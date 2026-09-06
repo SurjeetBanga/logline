@@ -1,0 +1,185 @@
+{
+  "name": "logline",
+  "displayName": "Logline — Live Tail for JSON Logs",
+  "description": "Live tail your server processes in a searchable, expandable JSON log viewer.",
+  "version": "1.0.0",
+  "publisher": "surjeetbanga",
+  "author": { "name": "Surjeet Banga", "email": "31071557+SurjeetBanga@users.noreply.github.com" },
+  "license": "MIT",
+  "repository": { "type": "git", "url": "https://github.com/SurjeetBanga/logline.git" },
+  "bugs": { "url": "https://github.com/SurjeetBanga/logline/issues" },
+  "homepage": "https://github.com/SurjeetBanga/logline#readme",
+  "icon": "media/icon.png",
+  "engines": {
+    "vscode": "^1.90.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "keywords": [
+    "live tail",
+    "log viewer",
+    "json logs",
+    "structured logs",
+    "server"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": false,
+      "description": "Runs server commands from workspace settings and tasks, so it requires a trusted workspace."
+    },
+    "virtualWorkspaces": {
+      "supported": false,
+      "description": "Spawns local processes and cannot run against a virtual filesystem."
+    }
+  },
+  "main": "./extension.js",
+  "contributes": {
+    "viewsContainers": {
+      "panel": [
+        {
+          "id": "logline",
+          "title": "Logs",
+          "icon": "media/logs.svg"
+        }
+      ]
+    },
+    "views": {
+      "logline": [
+        {
+          "type": "webview",
+          "id": "logline.logs",
+          "name": "Logs"
+        }
+      ]
+    },
+    "commands": [
+      {
+        "command": "logline.showLogs",
+        "title": "Show Logs",
+        "category": "Logline"
+      },
+      {
+        "command": "logline.runCommand",
+        "title": "Run Command",
+        "category": "Logline"
+      },
+      {
+        "command": "logline.stopCommand",
+        "title": "Stop Active Command",
+        "category": "Logline"
+      }
+    ],
+    "taskDefinitions": [
+      {
+        "type": "logline",
+        "required": ["label", "command"],
+        "properties": { "label": { "type": "string" }, "command": { "type": "string" }, "args": { "type": "array" }, "options": { "type": "object" } }
+      }
+    ],
+    "configuration": {
+      "title": "Logline",
+      "properties": {
+        "logline.indentation": {
+          "type": "number",
+          "default": 2,
+          "minimum": 1,
+          "maximum": 8,
+          "description": "Number of spaces used to indent formatted JSON."
+        },
+        "logline.maxEvents": {
+          "type": "number",
+          "default": 100000,
+          "minimum": 1000,
+          "maximum": 1000000,
+          "description": "Maximum number of events retained in memory. Applied immediately; the oldest events are evicted if the limit is lowered."
+        },
+        "logline.maxMemoryMb": {
+          "type": "number",
+          "default": 100,
+          "minimum": 10,
+          "maximum": 2048,
+          "description": "Approximate memory budget for retained log events. Applied immediately; the oldest events are evicted if the limit is lowered."
+        },
+        "logline.refreshIntervalMs": {
+          "type": "number",
+          "default": 250,
+          "minimum": 100,
+          "maximum": 5000,
+          "description": "How often the Logs panel refreshes."
+        },
+        "logline.maxLineLength": {
+          "type": "number",
+          "default": 65536,
+          "minimum": 1024,
+          "maximum": 1048576,
+          "description": "Maximum characters retained from one unfinished log line."
+        },
+        "logline.persistLogs": {
+          "type": "boolean",
+          "default": false,
+          "description": "Persist captured logs to .logline/latest.log in the first workspace folder."
+        },
+        "logline.maxDiskMb": {
+          "type": "number",
+          "default": 1000,
+          "minimum": 10,
+          "maximum": 10240,
+          "description": "Size at which latest.log rolls over to latest.log.1. Only the current and one previous file are kept."
+        },
+        "logline.columns": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "description": "Preferred columns. Empty uses detected common fields."
+        },
+        "logline.source": {
+          "type": "string",
+          "enum": [
+            "both",
+            "stdout",
+            "stderr"
+          ],
+          "default": "both",
+          "description": "Capture stdout, stderr, or both streams."
+        },
+        "logline.timezone": {
+          "type": "string",
+          "default": "local",
+          "enum": ["local", "utc"],
+          "enumDescriptions": ["Use the computer's local timezone.", "Display all timestamps in UTC."],
+          "description": "Timezone used to display log timestamps."
+        },
+        "logline.servers": {
+          "type": "array",
+          "default": [],
+          "description": "Saved server commands shown in the Logs server selector.",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": { "type": "string", "description": "Stable server identifier." },
+              "label": { "type": "string", "description": "Name shown in the server selector." },
+              "command": { "type": "string", "description": "Command to run." },
+              "cwd": { "type": "string", "description": "Working directory." },
+              "env": { "type": "object", "description": "Environment variables." },
+              "autoStart": { "type": "boolean", "default": false, "description": "Start when the extension activates." }
+            },
+            "required": ["id", "label", "command"]
+          }
+        }
+      }
+    }
+  },
+  "scripts": {
+    "check": "node --check extension.js && node --check media/viewer.js && node --test log-event.test.js log-store.test.js query.test.js time-query.test.js server-config.test.js",
+    "package": "vsce package"
+  },
+  "devDependencies": {
+    "@vscode/vsce": "^3.6.0"
+  }
+}
