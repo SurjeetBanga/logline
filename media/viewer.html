@@ -39,9 +39,10 @@
       </div>
       <button id="follow" aria-pressed="true">Live</button>
       <button id="config">⚙ Config</button><button id="manage">Manage servers</button>
+      <button id="export">Export</button><button id="exportAI">AI export</button><button id="import">Import</button>
       <button id="clear">Clear</button><button id="stop" disabled>Stop all</button>
     </div>
-    <div class="session"><span id="status">Ready</span><code id="command"></code></div>
+    <div class="session"><span id="status">Ready</span><span id="sessions" aria-live="polite"></span><code id="command"></code></div>
   </header>
   <section class="table-scroll" aria-label="Log events">
     <table>

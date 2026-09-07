@@ -58,6 +58,10 @@ export interface Stats {
 
 export interface PageOptions {
   query?: string;
+  // A server selected in the UI is an exact identity filter. This stays
+  // separate from query text, where serverId:foo intentionally remains a
+  // substring search for compatibility with the search language.
+  serverId?: string;
   // Omitted = no filter (all levels). An empty array deliberately matches
   // nothing — that's a real, distinct choice from "not filtering at all".
   levels?: string[];
@@ -177,7 +181,7 @@ export class LogStore {
     }
   }
 
-  page({ query = '', levels, page = 0, before = Infinity }: PageOptions = {}): PageResult {
+  page({ query = '', serverId, levels, page = 0, before = Infinity }: PageOptions = {}): PageResult {
     if (!Number.isFinite(before)) before = Infinity;
     // `levels` omitted means no filter (every level shown, the default —
     // matches the fast path below); an empty array is a deliberate "nothing
@@ -186,14 +190,28 @@ export class LogStore {
     const levelMatches = (eventLevel: string) => !levelSet || levelSet.has(eventLevel);
     query = query.slice(0, 256);
     const parsedQuery: ParsedQuery = parseQuery(query);
+    const exactServer = serverId === undefined ? undefined
+      : [...this.serverIndex.keys()].find(key => key.toLowerCase() === serverId.toLowerCase());
     const wantsLatestPage = !levelSet && before === Infinity && page === 0 && this.size > 10000;
-    if (!parsedQuery.length && wantsLatestPage) {
+    if (!parsedQuery.length && serverId === undefined && wantsLatestPage) {
       const events: LogEvent[] = [];
       for (let i = this.size - 1; i >= 0 && events.length < PAGE_SIZE; i--) {
         const event = this.slots[(this.head + i) % this.maxRows]!.event;
         if (levelMatches(event.level)) events.push(event);
       }
       return { events: events.reverse().map(pickFields), page: 0, pages: Math.max(1, Math.ceil(this.size / PAGE_SIZE)), matched: this.size, ...this.stats() };
+    }
+    if (!parsedQuery.length && serverId !== undefined && wantsLatestPage) {
+      const index = exactServer === undefined ? undefined : this.serverIndex.get(exactServer);
+      if (index) {
+        const events: LogEvent[] = [];
+        for (const slot of index.iterateFromEnd()) {
+          if (events.length >= PAGE_SIZE) break;
+          events.push(slot.event);
+        }
+        return { events: events.reverse().map(pickFields), page: 0, pages: Math.max(1, Math.ceil(index.length / PAGE_SIZE)), matched: index.length, ...this.stats() };
+      }
+      return { events: [], page: 0, pages: 1, matched: 0, ...this.stats() };
     }
     // Selecting a server in the UI sends a lone `serverId:` term. That's common
     // enough (and otherwise falls off the fast path above) to warrant its own
@@ -214,7 +232,7 @@ export class LogStore {
     const matches: LogEvent[] = [];
     for (let i = this.size - 1; i >= 0; i--) {
       const event = this.slots[(this.head + i) % this.maxRows]!.event;
-      if (event.id <= before && levelMatches(event.level)
+      if (event.id <= before && (serverId === undefined || event.serverId?.toLowerCase() === serverId.toLowerCase()) && levelMatches(event.level)
         && matchesQuery(event, parsedQuery)) matches.push(event);
     }
     const pages = Math.max(1, Math.ceil(matches.length / PAGE_SIZE));
@@ -222,6 +240,33 @@ export class LogStore {
     // Each page is chronological; page zero is the newest page.
     const events = matches.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE).reverse().map(pickFields);
     return { events, page, pages, matched: matches.length, ...this.stats() };
+  }
+
+  // Return every retained event in chronological order for explicit exports.
+  // The normal viewer uses page() so a large store never crosses the webview
+  // boundary in one message; exports are user initiated and intentionally
+  // operate on the bounded retained set.
+  all({ query = '', serverId, levels, before = Infinity }: PageOptions = {}): LogEvent[] {
+    if (!Number.isFinite(before)) before = Infinity;
+    const levelSet = levels ? new Set(levels) : undefined;
+    const parsedQuery: ParsedQuery = parseQuery(query.slice(0, 256));
+    const events: LogEvent[] = [];
+    for (let i = 0; i < this.size; i++) {
+      const event = this.slots[(this.head + i) % this.maxRows]!.event;
+      if (event.id <= before && (serverId === undefined || event.serverId?.toLowerCase() === serverId.toLowerCase())
+        && (!levelSet || levelSet.has(event.level)) && matchesQuery(event, parsedQuery)) {
+        events.push({ ...event, fields: event.fields ? { ...event.fields } : event.fields });
+      }
+    }
+    return events;
+  }
+
+  serverIds(): string[] { return [...this.serverIndex.keys()]; }
+
+  serverLabel(serverId: string): string | undefined {
+    const index = this.serverIndex.get(serverId);
+    for (const slot of index?.iterateFromEnd() ?? []) return slot.event.server;
+    return undefined;
   }
 
   stats(): Stats {
