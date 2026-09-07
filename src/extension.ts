@@ -299,7 +299,6 @@ export class LogsProvider implements vscode.WebviewViewProvider, vscode.Disposab
         event.serverId = server.id;
         event.server = server.label;
         event.sessionId = record.id;
-        event.fields = { ...event.fields, server: server.label, serverId: server.id };
         event.truncated = truncated;
         if (truncated) event.isJson = false;
         record.events++;
@@ -362,7 +361,9 @@ export class LogsProvider implements vscode.WebviewViewProvider, vscode.Disposab
       seen.add(id);
       const records = byId.get(id) ?? [];
       const active = records.filter(record => record.status === 'starting' || record.status === 'running' || record.status === 'stopping');
-      const last = records[records.length - 1];
+      const last = records.reduce((latest, record) =>
+        !latest || (record.endedAt ?? record.startedAt) > (latest.endedAt ?? latest.startedAt) ? record : latest,
+        undefined as SessionSummary | undefined);
       const status = active.some(record => record.status === 'stopping') ? 'stopping'
         : active.some(record => record.status === 'starting') ? 'starting'
           : active.length ? 'running' : last?.status ?? 'idle';
@@ -392,7 +393,7 @@ export class LogsProvider implements vscode.WebviewViewProvider, vscode.Disposab
     return choice?.format;
   }
 
-  async saveExport(content: string, format: ExportFormat, defaultName: string, fileFormat: ExportFormat | 'md' = format): Promise<boolean> {
+  async saveExport(content: string, fileFormat: ExportFormat | 'md', defaultName: string): Promise<boolean> {
     const filters: { [name: string]: string[] } = fileFormat === 'md' ? { Markdown: ['md'] }
       : fileFormat === 'csv' ? { CSV: ['csv'] } : fileFormat === 'json' ? { JSON: ['json'] } : { 'JSON Lines': ['jsonl'] };
     const folder = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
@@ -412,9 +413,12 @@ export class LogsProvider implements vscode.WebviewViewProvider, vscode.Disposab
     return true;
   }
 
+  queryExportEvents(request: ExportRequest = {}): LogEvent[] {
+    return this.store.all({ query: request.query, serverId: request.serverId, levels: request.levels });
+  }
+
   collectExportEvents(request: ExportRequest = {}): LogEvent[] {
-    const events = this.store.all({ query: request.query, serverId: request.serverId, levels: request.levels });
-    return events.map(event => redactEvent(event, this.redactionOptions()));
+    return this.queryExportEvents(request).map(event => redactEvent(event, this.redactionOptions()));
   }
 
   async exportLogs(request: ExportRequest = {}): Promise<void> {
@@ -425,9 +429,9 @@ export class LogsProvider implements vscode.WebviewViewProvider, vscode.Disposab
   }
 
   async exportForAI(request: ExportRequest = {}): Promise<void> {
-    const events = this.collectExportEvents(request);
     const limit = 2000;
-    const selected = events.slice(-limit);
+    const events = this.queryExportEvents(request);
+    const selected = events.slice(-limit).map(event => redactEvent(event, this.redactionOptions()));
     const omitted = events.length - selected.length;
     const lines = selected.map(event => JSON.stringify(event)).join('\n');
     const content = [
@@ -436,7 +440,7 @@ export class LogsProvider implements vscode.WebviewViewProvider, vscode.Disposab
       `Query: ${exportQuery(request) || '(none)'}`,
       '', '```jsonl', lines, '```', ''
     ].join('\n');
-    await this.saveExport(content, 'jsonl', 'logline-ai-context.md', 'md');
+    await this.saveExport(content, 'md', 'logline-ai-context.md');
   }
 
   async importLogs(): Promise<void> {
@@ -454,7 +458,6 @@ export class LogsProvider implements vscode.WebviewViewProvider, vscode.Disposab
         const event = parseLogLine(line, 'import', ++this.sequence, new Date());
         event.serverId = 'imported';
         event.server = 'Imported';
-        event.fields = { ...event.fields, server: 'Imported', serverId: 'imported' };
         this.store.add(event);
         imported++;
       }
