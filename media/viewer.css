@@ -26,6 +26,8 @@ input, select { height: 30px; padding: 3px 10px; color: var(--vscode-input-foreg
 }
 .popover[hidden] { display: none; }
 .level-menu { display: flex; flex-direction: column; gap: 2px; min-width: 130px; }
+.level-actions { display: flex; gap: 4px; padding: 0 2px 6px; border-bottom: 1px solid var(--vscode-panel-border, #444); margin-bottom: 2px; }
+.level-actions button { flex: 1; padding: 2px 6px; font-size: 12px; }
 .level-menu label { display: flex; align-items: center; gap: 6px; padding: 3px 6px; border-radius: 3px; cursor: pointer; white-space: nowrap; }
 .level-menu label:hover { background: var(--vscode-list-hoverBackground, #2a2d2e); }
 .level-menu input[type="checkbox"] { margin: 0; width: auto; height: auto; padding: 0; border: none; background: none; }
