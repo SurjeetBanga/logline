@@ -2,6 +2,15 @@
 
 All notable changes to Logline are documented in this file.
 
+## Unreleased
+
+**Sessions and sharing**
+
+- Track session lifecycle and active counts per server in the Logs selector.
+- Export the current server, search, and level filters as redacted JSON Lines, JSON, or CSV.
+- Import JSON/JSONL logs for offline searching and create bounded redacted Markdown context for AI tools.
+- Add configurable export redaction fields and replacement text.
+
 ## 1.1.0 — 2026-09-06
 
 **Performance**

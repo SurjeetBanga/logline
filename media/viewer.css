@@ -45,6 +45,7 @@ button[aria-pressed="true"] { border-color: var(--vscode-focusBorder, #007acc); 
 button:disabled { opacity: .45; cursor: default; }
 :focus-visible { outline: 2px solid var(--vscode-focusBorder, #007acc); outline-offset: 1px; }
 .session { display: flex; gap: 16px; padding-top: 6px; color: var(--vscode-descriptionForeground, #aaa); }
+#sessions { white-space: nowrap; }
 #command { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* The virtualized table fully replaces its visible rows on every update,
    giving the browser's scroll-anchoring heuristic no stable node to track;

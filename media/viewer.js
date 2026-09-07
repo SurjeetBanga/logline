@@ -1,7 +1,8 @@
 const vscode = acquireVsCodeApi();
 const elements = Object.fromEntries(
   ['logs', 'empty', 'search', 'searchHelp', 'searchHelpPanel', 'levelButton', 'levelMenu', 'server', 'follow',
-    'config', 'manage', 'clear', 'stop', 'run', 'status', 'command', 'older', 'newer', 'page', 'mode', 'counts']
+    'config', 'manage', 'export', 'exportAI', 'import', 'clear', 'stop', 'run', 'status', 'sessions', 'command',
+    'older', 'newer', 'page', 'mode', 'counts']
     .map(id => [id, document.getElementById(id)])
 );
 const scrollViewport = document.querySelector('.table-scroll');
@@ -112,7 +113,7 @@ function request(force = false) {
   if (pending) { refreshRequested ||= force; return; }
   pending = true;
   forcedRequest = force;
-  vscode.postMessage({ type: 'snapshot', query: `${selectedServer ? `serverId:${selectedServer} ` : ''}${elements.search.value}`,
+  vscode.postMessage({ type: 'snapshot', query: elements.search.value, serverId: selectedServer || undefined,
     levels: currentLevels(), page, before, statsOnly: paused && !force });
 }
 
@@ -150,16 +151,24 @@ window.addEventListener('message', ({ data }) => {
   elements.command.title = data.command;
   elements.stop.disabled = !data.running;
   elements.stop.textContent = selectedServer ? 'Stop server' : 'Stop all';
+  const activeSessions = Array.isArray(data.sessions) ? data.sessions.filter(session =>
+    ['starting', 'running', 'stopping'].includes(session.status)) : [];
+  elements.sessions.textContent = activeSessions.length
+    ? `${activeSessions.length} active session${activeSessions.length === 1 ? '' : 's'}` : 'No active sessions';
   if (data.servers) {
-    const signature = JSON.stringify(data.servers.map(server => [server.id, server.label]));
+    const signature = JSON.stringify(data.servers.map(server => [server.id, server.label, server.status, server.activeSessions]));
     if (signature !== serverSignature) {
       serverSignature = signature;
+      const activeCount = data.servers.reduce((sum, server) => sum + (server.activeSessions || 0), 0);
       const options = [document.createElement('option'), ...data.servers.map(() => document.createElement('option'))];
-      options[0].textContent = 'All servers';
+      options[0].textContent = activeCount ? `All servers · ${activeCount} active` : 'All servers';
       options[0].value = '';
       data.servers.forEach((server, index) => {
-        options[index + 1].textContent = server.label;
+        const state = server.status === 'idle' ? '' : ` · ${server.status}`;
+        const activity = server.activeSessions > 1 ? ` (${server.activeSessions} active)` : '';
+        options[index + 1].textContent = `${server.label}${state}${activity}`;
         options[index + 1].value = server.id;
+        options[index + 1].title = server.lastSession ? `Session ${server.lastSession}` : server.status;
       });
       elements.server.replaceChildren(...options);
       elements.server.value = data.servers.some(server => server.id === selectedServer) ? selectedServer : '';
@@ -455,6 +464,12 @@ elements.clear.addEventListener('click', () => {
 elements.stop.addEventListener('click', () => vscode.postMessage({ type: 'stop', serverId: selectedServer || undefined }));
 elements.config.addEventListener('click', () => vscode.postMessage({ type: 'config' }));
 elements.manage.addEventListener('click', () => vscode.postMessage({ type: 'manageServers' }));
+function exportRequest(type) {
+  vscode.postMessage({ type, query: elements.search.value, levels: currentLevels(), serverId: selectedServer || undefined });
+}
+elements.export.addEventListener('click', () => exportRequest('export'));
+elements.exportAI.addEventListener('click', () => exportRequest('exportForAI'));
+elements.import.addEventListener('click', () => vscode.postMessage({ type: 'import' }));
 elements.run.addEventListener('click', () => vscode.postMessage({ type: 'run', serverId: elements.server.value || undefined }));
 document.addEventListener('visibilitychange', () => { if (!document.hidden) request(); });
 // A push should arrive whenever data actually changes; this is only a

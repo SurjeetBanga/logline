@@ -191,6 +191,18 @@ test('levels filters to exactly the checked set, in any combination', () => {
   assert.ok(warnOnly.events.every(event => event.level === 'warn'));
 });
 
+test('all returns filtered retained events chronologically for exports', () => {
+  const store = new LogStore();
+  store.add({ id: 1, level: 'info', message: 'one', serverId: 'api', server: 'API' });
+  store.add({ id: 2, level: 'error', message: 'two', serverId: 'web', server: 'Web' });
+  store.add({ id: 3, level: 'error', message: 'three', serverId: 'api', server: 'API' });
+  const events = store.all({ query: 'serverId:api', levels: ['error'] });
+  assert.deepEqual(events.map(event => event.id), [3]);
+  assert.deepEqual(store.all({ serverId: 'api' }).map(event => event.id), [1, 3]);
+  assert.deepEqual(store.serverIds(), ['api', 'web']);
+  assert.equal(store.serverLabel('api'), 'API');
+});
+
 test('formatDetails marks output truncated at the byte limit', () => {
   const raw = '[' + Array.from({ length: 5000 }, (_, i) => `${i}`).join(',') + ']';
   const output = formatDetails(raw, 2, 100);
