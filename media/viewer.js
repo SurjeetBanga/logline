@@ -37,8 +37,24 @@ function updateLevelButtonLabel() {
   else elements.levelButton.textContent = `${checkedLevels.size} levels`;
 }
 
+function setAllLevels(value) {
+  checkedLevels = value ? new Set(LEVELS) : new Set();
+  buildLevelMenu();
+  updateLevelButtonLabel();
+  filterChanged();
+}
+
 function buildLevelMenu() {
-  elements.levelMenu.replaceChildren(...LEVELS.map(level => {
+  const actions = document.createElement('div');
+  actions.className = 'level-actions';
+  for (const [label, value] of [['All', true], ['None', false]]) {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.textContent = label;
+    button.addEventListener('click', () => setAllLevels(value));
+    actions.append(button);
+  }
+  const labels = LEVELS.map(level => {
     const label = document.createElement('label');
     const input = document.createElement('input');
     input.type = 'checkbox';
@@ -50,7 +66,8 @@ function buildLevelMenu() {
     });
     label.append(input, document.createTextNode(' ' + LEVEL_LABELS[level]));
     return label;
-  }));
+  });
+  elements.levelMenu.replaceChildren(actions, ...labels);
 }
 
 // Omitting `levels` entirely (the default, everything checked) lets the
@@ -152,8 +169,7 @@ window.addEventListener('message', ({ data }) => {
   const number = value => value.toLocaleString();
   const budget = Number.isFinite(data.maxBytes) ? (data.maxBytes / 1048576).toFixed(0) : '?';
   elements.counts.textContent = `${number(data.total)} received · ${number(data.retained)} retained · ${number(data.discarded)} discarded · ${(data.bytes / 1048576).toFixed(1)} / ${budget} MiB · ${data.truncated} truncated`;
-  elements.mode.textContent = paused ? 'Paused — collection continues' : following ? 'Live · newest 1,000' : 'Browsing retained history';
-  elements.mode.className = following && !paused ? 'live-mode' : '';
+  updateModeLabel();
   if (data.columns) updateColumns(data.columns);
   if (data.events && !refreshRequested && (!paused || forcedRequest)) {
     page = data.page;
@@ -341,14 +357,35 @@ function toggleExpand(id) {
     paused = true;
     vscode.postMessage({ type: 'details', id });
   }
+  updateFollowControl();
+  updateModeLabel();
   renderWindow();
+}
+
+function updateFollowControl() {
+  if (paused) {
+    elements.follow.setAttribute('aria-pressed', 'false');
+    elements.follow.setAttribute('aria-label', 'Resume live updates');
+    elements.follow.title = 'Resume live updates';
+    elements.follow.textContent = 'Resume';
+    return;
+  }
+  elements.follow.setAttribute('aria-pressed', String(following));
+  elements.follow.setAttribute('aria-label', following ? 'Live updates' : 'Browse retained history');
+  elements.follow.title = following ? 'Live updates' : 'Browse retained history';
+  elements.follow.textContent = following ? 'Live' : 'Browse';
+}
+
+function updateModeLabel() {
+  elements.mode.textContent = paused ? 'Paused — collection continues' : following ? 'Live · newest 1,000' : 'Browsing retained history';
+  elements.mode.className = following && !paused ? 'live-mode' : '';
 }
 
 function setFollowing(value) {
   following = value;
   before = value ? undefined : newest;
-  elements.follow.setAttribute('aria-pressed', String(value));
-  elements.follow.textContent = value ? 'Live' : 'Browse';
+  updateFollowControl();
+  updateModeLabel();
 }
 
 function saveState() {
@@ -375,6 +412,8 @@ elements.search.addEventListener('input', () => {
 });
 buildLevelMenu();
 updateLevelButtonLabel();
+updateFollowControl();
+updateModeLabel();
 createPopover(elements.levelButton.closest('.popover-container'), elements.levelButton, elements.levelMenu);
 createPopover(elements.searchHelp.closest('.popover-container'), elements.searchHelp, elements.searchHelpPanel);
 elements.server.addEventListener('change', () => {
@@ -385,11 +424,22 @@ elements.server.addEventListener('change', () => {
   request(true);
 });
 elements.follow.addEventListener('click', () => {
+  if (paused) {
+    paused = false;
+    following = true;
+    page = 0;
+    before = undefined;
+    updateFollowControl();
+    updateModeLabel();
+    request(true);
+    return;
+  }
   setFollowing(!following);
   if (following) {
     page = 0;
     paused = false;
   }
+  updateFollowControl();
   request(true);
 });
 elements.older.addEventListener('click', () => {
