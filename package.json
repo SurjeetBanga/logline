@@ -2,12 +2,20 @@
   "name": "logline",
   "displayName": "Logline — Live Tail for JSON Logs",
   "description": "Live tail your server processes in a searchable, expandable JSON log viewer.",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "publisher": "surjeetbanga",
-  "author": { "name": "Surjeet Banga", "email": "31071557+SurjeetBanga@users.noreply.github.com" },
+  "author": {
+    "name": "Surjeet Banga",
+    "email": "31071557+SurjeetBanga@users.noreply.github.com"
+  },
   "license": "MIT",
-  "repository": { "type": "git", "url": "https://github.com/SurjeetBanga/logline.git" },
-  "bugs": { "url": "https://github.com/SurjeetBanga/logline/issues" },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/SurjeetBanga/logline.git"
+  },
+  "bugs": {
+    "url": "https://github.com/SurjeetBanga/logline/issues"
+  },
   "homepage": "https://github.com/SurjeetBanga/logline#readme",
   "icon": "media/icon.png",
   "engines": {
@@ -36,7 +44,7 @@
       "description": "Spawns local processes and cannot run against a virtual filesystem."
     }
   },
-  "main": "./extension.js",
+  "main": "./out/extension.js",
   "contributes": {
     "viewsContainers": {
       "panel": [
@@ -52,7 +60,8 @@
         {
           "type": "webview",
           "id": "logline.logs",
-          "name": "Logs"
+          "name": "Logs",
+          "icon": "media/logs.svg"
         }
       ]
     },
@@ -76,8 +85,24 @@
     "taskDefinitions": [
       {
         "type": "logline",
-        "required": ["label", "command"],
-        "properties": { "label": { "type": "string" }, "command": { "type": "string" }, "args": { "type": "array" }, "options": { "type": "object" } }
+        "required": [
+          "label",
+          "command"
+        ],
+        "properties": {
+          "label": {
+            "type": "string"
+          },
+          "command": {
+            "type": "string"
+          },
+          "args": {
+            "type": "array"
+          },
+          "options": {
+            "type": "object"
+          }
+        }
       }
     ],
     "configuration": {
@@ -92,7 +117,7 @@
         },
         "logline.maxEvents": {
           "type": "number",
-          "default": 100000,
+          "default": 50000,
           "minimum": 1000,
           "maximum": 1000000,
           "description": "Maximum number of events retained in memory. Applied immediately; the oldest events are evicted if the limit is lowered."
@@ -106,10 +131,10 @@
         },
         "logline.refreshIntervalMs": {
           "type": "number",
-          "default": 250,
+          "default": 500,
           "minimum": 100,
           "maximum": 5000,
-          "description": "How often the Logs panel refreshes."
+          "description": "Minimum time between Logs panel updates. The panel refreshes as soon as new data arrives rather than on a fixed poll, so this only caps how often that happens during a heavy burst of log lines."
         },
         "logline.maxLineLength": {
           "type": "number",
@@ -151,8 +176,14 @@
         "logline.timezone": {
           "type": "string",
           "default": "local",
-          "enum": ["local", "utc"],
-          "enumDescriptions": ["Use the computer's local timezone.", "Display all timestamps in UTC."],
+          "enum": [
+            "local",
+            "utc"
+          ],
+          "enumDescriptions": [
+            "Use the computer's local timezone.",
+            "Display all timestamps in UTC."
+          ],
           "description": "Timezone used to display log timestamps."
         },
         "logline.servers": {
@@ -162,24 +193,58 @@
           "items": {
             "type": "object",
             "properties": {
-              "id": { "type": "string", "description": "Stable server identifier." },
-              "label": { "type": "string", "description": "Name shown in the server selector." },
-              "command": { "type": "string", "description": "Command to run." },
-              "cwd": { "type": "string", "description": "Working directory." },
-              "env": { "type": "object", "description": "Environment variables." },
-              "autoStart": { "type": "boolean", "default": false, "description": "Start when the extension activates." }
+              "id": {
+                "type": "string",
+                "description": "Stable server identifier."
+              },
+              "label": {
+                "type": "string",
+                "description": "Name shown in the server selector."
+              },
+              "command": {
+                "type": "string",
+                "description": "Command to run."
+              },
+              "cwd": {
+                "type": "string",
+                "description": "Working directory."
+              },
+              "env": {
+                "type": "object",
+                "description": "Environment variables."
+              },
+              "autoStart": {
+                "type": "boolean",
+                "default": false,
+                "description": "Start when the extension activates."
+              },
+              "jsonOnly": {
+                "type": "boolean",
+                "default": false,
+                "description": "Only retain lines that parse as JSON. Use this when the command's output mixes structured logs with unrelated plain-text lines, such as `gradle bootRun` interleaving build output with the application's JSON logs."
+              }
             },
-            "required": ["id", "label", "command"]
+            "required": [
+              "id",
+              "label",
+              "command"
+            ]
           }
         }
       }
     }
   },
   "scripts": {
-    "check": "node --check extension.js && node --check media/viewer.js && node --test log-event.test.js log-store.test.js query.test.js time-query.test.js server-config.test.js",
+    "compile": "tsc -p ./",
+    "watch": "tsc -w -p ./",
+    "check": "tsc --noEmit && npm run compile && node --check out/extension.js && node --check media/viewer.js && node --test out",
+    "vscode:prepublish": "npm run compile",
     "package": "vsce package"
   },
   "devDependencies": {
-    "@vscode/vsce": "^3.6.0"
+    "@types/node": "^20.19.43",
+    "@types/vscode": "1.90.0",
+    "@vscode/vsce": "^3.6.0",
+    "typescript": "^5.9.3"
   }
 }

@@ -12,12 +12,31 @@
     <div class="toolbar">
       <select id="server" aria-label="Server"><option value="">All servers</option></select>
       <button id="run">Run selected</button>
-      <input id="search" type="search" placeholder="Search retained logs…" aria-label="Search retained logs" maxlength="256">
-      <select id="level" aria-label="Minimum log level">
-        <option value="trace">All levels</option><option value="debug">Debug+</option>
-        <option value="info">Info+</option><option value="warn">Warn+</option>
-        <option value="error">Error+</option><option value="fatal">Fatal</option>
-      </select>
+      <div class="popover-container search-group">
+        <input id="search" type="search" placeholder="Search retained logs…" aria-label="Search retained logs" maxlength="256">
+        <button id="searchHelp" class="icon-button" type="button" aria-haspopup="true" aria-expanded="false" aria-label="Search syntax help" title="Search syntax help">ⓘ</button>
+        <div id="searchHelpPanel" class="popover cheat-sheet" hidden>
+          <h3>Search syntax</h3>
+          <dl>
+            <dt>error timeout</dt><dd>Free text — matches all words</dd>
+            <dt>"database timeout"</dt><dd>Exact phrase</dd>
+            <dt>-timeout</dt><dd>Exclude a word or filter</dd>
+            <dt>a OR b</dt><dd>Either side matches</dd>
+            <dt>level:error</dt><dd>Field filter (severity, msg, service, requestId, traceId, spanId, durationMs and more all work as aliases)</dd>
+            <dt>status:5xx</dt><dd>Wildcard: 2xx / 4xx / 5xx</dd>
+            <dt>status:&gt;=500</dt><dd>Numeric comparison: &gt; &gt;= &lt; &lt;=</dd>
+            <dt>status:[500 TO 599]</dt><dd>Numeric range</dd>
+            <dt>message:/time.?out/i</dt><dd>Regex, with optional flags</dd>
+            <dt>exists:requestId</dt><dd>Field is present on the event</dd>
+            <dt>last:15m</dt><dd>Relative time: s / m / h / d</dd>
+            <dt>timestamp:[2026-01-01 TO 2026-01-02]</dt><dd>Absolute time range</dd>
+          </dl>
+        </div>
+      </div>
+      <div class="popover-container">
+        <button id="levelButton" class="level-button" type="button" aria-haspopup="true" aria-expanded="false" aria-label="Log level filter">All levels</button>
+        <div id="levelMenu" class="popover level-menu" hidden role="group" aria-label="Log level filter"></div>
+      </div>
       <button id="follow" aria-pressed="true">Live</button>
       <button id="config">⚙ Config</button><button id="manage">Manage servers</button>
       <button id="clear">Clear</button><button id="stop" disabled>Stop all</button>
@@ -27,7 +46,7 @@
   <section class="table-scroll" aria-label="Log events">
     <table>
       <colgroup><col class="time-col"><col class="level-col"><col><col class="source-col"></colgroup>
-      <thead><tr id="head-row"><th>Time</th><th>Level</th><th>Message · click to expand</th><th>Source</th></tr></thead>
+      <thead><tr id="head-row"><th>Time</th><th>Level</th><th title="Click a message to expand it">Message</th><th>Source</th></tr></thead>
       <tbody id="logs"></tbody>
     </table>
     <p id="empty">Run a server command to see its logs here.</p>

@@ -1,8 +1,9 @@
-const test = require('node:test');
-const assert = require('node:assert/strict');
-const { LogStore, LineReader } = require('./log-store');
-const { parseLogLine } = require('./log-event');
-const { formatDetails } = require('./format-details');
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { LogStore, LineReader } from './log-store';
+import { parseLogLine } from './log-event';
+import { formatDetails } from './format-details';
+import type { LogEvent } from './types';
 
 test('detail formatting preserves whitespace inside strings and large numeric IDs', () => {
   const raw = '{"message":"a  b", "id":9007199254740993,"empty":{},"list":[1,true]}';
@@ -26,9 +27,9 @@ test('a million incoming events retain only the newest 100,000', () => {
   assert.equal(store.discarded, 900000);
   assert.ok(store.bytes <= store.maxBytes);
   assert.equal(store.find(900000), undefined);
-  assert.equal(store.find(900001).id, 900001);
+  assert.equal(store.find(900001)!.id, 900001);
   assert.equal(store.page().events.length, 1000);
-  assert.equal(store.page().events.at(-1).id, 1000000);
+  assert.equal(store.page().events.at(-1)!.id, 1000000);
 });
 
 test('byte budget evicts before the row budget and releases references', () => {
@@ -45,9 +46,23 @@ test('byte budget evicts before the row budget and releases references', () => {
 
 test('oversized records cannot exceed the storage budget', () => {
   const store = new LogStore(10, 1024);
-  store.add({ raw: 'x'.repeat(2000) });
+  // id/level are irrelevant here — the record is rejected for its size before
+  // either is ever read.
+  store.add({ raw: 'x'.repeat(2000) } as LogEvent);
   assert.equal(store.discarded, 1);
   assert.equal(store.bytes, 0);
+});
+
+test('server indexes release evicted records under the memory budget', () => {
+  const store = new LogStore(5000, 8192);
+  for (let id = 1; id <= 3000; id++) {
+    const serverId = id < 10 ? `finished-${id}` : 'api';
+    store.add({ id, raw: 'x'.repeat(1000), level: 'info', serverId, fields: { serverId } });
+  }
+  const referenced = [...store.serverIndex.values()].flatMap(index => index.items.filter(slot => slot !== undefined));
+  assert.equal(referenced.length, store.size);
+  assert.ok(referenced.every(slot => store.find(slot.event.id) === slot.event));
+  assert.deepEqual([...store.serverIndex.keys()], ['api'], 'empty server indexes are removed');
 });
 
 test('search, level filtering, history pages and frozen boundaries', () => {
@@ -55,14 +70,14 @@ test('search, level filtering, history pages and frozen boundaries', () => {
   for (let id = 1; id <= 350; id++) {
     store.add({ id, raw: `request ${id}`, level: id % 2 ? 'error' : 'info' });
   }
-  assert.equal(store.page({ level: 'error' }).matched, 175);
+  assert.equal(store.page({ levels: ['error'] }).matched, 175);
   assert.equal(store.page({ query: 'REQUEST 350' }).events[0].id, 350);
-  assert.equal(store.page({ page: 1 }).events.at(-1).id, 350);
-  assert.equal(store.page({ before: 100 }).events.at(-1).id, 100);
+  assert.equal(store.page({ page: 1 }).events.at(-1)!.id, 350);
+  assert.equal(store.page({ before: 100 }).events.at(-1)!.id, 100);
 });
 
 test('line reader handles split UTF-8, CRLF and a final unterminated line', () => {
-  const output = [];
+  const output: { line: string; truncated: boolean }[] = [];
   const reader = new LineReader((line, truncated) => output.push({ line, truncated }));
   const input = Buffer.from('hi 😀\r\nlast');
   for (const byte of input) reader.write(Buffer.from([byte]));
@@ -71,7 +86,7 @@ test('line reader handles split UTF-8, CRLF and a final unterminated line', () =
 });
 
 test('newline-free output is bounded and parsing recovers after a truncated line', () => {
-  const output = [];
+  const output: { line: string; truncated: boolean }[] = [];
   const reader = new LineReader((line, truncated) => output.push({ line, truncated }), 16);
   for (let i = 0; i < 10000; i++) reader.write(Buffer.from('x'.repeat(1024)));
   assert.equal(reader.pending.length, 16);
@@ -105,14 +120,75 @@ test('the large-store fast path agrees with the general search path', () => {
   assert.equal(fast.matched, store.size);
 });
 
+test('the per-server fast path agrees with the general search path', () => {
+  const store = new LogStore();
+  for (let id = 1; id <= 20000; id++) {
+    const serverId = id % 3 === 0 ? 'api' : 'web';
+    store.add({ id, raw: `event ${id}`, message: `event ${id}`, level: 'info', serverId, fields: { serverId } });
+  }
+  const fast = store.page({ query: 'serverId:api' });
+  const general = store.page({ query: 'serverId:api', before: store.total });
+  assert.deepEqual(fast.events, general.events.slice(0, 1000));
+  assert.equal(fast.matched, general.matched);
+  assert.equal(fast.matched, Math.floor(20000 / 3));
+});
+
+test('server searches preserve substring, case and regex matching across live and history views', () => {
+  const store = new LogStore();
+  const servers = ['api', 'api-worker', 'API', 'web', '/api/'];
+  for (let id = 1; id <= 20000; id++) {
+    const serverId = servers[id % servers.length];
+    store.add({ id, level: 'info', serverId, fields: { serverId } });
+  }
+  for (const query of ['serverId:api', 'serverId:API', 'serverId:worker', 'serverId:/api/', 'serverId:/api/g', '-serverId:api']) {
+    const live = store.page({ query });
+    const history = store.page({ query, before: store.total });
+    assert.deepEqual(live, history, query);
+  }
+  assert.equal(store.page({ query: 'serverId:api' }).matched, 16000);
+  assert.equal(store.page({ query: 'serverId:worker' }).matched, 4000);
+});
+
+test('the per-server fast path stays correct after evictions and a resize', () => {
+  const store = new LogStore(30000, 1024 * 1024 * 1024);
+  for (let id = 1; id <= 40000; id++) {
+    const serverId = id % 2 ? 'a' : 'b';
+    store.add({ id, raw: `event ${id}`, message: `event ${id}`, level: 'info', serverId, fields: { serverId } });
+  }
+  let fast = store.page({ query: 'serverId:b' });
+  let general = store.page({ query: 'serverId:b', before: store.total });
+  assert.deepEqual(fast.events, general.events.slice(0, 1000));
+  assert.equal(fast.matched, general.matched);
+  store.resize(12000, 1024 * 1024 * 1024);
+  fast = store.page({ query: 'serverId:b' });
+  general = store.page({ query: 'serverId:b', before: store.total });
+  assert.deepEqual(fast.events, general.events.slice(0, 1000));
+  assert.equal(fast.matched, general.matched);
+});
+
 test('a level filter on a large store reports the filtered match count, not the total', () => {
   const store = new LogStore();
   for (let id = 1; id <= 20000; id++) {
     store.add({ id, raw: `event ${id}`, message: `event ${id}`, level: id % 5 === 0 ? 'error' : 'info' });
   }
-  const result = store.page({ level: 'error' });
+  const result = store.page({ levels: ['error'] });
   assert.equal(result.matched, 4000);
   assert.equal(result.pages, 4);
+});
+
+test('levels filters to exactly the checked set, in any combination', () => {
+  const store = new LogStore();
+  const levels = ['trace', 'debug', 'info', 'warn', 'error', 'fatal'];
+  for (let id = 1; id <= 60; id++) store.add({ id, raw: `e${id}`, message: `e${id}`, level: levels[id % levels.length] });
+  const warnOnly = store.page({ levels: ['warn'] });
+  const warnAndFatal = store.page({ levels: ['warn', 'fatal'] });
+  const none = store.page({ levels: [] });
+  const all = store.page({});
+  assert.equal(warnOnly.matched, 10);
+  assert.equal(warnAndFatal.matched, 20, 'a combination that skips levels in between');
+  assert.equal(none.matched, 0, 'an empty selection matches nothing, unlike omitting levels entirely');
+  assert.equal(all.matched, 60, 'omitting levels applies no filter');
+  assert.ok(warnOnly.events.every(event => event.level === 'warn'));
 });
 
 test('formatDetails marks output truncated at the byte limit', () => {
@@ -132,14 +208,14 @@ test('formatDetails passes through a top-level scalar unchanged', () => {
   assert.equal(formatDetails('42'), '42');
 });
 
-const event = (id, level, message) =>
+const event = (id: number, level: string, message: string) =>
   parseLogLine(JSON.stringify({ level, message }), 'stdout', id, new Date());
 
 test('find locates events by id across the whole retained ring', () => {
   const store = new LogStore(50, 1024 * 1024);
   for (let i = 1; i <= 120; i++) store.add(event(i, 'info', `line ${i}`));
-  assert.equal(store.find(71).message, 'line 71');
-  assert.equal(store.find(120).message, 'line 120');
+  assert.equal(store.find(71)!.message, 'line 71');
+  assert.equal(store.find(120)!.message, 'line 120');
   assert.equal(store.find(1), undefined, 'evicted ids are not found');
   assert.equal(store.find(999), undefined, 'unseen ids are not found');
 });
@@ -151,12 +227,12 @@ test('resize applies new retention limits to already retained events', () => {
   store.resize(10, 1024 * 1024);
   assert.equal(store.size, 10);
   assert.equal(store.total, before, 'the received counter survives a resize');
-  assert.equal(store.find(100).message, 'line 100', 'the newest events are the ones kept');
+  assert.equal(store.find(100)!.message, 'line 100', 'the newest events are the ones kept');
   assert.equal(store.find(90), undefined);
   assert.ok(store.bytes <= store.maxBytes);
   store.add(event(101, 'info', 'line 101'));
   assert.equal(store.size, 10, 'the new row budget still holds after a resize');
-  assert.equal(store.find(101).message, 'line 101');
+  assert.equal(store.find(101)!.message, 'line 101');
 });
 
 test('a resize that raises the limits keeps every retained event', () => {
@@ -164,6 +240,6 @@ test('a resize that raises the limits keeps every retained event', () => {
   for (let i = 1; i <= 10; i++) store.add(event(i, 'info', `line ${i}`));
   store.resize(1000, 4 * 1024 * 1024);
   assert.equal(store.size, 10);
-  assert.equal(store.find(1).message, 'line 1');
-  assert.equal(store.find(10).message, 'line 10');
+  assert.equal(store.find(1)!.message, 'line 1');
+  assert.equal(store.find(10)!.message, 'line 10');
 });

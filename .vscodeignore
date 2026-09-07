@@ -2,6 +2,11 @@
 .gitignore
 .vscode/**
 node_modules/**
-*.test.js
+src/**
+tsconfig.json
+out/**/*.test.js
+out/**/*.js.map
+out/types.js
 *.vsix
 media/screenshot.png
+media/icon.svg

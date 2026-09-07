@@ -1,8 +1,11 @@
-const test = require('node:test');
-const assert = require('node:assert/strict');
-const { parseQuery, matchesQuery } = require('./query');
-const { parseLogLine } = require('./log-event');
-const event = { level: 'error', message: 'Database timeout', raw: '{"service":"api","status":503}', fields: { service: 'api', status: 503, requestId: 'abc-123' } };
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { parseQuery, matchesQuery } from './query';
+import { parseLogLine } from './log-event';
+import type { LogEvent } from './types';
+
+const event: LogEvent = { id: 1, level: 'error', message: 'Database timeout', raw: '{"service":"api","status":503}', fields: { service: 'api', status: 503, requestId: 'abc-123' } };
+
 test('supports field filters, phrases, negation and OR', () => {
   assert.equal(matchesQuery(event, 'level:error service:api status:5xx'), true);
   assert.equal(matchesQuery(event, 'service:web OR requestId:abc'), true);
@@ -33,6 +36,16 @@ test('supports regex matching, including invalid patterns', () => {
   assert.equal(matchesQuery(event, 'message:/time.?out/i'), true);
   assert.equal(matchesQuery(event, 'message:/nomatch/'), false);
   assert.equal(matchesQuery(event, 'message:/[/'), false);
+});
+
+test('global and sticky regex queries start fresh for every event and scan', () => {
+  const events = ['error', 'error', 'ok', 'error'].map((message, id) => ({ id, level: 'info', message }));
+  for (const flags of ['g', 'y', 'gy']) {
+    const parsed = parseQuery(`message:/error/${flags}`);
+    for (let scan = 0; scan < 2; scan++) {
+      assert.deepEqual(events.map(event => matchesQuery(event, parsed)), [true, true, false, true]);
+    }
+  }
 });
 
 test('resolves field aliases', () => {

@@ -1,6 +1,6 @@
 // Format validated JSON without materializing huge indentation strings for deep
 // or wide objects. Preserve lexical values (including large integer IDs).
-function formatDetails(raw, indentation = 2, limit = 256 * 1024) {
+export function formatDetails(raw: string, indentation = 2, limit = 256 * 1024): string {
   const width = Math.max(1, Math.min(8, Math.floor(indentation) || 2));
   let output = '';
   let depth = 0;
@@ -36,5 +36,3 @@ function formatDetails(raw, indentation = 2, limit = 256 * 1024) {
   }
   return output;
 }
-
-module.exports = { formatDetails };

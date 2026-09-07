@@ -1,8 +1,10 @@
-const test = require('node:test');
-const assert = require('node:assert/strict');
-const { matchesQuery } = require('./query');
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { matchesQuery } from './query';
+import type { LogEvent } from './types';
+
 const now = Date.now();
-const event = { level: 'info', message: 'recent', raw: '{}', timestamp: '12:00:00.000', timestampMs: now - 5 * 60000, fields: {} };
+const event: LogEvent = { id: 1, level: 'info', message: 'recent', raw: '{}', timestamp: '12:00:00.000', timestampMs: now - 5 * 60000, fields: {} };
 test('supports relative and absolute time ranges', () => {
   assert.equal(matchesQuery(event, 'last:15m'), true);
   assert.equal(matchesQuery(event, '-last:1m'), true);

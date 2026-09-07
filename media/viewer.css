@@ -11,9 +11,30 @@ body {
 }
 header { padding: 10px 14px 6px; flex: none; }
 .toolbar, .pagination { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
-.toolbar input { flex: 1 1 180px; min-width: 120px; }
 input, select, button { font: inherit; border: 1px solid var(--vscode-input-border, #555); border-radius: 3px; }
 input, select { height: 30px; padding: 3px 10px; color: var(--vscode-input-foreground, #ddd); background: var(--vscode-input-background, #333); }
+.popover-container { position: relative; }
+.search-group { display: flex; align-items: center; gap: 6px; flex: 1 1 180px; min-width: 120px; }
+.search-group input { flex: 1; min-width: 0; }
+.icon-button { flex: none; width: 30px; padding: 0; text-align: center; }
+.level-button { min-width: 108px; text-align: left; }
+.popover {
+  position: absolute; top: calc(100% + 4px); left: 0; z-index: 20;
+  background: var(--vscode-editorWidget-background, #252526);
+  border: 1px solid var(--vscode-editorWidget-border, var(--vscode-input-border, #555));
+  border-radius: 4px; box-shadow: 0 4px 16px rgba(0, 0, 0, .35); padding: 8px;
+}
+.popover[hidden] { display: none; }
+.level-menu { display: flex; flex-direction: column; gap: 2px; min-width: 130px; }
+.level-menu label { display: flex; align-items: center; gap: 6px; padding: 3px 6px; border-radius: 3px; cursor: pointer; white-space: nowrap; }
+.level-menu label:hover { background: var(--vscode-list-hoverBackground, #2a2d2e); }
+.level-menu input[type="checkbox"] { margin: 0; width: auto; height: auto; padding: 0; border: none; background: none; }
+.cheat-sheet { width: 300px; max-width: 80vw; max-height: 70vh; overflow-y: auto; font-size: 12px; }
+.cheat-sheet h3 { margin: 0 0 8px; font-size: 11px; text-transform: uppercase; letter-spacing: .04em; color: var(--vscode-descriptionForeground, #aaa); }
+.cheat-sheet dl { margin: 0; }
+.cheat-sheet dt { font-family: var(--vscode-editor-font-family, monospace); margin-top: 8px; }
+.cheat-sheet dt:first-of-type { margin-top: 0; }
+.cheat-sheet dd { margin: 2px 0 0; color: var(--vscode-descriptionForeground, #aaa); }
 button { padding: 4px 12px; cursor: pointer; color: var(--vscode-button-secondaryForeground, #ddd); background: var(--vscode-button-secondaryBackground, #333); white-space: nowrap; }
 button:hover { background: var(--vscode-button-secondaryHoverBackground, #444); }
 button[aria-pressed="true"] { border-color: var(--vscode-focusBorder, #007acc); color: var(--vscode-textLink-foreground, #75beff); }
@@ -23,13 +44,23 @@ button:disabled { opacity: .45; cursor: default; }
 :focus-visible { outline: 2px solid var(--vscode-focusBorder, #007acc); outline-offset: 1px; }
 .session { display: flex; gap: 16px; padding-top: 6px; color: var(--vscode-descriptionForeground, #aaa); }
 #command { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.table-scroll { flex: 1; min-height: 60px; overflow: auto; border-block: 1px solid var(--vscode-panel-border, #444); }
-table { width: 100%; min-width: 540px; border-collapse: collapse; table-layout: fixed; }
-.time-col { width: 135px; }
-.level-col { width: 95px; }
-.source-col { width: 95px; }
+/* The virtualized table fully replaces its visible rows on every update,
+   giving the browser's scroll-anchoring heuristic no stable node to track;
+   disabling it avoids relying on that heuristic across those replacements. */
+.table-scroll { flex: 1; min-height: 60px; overflow: auto; overflow-anchor: none; border-block: 1px solid var(--vscode-panel-border, #444); }
+table { width: 100%; min-width: 380px; border-collapse: collapse; table-layout: fixed; }
+.time-col { width: 118px; }
+.level-col { width: 72px; }
+.source-col { width: 72px; }
+/* Least useful column in a narrow panel — stdout/stderr is usually implied by
+   context, so it's the first thing to give way. */
+@media (max-width: 480px) { .source-col { visibility: collapse; } }
 th:not(:first-child), td:not(:first-child) { padding-left: 16px; padding-right: 16px; }
-th { position: sticky; top: 0; z-index: 1; background: var(--vscode-editor-background, #1e1e1e); text-align: left; font-weight: 500; color: var(--vscode-descriptionForeground, #aaa); }
+th {
+  position: sticky; top: 0; z-index: 1; background: var(--vscode-editor-background, #1e1e1e);
+  text-align: left; font-weight: 500; color: var(--vscode-descriptionForeground, #aaa);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
 th, td { padding: 5px 14px; border-bottom: 1px solid var(--vscode-panel-border, #333); }
 td { font-family: var(--vscode-editor-font-family, monospace); font-size: var(--vscode-editor-font-size, 13px); line-height: 1.6; }
 td.time { white-space: nowrap; font-variant-numeric: tabular-nums; }
@@ -37,6 +68,7 @@ td.time { white-space: nowrap; font-variant-numeric: tabular-nums; }
 .message-button::before { content: '▸'; margin-right: 10px; }
 .message-button[aria-expanded="true"]::before { content: '▾'; }
 .event-row:hover { background: var(--vscode-list-hoverBackground, #292929); }
+.virtual-spacer td { padding: 0; border: 0; }
 .level { font-weight: 600; text-transform: uppercase; }
 .level.info { color: var(--vscode-charts-blue, #75beff); }
 .level.warn { color: var(--vscode-charts-yellow, #e2c08d); }
