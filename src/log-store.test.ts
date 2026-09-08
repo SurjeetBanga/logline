@@ -203,6 +203,119 @@ test('all returns filtered retained events chronologically for exports', () => {
   assert.equal(store.serverLabel('api'), 'API');
 });
 
+test('analysis helpers provide facets, arbitrary sorting, groups and charts', () => {
+  const store = new LogStore();
+  const add = (id: number, level: string, message: string, fields: Record<string, string | number | boolean>, timestampMs: number) =>
+    store.add({ id, level, message, timestampMs, timestamp: new Date(timestampMs).toISOString(), fields, sessionId: id < 3 ? 'one' : 'two' });
+  add(1, 'error', 'timeout for user 123', { service: 'api', statusCode: 500, durationMs: 80 }, 1000);
+  add(2, 'error', 'timeout for user 456', { service: 'api', statusCode: 500, durationMs: 100 }, 1100);
+  add(3, 'info', 'ok', { service: 'web', statusCode: 200, durationMs: 20 }, 1200);
+  assert.deepEqual(store.page({ sort: 'durationMs', sortDirection: 'desc' }).events.map(event => event.id), [2, 1, 3]);
+  assert.equal(store.facets('service').find(value => value.value === 'api')?.count, 2);
+  assert.equal(store.fieldSuggestions('ser').fields.includes('service'), true);
+  const analysis = store.analysis();
+  assert.equal(analysis.errorGroups[0].count, 2);
+  assert.equal(analysis.statusCodes.find(value => value.code === '500')?.count, 2);
+  assert.equal(analysis.patterns.find(pattern => pattern.message === 'timeout for user 123')?.count, 2);
+  assert.equal(store.all({ from: 1100, to: 1200 }).length, 2);
+});
+
+test('page and all restrict results to one capture session', () => {
+  const store = new LogStore();
+  store.add({ id: 1, level: 'info', message: 'a', sessionId: 'run1' });
+  store.add({ id: 2, level: 'info', message: 'b', sessionId: 'run2' });
+  store.add({ id: 3, level: 'info', message: 'c', sessionId: 'run1' });
+  assert.deepEqual(store.page({ sessionId: 'run1' }).events.map(event => event.id), [1, 3]);
+  assert.deepEqual(store.all({ sessionId: 'run1' }).map(event => event.id), [1, 3]);
+  assert.equal(store.page({ sessionId: 'nope' }).matched, 0);
+});
+
+test('fieldSuggestions autocompletes a value for the field typed before the colon', () => {
+  const store = new LogStore();
+  store.add({ id: 1, level: 'info', message: 'x', fields: { service: 'api' } });
+  store.add({ id: 2, level: 'info', message: 'x', fields: { service: 'api' } });
+  store.add({ id: 3, level: 'info', message: 'x', fields: { service: 'worker' } });
+  const suggestions = store.fieldSuggestions('service:ap');
+  assert.deepEqual(suggestions.values, [{ value: 'api', count: 2 }]);
+  assert.equal(store.fieldSuggestions('service:worker').values[0]?.count, 1);
+  assert.equal(store.fieldSuggestions('nomatch:xyz').values.length, 0);
+});
+
+test('fieldNames lists builtin fields plus every observed payload field, sorted', () => {
+  const store = new LogStore();
+  store.add({ id: 1, level: 'info', message: 'x', fields: { zebra: 1, apple: 2 } });
+  const names = store.fieldNames();
+  assert.ok(names.includes('traceId'), 'builtin fields are always offered');
+  assert.ok(names.includes('zebra') && names.includes('apple'), 'observed payload fields are included');
+  assert.deepEqual([...names].sort((a, b) => a.localeCompare(b, undefined, { numeric: true })), names, 'the list is sorted');
+});
+
+test('log patterns cluster every retained event, any level, by normalized message template', () => {
+  const store = new LogStore();
+  const add = (id: number, level: string, message: string, timestampMs: number) =>
+    store.add({ id, level, message, timestampMs, timestamp: new Date(timestampMs).toISOString() });
+  add(1, 'info', 'user 1 logged in', 0);
+  add(2, 'info', 'user 2 logged in', 500);
+  add(3, 'info', 'user 3 logged in', 900);
+  add(4, 'warn', 'cache miss for key abc', 950);
+  const patterns = store.patterns();
+  assert.equal(patterns[0].message, 'user 1 logged in');
+  assert.equal(patterns[0].count, 3);
+  assert.equal(patterns[0].level, 'info');
+  assert.equal(patterns[0].trend.reduce((sum, value) => sum + value, 0), 3);
+  const cacheMiss = patterns.find(pattern => pattern.message === 'cache miss for key abc');
+  assert.equal(cacheMiss?.count, 1);
+  assert.equal(cacheMiss?.level, 'warn');
+});
+
+test('log patterns are capped at the top 10 by volume', () => {
+  const store = new LogStore();
+  const words = ['alpha', 'bravo', 'charlie', 'delta', 'echo', 'foxtrot', 'golf', 'hotel', 'india', 'juliet', 'kilo', 'lima', 'mike', 'november', 'oscar'];
+  let id = 0;
+  for (let template = 0; template < words.length; template++) {
+    for (let occurrence = 0; occurrence <= template; occurrence++) {
+      store.add({ id: ++id, level: 'info', message: `${words[template]} pattern occurred`, timestampMs: id, timestamp: new Date(id).toISOString() });
+    }
+  }
+  const patterns = store.patterns();
+  assert.equal(patterns.length, 10);
+  assert.equal(patterns[0].message, 'oscar pattern occurred');
+});
+
+test('analysis flags rate buckets that spike against the series baseline, not raw counts alone', () => {
+  const store = new LogStore();
+  for (let i = 0; i < 20; i++) store.add({ id: i + 1, level: 'info', message: 'heartbeat', timestampMs: i * 100, timestamp: new Date(i * 100).toISOString() });
+  const burstStart = 2900;
+  for (let i = 0; i < 30; i++) store.add({ id: 1000 + i, level: 'info', message: 'burst', timestampMs: burstStart + i, timestamp: new Date(burstStart + i).toISOString() });
+  const analysis = store.analysis();
+  const peak = Math.max(...analysis.rate.map(bucket => bucket.count));
+  const spike = analysis.rate.find(bucket => bucket.count === peak);
+  assert.equal(spike?.anomalous, true);
+  const quiet = analysis.rate.filter(bucket => bucket.count > 0 && bucket.count < peak);
+  assert.ok(quiet.length > 0);
+  assert.ok(quiet.every(bucket => bucket.anomalous === false));
+});
+
+test('error groups fingerprint by exception type and originating stack frame, not raw message text', () => {
+  const store = new LogStore();
+  const raw = (payload: unknown) => JSON.stringify(payload);
+  store.add({ id: 1, level: 'error', isJson: true, message: 'Failed to charge card ending 4242',
+    raw: raw({ message: 'Failed to charge card ending 4242',
+      err: { type: 'PaymentError', message: 'card declined', stack: 'PaymentError: card declined\n    at charge (/work/billing.ts:55:3)' } }) });
+  store.add({ id: 2, level: 'error', isJson: true, message: 'Failed to charge card ending 9999 for premium plan',
+    raw: raw({ message: 'Failed to charge card ending 9999 for premium plan',
+      err: { type: 'PaymentError', message: 'insufficient funds', stack: 'PaymentError: insufficient funds\n    at charge (/work/billing.ts:55:3)' } }) });
+  store.add({ id: 3, level: 'error', isJson: true, message: 'Failed to charge card ending 1111',
+    raw: raw({ message: 'Failed to charge card ending 1111',
+      err: { type: 'PaymentError', message: 'card declined', stack: 'PaymentError: card declined\n    at charge (/work/refund.ts:80:5)' } }) });
+  const groups = store.errorGroups();
+  assert.equal(groups.length, 2);
+  const billing = groups.find(group => group.location === '/work/billing.ts:55');
+  assert.equal(billing?.count, 2, 'differently-worded messages from the same call site should still merge');
+  const refund = groups.find(group => group.location === '/work/refund.ts:80');
+  assert.equal(refund?.count, 1, 'the same exception type/message from a different call site should not merge');
+});
+
 test('formatDetails marks output truncated at the byte limit', () => {
   const raw = '[' + Array.from({ length: 5000 }, (_, i) => `${i}`).join(',') + ']';
   const output = formatDetails(raw, 2, 100);

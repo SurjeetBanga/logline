@@ -33,9 +33,9 @@ test('derives a message for non-object JSON and array payloads', () => {
   assert.equal(parseLogLine('[1,2,3]', 'stdout', 1, now).message, 'Array (3 items)');
   assert.equal(parseLogLine('{"unrelated":"field"}', 'stdout', 1, now).message, 'JSON event');
 });
-test('extracts only known primitive fields', () => {
+test('extracts primitive payload fields and skips nested objects', () => {
   const event = parseLogLine('{"service":"api","status":500,"ok":true,"nested":{"a":1},"junk":"ignored key"}', 'stdout', 1, now);
-  assert.deepEqual(event.fields, { service: 'api', status: 500 });
+  assert.deepEqual(event.fields, { service: 'api', status: 500, ok: true, 'nested.a': 1, a: 1, junk: 'ignored key' });
 });
 test('truncates very long messages', () => {
   const event = parseLogLine(JSON.stringify({ message: 'x'.repeat(1000) }), 'stdout', 1, now);
@@ -54,4 +54,12 @@ test('flattens Log4j2 contextMap (MDC) values into searchable fields', () => {
 test('a top-level field wins over the same key in contextMap', () => {
   const event = parseLogLine('{"traceId":"top","contextMap":{"traceId":"nested"}}', 'stdout', 1, now);
   assert.equal(event.fields!.traceId, 'top');
+});
+test('nested field flattening stops after four levels to bound extraction cost', () => {
+  const shallow = parseLogLine('{"a":{"b":{"c":{"d":5}}}}', 'stdout', 1, now);
+  assert.equal(shallow.fields!.d, 5);
+  assert.equal(shallow.fields!['a.b.c.d'], 5);
+  const deep = parseLogLine('{"a":{"b":{"c":{"d":{"e":5}}}}}', 'stdout', 2, now);
+  assert.equal(deep.fields!.e, undefined);
+  assert.equal(deep.fields!['a.b.c.d.e'], undefined);
 });

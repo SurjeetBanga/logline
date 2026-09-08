@@ -99,6 +99,25 @@ test('server and session metadata are searchable even when not duplicated in fie
   assert.equal(matchesQuery(event, 'sessionId:s1'), true);
 });
 
+test('task lifecycle metadata is searchable by field, including the joined dependency list', () => {
+  const event: LogEvent = { id: 1, level: 'info', message: 'Task started', taskName: 'Build API', taskType: 'shell',
+    taskState: 'running', dependencies: ['Lint', 'Generate types'], dependencyState: 'pending', exitReason: 'exit code 1' };
+  assert.equal(matchesQuery(event, 'taskName:"Build API"'), true);
+  assert.equal(matchesQuery(event, 'taskType:shell'), true);
+  assert.equal(matchesQuery(event, 'taskState:running'), true);
+  assert.equal(matchesQuery(event, 'dependencyState:pending'), true);
+  assert.equal(matchesQuery(event, 'exitReason:"exit code 1"'), true);
+  assert.equal(matchesQuery(event, 'dependencies:Lint'), true, 'dependencies is searched as its comma-joined text');
+  assert.equal(matchesQuery(event, 'taskName:"Other task"'), false);
+});
+
+test('parentSpanId resolves through its alias group like the other trace fields', () => {
+  const camel = parseLogLine('{"message":"x","parentSpanId":"p1"}', 'stdout', 1, new Date());
+  const snake = parseLogLine('{"message":"x","parent_span_id":"p1"}', 'stdout', 2, new Date());
+  const short = parseLogLine('{"message":"x","parentId":"p1"}', 'stdout', 3, new Date());
+  for (const event of [camel, snake, short]) assert.equal(matchesQuery(event, 'parentSpanId:p1'), true);
+});
+
 test('an exact field name wins over its alias group', () => {
   const both = parseLogLine('{"level":"info","message":"x","status":500,"statusCode":200}', 'stdout', 1, new Date());
   assert.equal(matchesQuery(both, 'status:500'), true);

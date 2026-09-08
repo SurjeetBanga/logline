@@ -31,6 +31,7 @@
 body {
   margin: 0;
   height: 100vh;
+  overflow: hidden;
   display: flex;
   flex-direction: column;
   color: var(--vscode-foreground, #d4d4d4);
@@ -39,15 +40,33 @@ body {
 }
 header { padding: 10px 14px 6px; flex: none; }
 .toolbar, .pagination { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.toolbar-actions { display: flex; gap: 6px; flex-wrap: wrap; margin-left: auto; }
+.toolbar-actions button { background: transparent; border-color: transparent; }
+.search-toolbar { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-top: 10px; }
+.search-toolbar > .popover-container:not(.search-group) { flex: none; }
 input, select, button { font: inherit; border: 1px solid var(--vscode-input-border, #555); border-radius: 3px; }
 input, select { height: 30px; padding: 3px 10px; color: var(--vscode-input-foreground, #ddd); background: var(--vscode-input-background, #333); }
+.server-status-running, .server-status-stopping { color: var(--vscode-testing-iconPassed, #89d185); }
+.server-status-exited, .server-status-failed { color: var(--vscode-errorForeground, #f48771); }
 .popover-container { position: relative; }
-.search-group { display: flex; align-items: center; gap: 6px; flex: 1 1 180px; min-width: 120px; }
-.search-group input { flex: 1; min-width: 0; }
-.icon-button { flex: none; width: 30px; padding: 0; text-align: center; }
+.search-group { display: flex; align-items: center; flex: 1 1 280px; min-width: 180px; }
+.search-group input { width: 100%; min-width: 0; padding-right: 62px; }
+.search-help-button { position: absolute; right: 4px; padding: 1px 6px; border: 0; background: transparent; color: var(--vscode-descriptionForeground, #aaa); font-size: 11px; }
+.dropdown-button::after { content: ''; display: inline-block; width: 5px; height: 5px; border-right: 1px solid currentColor; border-bottom: 1px solid currentColor; transform: translateY(-2px) rotate(45deg); margin-left: 9px; opacity: .7; }
+/* Secondary filter/tool controls stay quiet (no fill or border) until hovered
+   or opened, so the search row reads as one light strip instead of a wall of
+   boxes next to the primary Run/Live actions. */
+.search-toolbar .dropdown-button, .search-toolbar #analyze {
+  background: transparent; border-color: transparent; color: var(--vscode-foreground, #d4d4d4);
+}
+.search-toolbar .dropdown-button:hover, .search-toolbar #analyze:hover {
+  background: var(--vscode-list-hoverBackground, #2a2d2e);
+}
+.search-toolbar button[aria-expanded="true"] { border-color: var(--vscode-focusBorder, #007acc); background: var(--vscode-list-hoverBackground, #2a2d2e); }
+.toolbar-divider { margin-left: 4px; padding-left: 14px; border-left: 1px solid var(--vscode-panel-border, #444); }
 .level-button { min-width: 108px; text-align: left; }
 .popover {
-  position: absolute; top: calc(100% + 4px); left: 0; z-index: 20;
+  position: absolute; top: calc(100% + 4px); left: 0; z-index: 20; overflow-y: auto;
   background: var(--vscode-editorWidget-background, #252526);
   border: 1px solid var(--vscode-editorWidget-border, var(--vscode-input-border, #555));
   border-radius: 4px; box-shadow: 0 4px 16px rgba(0, 0, 0, .35); padding: 8px;
@@ -65,6 +84,66 @@ input, select { height: 30px; padding: 3px 10px; color: var(--vscode-input-foreg
 .cheat-sheet dt { font-family: var(--vscode-editor-font-family, monospace); margin-top: 8px; }
 .cheat-sheet dt:first-of-type { margin-top: 0; }
 .cheat-sheet dd { margin: 2px 0 0; color: var(--vscode-descriptionForeground, #aaa); }
+.saved-searches, .facet-panel, .fields-panel { width: 300px; max-width: calc(100vw - 28px); max-height: 65vh; overflow: auto; padding: 12px; }
+.popover h3 { margin: 0; font-size: 12px; font-weight: 600; }
+.popover-heading { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 8px; }
+.popover-heading button { font-size: 11px; padding: 3px 8px; }
+.popover-empty, .popover-description { margin: 6px 0 10px; color: var(--vscode-descriptionForeground, #aaa); font-size: 12px; }
+.search-list { display: flex; flex-direction: column; gap: 2px; margin-top: 6px; }
+.search-item, .facet-value { display: flex; align-items: center; gap: 12px; width: 100%; min-width: 0; padding: 6px 8px; overflow: hidden; text-align: left; text-overflow: ellipsis; background: transparent; border-color: transparent; color: var(--vscode-foreground, #d4d4d4); }
+.search-item:hover, .facet-value:hover { background: var(--vscode-list-hoverBackground, #2a2d2e); }
+.search-item { display: block; }
+.facet-label { overflow: hidden; text-overflow: ellipsis; }
+.facet-count { margin-left: auto; color: var(--vscode-descriptionForeground, #aaa); font-size: 11px; font-variant-numeric: tabular-nums; }
+.search-item-row { display: flex; gap: 4px; }
+.search-item-row .search-item { flex: 1; }
+.search-remove { padding: 2px 7px; background: transparent; border-color: transparent; color: var(--vscode-descriptionForeground, #aaa); }
+.facet-panel label { display: flex; align-items: center; gap: 6px; }
+.facet-panel select { flex: 1; min-width: 0; }
+#facetValues { margin-top: 8px; display: flex; flex-direction: column; gap: 3px; max-height: 260px; overflow: auto; }
+.field-toggle { display: flex; align-items: center; gap: 8px; padding: 5px 8px; cursor: pointer; border-radius: 3px; }
+.field-toggle:hover { background: var(--vscode-list-hoverBackground, #2a2d2e); }
+.field-toggle input { width: auto; height: auto; padding: 0; }
+.message-content { display: flex; align-items: center; gap: 8px; }
+.message-content .message-button { flex: 1; min-width: 0; }
+@media (max-width: 700px) {
+  .search-group { flex-basis: 100%; }
+  .toolbar-actions { margin-left: 0; }
+}
+#analysisDialog { width: min(1000px, 96vw); max-width: 96vw; height: 88vh; max-height: 88vh; padding: 14px; color: inherit; background: var(--vscode-editor-background, #1e1e1e); border: 1px solid var(--vscode-panel-border, #555); border-radius: 6px; }
+#analysisDialog[open] { display: flex; flex-direction: column; }
+#analysisDialog::backdrop { background: rgba(0, 0, 0, .5); }
+#saveSearchDialog { width: min(360px, 92vw); padding: 14px; color: inherit; background: var(--vscode-editor-background, #1e1e1e); border: 1px solid var(--vscode-panel-border, #555); border-radius: 6px; }
+#saveSearchDialog::backdrop { background: rgba(0, 0, 0, .5); }
+#saveSearchDialog label { display: block; margin: 10px 0 4px; font-size: 12px; color: var(--vscode-descriptionForeground, #aaa); }
+#saveSearchDialog input { width: 100%; }
+.save-search-actions { display: flex; justify-content: flex-end; margin-top: 12px; }
+.analysis-content { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 12px; overflow: auto; flex: 1; }
+.chart-section { min-width: 0; }
+.chart-section.chart-wide { grid-column: 1 / -1; }
+.chart-section h3, .analysis-content h3 { margin: 8px 0 4px; font-size: 12px; color: var(--vscode-descriptionForeground, #aaa); }
+.volume-chart, .latency-chart { width: 100%; height: auto; display: block; }
+.chart-axis-label { font-size: 8px; fill: var(--vscode-descriptionForeground, #aaa); }
+.volume-bar-ok { fill: var(--vscode-charts-blue, #75beff); }
+.volume-bar-error { fill: var(--vscode-charts-red, #f14c4c); }
+.volume-bar.anomalous .volume-bar-ok { fill: var(--vscode-charts-orange, #d18616); }
+.anomaly-marker { fill: var(--vscode-charts-red, #f14c4c); }
+.latency-line { fill: none; stroke-width: 1.5; }
+.latency-average { stroke: var(--vscode-charts-blue, #75beff); }
+.latency-p95 { stroke: var(--vscode-charts-purple, #b180d7); stroke-dasharray: 3 2; }
+.latency-point { fill: var(--vscode-charts-blue, #75beff); }
+.latency-point.anomalous { fill: var(--vscode-charts-red, #f14c4c); }
+.chart-legend { display: flex; gap: 12px; margin-top: 4px; }
+.chart-legend-item { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; color: var(--vscode-descriptionForeground, #aaa); }
+.chart-legend-swatch { width: 9px; height: 9px; border-radius: 2px; display: inline-block; }
+.chart-legend-swatch.swatch-ok { background: var(--vscode-charts-blue, #75beff); }
+.chart-legend-swatch.swatch-error { background: var(--vscode-charts-red, #f14c4c); }
+.chart-legend-swatch.swatch-average { background: var(--vscode-charts-blue, #75beff); }
+.chart-legend-swatch.swatch-p95 { background: var(--vscode-charts-purple, #b180d7); }
+.pattern-row { display: flex; align-items: center; gap: 8px; min-height: 20px; padding: 2px 0; }
+.pattern-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
+.sparkline { display: inline-flex; align-items: flex-end; gap: 1px; height: 16px; width: 60px; flex: none; }
+.sparkline-bar { flex: 1; min-width: 2px; background: var(--vscode-charts-blue, #75beff); border-radius: 1px; }
 button { padding: 4px 12px; cursor: pointer; color: var(--vscode-button-secondaryForeground, #ddd); background: var(--vscode-button-secondaryBackground, #333); white-space: nowrap; }
 button:hover { background: var(--vscode-button-secondaryHoverBackground, #444); }
 button[aria-pressed="true"] { border-color: var(--vscode-focusBorder, #007acc); color: var(--vscode-textLink-foreground, #75beff); }
@@ -80,19 +159,30 @@ button:disabled { opacity: .45; cursor: default; }
    disabling it avoids relying on that heuristic across those replacements. */
 .table-scroll { flex: 1; min-height: 60px; overflow: auto; overflow-anchor: none; border-block: 1px solid var(--vscode-panel-border, #444); }
 table { width: 100%; min-width: 380px; border-collapse: collapse; table-layout: fixed; }
-.time-col { width: 118px; }
-.level-col { width: 72px; }
-.source-col { width: 72px; }
-/* Least useful column in a narrow panel — stdout/stderr is usually implied by
-   context, so it's the first thing to give way. */
-@media (max-width: 480px) { .source-col { visibility: collapse; } }
 th:not(:first-child), td:not(:first-child) { padding-left: 16px; padding-right: 16px; }
 th {
   position: sticky; top: 0; z-index: 1; background: var(--vscode-editor-background, #1e1e1e);
   text-align: left; font-weight: 500; color: var(--vscode-descriptionForeground, #aaa);
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
+.column-grip { display: inline-block; width: 14px; margin-right: 4px; cursor: grab; color: var(--vscode-descriptionForeground, #aaa); font-size: 12px; vertical-align: middle; opacity: 0; transition: opacity .1s; }
+.column-sort { display: inline-flex; align-items: center; gap: 6px; width: calc(100% - 18px); min-width: 0; padding: 2px 0; border: 0; background: transparent; color: inherit; text-align: left; vertical-align: middle; }
+.column-label { overflow: hidden; text-overflow: ellipsis; }
+th:has(.remove-column) .column-sort { width: calc(100% - 34px); }
+.column-sort:hover { color: var(--vscode-foreground, #d4d4d4); background: transparent; }
+.remove-column { position: absolute; right: 11px; top: 50%; transform: translateY(-50%); padding: 0 3px; border: 0; background: transparent; color: var(--vscode-descriptionForeground, #aaa); line-height: 1; opacity: 0; transition: opacity .1s; }
+.remove-column:hover { color: var(--vscode-errorForeground, #f48771); background: var(--vscode-list-hoverBackground, #2a2d2e); }
+th.column-dragging { opacity: .45; }
+th.column-drop-target { box-shadow: inset 3px 0 var(--vscode-focusBorder, #007acc); }
+.sort-indicator { flex: none; color: var(--vscode-descriptionForeground, #aaa); font-size: 12px; opacity: .55; transition: opacity .1s; }
+th[aria-sort="ascending"] .sort-indicator, th[aria-sort="descending"] .sort-indicator { color: var(--vscode-textLink-foreground, #75beff); opacity: 1; }
+th:hover .column-grip, th:hover .sort-indicator, th:hover .remove-column,
+.column-grip:focus-visible, .sort-indicator:focus-visible, .remove-column:focus-visible { opacity: 1; }
+@media (hover: none) { .column-grip, .remove-column, .sort-indicator { opacity: 1; } }
 th, td { padding: 5px 14px; border-bottom: 1px solid var(--vscode-panel-border, #333); }
+.resize-handle { position: absolute; top: 0; right: 0; z-index: 2; width: 9px; height: 100%; cursor: col-resize; touch-action: none; user-select: none; }
+.resize-handle::after { content: ''; position: absolute; top: 6px; bottom: 6px; right: 3px; width: 1px; background: var(--vscode-panel-border, #555); }
+.resize-handle:hover::after, .resize-handle:active::after { width: 2px; background: var(--vscode-focusBorder, #007acc); }
 td { font-family: var(--vscode-editor-font-family, monospace); font-size: var(--vscode-editor-font-size, 13px); line-height: 1.6; }
 td.time { white-space: nowrap; font-variant-numeric: tabular-nums; }
 .message-button { display: block; width: 100%; padding: 0; border: 0; text-align: left; background: transparent; color: inherit; font: inherit; white-space: pre; overflow: hidden; text-overflow: ellipsis; }
