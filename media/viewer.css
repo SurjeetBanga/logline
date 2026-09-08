@@ -1,4 +1,32 @@
 :root { color-scheme: light dark; }
+.detail-actions { margin-bottom: 6px; }
+.detail-cell > .event-details { max-height: 320px; overflow: auto; }
+.exception-block { margin: 12px 0; }
+.exception-stack { margin-top: 4px; font-family: var(--vscode-editor-font-family, monospace); }
+.exception-stack > *, .context-event { white-space: pre-wrap; overflow-wrap: anywhere; }
+.source-link { display: block; width: 100%; padding: 2px 0; text-align: left; border: 0; background: transparent; color: var(--vscode-textLink-foreground, #75beff); font: inherit; }
+.source-link:hover { text-decoration: underline; }
+.event-details summary { cursor: pointer; margin-top: 8px; }
+#contextDialog { width: min(1100px, 96vw); max-width: 96vw; height: 90vh; max-height: 90vh; padding: 14px; color: inherit; background: var(--vscode-editor-background, #1e1e1e); border: 1px solid var(--vscode-panel-border, #555); border-radius: 6px; }
+#contextDialog[open] { display: flex; flex-direction: column; }
+#contextDialog::backdrop { background: rgba(0, 0, 0, .5); }
+.context-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+#contextStatus { color: var(--vscode-descriptionForeground, #aaa); font-size: 12px; margin: 8px 0; }
+.context-scroll { overflow: auto; flex: 1 1 50%; min-height: 80px; }
+#contextDetails { overflow: auto; flex: 1 1 40%; min-height: 60px; border-top: 1px solid var(--vscode-panel-border, #555); padding-top: 10px; margin-top: 8px; }
+#contextDetails pre { white-space: pre-wrap; overflow-wrap: anywhere; }
+#contextDialog table { width: 100%; table-layout: fixed; }
+#contextDialog td, #contextDialog th { padding: 5px 6px; }
+#contextDialog th:nth-child(1) { width: 110px; }
+#contextDialog th:nth-child(2), #contextDialog th:nth-child(4) { width: 65px; }
+.context-event { width: 100%; text-align: left; background: transparent; border-color: transparent; padding: 3px; }
+.context-anchor { background: var(--vscode-editor-findMatchHighlightBackground, #4d411c); }
+@media (max-width: 500px) {
+  #contextDialog { padding: 8px; }
+  #contextDialog th:nth-child(1) { width: 86px; }
+  #contextDialog th:nth-child(2), #contextDialog th:nth-child(4) { width: 48px; }
+  .context-header { flex-wrap: wrap; }
+}
 * { box-sizing: border-box; }
 body {
   margin: 0;

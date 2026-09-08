@@ -7,6 +7,7 @@ import { randomBytes } from 'node:crypto';
 import { parseLogLine } from './log-event';
 import { LogStore, LineReader } from './log-store';
 import { formatDetails } from './format-details';
+import { extractExceptions } from './exceptions';
 import { nextServerId, resolveAutoStartServers, resolveRunTarget, resolveCwd } from './server-config';
 import { parseJsonc } from './jsonc';
 import { redactEvent, type RedactionOptions } from './redaction';
@@ -51,7 +52,7 @@ interface ExportRequest {
 interface ServerSummary {
   id: string;
   label: string;
-  status: 'idle' | 'starting' | 'running' | 'stopping' | 'exited' | 'failed';
+  status: 'idle' | 'running' | 'stopping' | 'exited' | 'failed';
   activeSessions: number;
   pid?: number;
   lastSession?: string;
@@ -70,13 +71,17 @@ function csvCell(value: unknown): string {
 function serializeExport(events: LogEvent[], format: ExportFormat): string {
   if (format === 'json') return JSON.stringify(events, null, 2) + '\n';
   if (format === 'jsonl') return events.map(event => JSON.stringify(event)).join('\n') + (events.length ? '\n' : '');
-  const fields = [...new Set(events.flatMap(event => Object.keys(event.fields ?? {})))].sort();
-  const columns = ['id', 'timestamp', 'timestampMs', 'level', 'message', 'stream', 'server', 'serverId', 'sessionId', 'raw', ...fields];
+  const baseColumns = ['id', 'timestamp', 'timestampMs', 'level', 'message', 'stream', 'server', 'serverId', 'sessionId', 'raw'];
+  // Field columns are always prefixed, even when a field's name doesn't collide
+  // with a base column, so a header never ambiguously refers to either source
+  // depending on which events happen to be in the export.
+  const fieldKeys = [...new Set(events.flatMap(event => Object.keys(event.fields ?? {})))].sort();
+  const columns = [...baseColumns, ...fieldKeys.map(key => `field:${key}`)];
   const rows = [columns.join(',')];
   for (const event of events) {
-    rows.push(columns.map(column => column in event
-      ? csvCell(event[column as keyof LogEvent])
-      : csvCell(event.fields?.[column])).join(','));
+    rows.push(columns.map(column => column.startsWith('field:')
+      ? csvCell(event.fields?.[column.slice('field:'.length)])
+      : csvCell(event[column as keyof LogEvent])).join(','));
   }
   return rows.join('\n') + '\n';
 }
@@ -342,8 +347,10 @@ export class LogsProvider implements vscode.WebviewViewProvider, vscode.Disposab
     }
   }
 
-  sessionSummaries(): SessionSummary[] {
-    return [...this.sessionRegistry.values()].map(record => ({ ...record }));
+  // The webview only needs each session's status to show an active count, so
+  // send that alone rather than cloning the full registry on every snapshot.
+  sessionSummaries(): Pick<SessionSummary, 'status'>[] {
+    return [...this.sessionRegistry.values()].map(record => ({ status: record.status }));
   }
 
   serverSummaries(): ServerSummary[] {
@@ -360,13 +367,12 @@ export class LogsProvider implements vscode.WebviewViewProvider, vscode.Disposab
       if (seen.has(id)) return;
       seen.add(id);
       const records = byId.get(id) ?? [];
-      const active = records.filter(record => record.status === 'starting' || record.status === 'running' || record.status === 'stopping');
+      const active = records.filter(record => record.status === 'running' || record.status === 'stopping');
       const last = records.reduce((latest, record) =>
         !latest || (record.endedAt ?? record.startedAt) > (latest.endedAt ?? latest.startedAt) ? record : latest,
         undefined as SessionSummary | undefined);
       const status = active.some(record => record.status === 'stopping') ? 'stopping'
-        : active.some(record => record.status === 'starting') ? 'starting'
-          : active.length ? 'running' : last?.status ?? 'idle';
+        : active.length ? 'running' : last?.status ?? 'idle';
       summaries.push({ id, label, status, activeSessions: active.length,
         pid: active.find(record => record.pid !== undefined)?.pid, lastSession: last?.id });
     };
@@ -384,11 +390,12 @@ export class LogsProvider implements vscode.WebviewViewProvider, vscode.Disposab
     };
   }
 
-  async chooseExportFormat(): Promise<ExportFormat | undefined> {
+  async chooseExportFormat(): Promise<ExportFormat | 'md' | undefined> {
     const choice = await vscode.window.showQuickPick([
       { label: 'JSON Lines', description: 'One redacted event per line', format: 'jsonl' as const },
       { label: 'JSON', description: 'A redacted JSON array', format: 'json' as const },
-      { label: 'CSV', description: 'Rows with common fields as columns', format: 'csv' as const }
+      { label: 'CSV', description: 'Rows with common fields as columns', format: 'csv' as const },
+      { label: 'AI context (Markdown)', description: 'Up to 2,000 filtered events for AI tools', format: 'md' as const }
     ], { title: 'Export retained logs' });
     return choice?.format;
   }
@@ -424,6 +431,7 @@ export class LogsProvider implements vscode.WebviewViewProvider, vscode.Disposab
   async exportLogs(request: ExportRequest = {}): Promise<void> {
     const format = await this.chooseExportFormat();
     if (!format) return;
+    if (format === 'md') return this.exportForAI(request);
     const events = this.collectExportEvents(request);
     await this.saveExport(serializeExport(events, format), format, `logline-export.${format}`);
   }
@@ -453,11 +461,14 @@ export class LogsProvider implements vscode.WebviewViewProvider, vscode.Disposab
     for (const uri of uris) {
       let text: string;
       try { text = Buffer.from(await vscode.workspace.fs.readFile(uri)).toString('utf8'); } catch { continue; }
+      // Keep surrounding context from crossing between independently imported files.
+      const sessionId = randomBytes(8).toString('hex');
       for (const record of parseImportRecords(text)) {
         const line = typeof record === 'string' ? record : JSON.stringify(record);
         const event = parseLogLine(line, 'import', ++this.sequence, new Date());
         event.serverId = 'imported';
         event.server = 'Imported';
+        event.sessionId = sessionId;
         this.store.add(event);
         imported++;
       }
@@ -556,6 +567,10 @@ export class LogsProvider implements vscode.WebviewViewProvider, vscode.Disposab
   handleMessage(view: vscode.WebviewView, message: unknown): void {
     if (!message || typeof message !== 'object') return;
     const msg = message as Record<string, unknown>;
+    if (msg.type === 'context' && Number.isSafeInteger(msg.id)) {
+      view.webview.postMessage({ type: 'context', id: msg.id, ...this.store.context(msg.id as number) });
+    }
+    if (msg.type === 'openSource') void this.openSource(msg);
     if (msg.type === 'snapshot') {
       const options = {
         query: typeof msg.query === 'string' ? msg.query : '',
@@ -596,7 +611,8 @@ export class LogsProvider implements vscode.WebviewViewProvider, vscode.Disposab
         text += `\n[Truncated: line exceeded ${limit.toLocaleString()} characters]`;
       }
       if (msg.type === 'copy' && event) vscode.env.clipboard.writeText(text);
-      if (msg.type === 'details') view.webview.postMessage({ type: 'details', id: msg.id, text });
+      if (msg.type === 'details') view.webview.postMessage({ type: 'details', id: msg.id, text,
+        target: msg.target === 'context' ? 'context' : 'main', exceptions: event ? extractExceptions(event) : [] });
     }
     if (msg.type === 'clear') { this.store.clear(); this.generation++; this.notifyViews(); }
     if (msg.type === 'stop') {
@@ -614,6 +630,49 @@ export class LogsProvider implements vscode.WebviewViewProvider, vscode.Disposab
       const target = resolveRunTarget(this.config.get<ServerConfig[]>('servers', []), msg.serverId as string, workspaceCwd);
       if (target) this.run(target.command, target.cwd, target.server, undefined, target.env);
       else vscode.commands.executeCommand('logline.runCommand');
+    }
+  }
+
+  async openSource(msg: Record<string, unknown>): Promise<void> {
+    if (!Number.isSafeInteger(msg.id) || !Number.isSafeInteger(msg.block) || !Number.isSafeInteger(msg.line)) return;
+    const event = this.store.find(msg.id as number);
+    if (!event) { vscode.window.showInformationMessage('This event has been discarded from retained history.'); return; }
+    const source = extractExceptions(event)[msg.block as number]?.lines[msg.line as number]?.source;
+    if (!source) return;
+    try {
+      const folders = vscode.workspace.workspaceFolders ?? [];
+      const normalized = source.file.replace(/\\/g, '/').replace(/^\.\//, '');
+      const candidates: vscode.Uri[] = [];
+      // A logged path can only open source inside the current workspace.
+      for (const folder of folders) {
+        const candidate = path.resolve(folder.uri.fsPath, source.file);
+        const relative = path.relative(folder.uri.fsPath, candidate);
+        if (relative.startsWith('..' + path.sep) || relative === '..' || path.isAbsolute(relative)) continue;
+        const uri = vscode.Uri.file(candidate);
+        try { if ((await vscode.workspace.fs.stat(uri)).type === vscode.FileType.File) candidates.push(uri); } catch { /* try source lookup */ }
+      }
+      if (!candidates.length) {
+        const filename = normalized.split('/').at(-1)!;
+        const escaped = filename.replace(/[\[\]{}*?]/g, char => `[${char}]`);
+        const matches = await vscode.workspace.findFiles(`**/${escaped}`, '**/{node_modules,.git,out,dist,build}/**', 100);
+        const suffix = matches.filter(uri => uri.path.endsWith('/' + normalized));
+        candidates.push(...(suffix.length ? suffix : matches));
+      }
+      if (!candidates.length) {
+        vscode.window.showInformationMessage(`Source file not found in this workspace: ${source.file}`);
+        return;
+      }
+      const unique = [...new Map(candidates.map(uri => [uri.toString(), uri])).values()];
+      const uri = unique.length === 1 ? unique[0] : (await vscode.window.showQuickPick(
+        unique.map(uri => ({ label: vscode.workspace.asRelativePath(uri), uri })), { title: 'Choose stack frame source' }))?.uri;
+      if (!uri) return;
+      const document = await vscode.workspace.openTextDocument(uri);
+      const line = Math.min(source.line - 1, document.lineCount - 1);
+      const column = Math.min(source.column - 1, document.lineAt(line).text.length);
+      const position = new vscode.Position(line, column);
+      await vscode.window.showTextDocument(document, { preview: true, selection: new vscode.Range(position, position) });
+    } catch (error) {
+      vscode.window.showInformationMessage(`Could not open stack frame: ${(error as Error).message}`);
     }
   }
 

@@ -29,7 +29,7 @@ export interface LogEvent {
   sessionId?: string;
 }
 
-export type SessionStatus = 'starting' | 'running' | 'stopping' | 'exited' | 'failed';
+export type SessionStatus = 'running' | 'stopping' | 'exited' | 'failed';
 
 export interface SessionSummary {
   id: string;

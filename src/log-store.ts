@@ -162,6 +162,27 @@ export class LogStore {
     return undefined;
   }
 
+  // Neighbours are in capture order within the same process session, including
+  // both streams and every level. Query filters intentionally do not apply.
+  context(id: number): { events: LogEvent[]; server?: string; missing: boolean } {
+    const anchor = this.find(id);
+    if (!anchor) return { events: [], missing: true };
+    const earlier: LogEvent[] = [];
+    const later: LogEvent[] = [];
+    for (let i = 0; i < this.size; i++) {
+      const event = this.slots[(this.head + i) % this.maxRows]!.event;
+      if (event.serverId !== anchor.serverId || event.sessionId !== anchor.sessionId) continue;
+      if (event.id < id) {
+        earlier.push(event);
+        if (earlier.length > 25) earlier.shift();
+      } else if (event.id > id) {
+        later.push(event);
+        if (later.length === 25) break;
+      }
+    }
+    return { events: [...earlier, anchor, ...later].map(pickFields), server: anchor.server, missing: false };
+  }
+
   // Re-home retained events into a new ring, dropping the oldest that no longer
   // fit. Used when the retention settings change without a window reload.
   resize(maxRows: number, maxBytes: number): void {
