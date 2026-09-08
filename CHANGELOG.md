@@ -2,6 +2,39 @@
 
 All notable changes to Logline are documented in this file.
 
+## 1.3.0 — 2026-09-08
+
+**Task integration**
+
+- Capture VS Code shell, process, `node-terminal`, and `launch.json` pre-launch task lifecycle events, dependency metadata, process ids, and exit reasons.
+- Convert existing executable tasks into Logline `CustomExecution` tasks, including supported `dependsOn` chains and VS Code variable resolution.
+- Add task-level `shell`, `jsonOnly`, and stable task metadata options.
+
+**Search and analysis**
+
+- Add saved searches, field/value autocomplete, and value facets.
+- Sort retained events by any captured field.
+- Rearrange and resize table columns with persisted drag-and-drop layout state.
+- Sort directly from table headers; remove the separate sort controls.
+- Show drag grips and remove controls for payload columns, with a Fields menu to restore hidden fields.
+- Give search its own row with separate saved-search, value-filter, column, and analysis controls.
+- Initialize sorting and resizing for plain logs, apply widths to the actual table columns, and keep widths attached to fields when reordered. Separate sort buttons from drag grips and resize handles; sort Source by its displayed stream.
+- Add normalized error grouping and rate/error/latency/status-code charts.
+- Cluster all retained events (any level) into the top 10 log patterns by volume with a trend, flag statistically anomalous rate/error/latency buckets, and group errors by exception type and originating stack frame instead of raw message text.
+- Redact camelCase secret assignments in free-text messages and keep context from crossing events with unknown session boundaries.
+
+**Interface**
+
+- Restyle the search row's filter and tool buttons (levels, saved searches, filter-by-value, columns, analyze) as quiet, borderless controls that pick up a background only on hover or when open, so they read as one light strip instead of a wall of boxes next to the primary Run/Live actions; group them with subtle dividers instead.
+- Hide table-header drag grips, sort arrows, and column-remove controls until the header is hovered or focused, cutting the per-column icon clutter.
+- Fix a popover (e.g. Columns) growing past the bottom of a short, docked panel and forcing the whole page to scroll horizontally — panels now flip above their trigger and cap their own height when there isn't room below.
+- Fix saved-search and filter-by-value list items rendering in the button-foreground color instead of the theme's normal text color.
+- Let non-message columns shrink (down to the same floor manual resizing enforces) when the table doesn't fit, instead of only the Message column ever reacting to added or removed columns while the rest forced a horizontal scrollbar.
+
+**Quality**
+
+- Add test coverage for the task-to-Logline JSONC writer (`appendTasksToJsonc`), saved-search dedup/eviction, the new task/query fields, per-session and time-range log retrieval, field/value autocomplete, and the facets and autocomplete rendering in the webview.
+
 ## 1.2.0 — 2026-09-07
 
 **Debugging**

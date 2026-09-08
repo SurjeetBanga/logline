@@ -28,5 +28,5 @@ test('missing session IDs do not mix with identified sessions', () => {
   store.add({ id: 1, level: 'info', serverId: 'imported' });
   store.add({ id: 2, level: 'info', serverId: 'imported', sessionId: 'run' });
   store.add({ id: 3, level: 'info', serverId: 'imported' });
-  assert.deepEqual(store.context(1).events.map(event => event.id), [1, 3]);
+  assert.deepEqual(store.context(1).events.map(event => event.id), [1]);
 });

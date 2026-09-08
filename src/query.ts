@@ -13,6 +13,7 @@ const FIELD_GROUPS: string[][] = [
   ['requestId', 'request_id'],
   ['traceId', 'trace_id'],
   ['spanId', 'span_id'],
+  ['parentSpanId', 'parent_span_id', 'parentId'],
   ['durationMs', 'duration', 'duration_ms']
 ];
 
@@ -132,6 +133,12 @@ function readField(event: LogEvent, field: string): FieldValue {
   if (field === 'serverId') return event.serverId;
   if (field === 'server') return event.server;
   if (field === 'sessionId') return event.sessionId;
+  if (field === 'taskName') return event.taskName;
+  if (field === 'taskType') return event.taskType;
+  if (field === 'taskState') return event.taskState;
+  if (field === 'dependencies') return event.dependencies?.join(', ');
+  if (field === 'dependencyState') return event.dependencyState;
+  if (field === 'exitReason') return event.exitReason;
   if (field === 'time') return undefined;
   return event.fields?.[field];
 }

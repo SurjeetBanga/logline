@@ -10,3 +10,4 @@ out/types.js
 *.vsix
 media/screenshot.png
 media/icon.svg
+samples/**
