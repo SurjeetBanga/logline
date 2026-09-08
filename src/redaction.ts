@@ -22,8 +22,13 @@ function isSensitiveKey(key: string, fields: string[] = []): boolean {
 export function redactText(text: string, options: RedactionOptions = {}): string {
   if (options.enabled === false) return text;
   const replacement = options.replacement ?? DEFAULT_REPLACEMENT;
-  const quoted = /\b(password|passphrase|secret|token|api[-_ ]?key|authorization|cookie|private[-_ ]?key|access[-_ ]?key|credential)\b(\s*[:=]\s*)(["'])(.*?)\3/gi;
-  const bare = /\b(password|passphrase|secret|token|api[-_ ]?key|authorization|cookie|private[-_ ]?key|access[-_ ]?key|credential)\b(\s*[:=]\s*)(?!["'])((?:(?:Bearer|Basic)\s+)?[^\s,;\]}]+)/gi;
+  // Permit a camelCase or snake_case field prefix (sessionToken,
+  // userPassword, client_secret) while still requiring the sensitive keyword
+  // to be immediately followed by an assignment separator. This catches
+  // secrets embedded in free-text messages as well as JSON object keys.
+  const key = '(?:[A-Za-z0-9_.-]*?(?:password|passphrase|secret|token|api[-_ ]?key|authorization|cookie|private[-_ ]?key|access[-_ ]?key|credential))';
+  const quoted = new RegExp(`(${key})(\\s*[:=]\\s*)(["'])(.*?)\\3`, 'gi');
+  const bare = new RegExp(`(${key})(\\s*[:=]\\s*)(?!["'])((?:(?:Bearer|Basic)\\s+)?[^\\s,;\\]}]+)`, 'gi');
   return text
     .replace(quoted, (_match, key, separator, quote) => `${key}${separator}${quote}${replacement}${quote}`)
     .replace(bare, (_match, key, separator) => `${key}${separator}${replacement}`);

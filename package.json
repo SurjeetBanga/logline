@@ -2,12 +2,8 @@
   "name": "logline",
   "displayName": "Logline — Live Tail for JSON Logs",
   "description": "Live tail your server processes in a searchable, expandable JSON log viewer.",
-  "version": "1.2.0",
+  "version": "1.3.0",
   "publisher": "surjeetbanga",
-  "author": {
-    "name": "Surjeet Banga",
-    "email": "31071557+SurjeetBanga@users.noreply.github.com"
-  },
   "license": "MIT",
   "repository": {
     "type": "git",
@@ -95,6 +91,16 @@
         "command": "logline.exportForAI",
         "title": "Export Logs for AI",
         "category": "Logline"
+      },
+      {
+        "command": "logline.convertTask",
+        "title": "Convert VS Code Task to Logline",
+        "category": "Logline"
+      },
+      {
+        "command": "logline.captureTask",
+        "title": "Capture VS Code Task in Logline",
+        "category": "Logline"
       }
     ],
     "taskDefinitions": [
@@ -113,6 +119,53 @@
           },
           "args": {
             "type": "array"
+          },
+          "shell": {
+            "type": "boolean",
+            "description": "Run through the user's shell. Defaults to argv mode when args are supplied."
+          },
+          "jsonOnly": {
+            "type": "boolean",
+            "default": false,
+            "description": "Only retain JSON output from this task."
+          },
+          "taskId": {
+            "type": "string",
+            "description": "Stable id used to group this task's events."
+          },
+          "taskName": {
+            "type": "string",
+            "description": "Display name used for this task's Logline session."
+          },
+          "taskType": {
+            "type": "string",
+            "description": "Original VS Code task type, shown in the Logs selector."
+          },
+          "detail": {
+            "type": "string"
+          },
+          "isBackground": {
+            "type": "boolean"
+          },
+          "problemMatcher": {
+            "type": ["string", "array"]
+          },
+          "presentation": {
+            "type": "object"
+          },
+          "runOptions": {
+            "type": "object"
+          },
+          "group": {
+            "type": "string"
+          },
+          "dependsOn": {
+            "type": ["string", "array"],
+            "items": { "type": "string" }
+          },
+          "dependsOrder": {
+            "type": "string",
+            "enum": ["sequence", "parallel"]
           },
           "options": {
             "type": "object"
