@@ -2,7 +2,7 @@
   "name": "logline",
   "displayName": "Logline — Live Tail for JSON Logs",
   "description": "Live tail your server processes in a searchable, expandable JSON log viewer.",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "publisher": "surjeetbanga",
   "author": {
     "name": "Surjeet Banga",
@@ -80,6 +80,21 @@
         "command": "logline.stopCommand",
         "title": "Stop Active Command",
         "category": "Logline"
+      },
+      {
+        "command": "logline.export",
+        "title": "Export Retained Logs",
+        "category": "Logline"
+      },
+      {
+        "command": "logline.import",
+        "title": "Import Logs",
+        "category": "Logline"
+      },
+      {
+        "command": "logline.exportForAI",
+        "title": "Export Logs for AI",
+        "category": "Logline"
       }
     ],
     "taskDefinitions": [
@@ -154,6 +169,24 @@
           "minimum": 10,
           "maximum": 10240,
           "description": "Size at which latest.log rolls over to latest.log.1. Only the current and one previous file are kept."
+        },
+        "logline.redactExports": {
+          "type": "boolean",
+          "default": true,
+          "description": "Redact common credentials and secret-like fields in exported logs."
+        },
+        "logline.redactionFields": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "description": "Additional case-insensitive field names to redact when exporting logs."
+        },
+        "logline.redactionReplacement": {
+          "type": "string",
+          "default": "[REDACTED]",
+          "description": "Replacement text used for redacted values in exports."
         },
         "logline.columns": {
           "type": "array",

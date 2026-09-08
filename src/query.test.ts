@@ -92,6 +92,13 @@ test('a field filter matches the name as typed, whichever variant the log uses',
   assert.equal(matchesQuery(camel, 'severity:info'), true, 'level aliases still resolve');
 });
 
+test('server and session metadata are searchable even when not duplicated in fields', () => {
+  const event = { id: 1, level: 'info', message: 'ok', serverId: 'api', server: 'API', sessionId: 's1' };
+  assert.equal(matchesQuery(event, 'serverId:api'), true);
+  assert.equal(matchesQuery(event, 'server:api'), true);
+  assert.equal(matchesQuery(event, 'sessionId:s1'), true);
+});
+
 test('an exact field name wins over its alias group', () => {
   const both = parseLogLine('{"level":"info","message":"x","status":500,"statusCode":200}', 'stdout', 1, new Date());
   assert.equal(matchesQuery(both, 'status:500'), true);

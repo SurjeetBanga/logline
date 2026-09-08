@@ -129,6 +129,9 @@ function readField(event: LogEvent, field: string): FieldValue {
   if (field === 'message') return event.message;
   if (field === 'stream') return event.stream;
   if (field === 'timestamp') return event.timestamp;
+  if (field === 'serverId') return event.serverId;
+  if (field === 'server') return event.server;
+  if (field === 'sessionId') return event.sessionId;
   if (field === 'time') return undefined;
   return event.fields?.[field];
 }

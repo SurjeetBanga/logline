@@ -38,10 +38,11 @@
         <div id="levelMenu" class="popover level-menu" hidden role="group" aria-label="Log level filter"></div>
       </div>
       <button id="follow" aria-pressed="true">Live</button>
-      <button id="config">⚙ Config</button><button id="manage">Manage servers</button>
+      <button id="config">Settings</button><button id="manage">Manage servers</button>
+      <button id="export" title="Export filtered logs as JSON Lines, JSON, CSV, or AI context (Markdown)">Export</button><button id="import">Import</button>
       <button id="clear">Clear</button><button id="stop" disabled>Stop all</button>
     </div>
-    <div class="session"><span id="status">Ready</span><code id="command"></code></div>
+    <div class="session"><span id="status">Ready</span><span id="sessions" aria-live="polite"></span><code id="command"></code></div>
   </header>
   <section class="table-scroll" aria-label="Log events">
     <table>
@@ -55,6 +56,14 @@
     <div class="pagination"><button id="older">← Older</button><span id="page">Page 1 of 1</span><button id="newer">Newer →</button><span id="mode">Live</span></div>
     <div id="counts" role="status">0 received · 0 retained · 0 discarded</div>
   </footer>
+  <dialog id="contextDialog" aria-labelledby="contextTitle">
+    <div class="context-header"><strong id="contextTitle">Surrounding logs</strong><button id="contextClose" autofocus>Back to results</button></div>
+    <p id="contextStatus" role="status">Loading…</p>
+    <div class="context-scroll">
+      <table aria-label="Surrounding log events"><thead><tr><th>Time</th><th>Level</th><th>Message</th><th>Source</th></tr></thead><tbody id="contextLogs"></tbody></table>
+    </div>
+    <div id="contextDetails" aria-live="polite"></div>
+  </dialog>
   <script nonce="{{NONCE}}" src="{{SCRIPT_URI}}"></script>
 </body>
 </html>

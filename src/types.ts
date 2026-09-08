@@ -26,4 +26,21 @@ export interface LogEvent {
   truncated?: boolean;
   serverId?: string;
   server?: string;
+  sessionId?: string;
+}
+
+export type SessionStatus = 'running' | 'stopping' | 'exited' | 'failed';
+
+export interface SessionSummary {
+  id: string;
+  serverId: string;
+  server: string;
+  status: SessionStatus;
+  startedAt: number;
+  endedAt?: number;
+  pid?: number;
+  events: number;
+  exitCode?: number;
+  signal?: string;
+  error?: string;
 }
