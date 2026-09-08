@@ -63,10 +63,31 @@ function isPrimitive(value: unknown): value is string | number | boolean {
 }
 
 function extractFields(object: JsonObject): Record<string, string | number | boolean> {
-  const keys = ['service', 'logger', 'requestId', 'traceId', 'spanId', 'method', 'path', 'status', 'statusCode', 'duration', 'durationMs', 'userId', 'host', 'environment'];
-  const fields: Record<string, string | number | boolean> = Object.fromEntries(
-    keys.filter(key => isPrimitive(object[key])).map(key => [key, object[key] as string | number | boolean])
-  );
+  const fields: Record<string, string | number | boolean> = {};
+  const ignored = new Set(['level', 'severity', 'message', 'msg', 'event', 'name', 'timestamp', 'time', 'ts', 'datetime', 'timeMillis', 'contextMap']);
+  const add = (key: string, value: unknown) => { if (isPrimitive(value) && fields[key] === undefined && Object.keys(fields).length < 120) fields[key] = value; };
+  const walk = (key: string, value: unknown, depth: number) => {
+    if (isPrimitive(value)) { add(key, value); return; }
+    if (!value || typeof value !== 'object' || Array.isArray(value) || depth >= 4) return;
+    for (const [child, childValue] of Object.entries(value as JsonObject)) {
+      add(`${key}.${child}`, childValue);
+      if (isPrimitive(childValue)) add(child, childValue);
+      else walk(`${key}.${child}`, childValue, depth + 1);
+    }
+  };
+  for (const [key, value] of Object.entries(object)) {
+    if (ignored.has(key)) continue;
+    if (isPrimitive(value)) add(key, value);
+    else if (value && typeof value === 'object' && !Array.isArray(value)) {
+      for (const [child, childValue] of Object.entries(value as JsonObject)) {
+        add(`${key}.${child}`, childValue);
+        // Bare aliases make nested payloads easy to search while the dotted
+        // path preserves an unambiguous column name.
+        if (isPrimitive(childValue)) add(child, childValue);
+        else walk(`${key}.${child}`, childValue, 2);
+      }
+    }
+  }
   // Log4j2 JsonLayout nests MDC (ThreadContext) values under contextMap instead
   // of at the top level; flatten them so they're searchable like any other field.
   const context = object.contextMap;

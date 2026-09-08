@@ -27,6 +27,13 @@ export interface LogEvent {
   serverId?: string;
   server?: string;
   sessionId?: string;
+  /** Present for events emitted by a VS Code task integration. */
+  taskName?: string;
+  taskType?: string;
+  taskState?: string;
+  dependencies?: string[];
+  dependencyState?: string;
+  exitReason?: string;
 }
 
 export type SessionStatus = 'running' | 'stopping' | 'exited' | 'failed';
@@ -43,4 +50,11 @@ export interface SessionSummary {
   exitCode?: number;
   signal?: string;
   error?: string;
+  taskName?: string;
+  taskType?: string;
+  taskState?: string;
+  dependencies?: string[];
+  dependencyState?: string;
+  exitReason?: string;
+  source?: string;
 }

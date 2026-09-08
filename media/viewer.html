@@ -12,9 +12,18 @@
     <div class="toolbar">
       <select id="server" aria-label="Server"><option value="">All servers</option></select>
       <button id="run">Run selected</button>
+      <button id="follow" aria-pressed="true">Live</button>
+      <div class="toolbar-actions">
+        <button id="config">Settings</button><button id="manage">Manage servers</button>
+        <button id="export" title="Export filtered logs as JSON Lines, JSON, CSV, or AI context (Markdown)">Export</button><button id="import">Import</button>
+        <button id="clear">Clear</button><button id="stop" disabled>Stop all</button>
+      </div>
+    </div>
+    <div class="search-toolbar" role="group" aria-label="Search and filter logs">
       <div class="popover-container search-group">
-        <input id="search" type="search" placeholder="Search retained logs…" aria-label="Search retained logs" maxlength="256">
-        <button id="searchHelp" class="icon-button" type="button" aria-haspopup="true" aria-expanded="false" aria-label="Search syntax help" title="Search syntax help">ⓘ</button>
+        <input id="search" type="search" placeholder="Search logs…" aria-label="Search logs" maxlength="256" list="fieldSuggestions">
+        <datalist id="fieldSuggestions"></datalist>
+        <button id="searchHelp" class="search-help-button" type="button" aria-haspopup="true" aria-expanded="false" aria-controls="searchHelpPanel" aria-label="Search syntax help" title="Search syntax help">Syntax</button>
         <div id="searchHelpPanel" class="popover cheat-sheet" hidden>
           <h3>Search syntax</h3>
           <dl>
@@ -33,20 +42,41 @@
           </dl>
         </div>
       </div>
-      <div class="popover-container">
-        <button id="levelButton" class="level-button" type="button" aria-haspopup="true" aria-expanded="false" aria-label="Log level filter">All levels</button>
+      <div class="popover-container toolbar-divider">
+        <button id="levelButton" class="level-button dropdown-button" type="button" aria-haspopup="true" aria-expanded="false" aria-controls="levelMenu" aria-label="Log level filter">All levels</button>
         <div id="levelMenu" class="popover level-menu" hidden role="group" aria-label="Log level filter"></div>
       </div>
-      <button id="follow" aria-pressed="true">Live</button>
-      <button id="config">Settings</button><button id="manage">Manage servers</button>
-      <button id="export" title="Export filtered logs as JSON Lines, JSON, CSV, or AI context (Markdown)">Export</button><button id="import">Import</button>
-      <button id="clear">Clear</button><button id="stop" disabled>Stop all</button>
+      <div class="popover-container">
+        <button id="searchTools" class="dropdown-button" type="button" aria-haspopup="true" aria-expanded="false" aria-controls="searchToolsPanel">Saved searches</button>
+        <div id="searchToolsPanel" class="popover saved-searches" hidden>
+          <div class="popover-heading"><h3>Saved searches</h3><button id="saveSearch" type="button" title="Save the current query, server, and levels">Save current</button></div>
+          <div id="savedSearchList" class="search-list"><p class="popover-empty">Save a search to reuse it here.</p></div>
+        </div>
+      </div>
+      <div class="popover-container">
+        <button id="facetButton" class="dropdown-button" type="button" aria-haspopup="true" aria-expanded="false" aria-controls="facetPanel">Filter by value</button>
+        <div id="facetPanel" class="popover facet-panel" hidden>
+          <h3>Filter by value</h3>
+          <p class="popover-description">Choose a value to search this field.</p>
+          <label>Field <select id="facetField" aria-label="Facet field"></select></label>
+          <div id="facetValues" aria-live="polite">Choose a field to see values.</div>
+        </div>
+      </div>
+      <div class="popover-container">
+        <button id="fieldsButton" class="dropdown-button" type="button" aria-haspopup="true" aria-expanded="false" aria-controls="fieldsPanel">Columns</button>
+        <div id="fieldsPanel" class="popover fields-panel" hidden>
+          <h3>Table columns</h3>
+          <p class="popover-description">Choose fields to show in the table.</p>
+          <div id="fieldList"></div>
+        </div>
+      </div>
+      <button id="analyze" type="button" class="toolbar-divider" title="Analyze the logs matching your current filter">Analyze</button>
     </div>
     <div class="session"><span id="status">Ready</span><span id="sessions" aria-live="polite"></span><code id="command"></code></div>
   </header>
   <section class="table-scroll" aria-label="Log events">
-    <table>
-      <colgroup><col class="time-col"><col class="level-col"><col><col class="source-col"></colgroup>
+    <table id="eventsTable">
+      <colgroup id="eventColumns"></colgroup>
       <thead><tr id="head-row"><th>Time</th><th>Level</th><th title="Click a message to expand it">Message</th><th>Source</th></tr></thead>
       <tbody id="logs"></tbody>
     </table>
@@ -57,12 +87,25 @@
     <div id="counts" role="status">0 received · 0 retained · 0 discarded</div>
   </footer>
   <dialog id="contextDialog" aria-labelledby="contextTitle">
-    <div class="context-header"><strong id="contextTitle">Surrounding logs</strong><button id="contextClose" autofocus>Back to results</button></div>
+    <div class="context-header"><strong id="contextTitle">Surrounding logs</strong><span><button id="contextExport">Export context</button><button id="contextClose" autofocus>Back to results</button></span></div>
     <p id="contextStatus" role="status">Loading…</p>
     <div class="context-scroll">
       <table aria-label="Surrounding log events"><thead><tr><th>Time</th><th>Level</th><th>Message</th><th>Source</th></tr></thead><tbody id="contextLogs"></tbody></table>
     </div>
     <div id="contextDetails" aria-live="polite"></div>
+  </dialog>
+  <dialog id="analysisDialog" aria-labelledby="analysisTitle">
+    <div class="context-header"><strong id="analysisTitle">Search analysis</strong><button id="analysisClose" autofocus>Close</button></div>
+    <p id="analysisStatus" role="status">Loading…</p>
+    <div id="analysisContent" class="analysis-content"></div>
+  </dialog>
+  <dialog id="saveSearchDialog" aria-labelledby="saveSearchTitle">
+    <form id="saveSearchForm">
+      <div class="context-header"><strong id="saveSearchTitle">Save search</strong><button id="saveSearchCancel" type="button">Cancel</button></div>
+      <label for="saveSearchName">Name</label>
+      <input id="saveSearchName" type="text" maxlength="80" autofocus>
+      <div class="save-search-actions"><button id="saveSearchConfirm" type="submit">Save</button></div>
+    </form>
   </dialog>
   <script nonce="{{NONCE}}" src="{{SCRIPT_URI}}"></script>
 </body>
