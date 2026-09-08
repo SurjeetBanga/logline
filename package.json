@@ -2,7 +2,7 @@
   "name": "logline",
   "displayName": "Logline — Live Tail for JSON Logs",
   "description": "Live tail your server processes in a searchable, expandable JSON log viewer.",
-  "version": "1.3.0",
+  "version": "1.4.0",
   "publisher": "surjeetbanga",
   "license": "MIT",
   "repository": {
@@ -148,7 +148,10 @@
             "type": "boolean"
           },
           "problemMatcher": {
-            "type": ["string", "array"]
+            "type": [
+              "string",
+              "array"
+            ]
           },
           "presentation": {
             "type": "object"
@@ -160,12 +163,20 @@
             "type": "string"
           },
           "dependsOn": {
-            "type": ["string", "array"],
-            "items": { "type": "string" }
+            "type": [
+              "string",
+              "array"
+            ],
+            "items": {
+              "type": "string"
+            }
           },
           "dependsOrder": {
             "type": "string",
-            "enum": ["sequence", "parallel"]
+            "enum": [
+              "sequence",
+              "parallel"
+            ]
           },
           "options": {
             "type": "object"

@@ -2,6 +2,25 @@
 
 All notable changes to Logline are documented in this file.
 
+## 1.4.0 — 2026-09-08
+
+**Performance**
+
+- Re-running a filter no longer rescans the whole retained set. Because events only ever arrive at one end of the ring and are evicted from the other, a repeated query now tests just the events that arrived since the last refresh — a filtered view of 100k events costs ~0.2 ms per refresh instead of ~23 ms, so live tailing with a search active no longer stalls the extension host twice a second.
+- Match free-text terms with a case-insensitive regex per field instead of lower-casing a joined copy of level, message, and raw for every event, cutting a cold search over 100k events from ~23 ms to ~7 ms.
+- Send only the field columns a row actually displays to the webview, halving the per-refresh payload (665 KiB → 353 KiB on wide structured logs).
+- Stop cloning every matching event (and its field map) for facets and analysis, which only ever read them.
+- Skip parsing structured events that carry no exception-shaped key when grouping errors, and skip the normalization passes that cannot match a given message. Analysis of 100k events drops from ~167 ms to ~123 ms and facets from ~16 ms to ~3.5 ms.
+- Answer field-name autocomplete from the indexes maintained during ingest rather than scanning retained events on each keystroke (~6.6 ms → ~0.02 ms), and keep suggestions scoped to the selected server.
+
+**Import**
+
+- Import CSV files alongside JSON, JSONL, and plain text. A Logline CSV export round-trips exactly through its `raw` column, and a CSV from anywhere else becomes an event built from its own headers.
+
+**Quality**
+
+- Add regression coverage for the incremental match cache (counts and pages stay identical to a cold scan across ingestion, eviction, filter switches, and paging), relative-time queries bypassing that cache, per-server field suggestions, the exception pre-test, and CSV import parsing.
+
 ## 1.3.0 — 2026-09-08
 
 **Task integration**

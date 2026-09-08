@@ -22,6 +22,9 @@ const pickFields = ({ id, timestamp, timestampMs, level, message, isJson, trunca
 class ServerIndex {
   items: (Slot | undefined)[] = [];
   start = 0;
+  // Field names seen on this server, so autocomplete can answer without
+  // scanning the ring. Like columnCache it is never pruned on eviction.
+  fields = new Set<string>();
   push(item: Slot) { this.items.push(item); }
   shift() {
     this.items[this.start] = undefined;
@@ -79,6 +82,15 @@ export interface PageOptions {
   to?: number;
 }
 
+// One filter's match set, kept between refreshes. `matches` is oldest-first;
+// `start` skips the prefix that has since been evicted from the ring.
+interface PageCache {
+  key: string;
+  matches: LogEvent[];
+  start: number;
+  lastId: number;
+}
+
 export interface PageResult extends Stats {
   events: LogEvent[];
   page: number;
@@ -123,9 +135,16 @@ function sortEvents(events: LogEvent[], field: string, direction: 'asc' | 'desc'
 // Strips volatile substrings (ids, numbers, paths) so structurally identical log lines
 // collapse to the same template regardless of the specific values they carry.
 function normalizeMessage(message: string): string {
-  return message.trim().replace(/[0-9a-f]{8,}/gi, '<id>').replace(/\b\d+(?:\.\d+)?\b/g, '<n>')
-    .replace(/([A-Za-z]:)?[\\/]?[^\s:]+[\\/][^\s:]+/g, '<path>').replace(/\s+/g, ' ').toLowerCase();
+  let text = message.trim();
+  // Each replace rescans the whole string, so skip the ones whose pattern
+  // cannot possibly fire. Most log lines carry no path and no hex id at all.
+  if (HAS_HEX.test(text)) text = text.replace(/[0-9a-f]{8,}/gi, '<id>');
+  if (HAS_DIGIT.test(text)) text = text.replace(/\b\d+(?:\.\d+)?\b/g, '<n>');
+  if (text.includes('/') || text.includes('\\')) text = text.replace(/([A-Za-z]:)?[\\/]?[^\s:]+[\\/][^\s:]+/g, '<path>');
+  return text.replace(/\s+/g, ' ').toLowerCase();
 }
+const HAS_HEX = /[0-9a-f]{8}/i;
+const HAS_DIGIT = /\d/;
 
 // Groups errors by exception type + originating stack frame when a stack trace is
 // available, so the same exception thrown from different call sites doesn't collapse
@@ -182,6 +201,7 @@ export class LogStore {
   truncated!: number;
   columnCache!: Set<string>;
   serverIndex!: Map<string, ServerIndex>;
+  private pageCache: PageCache | undefined;
 
   constructor(maxRows = 100000, maxBytes = 100 * 1024 * 1024) {
     this.maxRows = maxRows;
@@ -199,6 +219,7 @@ export class LogStore {
     this.truncated = 0;
     this.columnCache = new Set();
     this.serverIndex = new Map();
+    this.pageCache = undefined;
   }
 
   private evictOldest(): void {
@@ -218,13 +239,17 @@ export class LogStore {
 
   private insertSlot(slot: Slot): void {
     this.slots[(this.head + this.size) % this.maxRows] = slot;
-    Object.keys(slot.event.fields ?? {}).forEach(key => this.columnCache.add(key));
     const serverId = slot.event.serverId;
+    let index: ServerIndex | undefined;
     if (serverId !== undefined) {
-      let index = this.serverIndex.get(serverId);
+      index = this.serverIndex.get(serverId);
       if (!index) { index = new ServerIndex(); this.serverIndex.set(serverId, index); }
       index.push(slot);
     }
+    // A plain for-in avoids allocating a key array per ingested line, which at
+    // flood rates is the difference between steady state and constant GC.
+    const fields = slot.event.fields;
+    if (fields) for (const key in fields) { this.columnCache.add(key); index?.fields.add(key); }
     this.size++;
     this.bytes += slot.bytes;
   }
@@ -232,9 +257,11 @@ export class LogStore {
   add(event: LogEvent): void {
     this.total++;
     if (event.truncated) this.truncated++;
-    const bytes = 256 + Object.values(event).reduce(
-      (sum: number, value) => sum + (typeof value === 'string' ? value.length * 2 : 0), 0
-    );
+    let bytes = 256;
+    for (const key in event) {
+      const value = (event as unknown as Record<string, unknown>)[key];
+      if (typeof value === 'string') bytes += value.length * 2;
+    }
     if (bytes > this.maxBytes) { this.discarded++; return; }
     while (this.size && (this.size === this.maxRows || this.bytes + bytes > this.maxBytes)) this.evictOldest();
     this.insertSlot({ event, bytes });
@@ -307,8 +334,6 @@ export class LogStore {
     const levelMatches = (eventLevel: string) => !levelSet || levelSet.has(eventLevel);
     query = query.slice(0, 256);
     const parsedQuery: ParsedQuery = parseQuery(query);
-    const exactServer = serverId === undefined ? undefined
-      : [...this.serverIndex.keys()].find(key => key.toLowerCase() === serverId.toLowerCase());
     const wantsLatestPage = !sort && !sessionId && from === undefined && to === undefined && !levelSet && before === Infinity && page === 0 && this.size > 10000;
     if (!parsedQuery.length && serverId === undefined && wantsLatestPage) {
       const events: LogEvent[] = [];
@@ -319,6 +344,7 @@ export class LogStore {
       return { events: events.reverse().map(pickFields), page: 0, pages: Math.max(1, Math.ceil(this.size / PAGE_SIZE)), matched: this.size, ...this.stats() };
     }
     if (!parsedQuery.length && serverId !== undefined && wantsLatestPage) {
+      const exactServer = [...this.serverIndex.keys()].find(key => key.toLowerCase() === serverId.toLowerCase());
       const index = exactServer === undefined ? undefined : this.serverIndex.get(exactServer);
       if (index) {
         const events: LogEvent[] = [];
@@ -346,47 +372,108 @@ export class LogStore {
         return { events: events.reverse().map(pickFields), page: 0, pages: Math.max(1, Math.ceil(index.length / PAGE_SIZE)), matched: index.length, ...this.stats() };
       }
     }
-    const matches: LogEvent[] = [];
-    for (let i = this.size - 1; i >= 0; i--) {
-      const event = this.slots[(this.head + i) % this.maxRows]!.event;
-      if (event.id <= before && (sessionId === undefined || event.sessionId === sessionId) && (from === undefined || (event.timestampMs ?? 0) >= from) && (to === undefined || (event.timestampMs ?? 0) <= to) && (serverId === undefined || event.serverId?.toLowerCase() === serverId.toLowerCase()) && levelMatches(event.level)
-        && matchesQuery(event, parsedQuery)) matches.push(event);
-    }
+    // A `last:5m` window slides with the wall clock, so its match set cannot be
+    // carried between refreshes; every other filter is a pure function of the
+    // retained events and is safe to keep.
+    const relative = parsedQuery.some(group => group.some(token => token.canonical === 'last'));
+    const key = JSON.stringify([query, serverId?.toLowerCase() ?? null, levels ? [...levels].sort() : null,
+      sessionId ?? null, from ?? null, to ?? null, Number.isFinite(before) ? before : null]);
+    const { matches, start } = this.matchingEvents(key, !relative,
+      this.filterFor({ before, sessionId, from, to, serverId, levelMatches, parsedQuery }));
+    const matched = matches.length - start;
     if (sort) {
-      const sorted = sortEvents(matches, sort, sortDirection);
+      const sorted = sortEvents(matches.slice(start), sort, sortDirection);
       const sortedPages = Math.max(1, Math.ceil(sorted.length / PAGE_SIZE));
       page = Math.max(0, Math.min(sortedPages - 1, Number.isInteger(page) ? page : 0));
       return { events: sorted.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE).map(pickFields), page, pages: sortedPages,
         matched: sorted.length, ...this.stats() };
     }
-    const pages = Math.max(1, Math.ceil(matches.length / PAGE_SIZE));
+    const pages = Math.max(1, Math.ceil(matched / PAGE_SIZE));
     page = Math.max(0, Math.min(pages - 1, Number.isInteger(page) ? page : 0));
-    // Each page is chronological; page zero is the newest page.
-    const events = matches.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE).reverse().map(pickFields);
-    return { events, page, pages, matched: matches.length, ...this.stats() };
+    // Each page is chronological; page zero is the newest page. `matches` is
+    // oldest-first, so page N counts back from its end.
+    const end = matched - page * PAGE_SIZE;
+    const events = matches.slice(start + Math.max(0, end - PAGE_SIZE), start + end).map(pickFields);
+    return { events, page, pages, matched, ...this.stats() };
+  }
+
+  // Builds the row predicate once per query rather than re-deriving the
+  // lowercased server id and level lookup for every event in the ring.
+  private filterFor({ before, sessionId, from, to, serverId, levelMatches, parsedQuery }: {
+    before: number; sessionId?: string; from?: number; to?: number; serverId?: string;
+    levelMatches: (level: string) => boolean; parsedQuery: ParsedQuery;
+  }): (event: LogEvent) => boolean {
+    const wantedServer = serverId?.toLowerCase();
+    return event => event.id <= before
+      && (sessionId === undefined || event.sessionId === sessionId)
+      && (from === undefined || (event.timestampMs ?? 0) >= from)
+      && (to === undefined || (event.timestampMs ?? 0) <= to)
+      && (wantedServer === undefined || event.serverId?.toLowerCase() === wantedServer)
+      && levelMatches(event.level) && matchesQuery(event, parsedQuery);
+  }
+
+  // The retained set only ever changes at its two ends: new events are appended
+  // and the oldest are evicted. So when the same filter is re-run — which is
+  // what every refresh tick does while logs stream — only the events that
+  // arrived since the last run need testing, instead of the whole ring.
+  private matchingEvents(key: string, cacheable: boolean, test: (event: LogEvent) => boolean): { matches: LogEvent[]; start: number } {
+    const newestId = this.size ? this.slots[(this.head + this.size - 1) % this.maxRows]!.event.id : -1;
+    const cache = cacheable && this.pageCache?.key === key ? this.pageCache : undefined;
+    if (cache) {
+      const oldestId = this.size ? this.slots[this.head]!.event.id : Infinity;
+      while (cache.start < cache.matches.length && cache.matches[cache.start].id < oldestId) cache.start++;
+      if (cache.start > 1024 && cache.start * 2 > cache.matches.length) {
+        cache.matches = cache.matches.slice(cache.start);
+        cache.start = 0;
+      }
+      let fresh = 0;
+      while (fresh < this.size && this.slots[(this.head + this.size - 1 - fresh) % this.maxRows]!.event.id > cache.lastId) fresh++;
+      for (let i = this.size - fresh; i < this.size; i++) {
+        const event = this.slots[(this.head + i) % this.maxRows]!.event;
+        if (test(event)) cache.matches.push(event);
+      }
+      cache.lastId = newestId;
+      return { matches: cache.matches, start: cache.start };
+    }
+    const matches: LogEvent[] = [];
+    for (let i = 0; i < this.size; i++) {
+      const event = this.slots[(this.head + i) % this.maxRows]!.event;
+      if (test(event)) matches.push(event);
+    }
+    if (cacheable) this.pageCache = { key, matches, start: 0, lastId: newestId };
+    return { matches, start: 0 };
   }
 
   // Return every retained event in chronological order for explicit exports.
   // The normal viewer uses page() so a large store never crosses the webview
   // boundary in one message; exports are user initiated and intentionally
   // operate on the bounded retained set.
-  all({ query = '', serverId, levels, before = Infinity, sort, sortDirection = 'asc', sessionId, from, to }: PageOptions = {}): LogEvent[] {
+  all(options: PageOptions = {}): LogEvent[] {
+    const events = this.scan(options).map(event => ({ ...event, fields: event.fields ? { ...event.fields } : event.fields }));
+    return options.sort ? sortEvents(events, options.sort, options.sortDirection ?? 'asc') : events;
+  }
+
+  // Chronological references to the matching retained events. all() copies these
+  // for export callers that hand events on to redaction and serialization; the
+  // in-process readers below only ever read them, and cloning 100k events (and
+  // their field maps) just to count them was most of what made analysis stall.
+  private scan({ query = '', serverId, levels, before = Infinity, sessionId, from, to }: PageOptions = {}): LogEvent[] {
     if (!Number.isFinite(before)) before = Infinity;
     const levelSet = levels ? new Set(levels) : undefined;
     const parsedQuery: ParsedQuery = parseQuery(query.slice(0, 256));
+    const test = this.filterFor({ before, sessionId, from, to, serverId,
+      levelMatches: (level: string) => !levelSet || levelSet.has(level), parsedQuery });
     const events: LogEvent[] = [];
     for (let i = 0; i < this.size; i++) {
       const event = this.slots[(this.head + i) % this.maxRows]!.event;
-      if (event.id <= before && (sessionId === undefined || event.sessionId === sessionId) && (from === undefined || (event.timestampMs ?? 0) >= from) && (to === undefined || (event.timestampMs ?? 0) <= to) && (serverId === undefined || event.serverId?.toLowerCase() === serverId.toLowerCase())
-        && (!levelSet || levelSet.has(event.level)) && matchesQuery(event, parsedQuery)) {
-        events.push({ ...event, fields: event.fields ? { ...event.fields } : event.fields });
-      }
+      if (test(event)) events.push(event);
     }
-    return sort ? sortEvents(events, sort, sortDirection) : events;
+    return events;
   }
 
   private filtered(options: PageOptions = {}): LogEvent[] {
-    return this.all(options);
+    const events = this.scan(options);
+    return options.sort ? sortEvents(events, options.sort, options.sortDirection ?? 'asc') : events;
   }
 
   /** Field names and the most common values for the current search input. */
@@ -396,11 +483,17 @@ export class LogStore {
     const match = input.match(/(?:^|\s)(?:@?([A-Za-z_][A-Za-z0-9_.]*):)?([^\s]*)$/);
     const fieldPrefix = (match?.[1] ?? match?.[2] ?? '').toLowerCase();
     const valuePrefix = match?.[1] ? (match[2] ?? '').toLowerCase() : '';
-    for (let i = 0; i < this.size; i++) {
-      const event = this.slots[(this.head + i) % this.maxRows]!.event;
-      if (serverId && event.serverId?.toLowerCase() !== serverId.toLowerCase()) continue;
-      for (const key of Object.keys(event.fields ?? {})) fields.add(key);
-      if (match?.[1]) {
+    // Field names are already maintained on ingest, so the common case — typing a
+    // bare word — answers without touching the ring at all.
+    const wantedServer = serverId?.toLowerCase();
+    const known = serverId
+      ? this.serverIndex.get([...this.serverIndex.keys()].find(key => key.toLowerCase() === wantedServer) ?? serverId)?.fields
+      : this.columnCache;
+    for (const key of known ?? []) fields.add(key);
+    if (match?.[1]) {
+      for (let i = 0; i < this.size; i++) {
+        const event = this.slots[(this.head + i) % this.maxRows]!.event;
+        if (wantedServer !== undefined && event.serverId?.toLowerCase() !== wantedServer) continue;
         const value = fieldValue(event, match[1]);
         if (value !== undefined && String(value).toLowerCase().startsWith(valuePrefix)) {
           const text = String(value); values.set(text, (values.get(text) ?? 0) + 1);
