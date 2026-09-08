@@ -265,7 +265,6 @@ window.addEventListener('message', ({ data }) => {
         const reason = server.exitReason ? ` · ${server.exitReason}` : '';
         options[index + 1].textContent = `${task}${type}${state}${activity}${dependency}${reason}`;
         options[index + 1].value = server.id;
-        options[index + 1].className = `server-status-${server.status}`;
         options[index + 1].title = [server.lastSession ? `Session ${server.lastSession}` : undefined,
           server.taskName ? `Task ${server.taskName}${server.taskType ? ` (${server.taskType})` : ''}` : undefined,
           server.dependencyState ? `Dependencies: ${server.dependencies?.join(', ') || 'none'} (${server.dependencyState})` : undefined,
@@ -273,8 +272,6 @@ window.addEventListener('message', ({ data }) => {
       });
       elements.server.replaceChildren(...options);
       elements.server.value = data.servers.some(server => server.id === selectedServer) ? selectedServer : '';
-      const selected = data.servers.find(server => server.id === elements.server.value);
-      elements.server.className = selected ? `server-status-${selected.status}` : '';
       selectedServer = elements.server.value;
     }
   }

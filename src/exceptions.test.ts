@@ -60,3 +60,16 @@ test('ordinary JSON is unaffected and exception previews stay bounded', () => {
   for (let i = 0; i < 30; i++) cause = { message: 'wrapper', cause };
   assert.ok(exception({ error: cause }).length <= 8);
 });
+
+test('an error-level event without an exception key is not treated as an exception', () => {
+  // The pre-test that lets ordinary events skip JSON parsing keys off `"error":`
+  // as a field name, so a level *value* of "error" must not trip it.
+  assert.deepEqual(exception({ level: 'error', message: 'request failed', service: 'errors' }), []);
+  assert.deepEqual(exception({ level: 'error', message: 'no stack here', errorCount: 3 }), []);
+  assert.equal(exception({ level: 'error', error: { name: 'E', stack: 'E: x\n    at f (/a/b.js:1:2)' } }).length, 1,
+    'a real error field still yields a block');
+  assert.equal(exception({ message: 'boom', 'exception.stacktrace': 'at a(A.java:9)' }).length, 1,
+    'dotted Log4j2 exception keys still yield a block');
+  assert.equal(exception({ message: 'Traceback (most recent call last):\n  File "a.py", line 3\nValueError: v' }).length, 1,
+    'a traceback embedded in the message still yields a block');
+});

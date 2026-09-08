@@ -23,6 +23,10 @@ export interface Token {
   canonical?: string;
   value: string;
   regex?: RegExp | null;
+  /** Case-insensitive matcher for a free-text term, compiled once at parse time. */
+  search?: RegExp;
+  /** Whether the value is shaped like a range or comparison, so ordinary terms skip the numeric coercion. */
+  compare?: boolean;
 }
 export type TokenGroup = Token[];
 export type ParsedQuery = TokenGroup[];
@@ -69,7 +73,15 @@ function parseToken(token: string): Token {
     const end = value.lastIndexOf('/');
     try { regex = new RegExp(value.slice(1, end), value.slice(end + 1)); } catch { regex = null; }
   }
-  return { negate, field, canonical, value, regex };
+  // Testing an /i regex against each field beats lower-casing a joined copy of
+  // level + message + raw for every event. A term containing a space could span
+  // the joining spaces, so those keep the original joined comparison.
+  let search: RegExp | undefined;
+  if (field === undefined && regex === undefined && value && !value.includes(' ')) {
+    try { search = new RegExp(value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i'); } catch { search = undefined; }
+  }
+  const compare = /^(>=|<=|>|<)\s*-?\d+(?:\.\d+)?$/.test(value) || /^\[.*\s+to\s+.*\]$/.test(value);
+  return { negate, field, canonical, value, regex, search, compare };
 }
 
 export function matchesQuery(event: LogEvent, input: string | ParsedQuery): boolean {
@@ -93,10 +105,18 @@ export function matchesQuery(event: LogEvent, input: string | ParsedQuery): bool
       else matched = (event.timestamp ?? '').toLowerCase().includes(token.value);
       return token.negate ? !matched : matched;
     }
-    let actualValue: FieldValue = token.field ? getField(event, token.field) : `${event.level} ${event.message} ${event.raw}`;
+    // Free text never reaches the numeric or status branches below, so it skips
+    // straight to the substring test instead of coercing a long joined string.
+    if (token.search) {
+      const found = (event.level !== undefined && token.search.test(event.level))
+        || (event.message !== undefined && token.search.test(event.message))
+        || (event.raw !== undefined && token.search.test(event.raw));
+      return token.negate ? !found : found;
+    }
+    const actualValue: FieldValue = token.field ? getField(event, token.field) : `${event.level} ${event.message} ${event.raw}`;
     const actual = String(actualValue ?? '').toLowerCase();
     let matched: boolean | undefined;
-    const numeric = actual === '' ? NaN : Number(actual);
+    const numeric = token.compare && actual !== '' ? Number(actual) : NaN;
     const isNumeric = Number.isFinite(numeric);
     if (token.regex !== undefined) {
       // Global and sticky expressions carry a cursor between calls.

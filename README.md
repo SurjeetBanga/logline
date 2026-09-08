@@ -2,7 +2,7 @@
 
 **Live tail for JSON logs.** Logline is a VS Code bottom-panel log viewer for long-running server processes. It parses JSON logs, preserves plain-text output, and provides expandable details, searchable fields, level filters, timestamps, and per-server filtering.
 
-![The Logline panel live-tailing a Node server: colour-coded levels, auto-detected columns, and per-event details.](media/screenshot.png)
+![The Logline panel showing an imported log session: colour-coded levels, auto-detected columns for method, path, status, service, and trace ids, and expandable per-event details.](media/screenshot.png)
 
 ## Use
 
@@ -12,7 +12,7 @@ A saved server can also start automatically when the extension activates by sett
 
 **Live** follows the newest events. Turn it off to browse retained history with Older/Newer. The panel renders up to **1,000 rows per page**.
 
-The server selector shows each server's current session state and active-session count. Use **Export** to save the current server, search, and level filters as redacted JSON Lines, JSON, CSV, or **AI context (Markdown)**. The AI context option includes the latest 2,000 matching events in a redacted Markdown file. **Import** loads JSON/JSONL files into an `Imported` server entry for offline searching.
+The server selector shows each server's current session state and active-session count. Use **Export** to save the current server, search, and level filters as redacted JSON Lines, JSON, CSV, or **AI context (Markdown)**. The AI context option includes the latest 2,000 matching events in a redacted Markdown file. **Import** loads JSON, JSONL, CSV, and plain-text log files into an `Imported` server entry for offline searching. A CSV exported by Logline round-trips exactly; any other CSV becomes an event per row, built from its own header names.
 
 The level filter (next to the search box) is a multi-select — check any combination of Trace/Debug/Info/Warn/Error/Fatal, not just "this level and above." Click **Syntax** in the search box for a cheat sheet of the query syntax below.
 

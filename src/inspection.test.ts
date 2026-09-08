@@ -224,3 +224,26 @@ test('deleteSavedSearch removes only the matching entry', () => {
   provider.deleteSavedSearch(a.id);
   assert.deepEqual(provider.savedSearches().map(search => search.query), ['b']);
 });
+
+test('CSV imports round-trip a Logline export and accept foreign files', () => {
+  const { parseCsvRecords, parseCsv } = require('./extension') as typeof import('./extension');
+  // A Logline CSV export carries `raw`, which replays the original line exactly.
+  const exported = 'id,timestamp,level,message,raw,field:service\n'
+    + '7,10:00:00.000,error,Boom,"{""level"":""error"",""message"":""Boom"",""service"":""api""}",api\n';
+  assert.deepEqual(parseCsvRecords(exported), ['{"level":"error","message":"Boom","service":"api"}']);
+
+  // A CSV from anywhere else becomes a record built from its own headers.
+  const foreign = 'level,message,service\nwarn,"Disk ""nearly"" full, 91%",storage\ninfo,Started,storage\n';
+  assert.deepEqual(parseCsvRecords(foreign), [
+    { level: 'warn', message: 'Disk "nearly" full, 91%', service: 'storage' },
+    { level: 'info', message: 'Started', service: 'storage' }
+  ]);
+
+  // Quoted cells may span newlines, and blank rows are skipped.
+  assert.deepEqual(parseCsv('a,b\n"line one\nline two",second\n\n'),
+    [['a', 'b'], ['line one\nline two', 'second'], ['']]);
+  assert.deepEqual(parseCsvRecords('level,message\n\ninfo,ok\n'), [{ level: 'info', message: 'ok' }]);
+  assert.deepEqual(parseCsvRecords(''), []);
+  assert.deepEqual(parseCsvRecords('id,timestampMs,message\n5,1700000000000,hi\n'), [{ message: 'hi' }],
+    'ids and epoch columns are re-derived on ingest rather than carried over');
+});

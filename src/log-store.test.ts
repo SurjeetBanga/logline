@@ -368,3 +368,66 @@ test('a resize that raises the limits keeps every retained event', () => {
   assert.equal(store.find(1)!.message, 'line 1');
   assert.equal(store.find(10)!.message, 'line 10');
 });
+
+test('a repeated query keeps counting correctly as events arrive and are evicted', () => {
+  // The incremental match cache only rescans the tail, so the retained set has
+  // to keep agreeing with a cold scan of the same filter after every change.
+  const store = new LogStore(50, 1024 * 1024);
+  const cold = (query: string) => {
+    const fresh = new LogStore(50, 1024 * 1024);
+    for (let i = 0; i < store.size; i++) fresh.add(store.slots[(store.head + i) % store.maxRows]!.event);
+    return fresh.page({ query });
+  };
+  for (let id = 1; id <= 200; id++) {
+    store.add(event(id, id % 3 === 0 ? 'error' : 'info', id % 5 === 0 ? `boom ${id}` : `ok ${id}`));
+    const warm = store.page({ query: 'boom' });
+    const reference = cold('boom');
+    assert.equal(warm.matched, reference.matched, `match count after event ${id}`);
+    assert.deepEqual(warm.events.map(e => e.id), reference.events.map(e => e.id), `page rows after event ${id}`);
+  }
+  assert.equal(store.page({ query: 'boom' }).matched, 10, 'only the retained window is counted');
+});
+
+test('switching filters and paging does not serve another query\'s cached matches', () => {
+  const store = new LogStore(5000, 8 * 1024 * 1024);
+  for (let id = 1; id <= 2500; id++) store.add(event(id, id % 2 ? 'info' : 'error', `line ${id}`));
+  assert.equal(store.page({ query: 'line' }).matched, 2500);
+  assert.equal(store.page({ query: 'line', levels: ['error'] }).matched, 1250);
+  assert.equal(store.page({ query: 'nothing' }).matched, 0);
+  assert.equal(store.page({ query: 'line' }).matched, 2500, 'the earlier filter is recomputed, not reused');
+  const first = store.page({ query: 'line', page: 0 });
+  const second = store.page({ query: 'line', page: 1 });
+  assert.equal(first.pages, 3);
+  assert.equal(first.events.at(-1)!.id, 2500, 'page zero ends at the newest event');
+  assert.equal(second.events.at(-1)!.id, 1500, 'page one is the window just before it');
+  assert.equal(store.page({ query: 'line', page: 1 }).events.at(-1)!.id, 1500, 'a cached repeat pages identically');
+});
+
+test('a relative time query is re-evaluated rather than served from the cache', () => {
+  const store = new LogStore(100, 1024 * 1024);
+  const old = event(1, 'info', 'stale');
+  old.timestampMs = Date.now() - 3600_000;
+  store.add(old);
+  const recent = event(2, 'info', 'fresh');
+  recent.timestampMs = Date.now();
+  store.add(recent);
+  assert.deepEqual(store.page({ query: 'last:5m' }).events.map(e => e.id), [2]);
+  const later = event(3, 'info', 'newer');
+  later.timestampMs = Date.now();
+  store.add(later);
+  assert.deepEqual(store.page({ query: 'last:5m' }).events.map(e => e.id), [2, 3]);
+});
+
+test('field suggestions stay scoped to the selected server', () => {
+  const store = new LogStore(100, 1024 * 1024);
+  const api = parseLogLine(JSON.stringify({ message: 'a', route: '/x' }), 'stdout', 1, new Date());
+  api.serverId = 'api';
+  const worker = parseLogLine(JSON.stringify({ message: 'b', queue: 'jobs' }), 'stdout', 2, new Date());
+  worker.serverId = 'worker';
+  store.add(api);
+  store.add(worker);
+  assert.equal(store.fieldSuggestions('rou', 'api').fields.includes('route'), true);
+  assert.equal(store.fieldSuggestions('que', 'api').fields.includes('queue'), false, 'another server\'s fields stay out');
+  assert.equal(store.fieldSuggestions('que', 'worker').fields.includes('queue'), true);
+  assert.equal(store.fieldSuggestions('qu').fields.includes('queue'), true, 'with no server every field is offered');
+});

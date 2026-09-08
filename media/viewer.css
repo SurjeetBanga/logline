@@ -46,8 +46,6 @@ header { padding: 10px 14px 6px; flex: none; }
 .search-toolbar > .popover-container:not(.search-group) { flex: none; }
 input, select, button { font: inherit; border: 1px solid var(--vscode-input-border, #555); border-radius: 3px; }
 input, select { height: 30px; padding: 3px 10px; color: var(--vscode-input-foreground, #ddd); background: var(--vscode-input-background, #333); }
-.server-status-running, .server-status-stopping { color: var(--vscode-testing-iconPassed, #89d185); }
-.server-status-exited, .server-status-failed { color: var(--vscode-errorForeground, #f48771); }
 .popover-container { position: relative; }
 .search-group { display: flex; align-items: center; flex: 1 1 280px; min-width: 180px; }
 .search-group input { width: 100%; min-width: 0; padding-right: 62px; }
