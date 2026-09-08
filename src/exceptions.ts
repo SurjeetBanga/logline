@@ -28,6 +28,11 @@ export function parseSourceLocation(text: string): SourceLocation | undefined {
   return { file, line, column };
 }
 
+// JSON key tokens that can lead extractExceptions to emit a block. Anchored on
+// the closing quote and colon so a value like "level":"error" is not mistaken
+// for an `error` key.
+const EXCEPTION_KEY = /"(?:err|error|exception|thrown|cause|rootCause|stack|stack_trace|stackTrace|stacktrace|extendedStackTrace|exception\.[A-Za-z]+)"\s*:/;
+
 export function extractExceptions(event: LogEvent): ExceptionBlock[] {
   if (!event.raw) return [];
   const blocks: ExceptionBlock[] = [];
@@ -44,6 +49,11 @@ export function extractExceptions(event: LogEvent): ExceptionBlock[] {
     if (/\b(?:Error|Exception|Traceback|Caused by:)\b/.test(event.raw) || parseSourceLocation(event.raw)) add('Exception', event.raw);
     return blocks;
   }
+  // A structured event can only yield a block through an exception-ish key, an
+  // embedded multi-line traceback, or a bare string payload. Checking the raw
+  // text for those first lets ordinary events skip the JSON.parse entirely,
+  // which is most of the cost of grouping errors across a large retained set.
+  if (!EXCEPTION_KEY.test(event.raw) && !event.raw.includes('\\n') && !event.raw.startsWith('"')) return [];
   let value: unknown;
   try { value = JSON.parse(event.raw); } catch { return []; }
   const visit = (value: unknown, label: string, depth: number) => {
