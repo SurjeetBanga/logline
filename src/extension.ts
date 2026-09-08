@@ -99,6 +99,16 @@ function exportQuery(request: ExportRequest = {}): string {
   return [server, request.query?.trim() ?? ''].filter(Boolean).join(' ');
 }
 
+function pickColumns(fields: LogEvent['fields'], columns: string[]): LogEvent['fields'] {
+  if (!fields) return fields;
+  const picked: Record<string, string | number | boolean> = {};
+  for (const column of columns) {
+    const value = fields[column];
+    if (value !== undefined) picked[column] = value;
+  }
+  return picked;
+}
+
 function csvCell(value: unknown): string {
   const text = value === undefined || value === null ? '' : typeof value === 'string' ? value : JSON.stringify(value);
   return /[",\n\r]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
@@ -122,9 +132,64 @@ function serializeExport(events: LogEvent[], format: ExportFormat): string {
   return rows.join('\n') + '\n';
 }
 
-function parseImportRecords(text: string): unknown[] {
+// RFC 4180: cells may be quoted, a doubled quote is a literal one, and a quoted
+// cell may span commas and newlines. Only a quote in first position opens a
+// cell, which is what serializeExport emits.
+export function parseCsv(text: string): string[][] {
+  const rows: string[][] = [];
+  let row: string[] = [];
+  let cell = '';
+  let quoted = false;
+  for (let i = 0; i < text.length; i++) {
+    const char = text[i];
+    if (quoted) {
+      if (char !== '"') { cell += char; continue; }
+      if (text[i + 1] === '"') { cell += '"'; i++; continue; }
+      quoted = false;
+      continue;
+    }
+    if (char === '"' && cell === '') { quoted = true; continue; }
+    if (char === ',') { row.push(cell); cell = ''; continue; }
+    if (char === '\n' || char === '\r') {
+      if (char === '\r' && text[i + 1] === '\n') i++;
+      row.push(cell); rows.push(row); row = []; cell = '';
+      continue;
+    }
+    cell += char;
+  }
+  if (cell !== '' || row.length) { row.push(cell); rows.push(row); }
+  return rows;
+}
+
+export function parseCsvRecords(text: string): unknown[] {
+  const rows = parseCsv(text);
+  const header = rows.shift();
+  if (!header) return [];
+  const records: unknown[] = [];
+  for (const row of rows) {
+    if (!row.some(cell => cell !== '')) continue;
+    const cells = new Map(header.map((name, index) => [name.trim(), row[index] ?? '']));
+    // A Logline CSV export keeps the original line in `raw`, so replaying that
+    // reproduces the event exactly - timestamp, level and JSON payload included -
+    // instead of rebuilding an approximation from the flattened columns.
+    const raw = cells.get('raw');
+    if (raw) { records.push(raw); continue; }
+    const record: Record<string, unknown> = {};
+    for (const [name, value] of cells) {
+      // `id` and `timestampMs` are re-derived on ingest; carrying them over
+      // would collide with live capture ids and add noise columns.
+      if (!name || value === '' || name === 'id' || name === 'timestampMs') continue;
+      record[name.startsWith('field:') ? name.slice('field:'.length) : name] = value;
+    }
+    if (Object.keys(record).length) records.push(record);
+  }
+  return records;
+}
+
+function parseImportRecords(text: string, format?: string): unknown[] {
   const trimmed = text.trim();
   if (!trimmed) return [];
+  if (format === 'csv') return parseCsvRecords(text);
   try {
     const parsed: unknown = JSON.parse(trimmed);
     return Array.isArray(parsed) ? parsed : [parsed];
@@ -840,7 +905,8 @@ export class LogsProvider implements vscode.WebviewViewProvider, vscode.Disposab
   async importLogs(): Promise<void> {
     const uris = await vscode.window.showOpenDialog({
       canSelectMany: true, canSelectFiles: true, canSelectFolders: false,
-      filters: { Logs: ['jsonl', 'ndjson', 'json', 'log', 'txt'] }, openLabel: 'Import logs'
+      filters: { Logs: ['jsonl', 'ndjson', 'json', 'log', 'txt', 'csv'], CSV: ['csv'], 'Plain text': ['txt', 'log'] },
+      openLabel: 'Import logs'
     });
     if (!uris?.length) return;
     let imported = 0;
@@ -849,7 +915,7 @@ export class LogsProvider implements vscode.WebviewViewProvider, vscode.Disposab
       try { text = Buffer.from(await vscode.workspace.fs.readFile(uri)).toString('utf8'); } catch { continue; }
       // Keep surrounding context from crossing between independently imported files.
       const sessionId = randomBytes(8).toString('hex');
-      for (const record of parseImportRecords(text)) {
+      for (const record of parseImportRecords(text, path.extname(uri.path).slice(1).toLowerCase())) {
         const line = typeof record === 'string' ? record : JSON.stringify(record);
         const event = parseLogLine(line, 'import', ++this.sequence, new Date());
         event.serverId = 'imported';
@@ -974,13 +1040,18 @@ export class LogsProvider implements vscode.WebviewViewProvider, vscode.Disposab
         sort: typeof msg.sort === 'string' && msg.sort ? msg.sort : undefined,
         sortDirection: msg.sortDirection === 'desc' ? 'desc' as const : 'asc' as const
       };
-      const columns = this.config.get<string[]>('columns', []);
+      const configured = this.config.get<string[]>('columns', []);
+      const columns = configured.length ? configured : this.store.columns();
       const pageResult = msg.statsOnly ? undefined : this.store.page(options);
       const result = pageResult ?? this.store.stats();
-      const events = pageResult?.events;
+      // A row only ever reads the displayed field columns, but a structured
+      // payload can carry dozens of keys per event. Trimming here keeps the
+      // refresh payload proportional to what is on screen rather than to how
+      // wide the log records happen to be.
+      const events = pageResult?.events.map(event => ({ ...event, fields: pickColumns(event.fields, columns) }));
       view.webview.postMessage({ type: 'snapshot',
         ...result, ...(events ? { events } : {}),
-        columns: columns.length ? columns : this.store.columns(),
+        columns,
         fields: this.store.fieldNames(),
         status: this.status, command: this.command, running: this.sessions.size > 0 || (this.taskExecutions?.size ?? 0) > 0,
         servers: this.serverSummaries(), sessions: this.sessionSummaries(),
