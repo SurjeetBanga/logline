@@ -12,6 +12,8 @@ A saved server can also start automatically when the extension activates by sett
 
 **Live** follows the newest events. Turn it off to browse retained history with Older/Newer. The panel renders up to **1,000 rows per page**.
 
+The server selector shows each server's current session state and active-session count. Use **Export** to save the current server, search, and level filters as redacted JSON Lines, JSON, CSV, or **AI context (Markdown)**. The AI context option includes the latest 2,000 matching events in a redacted Markdown file. **Import** loads JSON/JSONL files into an `Imported` server entry for offline searching.
+
 The level filter (next to the search box) is a multi-select — check any combination of Trace/Debug/Info/Warn/Error/Fatal, not just "this level and above." Click the ⓘ next to the search box for a cheat sheet of the query syntax below.
 
 Search supports Datadog-style queries:
@@ -31,6 +33,12 @@ Field names match as typed and fall back to common aliases, so `statusCode:200` 
 Log4j2 JsonLayout output is supported directly: the `timeMillis` field is read as the event timestamp, and MDC values nested under `contextMap` are flattened so they're searchable like any other field.
 
 The timezone setting supports Local and UTC.
+
+### Exceptions and surrounding context
+
+Expand an event to read structured exceptions as stack frames with real line breaks and nested causes. Common `err`, `error`, `exception`, `thrown`, and stack fields are supported, including Log4j2 throwable frames and OpenTelemetry exception fields. Click a stack frame to open its source location in the workspace; ambiguous filenames open a file picker. **Original event** keeps the JSON available, and **Copy event** copies the original formatted event. Plain-text exception lines can link to source, but separate physical lines are not automatically grouped.
+
+Choose **Show context** on an expanded event to see up to 25 retained events before and after it, in capture order, from the same server session. Context includes all levels and both captured streams, regardless of the current search. Select any surrounding event to inspect its details. **Back to results** (or Escape) returns to the existing search and scroll position. Context is a fixed snapshot; ingestion continues, and discarded events cannot be recovered. Each newly imported file has its own context boundary.
 
 ## Tasks
 
@@ -68,6 +76,9 @@ Servers can also be started as a VS Code task, with output streamed into the sam
 | `logline.refreshIntervalMs` | `500` | Minimum time between Logs panel updates. The panel refreshes as soon as new data arrives rather than on a fixed poll, so this only caps how often that happens during a heavy burst of log lines. |
 | `logline.persistLogs` | `false` | Persist captured logs to `.logline/latest.log` in the first workspace folder. |
 | `logline.maxDiskMb` | `1000` | Size at which `latest.log` rolls over to `latest.log.1`. Only the current and one previous file are kept. |
+| `logline.redactExports` | `true` | Redact common credentials and secret-like fields in exports. |
+| `logline.redactionFields` | `[]` | Additional field names to redact in exports. |
+| `logline.redactionReplacement` | `[REDACTED]` | Replacement text used for redacted values. |
 
 ## Bounded retention
 

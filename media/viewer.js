@@ -1,7 +1,8 @@
 const vscode = acquireVsCodeApi();
 const elements = Object.fromEntries(
   ['logs', 'empty', 'search', 'searchHelp', 'searchHelpPanel', 'levelButton', 'levelMenu', 'server', 'follow',
-    'config', 'manage', 'clear', 'stop', 'run', 'status', 'command', 'older', 'newer', 'page', 'mode', 'counts']
+    'config', 'manage', 'export', 'import', 'clear', 'stop', 'run', 'status', 'sessions', 'command',
+    'older', 'newer', 'page', 'mode', 'counts', 'contextDialog', 'contextClose', 'contextStatus', 'contextLogs', 'contextDetails']
     .map(id => [id, document.getElementById(id)])
 );
 const scrollViewport = document.querySelector('.table-scroll');
@@ -20,6 +21,10 @@ let lastRows;
 let forcedRequest = false;
 let selected;
 let selectedDetailText;
+let selectedExceptions = [];
+let contextAnchor;
+let contextSelected;
+let contextScrollTop = 0;
 let selectedServer = saved.server ?? '';
 let serverSignature = '';
 let searchDebounce;
@@ -51,7 +56,14 @@ function buildLevelMenu() {
     const button = document.createElement('button');
     button.type = 'button';
     button.textContent = label;
-    button.addEventListener('click', () => setAllLevels(value));
+    button.addEventListener('click', event => {
+      // buildLevelMenu() below replaces this button's DOM node, detaching it
+      // before the document-level click listener runs in the bubble phase —
+      // without stopping propagation here, container.contains(event.target)
+      // would then see a detached node and incorrectly close the popover.
+      event.stopPropagation();
+      setAllLevels(value);
+    });
     actions.append(button);
   }
   const labels = LEVELS.map(level => {
@@ -112,7 +124,7 @@ function request(force = false) {
   if (pending) { refreshRequested ||= force; return; }
   pending = true;
   forcedRequest = force;
-  vscode.postMessage({ type: 'snapshot', query: `${selectedServer ? `serverId:${selectedServer} ` : ''}${elements.search.value}`,
+  vscode.postMessage({ type: 'snapshot', query: elements.search.value, serverId: selectedServer || undefined,
     levels: currentLevels(), page, before, statsOnly: paused && !force });
 }
 
@@ -122,9 +134,38 @@ window.addEventListener('message', ({ data }) => {
   // interval, so an idle server costs nothing here.
   if (data.type === 'update') { request(); return; }
   if (data.type === 'serversChanged') { serverSignature = ''; request(true); return; }
+  if (data.type === 'context') {
+    if (!elements.contextDialog.open || data.id !== contextAnchor) return;
+    elements.contextStatus.textContent = data.missing
+      ? 'This event has been discarded from retained history. Close this view to return to your results.'
+      : `${data.server || 'Source'} · Same session · All levels and captured streams · Up to 25 retained events before and after · Snapshot in capture order`;
+    elements.contextLogs.replaceChildren(...data.events.map(event => {
+      const row = document.createElement('tr');
+      row.dataset.id = event.id;
+      row.className = event.id === contextAnchor ? 'context-anchor' : '';
+      const message = cell('');
+      const button = document.createElement('button');
+      button.className = 'context-event';
+      button.dataset.id = event.id;
+      button.textContent = `${event.id === contextAnchor ? 'Selected: ' : ''}${event.message ?? ''}${event.truncated ? ' [truncated]' : ''}`;
+      message.append(button);
+      row.append(cell(formatTimestamp(event), 'time'), cell(event.level, `level ${event.level}`), message, cell(event.stream, 'source'));
+      return row;
+    }));
+    elements.contextLogs.querySelector('.context-anchor')?.scrollIntoView({ block: 'center' });
+    if (!data.missing) selectContextEvent(contextAnchor);
+    return;
+  }
   if (data.type === 'details') {
+    if (data.target === 'context') {
+      if (elements.contextDialog.open && data.id === contextSelected) {
+        elements.contextDetails.replaceChildren(buildEventDetails(data.id, data.text, data.exceptions ?? []));
+      }
+      return;
+    }
     if (data.id === selected) {
       selectedDetailText = data.text;
+      selectedExceptions = data.exceptions ?? [];
       renderWindow();
       elements.logs.querySelector('.detail-row')?.scrollIntoView({ block: 'nearest' });
     }
@@ -138,6 +179,7 @@ window.addEventListener('message', ({ data }) => {
     lastRows = undefined;
     selected = undefined;
     selectedDetailText = undefined;
+    selectedExceptions = [];
     virtualEvents = [];
     renderWindow();
     refreshRequested = true;
@@ -150,16 +192,24 @@ window.addEventListener('message', ({ data }) => {
   elements.command.title = data.command;
   elements.stop.disabled = !data.running;
   elements.stop.textContent = selectedServer ? 'Stop server' : 'Stop all';
+  const activeSessions = Array.isArray(data.sessions) ? data.sessions.filter(session =>
+    ['running', 'stopping'].includes(session.status)) : [];
+  elements.sessions.textContent = activeSessions.length
+    ? `${activeSessions.length} active session${activeSessions.length === 1 ? '' : 's'}` : 'No active sessions';
   if (data.servers) {
-    const signature = JSON.stringify(data.servers.map(server => [server.id, server.label]));
+    const signature = JSON.stringify(data.servers.map(server => [server.id, server.label, server.status, server.activeSessions]));
     if (signature !== serverSignature) {
       serverSignature = signature;
+      const activeCount = data.servers.reduce((sum, server) => sum + (server.activeSessions || 0), 0);
       const options = [document.createElement('option'), ...data.servers.map(() => document.createElement('option'))];
-      options[0].textContent = 'All servers';
+      options[0].textContent = activeCount ? `All servers · ${activeCount} active` : 'All servers';
       options[0].value = '';
       data.servers.forEach((server, index) => {
-        options[index + 1].textContent = server.label;
+        const state = server.status === 'idle' ? '' : ` · ${server.status}`;
+        const activity = server.activeSessions > 1 ? ` (${server.activeSessions} active)` : '';
+        options[index + 1].textContent = `${server.label}${state}${activity}`;
         options[index + 1].value = server.id;
+        options[index + 1].title = server.lastSession ? `Session ${server.lastSession}` : server.status;
       });
       elements.server.replaceChildren(...options);
       elements.server.value = data.servers.some(server => server.id === selectedServer) ? selectedServer : '';
@@ -221,15 +271,105 @@ function buildDetailRow(event) {
   details.className = 'detail-row';
   const container = cell('', 'detail-cell');
   container.colSpan = totalColumnCount();
+  const actions = document.createElement('div');
+  actions.className = 'detail-actions';
+  const context = document.createElement('button');
+  context.textContent = 'Show context';
+  context.className = 'context-button';
+  context.dataset.id = event.id;
+  actions.append(context);
+  container.append(actions, buildEventDetails(event.id, selectedDetailText, selectedExceptions));
+  details.append(container);
+  return details;
+}
+
+function buildEventDetails(id, text, exceptions) {
+  const container = document.createElement('div');
+  container.className = 'event-details';
   const copy = document.createElement('button');
   copy.className = 'copy-button';
   copy.textContent = 'Copy event';
-  copy.dataset.id = event.id;
+  copy.dataset.id = id;
+  container.append(copy);
+  exceptions.forEach((exception, blockIndex) => {
+    const section = document.createElement('section');
+    section.className = 'exception-block';
+    const title = document.createElement('strong');
+    title.textContent = exception.title;
+    const stack = document.createElement('div');
+    stack.className = 'exception-stack';
+    exception.lines.forEach((line, lineIndex) => {
+      const element = document.createElement(line.source ? 'button' : 'div');
+      element.textContent = line.text || ' ';
+      if (line.source) {
+        element.className = 'source-link';
+        element.dataset.id = id;
+        element.dataset.block = blockIndex;
+        element.dataset.line = lineIndex;
+        element.title = `Open ${line.source.file}:${line.source.line}`;
+      }
+      stack.append(element);
+    });
+    section.append(title, stack);
+    container.append(section);
+  });
   const pre = document.createElement('pre');
-  pre.textContent = selectedDetailText ?? 'Loading…';
-  container.append(copy, pre);
-  details.append(container);
-  return details;
+  pre.textContent = text ?? 'Loading…';
+  if (exceptions.length) {
+    const raw = document.createElement('details');
+    const summary = document.createElement('summary');
+    summary.textContent = 'Original event';
+    raw.append(summary, pre);
+    container.append(raw);
+  } else container.append(pre);
+  return container;
+}
+
+function showContext(id) {
+  contextAnchor = id;
+  contextSelected = undefined;
+  contextScrollTop = scrollViewport.scrollTop;
+  elements.contextStatus.textContent = 'Loading…';
+  elements.contextLogs.replaceChildren();
+  elements.contextDetails.replaceChildren();
+  elements.contextDialog.showModal();
+  vscode.postMessage({ type: 'context', id });
+}
+
+function selectContextEvent(id) {
+  contextSelected = id;
+  elements.contextDetails.textContent = 'Loading…';
+  for (const button of elements.contextLogs.querySelectorAll('.context-event')) {
+    button.setAttribute('aria-pressed', String(Number(button.dataset.id) === id));
+  }
+  vscode.postMessage({ type: 'details', id, target: 'context' });
+}
+
+elements.contextClose.addEventListener('click', () => elements.contextDialog.close());
+elements.contextDialog.addEventListener('close', () => {
+  contextAnchor = undefined;
+  contextSelected = undefined;
+  elements.contextLogs.replaceChildren();
+  elements.contextDetails.replaceChildren();
+  scrollViewport.scrollTop = contextScrollTop;
+});
+elements.contextLogs.addEventListener('click', event => {
+  const button = event.target.closest('.context-event');
+  if (button) selectContextEvent(Number(button.dataset.id));
+});
+elements.contextDetails.addEventListener('click', handleDetailAction);
+
+function handleDetailAction(event) {
+  const source = event.target.closest('.source-link');
+  if (source) {
+    vscode.postMessage({ type: 'openSource', id: Number(source.dataset.id), block: Number(source.dataset.block), line: Number(source.dataset.line) });
+    return true;
+  }
+  const copy = event.target.closest('.copy-button');
+  if (copy) { vscode.postMessage({ type: 'copy', id: Number(copy.dataset.id) }); return true; }
+  const context = event.target.closest('.context-button');
+  if (context) { showContext(Number(context.dataset.id)); return true; }
+  return false;
 }
 
 // Only the rows scrolled into view are ever built, bracketed by two
@@ -241,6 +381,7 @@ let rowHeight = 30;
 let rowHeightMeasured = false;
 let topSpacer;
 let bottomSpacer;
+let expandedHeight = 0;
 
 function ensureSpacers() {
   if (topSpacer) return;
@@ -269,16 +410,26 @@ function renderWindow() {
   ensureSpacers();
   ensureRowHeight();
   const total = virtualEvents.length;
+  const selectedIndex = virtualEvents.findIndex(event => event.id === selected);
+  if (selectedIndex < 0) expandedHeight = 0;
+  else {
+    const detail = elements.logs.querySelector('.detail-row');
+    if (detail) expandedHeight = detail.getBoundingClientRect().height;
+  }
   const overscan = 8;
   const visibleCount = Math.max(1, Math.ceil(scrollViewport.clientHeight / rowHeight)) + overscan * 2;
-  let start = Math.floor(scrollViewport.scrollTop / rowHeight) - overscan;
+  const detailTop = (selectedIndex + 1) * rowHeight;
+  const offset = selectedIndex >= 0 && scrollViewport.scrollTop > detailTop
+    ? scrollViewport.scrollTop - Math.min(expandedHeight, scrollViewport.scrollTop - detailTop)
+    : scrollViewport.scrollTop;
+  let start = Math.floor(offset / rowHeight) - overscan;
   start = Math.max(0, Math.min(start, Math.max(0, total - visibleCount)));
   const end = Math.min(total, start + visibleCount);
   const totalCols = totalColumnCount();
   topSpacer.firstChild.colSpan = totalCols;
-  topSpacer.firstChild.style.height = `${start * rowHeight}px`;
+  topSpacer.firstChild.style.height = `${start * rowHeight + (selectedIndex >= 0 && selectedIndex < start ? expandedHeight : 0)}px`;
   bottomSpacer.firstChild.colSpan = totalCols;
-  bottomSpacer.firstChild.style.height = `${(total - end) * rowHeight}px`;
+  bottomSpacer.firstChild.style.height = `${(total - end) * rowHeight + (selectedIndex >= end ? expandedHeight : 0)}px`;
   const fragment = document.createDocumentFragment();
   for (let i = start; i < end; i++) {
     const event = virtualEvents[i];
@@ -347,6 +498,8 @@ function updateColumns(columns) {
 }
 
 function toggleExpand(id) {
+  expandedHeight = 0;
+  selectedExceptions = [];
   if (selected === id) {
     selected = undefined;
     selectedDetailText = undefined;
@@ -400,8 +553,7 @@ function filterChanged() {
 }
 
 elements.logs.addEventListener('click', event => {
-  const copyButton = event.target.closest('.copy-button');
-  if (copyButton) { vscode.postMessage({ type: 'copy', id: Number(copyButton.dataset.id) }); return; }
+  if (handleDetailAction(event)) return;
   const button = event.target.closest('.message-button');
   if (!button) return;
   toggleExpand(Number(button.closest('tr').dataset.id));
@@ -455,6 +607,11 @@ elements.clear.addEventListener('click', () => {
 elements.stop.addEventListener('click', () => vscode.postMessage({ type: 'stop', serverId: selectedServer || undefined }));
 elements.config.addEventListener('click', () => vscode.postMessage({ type: 'config' }));
 elements.manage.addEventListener('click', () => vscode.postMessage({ type: 'manageServers' }));
+function exportRequest(type) {
+  vscode.postMessage({ type, query: elements.search.value, levels: currentLevels(), serverId: selectedServer || undefined });
+}
+elements.export.addEventListener('click', () => exportRequest('export'));
+elements.import.addEventListener('click', () => vscode.postMessage({ type: 'import' }));
 elements.run.addEventListener('click', () => vscode.postMessage({ type: 'run', serverId: elements.server.value || undefined }));
 document.addEventListener('visibilitychange', () => { if (!document.hidden) request(); });
 // A push should arrive whenever data actually changes; this is only a

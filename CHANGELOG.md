@@ -2,6 +2,24 @@
 
 All notable changes to Logline are documented in this file.
 
+## 1.2.0 — 2026-09-07
+
+**Debugging**
+
+- Show structured exception stacks with readable line breaks, nested causes, and workspace source links, while keeping the original event available.
+- Add a surrounding-context view with up to 25 events before and after an event across levels and captured streams in the same server session, preserving the search view.
+- Keep context from crossing imported-file boundaries and account for expanded details when virtualizing rows.
+- Parse array-shaped stack trace fields (used by some structured loggers), not just newline-joined strings.
+
+**Sessions and sharing**
+
+- Track session lifecycle and active counts per server in the Logs selector.
+- Export the current server, search, and level filters as redacted JSON Lines, JSON, or CSV.
+- Combine standard and AI exports under one Export button with a format picker.
+- Import JSON/JSONL logs for offline searching and create bounded redacted Markdown context for AI tools.
+- Add configurable export redaction fields and replacement text.
+- Fix CSV export silently losing a log field's value when its name collided with a reserved column (e.g. a custom `sessionId` field); field columns are now unambiguously prefixed.
+
 ## 1.1.0 — 2026-09-06
 
 **Performance**
