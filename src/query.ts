@@ -6,16 +6,23 @@ import type { LogEvent } from './types';
 // `statusCode`. Rewriting the name up front instead would break the common case
 // where the user types what the column header shows.
 const FIELD_GROUPS: string[][] = [
-  ['level', 'severity'],
-  ['message', 'msg'],
-  ['status', 'statusCode', 'status_code'],
-  ['service', 'service_name', 'serviceName'],
-  ['requestId', 'request_id'],
-  ['traceId', 'trace_id'],
-  ['spanId', 'span_id'],
+  ['level', 'severity', 'log.level', 'severityText', 'SeverityText'],
+  ['message', 'msg', 'body', 'Body'],
+  ['status', 'statusCode', 'status_code', 'res.statusCode', 'http.response.status_code', 'attributes.http.response.status_code'],
+  ['service', 'service_name', 'serviceName', 'service.name', 'resource.service.name', 'resource.attributes.service.name'],
+  ['logger', 'logger_name', 'log.logger'],
+  ['method', 'req.method', 'http.request.method', 'attributes.http.request.method'],
+  ['path', 'req.url', 'url.path', 'url', 'url.full'],
+  ['host', 'hostname', 'host.name'],
+  ['environment', 'service.environment', 'deployment.environment.name'],
+  ['requestId', 'request_id', 'req.id', 'http.request.id'],
+  ['traceId', 'trace_id', 'trace.id', 'TraceId'],
+  ['spanId', 'span_id', 'span.id', 'SpanId'],
   ['parentSpanId', 'parent_span_id', 'parentId'],
-  ['durationMs', 'duration', 'duration_ms']
+  ['durationMs', 'duration', 'duration_ms', 'responseTime']
 ];
+
+const FIELD_ALIASES = new Map(FIELD_GROUPS.flatMap(names => names.map(name => [name.toLowerCase(), names] as const)));
 
 export interface Token {
   negate: boolean;
@@ -34,7 +41,7 @@ type FieldValue = string | number | boolean | undefined;
 
 function groupFor(field: string): string[] | undefined {
   const lower = String(field).toLowerCase();
-  return FIELD_GROUPS.find(names => names.some(name => name.toLowerCase() === lower));
+  return FIELD_ALIASES.get(lower);
 }
 
 export function canonicalField(field: string): string {

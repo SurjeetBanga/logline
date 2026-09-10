@@ -10,11 +10,13 @@ Run **Logline: Run Command**, or open **Manage servers** in the Logs panel to ad
 
 A saved server can also start automatically when the extension activates by setting `autoStart: true` on it (also requires a trusted workspace). Set `jsonOnly: true` on a server whose command interleaves build-tool output with its own JSON logs (for example `gradle bootRun`) to discard everything that isn't valid JSON.
 
-**Live** follows the newest events. Turn it off to browse retained history with Older/Newer. The panel renders up to **1,000 rows per page**.
+**Live** follows the newest events automatically. Turn it off to browse retained history with Older/Newer. Sorting switches to Browse; returning to Live (or Resume after inspecting an event) clears the sort and expanded event and jumps to the newest rows in capture order. The panel renders up to **1,000 rows per page**.
 
 The server selector shows each server's current session state and active-session count. Use **Export** to save the current server, search, and level filters as redacted JSON Lines, JSON, CSV, or **AI context (Markdown)**. The AI context option includes the latest 2,000 matching events in a redacted Markdown file. **Import** loads JSON, JSONL, CSV, and plain-text log files into an `Imported` server entry for offline searching. A CSV exported by Logline round-trips exactly; any other CSV becomes an event per row, built from its own header names.
 
 The level filter (next to the search box) is a multi-select — check any combination of Trace/Debug/Info/Warn/Error/Fatal, not just "this level and above." Click **Syntax** in the search box for a cheat sheet of the query syntax below.
+
+Local imports stream records in batches so capture and panel interactions can continue. Use `.json` for JSON documents (including arrays and multiline objects), `.jsonl`/`.ndjson` for one JSON event per line, and `.log`/`.txt` for mixed line-based output. Imported records share the `maxLineLength` limit with live capture; oversized records are marked truncated and the next record is still imported. CSV records support quoted multiline cells. Non-file VS Code filesystem providers require a whole-file read, followed by incremental processing.
 
 Search supports Datadog-style queries:
 
@@ -30,13 +32,17 @@ A term only becomes a field filter when a bare identifier precedes the colon, so
 
 Field names match as typed and fall back to common aliases, so `statusCode:200` and `status:200` both work whether the log calls the field `status` or `statusCode`. The same holds for `level`/`severity`, `message`/`msg`, `service`/`service_name`, `requestId`/`request_id`, `traceId`/`trace_id`, and `durationMs`/`duration`.
 
+Automatic columns use fields from the selected server, recognize common aliases, and fall back to custom JSON fields instead of showing no payload columns. **Columns** offers up to 200 retained payload fields, including nested dotted paths, so you can add fields beyond the six automatic choices. Added columns are saved with the webview state. Explicit `logline.columns` settings also resolve common aliases.
+
+Format handling covers [ECS](https://www.elastic.co/docs/reference/ecs/logging/nodejs/winston) dotted or nested fields such as `service.name`, `log.level`, `@timestamp`, and `http.response.status_code`; [Pino HTTP](https://github.com/pinojs/pino-std-serializers) request/response fields; and individual [OpenTelemetry log records](https://opentelemetry.io/docs/specs/otel/logs/data-model/) with severity, body, typed attributes, and nanosecond timestamps. Full OTLP batch envelopes and arbitrary arrays are available in event details rather than expanded into table columns.
+
 Log4j2 JsonLayout output is supported directly: the `timeMillis` field is read as the event timestamp, and MDC values nested under `contextMap` are flattened so they're searchable like any other field.
 
 The timezone setting supports Local and UTC.
 
 The search row has separate **Saved searches**, **Filter by value**, **Columns**, and **Analyze** controls. **Saved searches** lets you save named searches and shows the 10 most recent entries from the last 30 retained searches, with a **Clear** action to drop that history. While typing, field names and common values are suggested; **Filter by value** shows counts for a field and lets you search a selected value.
 
-Click a column's name to sort by that field and click it again to reverse the direction; the arrow shows the active direction. Drag its grip to rearrange columns, or drag the divider at its right edge to resize. Payload fields also have an `×` remove control, and **Columns** restores them. Column widths and order are saved per webview.
+Click a column's name to sort by that field and click it again to reverse the direction; the arrow shows the active direction. Drag its grip to rearrange columns, or drag the divider at its right edge to resize. Payload fields also have an `×` remove control, and **Columns** restores them. Column widths and order are saved per webview. Rows keep a single-line preview; expand an event to read its full contents. Scrolling past an expanded event preserves its details and internal scroll position.
 
 **Analyze** opens retained metrics for the current filter: event rate, errors, latency, status-code counts, the top 10 log patterns by volume, and normalized error groups. Analysis uses only events currently retained in memory.
 
@@ -86,7 +92,7 @@ Set `shell: true` when the command is a shell line containing pipes, redirects, 
 | `logline.indentation` | `2` | Spaces used when formatting expanded JSON. |
 | `logline.maxEvents` | `50000` | Maximum events retained in memory. Applied immediately. |
 | `logline.maxMemoryMb` | `100` | Approximate memory budget for retained events. Applied immediately. |
-| `logline.maxLineLength` | `65536` | Maximum characters retained from one unfinished log line. |
+| `logline.maxLineLength` | `65536` | Maximum characters retained from one live log line or imported record. |
 | `logline.refreshIntervalMs` | `500` | Minimum time between Logs panel updates. The panel refreshes as soon as new data arrives rather than on a fixed poll, so this only caps how often that happens during a heavy burst of log lines. |
 | `logline.persistLogs` | `false` | Persist captured logs to `.logline/latest.log` in the first workspace folder. |
 | `logline.maxDiskMb` | `1000` | Size at which `latest.log` rolls over to `latest.log.1`. Only the current and one previous file are kept. |
@@ -99,6 +105,8 @@ Set `shell: true` when the command is a shell line containing pipes, redirects, 
 The viewer retains up to **50,000 events or 100 MiB** of estimated event storage by default, whichever limit is reached first. Older events are evicted automatically, and the footer shows the live figure against the configured budget. Raising or lowering `maxEvents` or `maxMemoryMb` takes effect immediately, without reloading the window.
 
 Search, facets, and analysis cover retained history only; enable `persistLogs` or use a log service for archival storage. Persisted logs are written to `.logline/` in the first workspace folder — add that directory to your `.gitignore`.
+
+Disk persistence buffers up to 8 MiB of estimated text storage, including writes in progress. If the disk falls behind, new disk writes are skipped until space becomes available; live capture continues. A warning and the footer's **disk writes skipped** counter report this loss. Accepted writes remain ordered. Field-name indexes release names when their last retained event is evicted, and each event exposes at most 120 flattened fields, including MDC fields; the original raw event remains available within the line-length limit.
 
 ## Development
 
