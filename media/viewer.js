@@ -325,7 +325,11 @@ function cell(text, className) {
   return element;
 }
 
+let savedSearchSignature;
 function renderSearchState(searches) {
+  const signature = JSON.stringify(searches.saved ?? []);
+  if (signature === savedSearchSignature) return;
+  savedSearchSignature = signature;
   const makeButton = (item, label, removable = false) => {
     const button = document.createElement('button');
     button.type = 'button'; button.className = 'search-item'; button.textContent = label;
@@ -362,9 +366,13 @@ function renderAutocomplete(data) {
   }));
 }
 
+let facetFieldsSignature;
 function populateFacetFields(columns = allFields.length ? allFields : currentColumns) {
   if (!elements.facetField) return;
   const names = [...new Set(['level', 'service', 'status', 'statusCode', 'durationMs', 'traceId', 'spanId', ...columns])];
+  const signature = JSON.stringify(names);
+  if (signature === facetFieldsSignature) return;
+  facetFieldsSignature = signature;
   const current = elements.facetField.value;
   elements.facetField.replaceChildren(...names.map(name => { const option = document.createElement('option'); option.value = name; option.textContent = name; return option; }));
   elements.facetField.value = names.includes(current) ? current : names[0];
@@ -1021,9 +1029,13 @@ function updateSortOptions(fields) {
   sortFields = [...new Set(fields ?? [])];
 }
 
+let fieldListSignature;
 function renderFieldList() {
   if (!elements.fieldList) return;
   const choices = [...new Set([...availableColumns, ...columnFields])];
+  const signature = JSON.stringify([choices, currentColumns]);
+  if (signature === fieldListSignature) return;
+  fieldListSignature = signature;
   if (!choices.length) {
     elements.fieldList.replaceChildren(emptyMessage('Additional fields will appear when structured logs are received.'));
     return;

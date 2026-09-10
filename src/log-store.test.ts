@@ -114,7 +114,7 @@ test('the large-store fast path agrees with the general search path', () => {
     store.add({ id, raw: `event ${id}`, message: `event ${id}`, level: id % 5 === 0 ? 'error' : 'info' });
   }
   const fast = store.page();
-  const general = store.page({ before: store.total });
+  const general = store.page({ before: store.total, levels: ['info', 'error'] });
   assert.deepEqual(fast.events, general.events.slice(0, 1000));
   assert.equal(fast.matched, general.matched);
   assert.equal(fast.matched, store.size);
@@ -127,7 +127,7 @@ test('the per-server fast path agrees with the general search path', () => {
     store.add({ id, raw: `event ${id}`, message: `event ${id}`, level: 'info', serverId, fields: { serverId } });
   }
   const fast = store.page({ query: 'serverId:api' });
-  const general = store.page({ query: 'serverId:api', before: store.total });
+  const general = store.page({ query: 'serverId:api', before: store.total, levels: ['info'] });
   assert.deepEqual(fast.events, general.events.slice(0, 1000));
   assert.equal(fast.matched, general.matched);
   assert.equal(fast.matched, Math.floor(20000 / 3));
@@ -546,4 +546,61 @@ test('ECS, Pino HTTP and Log4j alias fields are discovered as useful columns and
     assert.ok(store.columns().length >= 3);
     assert.equal(store.page({ query: 'service:api status:503' }).matched, 1);
   }
+});
+
+test('indexed history pages match filtered capture order across gaps, wrapping and frozen boundaries', () => {
+  const store = new LogStore(4200);
+  for (let id = 2; id <= 12000; id += 2) store.add({ id, level: 'info', serverId: id % 6 ? 'api' : 'worker' });
+  for (const serverId of [undefined, 'API', 'missing']) {
+    for (const before of [Infinity, 11991, 8000, 3599]) {
+      const expected = store.all({ serverId, before });
+      for (const requestedPage of [0, 1, 4, -1, NaN, 1.5]) {
+        const result = store.page({ serverId, before, page: requestedPage });
+        const pages = Math.max(1, Math.ceil(expected.length / 1000));
+        const page = Math.max(0, Math.min(pages - 1, Number.isInteger(requestedPage) ? requestedPage : 0));
+        const end = expected.length - page * 1000;
+        assert.equal(result.matched, expected.length);
+        assert.equal(result.pages, pages);
+        assert.equal(result.page, page);
+        assert.deepEqual(result.events.map(event => event.id), expected.slice(Math.max(0, end - 1000), end).map(event => event.id));
+      }
+    }
+  }
+});
+
+test('server index shortcuts preserve combined filters, case variants and numeric queries', () => {
+  const store = new LogStore();
+  for (let id = 1; id <= 15000; id++) store.add({ id, level: 'info', serverId: ['api', 'API', 'worker', '123', '234'][id % 5] });
+  const options = [
+    { serverId: 'api' },
+    { serverId: 'worker', query: 'serverId:api' },
+    { serverId: 'api', query: 'serverId:worker' },
+    { query: 'serverId:>200' }
+  ];
+  for (const option of options) {
+    const expected = store.all(option);
+    const result = store.page(option);
+    assert.equal(result.matched, expected.length, JSON.stringify(option));
+    assert.deepEqual(result.events.map(event => event.id), expected.slice(-1000).map(event => event.id));
+  }
+});
+
+test('history paging and nearby context read bounded portions of retained history', () => {
+  const store = new LogStore(50000);
+  for (let id = 1; id <= 50000; id++) store.add({ id, level: 'info', serverId: 'api', sessionId: 'run' });
+  let reads = 0;
+  const countReads = <T>(items: T[]) => new Proxy(items, { get(target, key, receiver) {
+    if (typeof key === 'string' && /^\d+$/.test(key)) reads++;
+    return Reflect.get(target, key, receiver);
+  } });
+  store.slots = countReads(store.slots);
+  for (const index of store.serverIndex.values()) index.items = countReads(index.items);
+  for (const option of [{ page: 12 }, { page: 12, before: 40000 }, { page: 12, before: 40000, serverId: 'api' }]) {
+    reads = 0;
+    assert.equal(store.page(option).events.length, 1000);
+    assert.ok(reads < 1100, `paging read ${reads} entries`);
+  }
+  reads = 0;
+  assert.deepEqual(store.context(45000).events.map(event => event.id), Array.from({ length: 51 }, (_, i) => 44975 + i));
+  assert.ok(reads < 100, `context read ${reads} entries`);
 });

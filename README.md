@@ -112,6 +112,8 @@ Disk persistence buffers up to 8 MiB of estimated text storage, including writes
 
 This directory contains the extension core, written in TypeScript (`src/`, compiled to `out/`). The webview UI (`media/viewer.js`) is plain JS. Manual testing uses a pair of demo servers — a Node server that emits mixed JSON and plain-text events, and a Spring Boot app — kept outside this repository and not part of the published package.
 
+`src/log-store.ts` owns retention, indexes, filtering, and paging. `src/log-analysis.ts` computes metrics, error groups, and patterns from matching events without depending on the store or VS Code. Performance regression tests check how many retained entries paging and context requests read, and verify that unchanged viewer controls keep their DOM nodes.
+
 `samples/demo-logs.jsonl` is a synthetic JSON Lines fixture (not part of the published package) for exercising the viewer without a live server: **Logline: Import Logs** it to get a realistic mix of services, levels, HTTP fields, linked trace/span ids, and two recurring, distinct error call sites, useful for screenshots or trying search, sort, facets, and Analyze.
 
 ```sh
