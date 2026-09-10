@@ -21,31 +21,44 @@ class Element {
   scrollHeight = 1000;
   clientHeight = 300;
   clientWidth = 1000;
+  parent?: Element;
+  height = 30;
+  focusCalls: unknown[] = [];
+  scrollIntoViewCalls: unknown[] = [];
+  onFocus?: (options?: { preventScroll?: boolean }) => void;
   get firstChild() { return this.children[0]; }
   get classList() { return { contains: (name: string) => this.className.split(' ').includes(name) }; }
-  append(...children: Element[]) { this.children.push(...children); }
-  replaceChildren(...children: Element[]) { this.children = children; }
+  append(...children: Element[]) { for (const child of children) child.parent = this; this.children.push(...children); }
+  replaceChildren(...children: Element[]) { this.children = []; this.append(...children); }
   addEventListener(name: string, callback: (event?: any) => void) { this.listeners.set(name, callback); }
   removeEventListener(name: string, callback: (event?: any) => void) { if (this.listeners.get(name) === callback) this.listeners.delete(name); }
   setAttribute(name: string, value: string) { this.attributes[name] = value; if (name === 'class') this.className = value; }
-  contains(element: Element) { return this.children.includes(element); }
-  closest() { return this; }
+  contains(element: Element): boolean { return element === this || this.children.some(child => child.contains(element)); }
+  closest(selector: string): Element | undefined {
+    if (selector === 'tr') return this.classList.contains('event-row') || this.classList.contains('detail-row') ? this : this.parent?.closest(selector);
+    return this;
+  }
   querySelectorAll(selector: string): Element[] {
     return this.children.flatMap(child => [
       ...(selector.startsWith('.') && child.classList.contains(selector.slice(1)) ? [child] : []),
       ...child.querySelectorAll(selector)
     ]);
   }
-  querySelector(selector: string) { return this.querySelectorAll(selector)[0]; }
-  getBoundingClientRect() { return { height: 30, width: 140 }; }
+  querySelector(selector: string): Element | undefined {
+    const row = selector.match(/^tr.event-row\[data-id="(\d+)"\] .message-button$/);
+    if (row) return this.querySelectorAll('.event-row').find(element => String(element.dataset.id) === row[1])?.querySelector('.message-button');
+    return this.querySelectorAll(selector)[0];
+  }
+  getBoundingClientRect() { return { height: this.height, width: 140 }; }
   remove() {}
-  focus() {}
-  scrollIntoView() {}
+  focus(options?: { preventScroll?: boolean }) { this.focusCalls.push(options); this.onFocus?.(options); }
+  scrollIntoView(options?: unknown) { this.scrollIntoViewCalls.push(options); }
   showModal() { this.open = true; }
   close() { this.open = false; this.listeners.get('close')?.(); }
 }
 
 function viewer() {
+  const frames: (() => void)[] = [];
   const elements = new Map<string, Element>();
   const get = (id: string) => { if (!elements.has(id)) elements.set(id, new Element()); return elements.get(id)!; };
   const messages: Record<string, any>[] = [];
@@ -57,7 +70,7 @@ function viewer() {
   const runtime = createContext({ document, window, Intl, console,
     acquireVsCodeApi: () => ({ getState: () => ({ query: 'timeout', levels: ['error'], server: 'api' }), setState() {},
       postMessage: (message: Record<string, any>) => messages.push(message) }),
-    ResizeObserver: class { observe() {} }, requestAnimationFrame() {}, setInterval() {}, setTimeout() {}, clearTimeout() {}
+    ResizeObserver: class { observe() {} disconnect() {} }, requestAnimationFrame: (callback: () => void) => frames.push(callback), setInterval() {}, setTimeout() {}, clearTimeout() {}
   });
   runInContext(readFileSync(path.join(__dirname, '../media/viewer.js'), 'utf8'), runtime);
   const run = (script: string) => runInContext(script, runtime);
@@ -66,7 +79,8 @@ function viewer() {
     total: 100, retained: 100, discarded: 0, bytes: 1000, maxBytes: 10000, truncated: 0,
     events: [{ id: 42, message: 'timeout', level: 'error', timestamp: '12:00', stream: 'stderr' }],
     columns: [], page: 0, pages: 2, matched: 100 });
-  return { get, messages, run, receive };
+  const flushFrames = () => { let count = 0; while (frames.length && count++ < 10) frames.shift()!(); assert.ok(count < 10, 'rendering settles without a scroll loop'); };
+  return { get, messages, run, receive, flushFrames };
 }
 
 test('context preserves search, levels, server, paging, pause state and scroll position', () => {
@@ -225,4 +239,85 @@ test('autocomplete suggestions list known field names alongside matching values'
   const { get, receive } = viewer();
   receive({ type: 'autocomplete', fields: ['service', 'status'], values: [{ value: 'api', count: 4 }] });
   assert.deepEqual(get('fieldSuggestions').children.map(option => option.value), ['service', 'status', 'api']);
+});
+
+test('Live settles at the new bottom after layout and resumes even when row IDs are unchanged', () => {
+  const { get, run, flushFrames } = viewer();
+  run('renderRows(Array.from({length: 1000}, (_, i) => ({id: i + 1, level: "info", message: "line " + i})))');
+  get('viewport').scrollHeight = 32000; // layout finishes after the initial render
+  flushFrames();
+  assert.equal(get('viewport').scrollTop, 32000);
+  run('paused = true; following = false; before = 50; page = 3; selectedSort = "message"; selected = 42');
+  get('viewport').scrollTop = 100;
+  get('follow').listeners.get('click')!();
+  flushFrames();
+  assert.equal(get('viewport').scrollTop, 32000);
+  assert.equal(run('following && !paused && page === 0 && before === undefined && selectedSort === "" && selected === undefined'), true);
+  assert.equal(run('lastRows'), undefined, 'the same result IDs must still be rendered after resuming');
+});
+
+test('scrolling past expanded details keeps their DOM state and does not repeatedly replace rows', () => {
+  const { get, run, flushFrames, receive } = viewer();
+  get('viewport').scrollTop = 0;
+  run('following = false; renderRows(Array.from({length: 100}, (_, i) => ({id: i + 1, level: "info", message: "line " + i}))); toggleExpand(10)');
+  receive({ type: 'details', id: 10, text: 'large payload', exceptions: [] });
+  const detail = get('logs').querySelector('.detail-row')!;
+  detail.height = 350;
+  detail.querySelector('.event-details')!.scrollTop = 200;
+  flushFrames();
+  const children = get('logs').children;
+  get('viewport').scrollTop = 1;
+  run('renderWindow()');
+  assert.equal(get('logs').children, children, 'a scroll within the same virtual window preserves the DOM');
+  assert.equal(detail.scrollIntoViewCalls.length, 0, 'detail responses must not yank the viewport');
+  get('viewport').scrollTop = 2300; run('renderWindow()');
+  assert.equal(get('viewport').scrollTop, 2300);
+  get('viewport').scrollTop = 0; run('renderWindow()');
+  assert.equal(get('logs').querySelector('.detail-row'), detail);
+  assert.equal(detail.querySelector('.event-details')!.scrollTop, 200);
+  assert.equal(run('expandedHeight'), 350);
+});
+
+test('restoring row focus during scrolling uses preventScroll', () => {
+  const { get, run } = viewer();
+  get('viewport').scrollTop = 0;
+  run('following = false; renderRows(Array.from({length: 100}, (_, i) => ({id: i + 1, level: "info", message: "line " + i})))');
+  const focused = get('logs').querySelector('tr.event-row[data-id="10"] .message-button')!;
+  run('document.activeElement = elements.logs.querySelector(\'tr.event-row[data-id="10"] .message-button\')');
+  get('viewport').scrollTop = 300;
+  run('renderWindow()');
+  const restored = get('logs').querySelector('tr.event-row[data-id="10"] .message-button')!;
+  assert.notEqual(restored, focused);
+  assert.deepEqual(JSON.parse(JSON.stringify(restored.focusCalls)), [{ preventScroll: true }]);
+  assert.equal(get('viewport').scrollTop, 300);
+});
+
+test('Columns exposes additional payload fields and requests their values when selected', () => {
+  const { get, receive, messages, run } = viewer();
+  receive({ type: 'snapshot', generation: 1, newest: 100, total: 100, retained: 100, discarded: 0, bytes: 1000, maxBytes: 10000,
+    columns: ['service'], columnFields: ['service', 'custom.jobId', 'attempt'], fields: ['service', 'custom.jobId', 'attempt'] });
+  const custom = get('fieldList').children.find(row => row.dataset.field === 'custom.jobId')!;
+  assert.ok(custom);
+  const checkbox = custom.children[0] as Element & { checked: boolean };
+  assert.equal(checkbox.checked, false);
+  checkbox.checked = true; checkbox.listeners.get('change')!();
+  assert.deepEqual(JSON.parse(JSON.stringify(messages.at(-1)?.columns)), ['custom.jobId']);
+  assert.equal(run('currentColumns.includes("custom.jobId")'), true);
+  const updated = get('fieldList').children.find(row => row.dataset.field === 'custom.jobId')!.children[0] as Element & { checked: boolean };
+  assert.equal(updated.checked, true);
+  updated.checked = false; updated.listeners.get('change')!();
+  assert.equal(run('currentColumns.includes("custom.jobId")'), false);
+});
+
+test('an update received during a snapshot queues another request without hiding the current rows', () => {
+  const { receive, messages, run } = viewer();
+  run('request()');
+  const count = messages.length;
+  receive({ type: 'update' });
+  assert.equal(messages.length, count, 'only one snapshot is in flight');
+  receive({ type: 'snapshot', generation: 1, newest: 101, total: 101, retained: 101, discarded: 0, bytes: 1000, maxBytes: 10000,
+    columns: [], events: [{ id: 101, level: 'error', message: 'latest' }], page: 0, pages: 1, matched: 1 });
+  assert.equal(run('virtualEvents[0].id'), 101);
+  assert.equal(messages.length, count + 1);
+  assert.equal(messages.at(-1)?.type, 'snapshot');
 });

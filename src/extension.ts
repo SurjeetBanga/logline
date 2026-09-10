@@ -1,10 +1,13 @@
 import * as vscode from 'vscode';
 import { spawn, execFile, type ChildProcessWithoutNullStreams, type SpawnOptions } from 'node:child_process';
-import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
+import { createReadStream, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { mkdir, stat, rename, appendFile } from 'node:fs/promises';
 import * as path from 'node:path';
 import { randomBytes } from 'node:crypto';
 import { parseLogLine } from './log-event';
+import { getField } from './query';
+import { importRecords } from './log-import';
+import { setImmediate as yieldToHost } from 'node:timers/promises';
 import { LogStore, LineReader } from './log-store';
 import { formatDetails } from './format-details';
 import { extractExceptions } from './exceptions';
@@ -15,6 +18,8 @@ import type { LogEvent, ServerConfig, SessionStatus, SessionSummary } from './ty
 
 const PERSIST_FLUSH_MS = 250;
 const PERSIST_MAX_BUFFER = 2000;
+const PERSIST_BATCH_BYTES = 256 * 1024;
+const PERSIST_QUEUE_BYTES = 8 * 1024 * 1024;
 
 let provider: LogsProvider | undefined;
 
@@ -99,11 +104,12 @@ function exportQuery(request: ExportRequest = {}): string {
   return [server, request.query?.trim() ?? ''].filter(Boolean).join(' ');
 }
 
-function pickColumns(fields: LogEvent['fields'], columns: string[]): LogEvent['fields'] {
+function pickColumns(event: LogEvent, columns: string[]): LogEvent['fields'] {
+  const fields = event.fields;
   if (!fields) return fields;
   const picked: Record<string, string | number | boolean> = {};
   for (const column of columns) {
-    const value = fields[column];
+    const value = fields[column] ?? getField(event, column);
     if (value !== undefined) picked[column] = value;
   }
   return picked;
@@ -132,73 +138,7 @@ function serializeExport(events: LogEvent[], format: ExportFormat): string {
   return rows.join('\n') + '\n';
 }
 
-// RFC 4180: cells may be quoted, a doubled quote is a literal one, and a quoted
-// cell may span commas and newlines. Only a quote in first position opens a
-// cell, which is what serializeExport emits.
-export function parseCsv(text: string): string[][] {
-  const rows: string[][] = [];
-  let row: string[] = [];
-  let cell = '';
-  let quoted = false;
-  for (let i = 0; i < text.length; i++) {
-    const char = text[i];
-    if (quoted) {
-      if (char !== '"') { cell += char; continue; }
-      if (text[i + 1] === '"') { cell += '"'; i++; continue; }
-      quoted = false;
-      continue;
-    }
-    if (char === '"' && cell === '') { quoted = true; continue; }
-    if (char === ',') { row.push(cell); cell = ''; continue; }
-    if (char === '\n' || char === '\r') {
-      if (char === '\r' && text[i + 1] === '\n') i++;
-      row.push(cell); rows.push(row); row = []; cell = '';
-      continue;
-    }
-    cell += char;
-  }
-  if (cell !== '' || row.length) { row.push(cell); rows.push(row); }
-  return rows;
-}
-
-export function parseCsvRecords(text: string): unknown[] {
-  const rows = parseCsv(text);
-  const header = rows.shift();
-  if (!header) return [];
-  const records: unknown[] = [];
-  for (const row of rows) {
-    if (!row.some(cell => cell !== '')) continue;
-    const cells = new Map(header.map((name, index) => [name.trim(), row[index] ?? '']));
-    // A Logline CSV export keeps the original line in `raw`, so replaying that
-    // reproduces the event exactly - timestamp, level and JSON payload included -
-    // instead of rebuilding an approximation from the flattened columns.
-    const raw = cells.get('raw');
-    if (raw) { records.push(raw); continue; }
-    const record: Record<string, unknown> = {};
-    for (const [name, value] of cells) {
-      // `id` and `timestampMs` are re-derived on ingest; carrying them over
-      // would collide with live capture ids and add noise columns.
-      if (!name || value === '' || name === 'id' || name === 'timestampMs') continue;
-      record[name.startsWith('field:') ? name.slice('field:'.length) : name] = value;
-    }
-    if (Object.keys(record).length) records.push(record);
-  }
-  return records;
-}
-
-function parseImportRecords(text: string, format?: string): unknown[] {
-  const trimmed = text.trim();
-  if (!trimmed) return [];
-  if (format === 'csv') return parseCsvRecords(text);
-  try {
-    const parsed: unknown = JSON.parse(trimmed);
-    return Array.isArray(parsed) ? parsed : [parsed];
-  } catch {
-    return text.split(/\r?\n/).map(line => line.trim()).filter(Boolean).map(line => {
-      try { return JSON.parse(line); } catch { return line; }
-    });
-  }
-}
+export { parseCsv, parseCsvRecords } from './log-import';
 
 type ExecutableTask = vscode.Task & { definition: vscode.TaskDefinition & {
   dependsOn?: string | string[];
@@ -430,6 +370,9 @@ export class LogsProvider implements vscode.WebviewViewProvider, vscode.Disposab
   generation = 0;
   views = new Set<vscode.Webview>();
   pendingWrites: string[] = [];
+  pendingWriteBytes = 0;
+  queuedWriteBytes = 0;
+  persistDropped = 0;
   persistTimer: ReturnType<typeof setTimeout> | undefined;
   persistedBytes: number | undefined;
   persistChain: Promise<void> | undefined;
@@ -704,6 +647,11 @@ export class LogsProvider implements vscode.WebviewViewProvider, vscode.Disposab
     this.sessionRegistry.set(record.id, record);
     this.sessions.add(session);
     const source = this.config.get<string>('source', 'both');
+    // Both pipes must flow even when only one stream is retained. Otherwise a
+    // full OS pipe can block the server itself while writing excluded output.
+    for (const stream of ['stdout', 'stderr'] as const) {
+      if (source !== 'both' && source !== stream) child[stream].resume();
+    }
     const readers = (['stdout', 'stderr'] as const).filter(stream => source === 'both' || source === stream).map(stream => {
       const reader = new LineReader((line, truncated) => {
         if (!this.sessions.has(session)) return;
@@ -911,18 +859,28 @@ export class LogsProvider implements vscode.WebviewViewProvider, vscode.Disposab
     if (!uris?.length) return;
     let imported = 0;
     for (const uri of uris) {
-      let text: string;
-      try { text = Buffer.from(await vscode.workspace.fs.readFile(uri)).toString('utf8'); } catch { continue; }
       // Keep surrounding context from crossing between independently imported files.
       const sessionId = randomBytes(8).toString('hex');
-      for (const record of parseImportRecords(text, path.extname(uri.path).slice(1).toLowerCase())) {
-        const line = typeof record === 'string' ? record : JSON.stringify(record);
-        const event = parseLogLine(line, 'import', ++this.sequence, new Date());
-        event.serverId = 'imported';
-        event.server = 'Imported';
-        event.sessionId = sessionId;
-        this.store.add(event);
-        imported++;
+      try {
+        // Native files stream in bounded chunks. Other VS Code filesystem
+        // providers expose only readFile, so release their buffer after this file.
+        const chunks = uri.scheme === 'file' ? createReadStream(uri.fsPath, { highWaterMark: 64 * 1024 })
+          : this.importFileChunks(await vscode.workspace.fs.readFile(uri));
+        const format = path.extname(uri.path).slice(1).toLowerCase();
+        const limit = this.config.get('maxLineLength', 65536);
+        for await (const record of importRecords(chunks, format, limit)) {
+          const event = parseLogLine(record.raw, 'import', ++this.sequence, new Date());
+          event.serverId = 'imported';
+          event.server = 'Imported';
+          event.sessionId = sessionId;
+          event.truncated = record.truncated;
+          if (record.truncated) event.isJson = false;
+          this.store.add(event);
+          imported++;
+          if (imported % 500 === 0) { this.notifyViews(); await yieldToHost(); }
+        }
+      } catch (error) {
+        void vscode.window.showWarningMessage(`Could not finish importing ${path.basename(uri.path)}: ${(error as Error).message}`);
       }
     }
     if (imported) {
@@ -933,12 +891,27 @@ export class LogsProvider implements vscode.WebviewViewProvider, vscode.Disposab
     vscode.window.showInformationMessage(`Imported ${imported.toLocaleString()} log events.`);
   }
 
+  private async *importFileChunks(bytes: Uint8Array): AsyncGenerator<Uint8Array> {
+    for (let offset = 0; offset < bytes.length; offset += 64 * 1024) yield bytes.subarray(offset, offset + 64 * 1024);
+  }
+
   // Buffer disk writes so a chatty server cannot stall the extension host on
   // one syscall per line.
   persist(line: string): void {
     if (!this.config?.get('persistLogs', false)) return;
+    // Count estimated UTF-16 storage, including pending and in-flight batches.
+    // Drop new disk-only writes on overload; capture and existing writes continue.
+    const bytes = (line.length + 1) * 2;
+    if (this.queuedWriteBytes + bytes > PERSIST_QUEUE_BYTES) {
+      if (this.persistDropped++ === 0) {
+        void vscode.window.showWarningMessage('Logline disk writes are falling behind. New disk writes are being skipped while the 8 MiB queue is full; live capture continues. The Logs footer shows the skipped count.');
+      }
+      return;
+    }
+    this.queuedWriteBytes += bytes;
+    this.pendingWriteBytes += bytes;
     this.pendingWrites.push(line);
-    if (this.pendingWrites.length >= PERSIST_MAX_BUFFER) { this.flushPersist(); return; }
+    if (this.pendingWrites.length >= PERSIST_MAX_BUFFER || this.pendingWriteBytes >= PERSIST_BATCH_BYTES) { this.flushPersist(); return; }
     if (this.persistTimer) return;
     this.persistTimer = setTimeout(() => this.flushPersist(), PERSIST_FLUSH_MS);
     this.persistTimer.unref?.();
@@ -946,14 +919,18 @@ export class LogsProvider implements vscode.WebviewViewProvider, vscode.Disposab
 
   // Writes happen off the extension host's main flow of control (fs/promises)
   // so a chatty server persisting logs cannot stall the UI. The chain still
-  // serializes writes so batches land in order and none are dropped.
+  // serializes accepted writes so batches land in order.
   flushPersist(): void {
     clearTimeout(this.persistTimer);
     this.persistTimer = undefined;
     if (!this.pendingWrites.length) return;
     const batch = this.pendingWrites.join('\n') + '\n';
+    const bytes = this.pendingWriteBytes;
     this.pendingWrites.length = 0;
-    this.persistChain = (this.persistChain ?? Promise.resolve()).then(() => this.writeBatch(batch));
+    this.pendingWriteBytes = 0;
+    this.persistChain = (this.persistChain ?? Promise.resolve())
+      .then(() => this.writeBatch(batch))
+      .finally(() => { this.queuedWriteBytes -= bytes; });
   }
 
   async writeBatch(batch: string): Promise<void> {
@@ -1041,22 +1018,28 @@ export class LogsProvider implements vscode.WebviewViewProvider, vscode.Disposab
         sortDirection: msg.sortDirection === 'desc' ? 'desc' as const : 'asc' as const
       };
       const configured = this.config.get<string[]>('columns', []);
-      const columns = configured.length ? configured : this.store.columns();
+      const columns = configured.length ? configured : this.store.columns(options.serverId);
+      const columnFields = this.store.columnFields(options.serverId);
+      const requestedColumns = Array.isArray(msg.columns)
+        ? msg.columns.filter((field): field is string => typeof field === 'string' && columnFields.includes(field)) : [];
+      const projectedColumns = [...new Set([...columns, ...requestedColumns])];
       const pageResult = msg.statsOnly ? undefined : this.store.page(options);
       const result = pageResult ?? this.store.stats();
       // A row only ever reads the displayed field columns, but a structured
       // payload can carry dozens of keys per event. Trimming here keeps the
       // refresh payload proportional to what is on screen rather than to how
       // wide the log records happen to be.
-      const events = pageResult?.events.map(event => ({ ...event, fields: pickColumns(event.fields, columns) }));
+      const events = pageResult?.events.map(event => ({ ...event, fields: pickColumns(event, projectedColumns) }));
       view.webview.postMessage({ type: 'snapshot',
         ...result, ...(events ? { events } : {}),
         columns,
+        columnFields,
         fields: this.store.fieldNames(),
         status: this.status, command: this.command, running: this.sessions.size > 0 || (this.taskExecutions?.size ?? 0) > 0,
         servers: this.serverSummaries(), sessions: this.sessionSummaries(),
         searches: { saved: this.savedSearches() },
         newest: this.sequence, generation: this.generation,
+        persistDropped: this.persistDropped,
         timezone: this.config.get('timezone', 'local')
       });
     }

@@ -2,7 +2,7 @@
   "name": "logline",
   "displayName": "Logline — Live Tail for JSON Logs",
   "description": "Live tail your server processes in a searchable, expandable JSON log viewer.",
-  "version": "1.4.0",
+  "version": "1.5.0",
   "publisher": "surjeetbanga",
   "license": "MIT",
   "repository": {
@@ -220,7 +220,7 @@
           "default": 65536,
           "minimum": 1024,
           "maximum": 1048576,
-          "description": "Maximum characters retained from one unfinished log line."
+          "description": "Maximum characters retained from one live log line or imported record."
         },
         "logline.persistLogs": {
           "type": "boolean",
