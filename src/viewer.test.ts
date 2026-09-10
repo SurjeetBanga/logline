@@ -321,3 +321,30 @@ test('an update received during a snapshot queues another request without hiding
   assert.equal(messages.length, count + 1);
   assert.equal(messages.at(-1)?.type, 'snapshot');
 });
+
+test('unchanged snapshot controls preserve their DOM and update when metadata changes', () => {
+  const { get, run } = viewer();
+  const render = () => run(`
+    renderSearchState({ saved: [{ id: 'saved', name: 'Errors', query: 'error' }] });
+    populateFacetFields(['custom']);
+    columnFields = ['custom']; renderFieldList();
+  `);
+  render();
+  const search = get('savedSearchList').firstChild;
+  const facet = get('facetField').firstChild;
+  const field = get('fieldList').firstChild;
+  get('facetField').value = 'custom';
+  render();
+  assert.equal(get('savedSearchList').firstChild, search);
+  assert.equal(get('facetField').firstChild, facet);
+  assert.equal(get('facetField').value, 'custom');
+  assert.equal(get('fieldList').firstChild, field);
+  run(`renderSearchState({ saved: [] }); populateFacetFields(['next']); columnFields = ['next']; renderFieldList();`);
+  assert.notEqual(get('savedSearchList').firstChild, search);
+  assert.notEqual(get('facetField').firstChild, facet);
+  assert.notEqual(get('fieldList').firstChild, field);
+  const unchecked = get('fieldList').firstChild;
+  run(`currentColumns = ['next']; renderFieldList();`);
+  assert.notEqual(get('fieldList').firstChild, unchecked);
+  assert.equal((get('fieldList').firstChild.firstChild as Element & { checked: boolean }).checked, true);
+});
