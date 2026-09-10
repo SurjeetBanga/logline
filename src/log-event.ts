@@ -1,6 +1,8 @@
 import type { LogEvent } from './types';
 
 const LEVELS = ['trace', 'debug', 'info', 'warn', 'error', 'fatal'];
+const IGNORED_FIELDS = new Set(['level', 'severity', 'message', 'msg', 'event', 'name', 'timestamp', 'time', 'ts', 'datetime', 'timeMillis', 'contextMap']);
+const MAX_FIELDS = 120;
 type JsonObject = Record<string, unknown>;
 
 export function parseLogLine(line: string, stream: string, id: number, receivedAt: Date): LogEvent {
@@ -10,7 +12,10 @@ export function parseLogLine(line: string, stream: string, id: number, receivedA
     try { value = JSON.parse(trimmed); } catch { value = undefined; }
   }
   const object: JsonObject | undefined = value && typeof value === 'object' && !Array.isArray(value) ? value as JsonObject : undefined;
-  const level = normalizeLevel((object?.level ?? object?.severity) as string | number | undefined, stream);
+  const severity = readValue(object, 'level', 'severity', 'log.level', 'severityText', 'SeverityText');
+  const severityNumber = readValue(object, 'severityNumber', 'SeverityNumber');
+  const level = severity === undefined && typeof severityNumber === 'number' && severityNumber >= 1 && severityNumber <= 24
+    ? LEVELS[Math.floor((severityNumber - 1) / 4)] : normalizeLevel(severity as string | number | undefined, stream);
   const message = getMessage(object, value, trimmed);
   const timestampInfo = getTimestamp(object, receivedAt);
   const fields = object ? extractFields(object) : {};
@@ -18,6 +23,19 @@ export function parseLogLine(line: string, stream: string, id: number, receivedA
     id, timestamp: timestampInfo.text, timestampMs: timestampInfo.ms, level, message: message.slice(0, 512), stream,
     isJson: value !== undefined, raw: trimmed, fields
   };
+}
+
+// Accept both literal dotted keys (ECS) and the equivalent nested objects.
+function readValue(object: JsonObject | undefined, ...names: string[]): unknown {
+  if (!object) return undefined;
+  for (const name of names) {
+    if (object?.[name] !== undefined) return object[name];
+    if (!name.includes('.')) continue;
+    let value: unknown = object;
+    for (const part of name.split('.')) value = value && typeof value === 'object' ? (value as JsonObject)[part] : undefined;
+    if (value !== undefined) return value;
+  }
+  return undefined;
 }
 
 export function normalizeLevel(level: string | number | undefined, stream: string): string {
@@ -33,7 +51,8 @@ export function normalizeLevel(level: string | number | undefined, stream: strin
 }
 
 function getMessage(object: JsonObject | undefined, value: unknown, fallback: string): string {
-  const candidate = object?.message ?? object?.msg ?? object?.event ?? object?.name;
+  const candidate = object?.message ?? object?.msg ?? object?.event ?? object?.name
+    ?? readValue(object, 'body.stringValue', 'Body.stringValue', 'body', 'Body');
   if (candidate !== undefined) return String(candidate);
   if (value === undefined || typeof value === 'string') return String(value ?? fallback);
   if (Array.isArray(value)) return `Array (${value.length} items)`;
@@ -42,9 +61,14 @@ function getMessage(object: JsonObject | undefined, value: unknown, fallback: st
 
 function getTimestamp(object: JsonObject | undefined, receivedAt: Date): { text: string; ms: number } {
   // timeMillis is Log4j2 JsonLayout's event time (epoch ms); Date() accepts it directly.
-  const candidate = (object?.timestamp ?? object?.time ?? object?.ts ?? object?.datetime ?? object?.timeMillis) as string | number | undefined;
+  const candidate = (object?.timestamp ?? object?.time ?? object?.ts ?? object?.datetime ?? object?.timeMillis ?? object?.['@timestamp']) as string | number | undefined;
   if (candidate !== undefined) {
     const parsed = new Date(candidate);
+    if (!Number.isNaN(parsed.getTime())) return { text: formatTime(parsed), ms: parsed.getTime() };
+  }
+  const nanos = readValue(object, 'timeUnixNano', 'observedTimeUnixNano');
+  if ((typeof nanos === 'string' || typeof nanos === 'number') && /^\d+$/.test(String(nanos))) {
+    const parsed = new Date(Number(BigInt(nanos) / 1000000n));
     if (!Number.isNaN(parsed.getTime())) return { text: formatTime(parsed), ms: parsed.getTime() };
   }
   return { text: formatTime(receivedAt), ms: receivedAt.getTime() };
@@ -64,22 +88,35 @@ function isPrimitive(value: unknown): value is string | number | boolean {
 
 function extractFields(object: JsonObject): Record<string, string | number | boolean> {
   const fields: Record<string, string | number | boolean> = {};
-  const ignored = new Set(['level', 'severity', 'message', 'msg', 'event', 'name', 'timestamp', 'time', 'ts', 'datetime', 'timeMillis', 'contextMap']);
-  const add = (key: string, value: unknown) => { if (isPrimitive(value) && fields[key] === undefined && Object.keys(fields).length < 120) fields[key] = value; };
+  const entries = Object.entries(object);
+  let fieldCount = 0;
+  const add = (key: string, value: unknown) => {
+    if (fieldCount < MAX_FIELDS && isPrimitive(value) && fields[key] === undefined) {
+      fields[key] = value;
+      fieldCount++;
+    }
+  };
+  // Explicit top-level values win over convenience aliases from nested objects.
+  for (const [key, value] of entries) {
+    if (fieldCount >= MAX_FIELDS) break;
+    if (!IGNORED_FIELDS.has(key) && isPrimitive(value)) add(key, value);
+  }
   const walk = (key: string, value: unknown, depth: number) => {
     if (isPrimitive(value)) { add(key, value); return; }
     if (!value || typeof value !== 'object' || Array.isArray(value) || depth >= 4) return;
     for (const [child, childValue] of Object.entries(value as JsonObject)) {
+      if (fieldCount >= MAX_FIELDS) break;
       add(`${key}.${child}`, childValue);
       if (isPrimitive(childValue)) add(child, childValue);
       else walk(`${key}.${child}`, childValue, depth + 1);
     }
   };
-  for (const [key, value] of Object.entries(object)) {
-    if (ignored.has(key)) continue;
-    if (isPrimitive(value)) add(key, value);
-    else if (value && typeof value === 'object' && !Array.isArray(value)) {
+  for (const [key, value] of entries) {
+    if (fieldCount >= MAX_FIELDS) break;
+    if (IGNORED_FIELDS.has(key) || isPrimitive(value)) continue;
+    if (value && typeof value === 'object' && !Array.isArray(value)) {
       for (const [child, childValue] of Object.entries(value as JsonObject)) {
+        if (fieldCount >= MAX_FIELDS) break;
         add(`${key}.${child}`, childValue);
         // Bare aliases make nested payloads easy to search while the dotted
         // path preserves an unambiguous column name.
@@ -93,7 +130,22 @@ function extractFields(object: JsonObject): Record<string, string | number | boo
   const context = object.contextMap;
   if (context && typeof context === 'object' && !Array.isArray(context)) {
     for (const [key, value] of Object.entries(context as JsonObject)) {
-      if (fields[key] === undefined && isPrimitive(value)) fields[key] = value;
+      if (fieldCount >= MAX_FIELDS) break;
+      add(key, value);
+    }
+  }
+  // OTLP JSON encodes attributes as key/value entries containing typed values.
+  // Decode only recognized attribute containers, with the same field budget.
+  for (const [prefix, attributes] of [
+    ['attributes', object.attributes], ['resource.attributes', readValue(object, 'resource.attributes')]
+  ] as const) {
+    if (!Array.isArray(attributes)) continue;
+    for (const entry of attributes) {
+      if (fieldCount >= MAX_FIELDS) break;
+      if (!entry || typeof entry.key !== 'string' || !entry.value || typeof entry.value !== 'object') continue;
+      const value = entry.value.stringValue ?? entry.value.intValue ?? entry.value.doubleValue ?? entry.value.boolValue;
+      add(`${prefix}.${entry.key}`, value);
+      add(entry.key, value);
     }
   }
   return fields;

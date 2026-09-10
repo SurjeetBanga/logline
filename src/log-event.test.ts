@@ -63,3 +63,48 @@ test('nested field flattening stops after four levels to bound extraction cost',
   assert.equal(deep.fields!.e, undefined);
   assert.equal(deep.fields!['a.b.c.d.e'], undefined);
 });
+
+test('one shared field budget bounds top-level, nested aliases and MDC fields', () => {
+  const wide = Object.fromEntries(Array.from({ length: 200 }, (_, i) => [`field${i}`, i]));
+  for (const object of [wide, { nested: wide }, { contextMap: wide }, { field0: 'top', nested: wide, contextMap: wide }]) {
+    const event = parseLogLine(JSON.stringify(object), 'stdout', 1, now);
+    assert.equal(Object.keys(event.fields!).length, 120);
+  }
+  const event = parseLogLine(JSON.stringify({ field0: 'top', contextMap: wide }), 'stdout', 1, now);
+  assert.equal(event.fields!.field0, 'top');
+  assert.equal(event.fields!.field119, 119, 'duplicate names do not consume extra budget');
+  assert.equal(event.fields!.field120, undefined);
+});
+
+test('ECS logs normalize metadata while retaining dotted and nested fields', () => {
+  for (const extra of [
+    { 'log.level': 'ERROR', 'service.name': 'checkout', 'trace.id': 't1', 'http.response.status_code': 503 },
+    { log: { level: 'ERROR' }, service: { name: 'checkout' }, trace: { id: 't1' }, http: { response: { status_code: 503 } } }
+  ]) {
+    const event = parseLogLine(JSON.stringify({ '@timestamp': '2026-09-09T12:00:00Z', message: 'failed', ...extra }), 'stdout', 1, now);
+    assert.equal(event.level, 'error');
+    assert.equal(event.timestampMs, Date.parse('2026-09-09T12:00:00Z'));
+    assert.equal(event.fields!['service.name'], 'checkout');
+    assert.equal(event.fields!['http.response.status_code'], 503);
+  }
+});
+
+test('OpenTelemetry log records decode typed attributes and nanosecond timestamps', () => {
+  const event = parseLogLine(JSON.stringify({ timeUnixNano: '1788955200123456789', severityNumber: 17,
+    body: { stringValue: 'request failed' }, traceId: 't1',
+    attributes: [{ key: 'http.response.status_code', value: { intValue: '503' } }, { key: 'retry', value: { boolValue: false } }],
+    resource: { attributes: [{ key: 'service.name', value: { stringValue: 'checkout' } }] }
+  }), 'stdout', 1, now);
+  assert.equal(event.level, 'error');
+  assert.equal(event.message, 'request failed');
+  assert.equal(event.timestampMs, 1788955200123);
+  assert.equal(event.fields!['http.response.status_code'], '503');
+  assert.equal(event.fields!['service.name'], 'checkout');
+  assert.equal(event.fields!.retry, false);
+});
+
+test('explicit top-level fields win over nested aliases regardless of JSON key order', () => {
+  const event = parseLogLine('{"nested":{"status":503},"status":200}', 'stdout', 1, now);
+  assert.equal(event.fields!.status, 200);
+  assert.equal(event.fields!['nested.status'], 503);
+});

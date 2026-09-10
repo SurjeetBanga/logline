@@ -12,7 +12,7 @@ const scrollViewport = document.querySelector('.table-scroll');
 const saved = vscode.getState() ?? {};
 elements.search.value = saved.query ?? '';
 let paused = false;
-let following = true;
+let following = !saved.sort;
 let page = 0;
 let pages = 1;
 let newest = 0;
@@ -20,6 +20,7 @@ let before;
 let generation;
 let pending = false;
 let refreshRequested = false;
+let updateRequested = false;
 let lastRows;
 let forcedRequest = false;
 let selected;
@@ -34,6 +35,8 @@ let selectedSort = saved.sort ?? '';
 let selectedSortDirection = saved.sortDirection === 'asc' ? 'asc' : 'desc';
 let sortFields = [];
 let allFields = [];
+let columnFields = [];
+let extraColumns = Array.isArray(saved.extraColumns) ? saved.extraColumns.filter(field => typeof field === 'string') : [];
 let columnWidths = saved.columnWidths && typeof saved.columnWidths === 'object' ? saved.columnWidths : {};
 let serverSignature = '';
 let searchDebounce;
@@ -164,11 +167,12 @@ window.addEventListener('resize', () => { for (const popover of popovers) popove
 // Only one page may be in flight. Pausing never queues incoming events.
 function request(force = false) {
   if (document.hidden) return;
-  if (pending) { refreshRequested ||= force; return; }
+  if (pending) { if (force) refreshRequested = true; else updateRequested = true; return; }
   pending = true;
   forcedRequest = force;
   vscode.postMessage({ type: 'snapshot', query: elements.search.value, serverId: selectedServer || undefined,
     levels: currentLevels(), page, before, sort: selectedSort || undefined, sortDirection: selectedSortDirection,
+    columns: extraColumns,
     statsOnly: paused && !force });
 }
 
@@ -211,8 +215,10 @@ window.addEventListener('message', ({ data }) => {
     if (data.id === selected) {
       selectedDetailText = data.text;
       selectedExceptions = data.exceptions ?? [];
+      expandedRow = undefined;
+      detailResizeObserver.disconnect();
+      renderRevision++;
       renderWindow();
-      elements.logs.querySelector('.detail-row')?.scrollIntoView({ block: 'nearest' });
     }
     return;
   }
@@ -229,6 +235,9 @@ window.addEventListener('message', ({ data }) => {
     selected = undefined;
     selectedDetailText = undefined;
     selectedExceptions = [];
+    expandedRow = undefined;
+    detailResizeObserver.disconnect();
+    renderRevision++;
     virtualEvents = [];
     renderWindow();
     refreshRequested = true;
@@ -236,6 +245,7 @@ window.addEventListener('message', ({ data }) => {
   generation = data.generation;
   if (data.timezone && data.timezone !== displayTimezone) { displayTimezone = data.timezone; lastRows = undefined; }
   newest = data.newest;
+  if (!following && before === undefined) before = newest;
   elements.status.textContent = data.status;
   elements.command.textContent = data.command;
   elements.command.title = data.command;
@@ -277,9 +287,12 @@ window.addEventListener('message', ({ data }) => {
   }
   const number = value => value.toLocaleString();
   const budget = Number.isFinite(data.maxBytes) ? (data.maxBytes / 1048576).toFixed(0) : '?';
-  elements.counts.textContent = `${number(data.total)} received · ${number(data.retained)} retained · ${number(data.discarded)} discarded · ${(data.bytes / 1048576).toFixed(1)} / ${budget} MiB · ${data.truncated} truncated`;
+  elements.counts.textContent = `${number(data.total)} received · ${number(data.retained)} retained · ${number(data.discarded)} discarded · ${(data.bytes / 1048576).toFixed(1)} / ${budget} MiB · ${data.truncated} truncated`
+    + (data.persistDropped ? ` · ${number(data.persistDropped)} disk writes skipped` : '');
   updateModeLabel();
+  if (Array.isArray(data.columnFields)) columnFields = data.columnFields;
   updateColumns(data.columns ?? []);
+  renderFieldList();
   if (Array.isArray(data.fields)) { allFields = data.fields; updateSortOptions(data.fields); populateFacetFields(data.fields); }
   if (data.searches) renderSearchState(data.searches);
   if (data.events && !refreshRequested && (!paused || forcedRequest)) {
@@ -295,10 +308,13 @@ window.addEventListener('message', ({ data }) => {
     }
     elements.empty.hidden = data.events.length > 0;
     elements.empty.textContent = data.total ? 'No matching events in retained history.' : 'Run a server command to see its logs here.';
+    if (following && !paused && !selectedSort) scheduleRenderWindow(true);
   }
-  if (refreshRequested) {
+  if (refreshRequested || updateRequested) {
+    const force = refreshRequested;
     refreshRequested = false;
-    request(true);
+    updateRequested = false;
+    request(force);
   }
 });
 
@@ -704,6 +720,10 @@ let rowHeightMeasured = false;
 let topSpacer;
 let bottomSpacer;
 let expandedHeight = 0;
+let expandedRow;
+let renderRevision = 0;
+let renderedWindow;
+const detailResizeObserver = new ResizeObserver(() => scheduleRenderWindow());
 
 function ensureSpacers() {
   if (topSpacer) return;
@@ -752,38 +772,75 @@ function renderWindow() {
   topSpacer.firstChild.style.height = `${start * rowHeight + (selectedIndex >= 0 && selectedIndex < start ? expandedHeight : 0)}px`;
   bottomSpacer.firstChild.colSpan = totalCols;
   bottomSpacer.firstChild.style.height = `${(total - end) * rowHeight + (selectedIndex >= end ? expandedHeight : 0)}px`;
+  const windowKey = `${start}:${end}:${renderRevision}`;
+  if (renderedWindow === windowKey) return;
+  renderedWindow = windowKey;
+  // Capture focus before moving the expanded row into a fragment. Rebuilding
+  // must never scroll a focused event back into view during wheel scrolling.
+  const focused = document.activeElement;
+  const focusedRow = elements.logs.contains(focused) ? focused.closest('tr') : undefined;
+  const refocusId = focusedRow?.classList.contains('event-row') ? focusedRow.dataset.id : undefined;
+  const detailScrollers = [...(expandedRow?.querySelectorAll('.event-details, pre') ?? [])]
+    .map(element => ({ element, top: element.scrollTop, left: element.scrollLeft }));
   const fragment = document.createDocumentFragment();
   for (let i = start; i < end; i++) {
     const event = virtualEvents[i];
     fragment.append(buildRow(event));
-    if (event.id === selected) fragment.append(buildDetailRow(event));
+    if (event.id === selected) {
+      if (!expandedRow) {
+        detailResizeObserver.disconnect();
+        expandedRow = buildDetailRow(event);
+        detailResizeObserver.observe(expandedRow);
+      }
+      expandedRow.firstChild.colSpan = totalCols;
+      fragment.append(expandedRow);
+    }
   }
   // Rebuilding replaces the focused button's element out from under it, which
   // (besides dropping keyboard focus) makes Chrome yank the scroll position
   // once focus falls back to <body>. Re-focus the same row's new button.
-  const focusedRow = elements.logs.contains(document.activeElement) ? document.activeElement.closest('tr') : undefined;
-  const refocusId = focusedRow?.classList.contains('event-row') ? focusedRow.dataset.id : undefined;
   elements.logs.replaceChildren(topSpacer, fragment, bottomSpacer);
-  if (refocusId !== undefined) elements.logs.querySelector(`tr.event-row[data-id="${refocusId}"] .message-button`)?.focus();
+  for (const { element, top, left } of detailScrollers) { element.scrollTop = top; element.scrollLeft = left; }
+  if (focused && elements.logs.contains(focused)) focused.focus({ preventScroll: true });
+  else if (refocusId !== undefined) elements.logs.querySelector(`tr.event-row[data-id="${refocusId}"] .message-button`)?.focus({ preventScroll: true });
+  const measured = elements.logs.querySelector('.detail-row')?.getBoundingClientRect().height;
+  if (measured !== undefined && measured !== expandedHeight) { expandedHeight = measured; scheduleRenderWindow(); }
 }
 
 let windowRenderQueued = false;
-function scheduleRenderWindow() {
+let followTailRequested = false;
+function scheduleRenderWindow(followTail = false) {
+  followTailRequested ||= followTail === true;
   if (windowRenderQueued) return;
   windowRenderQueued = true;
-  requestAnimationFrame(() => { windowRenderQueued = false; renderWindow(); });
+  requestAnimationFrame(() => {
+    windowRenderQueued = false;
+    const followTail = followTailRequested;
+    followTailRequested = false;
+    renderWindow();
+    if (followTail && following && !paused && !selectedSort) {
+      scrollViewport.scrollTop = scrollViewport.scrollHeight;
+      renderWindow();
+    }
+  });
 }
 scrollViewport.addEventListener('scroll', scheduleRenderWindow);
-new ResizeObserver(() => { layoutColumns(); scheduleRenderWindow(); }).observe(scrollViewport);
+new ResizeObserver(() => {
+  rowHeightMeasured = false;
+  renderRevision++;
+  layoutColumns(); scheduleRenderWindow(following && !paused && !selectedSort);
+}).observe(scrollViewport);
 
 function renderRows(events) {
   virtualEvents = events;
+  renderRevision++;
   renderWindow();
   if (following && !paused && !selectedSort) {
     // Spacers above now size scrollHeight to the full list; scroll to the
     // true bottom, then re-render so the visible window matches.
     scrollViewport.scrollTop = scrollViewport.scrollHeight;
     renderWindow();
+    scheduleRenderWindow(true);
   }
 }
 
@@ -812,15 +869,18 @@ const baseColumns = [
 ];
 let displayedColumns = [...baseColumns];
 let availableColumns = [];
+let automaticColumns = [];
 let columnOrder = Array.isArray(saved.columnOrder) ? saved.columnOrder : [];
 let hiddenColumns = new Set(Array.isArray(saved.hiddenColumns) ? saved.hiddenColumns : []);
 let draggedColumn;
 let columnsInitialized = false;
 let columnElements = new Map();
 function updateColumns(columns, force = false) {
-  const next = Array.isArray(columns) ? columns : [];
+  automaticColumns = Array.isArray(columns) ? columns : [];
+  const next = [...new Set([...automaticColumns, ...extraColumns.filter(field => columnFields.includes(field))])];
   if (columnsInitialized && !force && JSON.stringify(next) === JSON.stringify(availableColumns)) return;
   columnsInitialized = true;
+  renderRevision++;
   availableColumns = next;
   currentColumns = next.filter(label => !hiddenColumns.has(`field:${label}`));
   const allColumns = [...baseColumns, ...currentColumns.map(label => ({ key: `field:${label}`, label }))];
@@ -849,7 +909,8 @@ function updateColumns(columns, force = false) {
     sortButton.addEventListener('click', () => {
       selectedSortDirection = selectedSort === sortKey && selectedSortDirection === 'asc' ? 'desc' : 'asc';
       if (selectedSort !== sortKey) { selectedSort = sortKey; selectedSortDirection = 'desc'; }
-      page = 0; lastRows = undefined; saveState(); updateColumns(availableColumns, true); updateModeLabel(); request(true);
+      setFollowing(false);
+      page = 0; lastRows = undefined; saveState(); updateColumns(automaticColumns, true); updateModeLabel(); request(true);
       scrollViewport.scrollTop = 0;
       head.querySelectorAll('.column-sort')[displayedColumns.findIndex(column => column.key === key)]?.focus();
     });
@@ -865,7 +926,7 @@ function updateColumns(columns, force = false) {
       if (!source || source === key) return;
       const order = displayedColumns.map(item => item.key); const from = order.indexOf(source); const to = order.indexOf(key);
       if (from < 0 || to < 0) return;
-      order.splice(from, 1); order.splice(to, 0, source); columnOrder = order; saveState(); updateColumns(availableColumns, true); renderWindow();
+      order.splice(from, 1); order.splice(to, 0, source); columnOrder = order; saveState(); updateColumns(automaticColumns, true); renderWindow();
     });
     grip.addEventListener('dragend', () => { draggedColumn = undefined; th.classList.remove?.('column-dragging', 'column-drop-target'); for (const item of head.querySelectorAll?.('.column-drop-target') ?? []) item.classList.remove?.('column-drop-target'); });
     const handle = document.createElement('span'); handle.className = 'resize-handle'; handle.dataset.column = key; handle.setAttribute('aria-label', `Resize ${label} column`);
@@ -876,7 +937,7 @@ function updateColumns(columns, force = false) {
     th.append(handle);
     if (key.startsWith('field:')) {
       const remove = document.createElement('button'); remove.type = 'button'; remove.className = 'remove-column'; remove.textContent = '×'; remove.title = `Remove ${label} column`; remove.setAttribute('aria-label', `Remove ${label} column`);
-      remove.addEventListener('click', event => { event.stopPropagation?.(); hiddenColumns.add(key); columnOrder = columnOrder.filter(item => item !== key); saveState(); updateColumns(availableColumns, true); renderWindow(); });
+      remove.addEventListener('click', event => { event.stopPropagation?.(); hiddenColumns.add(key); columnOrder = columnOrder.filter(item => item !== key); saveState(); updateColumns(automaticColumns, true); renderWindow(); });
       th.append(remove);
     }
     return th;
@@ -962,20 +1023,29 @@ function updateSortOptions(fields) {
 
 function renderFieldList() {
   if (!elements.fieldList) return;
-  if (!availableColumns.length) {
+  const choices = [...new Set([...availableColumns, ...columnFields])];
+  if (!choices.length) {
     elements.fieldList.replaceChildren(emptyMessage('Additional fields will appear when structured logs are received.'));
     return;
   }
-  elements.fieldList.replaceChildren(...availableColumns.map(label => {
-    const row = document.createElement('label'); row.className = 'field-toggle';
-    const input = document.createElement('input'); input.type = 'checkbox'; input.checked = !hiddenColumns.has(`field:${label}`);
-    input.addEventListener('change', () => { const key = `field:${label}`; if (input.checked) hiddenColumns.delete(key); else hiddenColumns.add(key); saveState(); updateColumns(availableColumns, true); renderWindow(); });
+  elements.fieldList.replaceChildren(...choices.map(label => {
+    const row = document.createElement('label'); row.className = 'field-toggle'; row.dataset.field = label;
+    const input = document.createElement('input'); input.type = 'checkbox'; input.checked = currentColumns.includes(label);
+    input.addEventListener('change', () => {
+      const key = `field:${label}`;
+      if (input.checked) { hiddenColumns.delete(key); if (!extraColumns.includes(label)) extraColumns.push(label); }
+      else { hiddenColumns.add(key); extraColumns = extraColumns.filter(field => field !== label); }
+      saveState(); updateColumns(automaticColumns, true); renderWindow(); request(true);
+    });
     row.append(input, document.createTextNode(label)); return row;
   }));
 }
 
 function toggleExpand(id) {
   expandedHeight = 0;
+  expandedRow = undefined;
+  detailResizeObserver.disconnect();
+  renderRevision++;
   selectedExceptions = [];
   if (selected === id) {
     selected = undefined;
@@ -1023,7 +1093,7 @@ function setFollowing(value) {
 }
 
 function saveState() {
-  vscode.setState({ query: elements.search.value, levels: [...checkedLevels], server: selectedServer, sort: selectedSort, sortDirection: selectedSortDirection, columnWidths, columnOrder, hiddenColumns: [...hiddenColumns] });
+  vscode.setState({ query: elements.search.value, levels: [...checkedLevels], server: selectedServer, sort: selectedSort, sortDirection: selectedSortDirection, columnWidths, columnOrder, hiddenColumns: [...hiddenColumns], extraColumns });
 }
 
 function filterChanged() {
@@ -1086,14 +1156,18 @@ elements.server.addEventListener('change', () => {
   request(true);
 });
 elements.follow.addEventListener('click', () => {
-  if (paused) {
+  if (paused || !following) {
     paused = false;
     // The button promises to resume live updates, so jump back to the live
     // tail even if the pause happened while browsing older retained history.
-    if (!following) { setFollowing(true); page = 0; }
+    selected = undefined; selectedDetailText = undefined; selectedExceptions = [];
+    expandedRow = undefined; expandedHeight = 0; detailResizeObserver.disconnect();
+    selectedSort = ''; page = 0; lastRows = undefined; renderRevision++;
+    setFollowing(true); saveState(); updateColumns(automaticColumns, true);
     updateFollowControl();
     updateModeLabel();
     request(true);
+    scheduleRenderWindow(true);
     return;
   }
   setFollowing(!following);
