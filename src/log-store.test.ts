@@ -431,3 +431,119 @@ test('field suggestions stay scoped to the selected server', () => {
   assert.equal(store.fieldSuggestions('que', 'worker').fields.includes('queue'), true);
   assert.equal(store.fieldSuggestions('qu').fields.includes('queue'), true, 'with no server every field is offered');
 });
+
+test('field names are released on eviction, remain while referenced, and reset on resize/clear', () => {
+  const store = new LogStore(3);
+  store.add({ id: 1, level: 'info', serverId: 'api', fields: { old: true, shared: 1 } });
+  store.add({ id: 2, level: 'info', serverId: 'api', fields: { shared: 2 } });
+  store.add({ id: 3, level: 'info', serverId: 'worker', fields: { shared: 3 } });
+  assert.ok(store.fieldNames().includes('old'));
+  store.add({ id: 4, level: 'info', serverId: 'api', fields: { fresh: true } });
+  assert.ok(!store.fieldNames().includes('old'));
+  assert.ok(store.fieldSuggestions('sha', 'api').fields.includes('shared'));
+  store.add({ id: 5, level: 'info', serverId: 'api' });
+  assert.ok(!store.fieldSuggestions('sha', 'api').fields.includes('shared'));
+  assert.ok(store.fieldSuggestions('sha', 'worker').fields.includes('shared'));
+  store.resize(1, store.maxBytes);
+  assert.equal(store.columnCache.size, 0);
+  for (let id = 6; id <= 10005; id++) store.add({ id, level: 'info', fields: { [`field${id}`]: id } });
+  assert.deepEqual([...store.columnCache], ['field10005']);
+  store.clear();
+  assert.ok(!store.fieldNames().includes('field10005'));
+});
+
+test('sorted pages keep natural ordering, missing values and cache invalidation correct', () => {
+  const store = new LogStore(2000);
+  for (let id = 1; id <= 1500; id++) store.add({ id, level: id % 2 ? 'info' : 'error', fields: { requestId: `req-${1501 - id}` } });
+  const ids = (options: Parameters<LogStore['page']>[0]) => store.page(options).events.map(event => event.id);
+  const asc = { sort: 'requestId', sortDirection: 'asc' as const };
+  assert.deepEqual(ids(asc), Array.from({ length: 1000 }, (_, i) => 1500 - i));
+  assert.equal(ids({ ...asc, page: 1 })[0], 500);
+  assert.equal(ids({ ...asc, sortDirection: 'desc' })[0], 1);
+  assert.ok(ids({ ...asc, levels: ['error'] }).every(id => id % 2 === 0));
+  assert.equal(ids(asc)[0], 1500);
+  store.add({ id: 1501, level: 'info', fields: { requestId: 'req-0' } });
+  assert.equal(ids(asc)[0], 1501);
+  store.resize(2, store.maxBytes);
+  assert.deepEqual(ids(asc), [1501, 1500]);
+  store.add({ id: 1502, level: 'info' });
+  assert.deepEqual(ids(asc), [1501, 1502], 'missing values sort last');
+  store.add({ id: 1503, level: 'info', fields: { requestId: 'req-9' } });
+  assert.deepEqual(ids(asc), [1503, 1502], 'an evicted cached row disappears');
+  store.clear();
+  assert.deepEqual(ids(asc), []);
+});
+
+test('repeated sorted pages reuse comparisons until data changes; relative filters expire', t => {
+  let reads = 0;
+  const store = new LogStore(10);
+  for (let id = 1; id <= 5; id++) store.add({ id, level: 'info', timestampMs: 100000, fields: {
+    get requestId() { reads++; return `req-${id}`; }
+  } });
+  const options = { sort: 'requestId' };
+  store.page(options);
+  const initial = reads;
+  store.page(options);
+  assert.equal(reads, initial, 'an unchanged page does not repeat string comparisons');
+  store.add({ id: 6, level: 'info', fields: { requestId: 'req-0' } });
+  assert.equal(store.page(options).events[0].id, 6);
+  assert.ok(reads > initial);
+  t.mock.method(Date, 'now', () => 100000);
+  assert.equal(store.page({ ...options, query: 'last:1s' }).matched, 5);
+  t.mock.method(Date, 'now', () => 102000);
+  assert.equal(store.page({ ...options, query: 'last:1s' }).matched, 0);
+});
+
+test('eviction releases cached payload references even without another page request', () => {
+  const store = new LogStore(2);
+  store.add({ id: 1, level: 'info', message: 'match' });
+  store.add({ id: 2, level: 'info', message: 'match' });
+  store.page({ query: 'match', sort: 'id' });
+  store.add({ id: 3, level: 'info', message: 'new' });
+  store.add({ id: 4, level: 'info', message: 'new' });
+  const caches = store as unknown as { pageCache: { matches: (LogEvent | undefined)[] }; sortedCache?: unknown };
+  assert.ok(caches.pageCache.matches.every(event => event === undefined));
+  assert.equal(caches.sortedCache, undefined);
+  assert.equal(store.page({ query: 'match' }).matched, 0);
+});
+
+test('analysis and patterns handle 200k timestamps without argument-limit failures', () => {
+  const store = new LogStore(200000);
+  for (let id = 1; id <= 200000; id++) store.add({ id, level: 'info', message: 'done', timestampMs: 200001 - id });
+  const analysis = store.analysis();
+  assert.deepEqual(analysis.range, { from: 1, to: 200000 });
+  assert.equal(analysis.rate.reduce((sum, bucket) => sum + bucket.count, 0), 200000);
+  assert.equal(analysis.patterns[0].count, 200000);
+  assert.equal(store.patterns()[0].count, 200000);
+  const filtered = store.analysis({ from: 10, to: 20 });
+  assert.deepEqual(filtered.range, { from: 10, to: 20 });
+  assert.equal(filtered.patterns[0].count, 11);
+  store.clear();
+  assert.deepEqual(store.analysis().range, { from: undefined, to: undefined });
+});
+
+test('columns discover arbitrary JSON and scope choices to the selected server', () => {
+  const store = new LogStore();
+  const api = parseLogLine('{"message":"job","job":{"queue":"fast","attempt":2},"customer":"a"}', 'stdout', 1, new Date());
+  api.serverId = 'api'; store.add(api);
+  const worker = parseLogLine('{"message":"work","workerPool":"batch"}', 'stdout', 2, new Date());
+  worker.serverId = 'worker'; store.add(worker);
+  assert.deepEqual(store.columns('API'), ['customer', 'job.attempt', 'job.queue']);
+  assert.deepEqual(store.columns('worker'), ['workerPool']);
+  assert.ok(store.columnFields('api').includes('job.queue'));
+  assert.ok(!store.columnFields('api').includes('workerPool'));
+});
+
+test('ECS, Pino HTTP and Log4j alias fields are discovered as useful columns and searchable', () => {
+  const fixtures = [
+    { message: 'ecs', 'service.name': 'api', 'log.logger': 'main', 'trace.id': 'abc', 'http.response.status_code': 503 },
+    { msg: 'pino', service_name: 'api', req: { method: 'GET', url: '/jobs', id: 'r1' }, res: { statusCode: 503 }, responseTime: 12 },
+    { message: 'log4j', logger_name: 'main', contextMap: { serviceName: 'api', trace_id: 'abc', status_code: 503 } }
+  ];
+  for (const fixture of fixtures) {
+    const store = new LogStore();
+    store.add(parseLogLine(JSON.stringify(fixture), 'stdout', 1, new Date()));
+    assert.ok(store.columns().length >= 3);
+    assert.equal(store.page({ query: 'service:api status:503' }).matched, 1);
+  }
+});

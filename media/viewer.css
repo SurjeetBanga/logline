@@ -183,7 +183,8 @@ th, td { padding: 5px 14px; border-bottom: 1px solid var(--vscode-panel-border, 
 .resize-handle:hover::after, .resize-handle:active::after { width: 2px; background: var(--vscode-focusBorder, #007acc); }
 td { font-family: var(--vscode-editor-font-family, monospace); font-size: var(--vscode-editor-font-size, 13px); line-height: 1.6; }
 td.time { white-space: nowrap; font-variant-numeric: tabular-nums; }
-.message-button { display: block; width: 100%; padding: 0; border: 0; text-align: left; background: transparent; color: inherit; font: inherit; white-space: pre; overflow: hidden; text-overflow: ellipsis; }
+.message-button { display: block; width: 100%; min-width: 0; padding: 0; border: 0; text-align: left; background: transparent; color: inherit; font: inherit; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.event-row td { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .message-button::before { content: '▸'; margin-right: 10px; }
 .message-button[aria-expanded="true"]::before { content: '▾'; }
 .event-row:hover { background: var(--vscode-list-hoverBackground, #292929); }
@@ -194,7 +195,7 @@ td.time { white-space: nowrap; font-variant-numeric: tabular-nums; }
 .level.error, .level.fatal { color: var(--vscode-errorForeground, #f48771); }
 .level.debug, .level.trace, .source { color: var(--vscode-descriptionForeground, #aaa); }
 .detail-cell { background: var(--vscode-textCodeBlock-background, #252526); padding: 10px 20px; }
-.detail-cell pre { max-height: 220px; overflow: auto; white-space: pre; tab-size: 4; margin: 8px 0; font: inherit; }
+.detail-cell pre { white-space: pre; tab-size: 4; margin: 8px 0; font: inherit; }
 #empty { padding: 18px; color: var(--vscode-descriptionForeground, #aaa); }
 footer { padding: 8px 14px; font-size: 12px; flex: none; }
 #counts { margin-top: 3px; color: var(--vscode-descriptionForeground, #aaa); }

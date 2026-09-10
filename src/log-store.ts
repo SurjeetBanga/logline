@@ -1,5 +1,5 @@
 import { StringDecoder } from 'node:string_decoder';
-import { getField, matchesQuery, parseQuery, type ParsedQuery } from './query';
+import { canonicalField, getField, matchesQuery, parseQuery, type ParsedQuery } from './query';
 import { extractExceptions } from './exceptions';
 import type { LogEvent } from './types';
 
@@ -22,9 +22,8 @@ const pickFields = ({ id, timestamp, timestampMs, level, message, isJson, trunca
 class ServerIndex {
   items: (Slot | undefined)[] = [];
   start = 0;
-  // Field names seen on this server, so autocomplete can answer without
-  // scanning the ring. Like columnCache it is never pruned on eviction.
-  fields = new Set<string>();
+  // Reference counts let eviction release field names without scanning the ring.
+  fields = new Map<string, number>();
   push(item: Slot) { this.items.push(item); }
   shift() {
     this.items[this.start] = undefined;
@@ -86,7 +85,7 @@ export interface PageOptions {
 // `start` skips the prefix that has since been evicted from the ring.
 interface PageCache {
   key: string;
-  matches: LogEvent[];
+  matches: (LogEvent | undefined)[];
   start: number;
   lastId: number;
 }
@@ -120,6 +119,9 @@ function fieldValue(event: LogEvent, field: string): unknown {
   return getField(event, field);
 }
 
+const valueCollator = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' });
+const fieldCollator = new Intl.Collator(undefined, { numeric: true });
+
 function sortEvents(events: LogEvent[], field: string, direction: 'asc' | 'desc' = 'asc'): LogEvent[] {
   const sign = direction === 'desc' ? -1 : 1;
   return events.sort((a, b) => {
@@ -128,8 +130,23 @@ function sortEvents(events: LogEvent[], field: string, direction: 'asc' | 'desc'
     if (bv === undefined || bv === null || bv === '') return -1;
     const an = typeof av === 'number' ? av : Number(av); const bn = typeof bv === 'number' ? bv : Number(bv);
     if (Number.isFinite(an) && Number.isFinite(bn)) return sign * (an - bn || a.id - b.id);
-    return sign * String(av).localeCompare(String(bv), undefined, { numeric: true, sensitivity: 'base' }) || a.id - b.id;
+    return sign * valueCollator.compare(String(av), String(bv)) || a.id - b.id;
   });
+}
+
+function timeRange(events: LogEvent[], options: PageOptions): { from?: number; to?: number } {
+  let minimum = Infinity;
+  let maximum = -Infinity;
+  if (options.from === undefined || options.to === undefined) {
+    for (const event of events) {
+      const time = event.timestampMs;
+      if (time === undefined || !Number.isFinite(time)) continue;
+      if (time < minimum) minimum = time;
+      if (time > maximum) maximum = time;
+    }
+  }
+  return { from: options.from ?? (minimum === Infinity ? undefined : minimum),
+    to: options.to ?? (maximum === -Infinity ? undefined : maximum) };
 }
 
 // Strips volatile substrings (ids, numbers, paths) so structurally identical log lines
@@ -200,8 +217,11 @@ export class LogStore {
   discarded!: number;
   truncated!: number;
   columnCache!: Set<string>;
+  private fieldCounts!: Map<string, number>;
+  private fieldNamesCache?: string[];
   serverIndex!: Map<string, ServerIndex>;
   private pageCache: PageCache | undefined;
+  private sortedCache?: { key: string; events: LogEvent[] };
 
   constructor(maxRows = 100000, maxBytes = 100 * 1024 * 1024) {
     this.maxRows = maxRows;
@@ -218,16 +238,32 @@ export class LogStore {
     this.discarded = 0;
     this.truncated = 0;
     this.columnCache = new Set();
+    this.fieldCounts = new Map();
+    this.fieldNamesCache = undefined;
     this.serverIndex = new Map();
     this.pageCache = undefined;
+    this.sortedCache = undefined;
   }
 
   private evictOldest(): void {
     const evicted = this.slots[this.head]!;
     this.bytes -= evicted.bytes;
     const serverId = evicted.event.serverId;
+    const index = serverId === undefined ? undefined : this.serverIndex.get(serverId);
+    for (const key in evicted.event.fields) {
+      const count = this.fieldCounts.get(key)! - 1;
+      if (count) this.fieldCounts.set(key, count);
+      else { this.fieldCounts.delete(key); this.columnCache.delete(key); this.fieldNamesCache = undefined; }
+      if (index) {
+        const serverCount = index.fields.get(key)! - 1;
+        if (serverCount) index.fields.set(key, serverCount); else index.fields.delete(key);
+      }
+    }
+    // Release cached event references immediately, even while the viewer is hidden.
+    const cache = this.pageCache;
+    if (cache?.matches[cache.start]?.id === evicted.event.id) cache.matches[cache.start++] = undefined;
+    this.sortedCache = undefined;
     if (serverId !== undefined) {
-      const index = this.serverIndex.get(serverId);
       index?.shift();
       if (index?.length === 0) this.serverIndex.delete(serverId);
     }
@@ -238,6 +274,7 @@ export class LogStore {
   }
 
   private insertSlot(slot: Slot): void {
+    this.sortedCache = undefined;
     this.slots[(this.head + this.size) % this.maxRows] = slot;
     const serverId = slot.event.serverId;
     let index: ServerIndex | undefined;
@@ -249,7 +286,11 @@ export class LogStore {
     // A plain for-in avoids allocating a key array per ingested line, which at
     // flood rates is the difference between steady state and constant GC.
     const fields = slot.event.fields;
-    if (fields) for (const key in fields) { this.columnCache.add(key); index?.fields.add(key); }
+    if (fields) for (const key in fields) {
+      if (!this.fieldCounts.has(key)) { this.columnCache.add(key); this.fieldNamesCache = undefined; }
+      this.fieldCounts.set(key, (this.fieldCounts.get(key) ?? 0) + 1);
+      if (index) index.fields.set(key, (index.fields.get(key) ?? 0) + 1);
+    }
     this.size++;
     this.bytes += slot.bytes;
   }
@@ -382,7 +423,10 @@ export class LogStore {
       this.filterFor({ before, sessionId, from, to, serverId, levelMatches, parsedQuery }));
     const matched = matches.length - start;
     if (sort) {
-      const sorted = sortEvents(matches.slice(start), sort, sortDirection);
+      const sortKey = JSON.stringify([key, sort, sortDirection]);
+      const sorted = !relative && this.sortedCache?.key === sortKey ? this.sortedCache.events
+        : sortEvents(matches.slice(start) as LogEvent[], sort, sortDirection);
+      this.sortedCache = relative ? undefined : { key: sortKey, events: sorted };
       const sortedPages = Math.max(1, Math.ceil(sorted.length / PAGE_SIZE));
       page = Math.max(0, Math.min(sortedPages - 1, Number.isInteger(page) ? page : 0));
       return { events: sorted.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE).map(pickFields), page, pages: sortedPages,
@@ -393,7 +437,7 @@ export class LogStore {
     // Each page is chronological; page zero is the newest page. `matches` is
     // oldest-first, so page N counts back from its end.
     const end = matched - page * PAGE_SIZE;
-    const events = matches.slice(start + Math.max(0, end - PAGE_SIZE), start + end).map(pickFields);
+    const events = (matches.slice(start + Math.max(0, end - PAGE_SIZE), start + end) as LogEvent[]).map(pickFields);
     return { events, page, pages, matched, ...this.stats() };
   }
 
@@ -416,12 +460,12 @@ export class LogStore {
   // and the oldest are evicted. So when the same filter is re-run — which is
   // what every refresh tick does while logs stream — only the events that
   // arrived since the last run need testing, instead of the whole ring.
-  private matchingEvents(key: string, cacheable: boolean, test: (event: LogEvent) => boolean): { matches: LogEvent[]; start: number } {
+  private matchingEvents(key: string, cacheable: boolean, test: (event: LogEvent) => boolean): Pick<PageCache, 'matches' | 'start'> {
     const newestId = this.size ? this.slots[(this.head + this.size - 1) % this.maxRows]!.event.id : -1;
     const cache = cacheable && this.pageCache?.key === key ? this.pageCache : undefined;
     if (cache) {
       const oldestId = this.size ? this.slots[this.head]!.event.id : Infinity;
-      while (cache.start < cache.matches.length && cache.matches[cache.start].id < oldestId) cache.start++;
+      while (cache.start < cache.matches.length && cache.matches[cache.start]!.id < oldestId) cache.matches[cache.start++] = undefined;
       if (cache.start > 1024 && cache.start * 2 > cache.matches.length) {
         cache.matches = cache.matches.slice(cache.start);
         cache.start = 0;
@@ -487,7 +531,7 @@ export class LogStore {
     // bare word — answers without touching the ring at all.
     const wantedServer = serverId?.toLowerCase();
     const known = serverId
-      ? this.serverIndex.get([...this.serverIndex.keys()].find(key => key.toLowerCase() === wantedServer) ?? serverId)?.fields
+      ? this.serverIndex.get([...this.serverIndex.keys()].find(key => key.toLowerCase() === wantedServer) ?? serverId)?.fields.keys()
       : this.columnCache;
     for (const key of known ?? []) fields.add(key);
     if (match?.[1]) {
@@ -535,9 +579,7 @@ export class LogStore {
   // query - the same idea as Grafana's log-pattern view or Splunk's Patterns tab.
   patterns(options: PageOptions = {}, events?: LogEvent[], trendBuckets = 10): LogPattern[] {
     const list = events ?? this.filtered(options);
-    const timestamps = list.map(event => event.timestampMs).filter((value): value is number => Number.isFinite(value));
-    const from = options.from ?? (timestamps.length ? Math.min(...timestamps) : undefined);
-    const to = options.to ?? (timestamps.length ? Math.max(...timestamps) : undefined);
+    const { from, to } = timeRange(list, options);
     const bucketSize = from !== undefined && to !== undefined ? Math.max(1, (to - from) / trendBuckets) : 1;
     const groups = new Map<string, LogPattern>();
     for (const event of list) {
@@ -557,9 +599,7 @@ export class LogStore {
 
   analysis(options: PageOptions = {}): AnalysisResult {
     const events = this.filtered(options);
-    const timestamps = events.map(event => event.timestampMs).filter((value): value is number => Number.isFinite(value));
-    const from = options.from ?? (timestamps.length ? Math.min(...timestamps) : undefined);
-    const to = options.to ?? (timestamps.length ? Math.max(...timestamps) : undefined);
+    const { from, to } = timeRange(events, options);
     const bucketSize = from !== undefined && to !== undefined ? Math.max(1, (to - from) / 30) : 1;
     const rate = Array.from({ length: 30 }, (_, bucket) => ({ bucket, count: 0 }));
     const errors = Array.from({ length: 30 }, (_, bucket) => ({ bucket, count: 0 }));
@@ -586,7 +626,7 @@ export class LogStore {
       errors: errors.map((item, index) => ({ ...item, anomalous: errorAnomalies[index] })),
       latency: latency.map((item, index) => ({ ...item, anomalous: latencyAnomalies[index] })),
       statusCodes: [...status.entries()].sort((a, b) => b[1] - a[1]).map(([code, count]) => ({ code, count })),
-      errorGroups: this.errorGroups(options, events), patterns: this.patterns(options, events), range: { from, to }
+      errorGroups: this.errorGroups(options, events), patterns: this.patterns({ ...options, from, to }, events), range: { from, to }
     };
   }
 
@@ -603,15 +643,47 @@ export class LogStore {
       truncated: this.truncated, bytes: this.bytes, maxBytes: this.maxBytes, maxRows: this.maxRows };
   }
 
-  columns(): string[] {
+  private columnKeys(serverId?: string): Iterable<string> {
+    if (serverId === undefined) return this.columnCache;
+    const key = [...this.serverIndex.keys()].find(key => key.toLowerCase() === serverId.toLowerCase());
+    return key === undefined ? [] : this.serverIndex.get(key)!.fields.keys();
+  }
+
+  columnFields(serverId?: string): string[] {
+    const fields: string[] = [];
+    for (const field of this.columnKeys(serverId)) { fields.push(field); if (fields.length === 200) break; }
+    return fields.sort(fieldCollator.compare);
+  }
+
+  columns(serverId?: string): string[] {
+    const known = this.columnFields(serverId);
     const preferred = ['service', 'logger', 'requestId', 'traceId', 'method', 'path', 'status', 'statusCode', 'durationMs', 'host', 'environment'];
-    return preferred.filter(key => this.columnCache.has(key)).slice(0, 6);
+    const chosen: string[] = [];
+    const groups = new Set<string>();
+    for (const field of preferred) {
+      const key = known.includes(field) ? field : known.find(key => canonicalField(key) === canonicalField(field));
+      if (key && !groups.has(canonicalField(key))) { chosen.push(key); groups.add(canonicalField(key)); }
+    }
+    for (const key of known) {
+      if (chosen.length >= 6) break;
+      const canonical = canonicalField(key);
+      if (groups.has(canonical) || ['level', 'message'].includes(canonical)
+        || ['@timestamp', 'ecs.version', 'severityNumber', 'SeverityNumber', 'timeUnixNano', 'observedTimeUnixNano', 'body.stringValue', 'Body.stringValue'].includes(key)) continue;
+      // Bare aliases of nested fields remain searchable, but need not duplicate
+      // their dotted column in the small automatic selection.
+      if (!key.includes('.') && known.some(other => other.endsWith('.' + key))) continue;
+      chosen.push(key); groups.add(canonical);
+    }
+    return chosen.slice(0, 6);
   }
 
   /** Every field observed in retained payloads, for sort/facet controls. */
   fieldNames(): string[] {
-    const extra = [...this.columnCache].filter(field => !BUILTIN_FIELDS.includes(field)).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
-    return [...BUILTIN_FIELDS, ...extra.slice(0, 200)].sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+    if (!this.fieldNamesCache) {
+      const extra = [...this.columnCache].filter(field => !BUILTIN_FIELDS.includes(field)).sort(fieldCollator.compare);
+      this.fieldNamesCache = [...BUILTIN_FIELDS, ...extra.slice(0, 200)].sort(fieldCollator.compare);
+    }
+    return this.fieldNamesCache.slice();
   }
 }
 

@@ -2,6 +2,19 @@
 
 All notable changes to Logline are documented in this file.
 
+## 1.5.0 — 2026-09-09
+
+- Fix Live following after layout changes and resume, avoid losing updates while a snapshot is in flight, and switch sorting to Browse until Live is explicitly resumed.
+- Preserve expanded details and their scroll position across virtual-table updates; restore focus without scrolling and keep preview rows at a consistent height.
+- Offer custom retained payload fields in Columns, scope automatic choices to the selected server, and recognize ECS, Pino HTTP, and individual OpenTelemetry log-record fields.
+
+- Drain excluded stdout/stderr pipes so single-stream capture cannot block the server.
+- Reuse string collators and cache sorted pages while their data and filters remain unchanged.
+- Compute timestamp bounds without spreading the retained set into function arguments, fixing Analyze and patterns with large retention settings.
+- Release field-name indexes and cached event references on eviction; bound the disk-write queue to 8 MiB and report skipped writes when the disk falls behind.
+- Stream local JSON, JSONL, CSV and plain-text imports, yield between batches, preserve raw JSON without a parse/serialize/parse cycle, and truncate oversized records at the configured line-length limit.
+- Count extracted fields directly and apply the 120-field limit to nested aliases and MDC fields together.
+
 ## 1.4.0 — 2026-09-08
 
 **Performance**
