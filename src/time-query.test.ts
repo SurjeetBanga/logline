@@ -1,7 +1,7 @@
-import test from 'node:test';
 import assert from 'node:assert/strict';
-import { matchesQuery } from './query';
-import type { LogEvent } from './types';
+import test from 'node:test';
+import { matchesQuery } from './core/query';
+import type { LogEvent } from './core/types';
 
 const now = Date.now();
 const event: LogEvent = { id: 1, level: 'info', message: 'recent', raw: '{}', timestamp: '12:00:00.000', timestampMs: now - 5 * 60000, fields: {} };

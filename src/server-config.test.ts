@@ -1,7 +1,7 @@
-import test from 'node:test';
 import assert from 'node:assert/strict';
-import { slugify, nextServerId, resolveAutoStartServers, resolveRunTarget, resolveCwd } from './server-config';
-import type { ServerConfig } from './types';
+import test from 'node:test';
+import { nextServerId, resolveAutoStartServers, resolveCwd, resolveRunTarget, slugify } from './core/server-config';
+import type { ServerConfig } from './core/types';
 
 test('slugify normalizes labels and falls back when nothing survives', () => {
   assert.equal(slugify('My Server!'), 'my-server');

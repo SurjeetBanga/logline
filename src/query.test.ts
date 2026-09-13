@@ -1,8 +1,8 @@
-import test from 'node:test';
 import assert from 'node:assert/strict';
-import { parseQuery, matchesQuery } from './query';
-import { parseLogLine } from './log-event';
-import type { LogEvent } from './types';
+import test from 'node:test';
+import { parseLogLine } from './core/log-event';
+import { matchesQuery, parseQuery } from './core/query';
+import type { LogEvent } from './core/types';
 
 const event: LogEvent = { id: 1, level: 'error', message: 'Database timeout', raw: '{"service":"api","status":503}', fields: { service: 'api', status: 503, requestId: 'abc-123' } };
 
@@ -100,8 +100,10 @@ test('server and session metadata are searchable even when not duplicated in fie
 });
 
 test('task lifecycle metadata is searchable by field, including the joined dependency list', () => {
-  const event: LogEvent = { id: 1, level: 'info', message: 'Task started', taskName: 'Build API', taskType: 'shell',
-    taskState: 'running', dependencies: ['Lint', 'Generate types'], dependencyState: 'pending', exitReason: 'exit code 1' };
+  const event: LogEvent = {
+    id: 1, level: 'info', message: 'Task started', taskName: 'Build API', taskType: 'shell',
+    taskState: 'running', dependencies: ['Lint', 'Generate types'], dependencyState: 'pending', exitReason: 'exit code 1'
+  };
   assert.equal(matchesQuery(event, 'taskName:"Build API"'), true);
   assert.equal(matchesQuery(event, 'taskType:shell'), true);
   assert.equal(matchesQuery(event, 'taskState:running'), true);

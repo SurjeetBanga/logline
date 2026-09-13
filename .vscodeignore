@@ -3,11 +3,13 @@
 .vscode/**
 node_modules/**
 src/**
-tsconfig.json
+tsconfig*.json
 out/**/*.test.js
 out/**/*.js.map
-out/types.js
+out/core/types.js
 *.vsix
 media/screenshot.png
 media/icon.svg
 samples/**
+out-tests/**
+scripts/**
