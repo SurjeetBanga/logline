@@ -1,6 +1,6 @@
 {
   "name": "logline",
-  "displayName": "Logline — Live Tail for JSON Logs",
+  "displayName": "Logline \u2014 Live Tail for JSON Logs",
   "description": "Live tail your server processes in a searchable, expandable JSON log viewer.",
   "version": "1.5.0",
   "publisher": "surjeetbanga",
@@ -332,16 +332,20 @@
     }
   },
   "scripts": {
-    "compile": "tsc -p ./",
-    "watch": "tsc -w -p ./",
-    "check": "tsc --noEmit && npm run compile && node --check out/extension.js && node --check media/viewer.js && node --test out",
+    "compile": "node scripts/build.mjs",
+    "watch": "node scripts/build.mjs --watch",
+    "check": "npm run typecheck && npm run compile && npm test",
     "vscode:prepublish": "npm run compile",
-    "package": "vsce package"
+    "package": "vsce package",
+    "typecheck": "tsc --noEmit && tsc -p tsconfig.webview.json && tsc -p tsconfig.test.json --noEmit",
+    "test": "node scripts/test.mjs",
+    "smoke": "npm run compile && tsc -p tsconfig.test.json && node scripts/smoke.mjs"
   },
   "devDependencies": {
     "@types/node": "^20.19.43",
     "@types/vscode": "1.90.0",
     "@vscode/vsce": "^3.6.0",
+    "esbuild": "^0.28.2",
     "typescript": "^5.9.3"
   }
 }

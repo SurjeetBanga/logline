@@ -1,9 +1,10 @@
-import test from 'node:test';
 import assert from 'node:assert/strict';
-import { LogStore, LineReader } from './log-store';
-import { parseLogLine } from './log-event';
-import { formatDetails } from './format-details';
-import type { LogEvent } from './types';
+import test from 'node:test';
+import { LineReader } from './capture/line-reader';
+import { formatDetails } from './core/format-details';
+import { parseLogLine } from './core/log-event';
+import { LogStore } from './core/log-store';
+import type { LogEvent } from './core/types';
 
 test('detail formatting preserves whitespace inside strings and large numeric IDs', () => {
   const raw = '{"message":"a  b", "id":9007199254740993,"empty":{},"list":[1,true]}';
@@ -77,7 +78,7 @@ test('search, level filtering, history pages and frozen boundaries', () => {
 });
 
 test('line reader handles split UTF-8, CRLF and a final unterminated line', () => {
-  const output: { line: string; truncated: boolean }[] = [];
+  const output: { line: string; truncated: boolean; }[] = [];
   const reader = new LineReader((line, truncated) => output.push({ line, truncated }));
   const input = Buffer.from('hi 😀\r\nlast');
   for (const byte of input) reader.write(Buffer.from([byte]));
@@ -86,7 +87,7 @@ test('line reader handles split UTF-8, CRLF and a final unterminated line', () =
 });
 
 test('newline-free output is bounded and parsing recovers after a truncated line', () => {
-  const output: { line: string; truncated: boolean }[] = [];
+  const output: { line: string; truncated: boolean; }[] = [];
   const reader = new LineReader((line, truncated) => output.push({ line, truncated }), 16);
   for (let i = 0; i < 10000; i++) reader.write(Buffer.from('x'.repeat(1024)));
   assert.equal(reader.pending.length, 16);
@@ -299,15 +300,27 @@ test('analysis flags rate buckets that spike against the series baseline, not ra
 test('error groups fingerprint by exception type and originating stack frame, not raw message text', () => {
   const store = new LogStore();
   const raw = (payload: unknown) => JSON.stringify(payload);
-  store.add({ id: 1, level: 'error', isJson: true, message: 'Failed to charge card ending 4242',
-    raw: raw({ message: 'Failed to charge card ending 4242',
-      err: { type: 'PaymentError', message: 'card declined', stack: 'PaymentError: card declined\n    at charge (/work/billing.ts:55:3)' } }) });
-  store.add({ id: 2, level: 'error', isJson: true, message: 'Failed to charge card ending 9999 for premium plan',
-    raw: raw({ message: 'Failed to charge card ending 9999 for premium plan',
-      err: { type: 'PaymentError', message: 'insufficient funds', stack: 'PaymentError: insufficient funds\n    at charge (/work/billing.ts:55:3)' } }) });
-  store.add({ id: 3, level: 'error', isJson: true, message: 'Failed to charge card ending 1111',
-    raw: raw({ message: 'Failed to charge card ending 1111',
-      err: { type: 'PaymentError', message: 'card declined', stack: 'PaymentError: card declined\n    at charge (/work/refund.ts:80:5)' } }) });
+  store.add({
+    id: 1, level: 'error', isJson: true, message: 'Failed to charge card ending 4242',
+    raw: raw({
+      message: 'Failed to charge card ending 4242',
+      err: { type: 'PaymentError', message: 'card declined', stack: 'PaymentError: card declined\n    at charge (/work/billing.ts:55:3)' }
+    })
+  });
+  store.add({
+    id: 2, level: 'error', isJson: true, message: 'Failed to charge card ending 9999 for premium plan',
+    raw: raw({
+      message: 'Failed to charge card ending 9999 for premium plan',
+      err: { type: 'PaymentError', message: 'insufficient funds', stack: 'PaymentError: insufficient funds\n    at charge (/work/billing.ts:55:3)' }
+    })
+  });
+  store.add({
+    id: 3, level: 'error', isJson: true, message: 'Failed to charge card ending 1111',
+    raw: raw({
+      message: 'Failed to charge card ending 1111',
+      err: { type: 'PaymentError', message: 'card declined', stack: 'PaymentError: card declined\n    at charge (/work/refund.ts:80:5)' }
+    })
+  });
   const groups = store.errorGroups();
   assert.equal(groups.length, 2);
   const billing = groups.find(group => group.location === '/work/billing.ts:55');
@@ -477,9 +490,11 @@ test('sorted pages keep natural ordering, missing values and cache invalidation 
 test('repeated sorted pages reuse comparisons until data changes; relative filters expire', t => {
   let reads = 0;
   const store = new LogStore(10);
-  for (let id = 1; id <= 5; id++) store.add({ id, level: 'info', timestampMs: 100000, fields: {
-    get requestId() { reads++; return `req-${id}`; }
-  } });
+  for (let id = 1; id <= 5; id++) store.add({
+    id, level: 'info', timestampMs: 100000, fields: {
+      get requestId() { reads++; return `req-${id}`; }
+    }
+  });
   const options = { sort: 'requestId' };
   store.page(options);
   const initial = reads;
@@ -501,7 +516,7 @@ test('eviction releases cached payload references even without another page requ
   store.page({ query: 'match', sort: 'id' });
   store.add({ id: 3, level: 'info', message: 'new' });
   store.add({ id: 4, level: 'info', message: 'new' });
-  const caches = store as unknown as { pageCache: { matches: (LogEvent | undefined)[] }; sortedCache?: unknown };
+  const caches = store as unknown as { pageCache: { matches: (LogEvent | undefined)[]; }; sortedCache?: unknown; };
   assert.ok(caches.pageCache.matches.every(event => event === undefined));
   assert.equal(caches.sortedCache, undefined);
   assert.equal(store.page({ query: 'match' }).matched, 0);
@@ -589,10 +604,12 @@ test('history paging and nearby context read bounded portions of retained histor
   const store = new LogStore(50000);
   for (let id = 1; id <= 50000; id++) store.add({ id, level: 'info', serverId: 'api', sessionId: 'run' });
   let reads = 0;
-  const countReads = <T>(items: T[]) => new Proxy(items, { get(target, key, receiver) {
-    if (typeof key === 'string' && /^\d+$/.test(key)) reads++;
-    return Reflect.get(target, key, receiver);
-  } });
+  const countReads = <T>(items: T[]) => new Proxy(items, {
+    get(target, key, receiver) {
+      if (typeof key === 'string' && /^\d+$/.test(key)) reads++;
+      return Reflect.get(target, key, receiver);
+    }
+  });
   store.slots = countReads(store.slots);
   for (const index of store.serverIndex.values()) index.items = countReads(index.items);
   for (const option of [{ page: 12 }, { page: 12, before: 40000 }, { page: 12, before: 40000, serverId: 'api' }]) {

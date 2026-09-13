@@ -1,6 +1,6 @@
-import { StringDecoder } from 'node:string_decoder';
-import { canonicalField, getField, matchesQuery, parseQuery, type ParsedQuery } from './query';
-import { analyzeEvents, groupErrors, findPatterns, type AnalysisResult, type ErrorGroup, type LogPattern } from './log-analysis';
+import { fieldValue, sortEvents } from './event-order';
+import { analyzeEvents, findPatterns, groupErrors, type AnalysisResult, type ErrorGroup, type LogPattern } from './log-analysis';
+import { canonicalField, matchesQuery, parseQuery, type ParsedQuery } from './query';
 import type { LogEvent } from './types';
 
 export type { AnalysisResult, ErrorGroup, LogPattern } from './log-analysis';
@@ -14,8 +14,10 @@ interface Slot {
 
 const pickFields = ({ id, timestamp, timestampMs, level, message, isJson, truncated, stream, fields,
   taskName, taskType, taskState, dependencies, dependencyState, exitReason }: LogEvent): LogEvent =>
-  ({ id, timestamp, timestampMs, level, message, isJson, truncated, stream, fields,
-    taskName, taskType, taskState, dependencies, dependencyState, exitReason });
+({
+  id, timestamp, timestampMs, level, message, isJson, truncated, stream, fields,
+  taskName, taskType, taskState, dependencies, dependencyState, exitReason
+});
 
 // A small append-only deque of slot refs for one server, oldest first. Eviction
 // from the main ring always removes the globally oldest surviving event, which
@@ -117,26 +119,7 @@ const BUILTIN_FIELDS = ['id', 'level', 'message', 'timestamp', 'timestampMs', 's
   'taskName', 'taskType', 'taskState', 'dependencies', 'dependencyState', 'exitReason', 'traceId', 'spanId', 'parentSpanId',
   'requestId', 'status', 'statusCode', 'durationMs'];
 
-function fieldValue(event: LogEvent, field: string): unknown {
-  if (field === 'id') return event.id;
-  if (field === 'timestampMs') return event.timestampMs;
-  return getField(event, field);
-}
-
-const valueCollator = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' });
 const fieldCollator = new Intl.Collator(undefined, { numeric: true });
-
-function sortEvents(events: LogEvent[], field: string, direction: 'asc' | 'desc' = 'asc'): LogEvent[] {
-  const sign = direction === 'desc' ? -1 : 1;
-  return events.sort((a, b) => {
-    const av = fieldValue(a, field); const bv = fieldValue(b, field);
-    if (av === undefined || av === null || av === '') return bv === undefined || bv === null || bv === '' ? a.id - b.id : 1;
-    if (bv === undefined || bv === null || bv === '') return -1;
-    const an = typeof av === 'number' ? av : Number(av); const bn = typeof bv === 'number' ? bv : Number(bv);
-    if (Number.isFinite(an) && Number.isFinite(bn)) return sign * (an - bn || a.id - b.id);
-    return sign * valueCollator.compare(String(av), String(bv)) || a.id - b.id;
-  });
-}
 
 // Approximate UTF-16 storage plus per-record overhead, not total process RSS.
 export class LogStore {
@@ -154,7 +137,7 @@ export class LogStore {
   private fieldNamesCache?: string[];
   serverIndex!: Map<string, ServerIndex>;
   private pageCache: PageCache | undefined;
-  private sortedCache?: { key: string; events: LogEvent[] };
+  private sortedCache?: { key: string; events: LogEvent[]; };
 
   constructor(maxRows = 100000, maxBytes = 100 * 1024 * 1024) {
     this.maxRows = maxRows;
@@ -258,7 +241,7 @@ export class LogStore {
 
   // Neighbours are in capture order within the same process session, including
   // both streams and every level. Query filters intentionally do not apply.
-  context(id: number): { events: LogEvent[]; server?: string; missing: boolean } {
+  context(id: number): { events: LogEvent[]; server?: string; missing: boolean; } {
     const anchor = this.find(id);
     if (!anchor) return { events: [], missing: true };
     const earlier: LogEvent[] = [];
@@ -348,8 +331,10 @@ export class LogStore {
       this.sortedCache = relative ? undefined : { key: sortKey, events: sorted };
       const sortedPages = Math.max(1, Math.ceil(sorted.length / PAGE_SIZE));
       page = Math.max(0, Math.min(sortedPages - 1, Number.isInteger(page) ? page : 0));
-      return { events: sorted.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE).map(pickFields), page, pages: sortedPages,
-        matched: sorted.length, ...this.stats() };
+      return {
+        events: sorted.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE).map(pickFields), page, pages: sortedPages,
+        matched: sorted.length, ...this.stats()
+      };
     }
     const pages = Math.max(1, Math.ceil(matched / PAGE_SIZE));
     page = Math.max(0, Math.min(pages - 1, Number.isInteger(page) ? page : 0));
@@ -436,8 +421,10 @@ export class LogStore {
     if (!Number.isFinite(before)) before = Infinity;
     const levelSet = levels ? new Set(levels) : undefined;
     const parsedQuery: ParsedQuery = parseQuery(query.slice(0, 256));
-    const test = this.filterFor({ before, sessionId, from, to, serverId,
-      levelMatches: (level: string) => !levelSet || levelSet.has(level), parsedQuery });
+    const test = this.filterFor({
+      before, sessionId, from, to, serverId,
+      levelMatches: (level: string) => !levelSet || levelSet.has(level), parsedQuery
+    });
     const events: LogEvent[] = [];
     for (let i = 0; i < this.size; i++) {
       const event = this.slots[(this.head + i) % this.maxRows]!.event;
@@ -452,7 +439,7 @@ export class LogStore {
   }
 
   /** Field names and the most common values for the current search input. */
-  fieldSuggestions(input = '', serverId?: string): { fields: string[]; values: FacetValue[] } {
+  fieldSuggestions(input = '', serverId?: string): { fields: string[]; values: FacetValue[]; } {
     const fields = new Set(BUILTIN_FIELDS);
     const values = new Map<string, number>();
     const match = input.match(/(?:^|\s)(?:@?([A-Za-z_][A-Za-z0-9_.]*):)?([^\s]*)$/);
@@ -475,8 +462,10 @@ export class LogStore {
         }
       }
     }
-    return { fields: [...fields].filter(field => field.toLowerCase().startsWith(fieldPrefix)).sort().slice(0, 40),
-      values: [...values.entries()].sort((a, b) => b[1] - a[1]).slice(0, 20).map(([value, count]) => ({ value, count })) };
+    return {
+      fields: [...fields].filter(field => field.toLowerCase().startsWith(fieldPrefix)).sort().slice(0, 40),
+      values: [...values.entries()].sort((a, b) => b[1] - a[1]).slice(0, 20).map(([value, count]) => ({ value, count }))
+    };
   }
 
   facets(field: string, options: PageOptions = {}): FacetValue[] {
@@ -511,8 +500,10 @@ export class LogStore {
   }
 
   stats(): Stats {
-    return { total: this.total, retained: this.size, discarded: this.discarded,
-      truncated: this.truncated, bytes: this.bytes, maxBytes: this.maxBytes, maxRows: this.maxRows };
+    return {
+      total: this.total, retained: this.size, discarded: this.discarded,
+      truncated: this.truncated, bytes: this.bytes, maxBytes: this.maxBytes, maxRows: this.maxRows
+    };
   }
 
   private columnKeys(serverId?: string): Iterable<string> {
@@ -557,45 +548,4 @@ export class LogStore {
     }
     return this.fieldNamesCache.slice();
   }
-}
-
-export class LineReader {
-  onLine: (line: string, truncated: boolean) => void;
-  limit: number;
-  pending: string;
-  truncated: boolean;
-  decoder: StringDecoder;
-
-  constructor(onLine: (line: string, truncated: boolean) => void, limit = 64 * 1024) {
-    this.onLine = onLine;
-    this.limit = limit;
-    this.pending = '';
-    this.truncated = false;
-    this.decoder = new StringDecoder('utf8');
-  }
-
-  write(chunk: Buffer): void { this.consume(this.decoder.write(chunk)); }
-
-  consume(text: string): void {
-    let start = 0;
-    while (start < text.length) {
-      const newline = text.indexOf('\n', start);
-      const end = newline === -1 ? text.length : newline;
-      const room = this.limit - this.pending.length;
-      this.pending += text.slice(start, Math.min(end, start + room));
-      if (end - start > room) this.truncated = true;
-      if (newline === -1) break;
-      this.emit();
-      start = newline + 1;
-    }
-  }
-
-  emit(): void {
-    const line = this.pending.replace(/\r$/, '');
-    if (line || this.truncated) this.onLine(line, this.truncated);
-    this.pending = '';
-    this.truncated = false;
-  }
-
-  end(): void { this.consume(this.decoder.end()); this.emit(); }
 }
