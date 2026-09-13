@@ -1,6 +1,6 @@
-import test from 'node:test';
 import assert from 'node:assert/strict';
-import { parseLogLine, normalizeLevel, stripAnsi } from './log-event';
+import test from 'node:test';
+import { normalizeLevel, parseLogLine, stripAnsi } from './core/log-event';
 const now = new Date('2026-09-06T18:00:00.123Z');
 
 test('extracts common fields from JSON logs', () => {
@@ -90,7 +90,8 @@ test('ECS logs normalize metadata while retaining dotted and nested fields', () 
 });
 
 test('OpenTelemetry log records decode typed attributes and nanosecond timestamps', () => {
-  const event = parseLogLine(JSON.stringify({ timeUnixNano: '1788955200123456789', severityNumber: 17,
+  const event = parseLogLine(JSON.stringify({
+    timeUnixNano: '1788955200123456789', severityNumber: 17,
     body: { stringValue: 'request failed' }, traceId: 't1',
     attributes: [{ key: 'http.response.status_code', value: { intValue: '503' } }, { key: 'retry', value: { boolValue: false } }],
     resource: { attributes: [{ key: 'service.name', value: { stringValue: 'checkout' } }] }

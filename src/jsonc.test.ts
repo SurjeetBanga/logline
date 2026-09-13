@@ -1,6 +1,6 @@
-import test from 'node:test';
 import assert from 'node:assert/strict';
-import { parseJsonc } from './jsonc';
+import test from 'node:test';
+import { parseJsonc } from './core/jsonc';
 
 test('parses plain JSON unchanged', () => {
   assert.deepEqual(parseJsonc('{"a": 1, "b": [1, 2]}'), { a: 1, b: [1, 2] });

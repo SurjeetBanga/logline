@@ -1,9 +1,10 @@
-import test from 'node:test';
 import assert from 'node:assert/strict';
-import { LogStore, LineReader } from './log-store';
-import { parseLogLine } from './log-event';
-import { formatDetails } from './format-details';
-import type { LogEvent } from './types';
+import test from 'node:test';
+import { LineReader } from './capture/line-reader';
+import { formatDetails } from './core/format-details';
+import { parseLogLine } from './core/log-event';
+import { LogStore } from './core/log-store';
+import type { LogEvent } from './core/types';
 
 test('detail formatting preserves whitespace inside strings and large numeric IDs', () => {
   const raw = '{"message":"a  b", "id":9007199254740993,"empty":{},"list":[1,true]}';
@@ -77,7 +78,7 @@ test('search, level filtering, history pages and frozen boundaries', () => {
 });
 
 test('line reader handles split UTF-8, CRLF and a final unterminated line', () => {
-  const output: { line: string; truncated: boolean }[] = [];
+  const output: { line: string; truncated: boolean; }[] = [];
   const reader = new LineReader((line, truncated) => output.push({ line, truncated }));
   const input = Buffer.from('hi 😀\r\nlast');
   for (const byte of input) reader.write(Buffer.from([byte]));
@@ -86,7 +87,7 @@ test('line reader handles split UTF-8, CRLF and a final unterminated line', () =
 });
 
 test('newline-free output is bounded and parsing recovers after a truncated line', () => {
-  const output: { line: string; truncated: boolean }[] = [];
+  const output: { line: string; truncated: boolean; }[] = [];
   const reader = new LineReader((line, truncated) => output.push({ line, truncated }), 16);
   for (let i = 0; i < 10000; i++) reader.write(Buffer.from('x'.repeat(1024)));
   assert.equal(reader.pending.length, 16);
@@ -114,7 +115,7 @@ test('the large-store fast path agrees with the general search path', () => {
     store.add({ id, raw: `event ${id}`, message: `event ${id}`, level: id % 5 === 0 ? 'error' : 'info' });
   }
   const fast = store.page();
-  const general = store.page({ before: store.total });
+  const general = store.page({ before: store.total, levels: ['info', 'error'] });
   assert.deepEqual(fast.events, general.events.slice(0, 1000));
   assert.equal(fast.matched, general.matched);
   assert.equal(fast.matched, store.size);
@@ -127,7 +128,7 @@ test('the per-server fast path agrees with the general search path', () => {
     store.add({ id, raw: `event ${id}`, message: `event ${id}`, level: 'info', serverId, fields: { serverId } });
   }
   const fast = store.page({ query: 'serverId:api' });
-  const general = store.page({ query: 'serverId:api', before: store.total });
+  const general = store.page({ query: 'serverId:api', before: store.total, levels: ['info'] });
   assert.deepEqual(fast.events, general.events.slice(0, 1000));
   assert.equal(fast.matched, general.matched);
   assert.equal(fast.matched, Math.floor(20000 / 3));
@@ -299,15 +300,27 @@ test('analysis flags rate buckets that spike against the series baseline, not ra
 test('error groups fingerprint by exception type and originating stack frame, not raw message text', () => {
   const store = new LogStore();
   const raw = (payload: unknown) => JSON.stringify(payload);
-  store.add({ id: 1, level: 'error', isJson: true, message: 'Failed to charge card ending 4242',
-    raw: raw({ message: 'Failed to charge card ending 4242',
-      err: { type: 'PaymentError', message: 'card declined', stack: 'PaymentError: card declined\n    at charge (/work/billing.ts:55:3)' } }) });
-  store.add({ id: 2, level: 'error', isJson: true, message: 'Failed to charge card ending 9999 for premium plan',
-    raw: raw({ message: 'Failed to charge card ending 9999 for premium plan',
-      err: { type: 'PaymentError', message: 'insufficient funds', stack: 'PaymentError: insufficient funds\n    at charge (/work/billing.ts:55:3)' } }) });
-  store.add({ id: 3, level: 'error', isJson: true, message: 'Failed to charge card ending 1111',
-    raw: raw({ message: 'Failed to charge card ending 1111',
-      err: { type: 'PaymentError', message: 'card declined', stack: 'PaymentError: card declined\n    at charge (/work/refund.ts:80:5)' } }) });
+  store.add({
+    id: 1, level: 'error', isJson: true, message: 'Failed to charge card ending 4242',
+    raw: raw({
+      message: 'Failed to charge card ending 4242',
+      err: { type: 'PaymentError', message: 'card declined', stack: 'PaymentError: card declined\n    at charge (/work/billing.ts:55:3)' }
+    })
+  });
+  store.add({
+    id: 2, level: 'error', isJson: true, message: 'Failed to charge card ending 9999 for premium plan',
+    raw: raw({
+      message: 'Failed to charge card ending 9999 for premium plan',
+      err: { type: 'PaymentError', message: 'insufficient funds', stack: 'PaymentError: insufficient funds\n    at charge (/work/billing.ts:55:3)' }
+    })
+  });
+  store.add({
+    id: 3, level: 'error', isJson: true, message: 'Failed to charge card ending 1111',
+    raw: raw({
+      message: 'Failed to charge card ending 1111',
+      err: { type: 'PaymentError', message: 'card declined', stack: 'PaymentError: card declined\n    at charge (/work/refund.ts:80:5)' }
+    })
+  });
   const groups = store.errorGroups();
   assert.equal(groups.length, 2);
   const billing = groups.find(group => group.location === '/work/billing.ts:55');
@@ -477,9 +490,11 @@ test('sorted pages keep natural ordering, missing values and cache invalidation 
 test('repeated sorted pages reuse comparisons until data changes; relative filters expire', t => {
   let reads = 0;
   const store = new LogStore(10);
-  for (let id = 1; id <= 5; id++) store.add({ id, level: 'info', timestampMs: 100000, fields: {
-    get requestId() { reads++; return `req-${id}`; }
-  } });
+  for (let id = 1; id <= 5; id++) store.add({
+    id, level: 'info', timestampMs: 100000, fields: {
+      get requestId() { reads++; return `req-${id}`; }
+    }
+  });
   const options = { sort: 'requestId' };
   store.page(options);
   const initial = reads;
@@ -501,7 +516,7 @@ test('eviction releases cached payload references even without another page requ
   store.page({ query: 'match', sort: 'id' });
   store.add({ id: 3, level: 'info', message: 'new' });
   store.add({ id: 4, level: 'info', message: 'new' });
-  const caches = store as unknown as { pageCache: { matches: (LogEvent | undefined)[] }; sortedCache?: unknown };
+  const caches = store as unknown as { pageCache: { matches: (LogEvent | undefined)[]; }; sortedCache?: unknown; };
   assert.ok(caches.pageCache.matches.every(event => event === undefined));
   assert.equal(caches.sortedCache, undefined);
   assert.equal(store.page({ query: 'match' }).matched, 0);
@@ -546,4 +561,63 @@ test('ECS, Pino HTTP and Log4j alias fields are discovered as useful columns and
     assert.ok(store.columns().length >= 3);
     assert.equal(store.page({ query: 'service:api status:503' }).matched, 1);
   }
+});
+
+test('indexed history pages match filtered capture order across gaps, wrapping and frozen boundaries', () => {
+  const store = new LogStore(4200);
+  for (let id = 2; id <= 12000; id += 2) store.add({ id, level: 'info', serverId: id % 6 ? 'api' : 'worker' });
+  for (const serverId of [undefined, 'API', 'missing']) {
+    for (const before of [Infinity, 11991, 8000, 3599]) {
+      const expected = store.all({ serverId, before });
+      for (const requestedPage of [0, 1, 4, -1, NaN, 1.5]) {
+        const result = store.page({ serverId, before, page: requestedPage });
+        const pages = Math.max(1, Math.ceil(expected.length / 1000));
+        const page = Math.max(0, Math.min(pages - 1, Number.isInteger(requestedPage) ? requestedPage : 0));
+        const end = expected.length - page * 1000;
+        assert.equal(result.matched, expected.length);
+        assert.equal(result.pages, pages);
+        assert.equal(result.page, page);
+        assert.deepEqual(result.events.map(event => event.id), expected.slice(Math.max(0, end - 1000), end).map(event => event.id));
+      }
+    }
+  }
+});
+
+test('server index shortcuts preserve combined filters, case variants and numeric queries', () => {
+  const store = new LogStore();
+  for (let id = 1; id <= 15000; id++) store.add({ id, level: 'info', serverId: ['api', 'API', 'worker', '123', '234'][id % 5] });
+  const options = [
+    { serverId: 'api' },
+    { serverId: 'worker', query: 'serverId:api' },
+    { serverId: 'api', query: 'serverId:worker' },
+    { query: 'serverId:>200' }
+  ];
+  for (const option of options) {
+    const expected = store.all(option);
+    const result = store.page(option);
+    assert.equal(result.matched, expected.length, JSON.stringify(option));
+    assert.deepEqual(result.events.map(event => event.id), expected.slice(-1000).map(event => event.id));
+  }
+});
+
+test('history paging and nearby context read bounded portions of retained history', () => {
+  const store = new LogStore(50000);
+  for (let id = 1; id <= 50000; id++) store.add({ id, level: 'info', serverId: 'api', sessionId: 'run' });
+  let reads = 0;
+  const countReads = <T>(items: T[]) => new Proxy(items, {
+    get(target, key, receiver) {
+      if (typeof key === 'string' && /^\d+$/.test(key)) reads++;
+      return Reflect.get(target, key, receiver);
+    }
+  });
+  store.slots = countReads(store.slots);
+  for (const index of store.serverIndex.values()) index.items = countReads(index.items);
+  for (const option of [{ page: 12 }, { page: 12, before: 40000 }, { page: 12, before: 40000, serverId: 'api' }]) {
+    reads = 0;
+    assert.equal(store.page(option).events.length, 1000);
+    assert.ok(reads < 1100, `paging read ${reads} entries`);
+  }
+  reads = 0;
+  assert.deepEqual(store.context(45000).events.map(event => event.id), Array.from({ length: 51 }, (_, i) => 44975 + i));
+  assert.ok(reads < 100, `context read ${reads} entries`);
 });
