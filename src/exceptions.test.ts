@@ -1,14 +1,18 @@
-import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { extractExceptions, parseSourceLocation } from './exceptions';
-import { parseLogLine } from './log-event';
+import { test } from 'node:test';
+import { extractExceptions, parseSourceLocation } from './core/exceptions';
+import { parseLogLine } from './core/log-event';
 
 const exception = (value: unknown) => extractExceptions(parseLogLine(JSON.stringify(value), 'stdout', 1, new Date()));
 
 test('JSON exception stacks become readable frames and retain nested causes', () => {
-  const blocks = exception({ message: 'Checkout failed', err: { type: 'Error', message: 'Payment failed',
-    stack: 'Error: Payment failed\n    at pay (/work/src/pay.ts:42:9)',
-    cause: { name: 'TimeoutError', message: 'Timed out', stack: 'TimeoutError: Timed out\n    at retry (src/retry.ts:8:2)' } } });
+  const blocks = exception({
+    message: 'Checkout failed', err: {
+      type: 'Error', message: 'Payment failed',
+      stack: 'Error: Payment failed\n    at pay (/work/src/pay.ts:42:9)',
+      cause: { name: 'TimeoutError', message: 'Timed out', stack: 'TimeoutError: Timed out\n    at retry (src/retry.ts:8:2)' }
+    }
+  });
   assert.equal(blocks.length, 2);
   assert.equal(blocks[0].title, 'Error: Payment failed');
   assert.deepEqual(blocks[0].lines[1].source, { file: '/work/src/pay.ts', line: 42, column: 9 });
@@ -33,9 +37,13 @@ test('rejects remote, command, internal, and invalid source locations', () => {
 });
 
 test('supports Log4j2 structured throwable frames and OpenTelemetry exception fields', () => {
-  const blocks = exception({ thrown: { name: 'java.lang.RuntimeException', message: 'Failed',
-    extendedStackTrace: [{ class: 'app.Service', method: 'run', file: 'Service.java', line: 27 }],
-    cause: { name: 'java.io.IOException', message: 'Connection lost' } } });
+  const blocks = exception({
+    thrown: {
+      name: 'java.lang.RuntimeException', message: 'Failed',
+      extendedStackTrace: [{ class: 'app.Service', method: 'run', file: 'Service.java', line: 27 }],
+      cause: { name: 'java.io.IOException', message: 'Connection lost' }
+    }
+  });
   assert.equal(blocks.length, 2);
   assert.equal(blocks[0].lines[0].source?.line, 27);
   assert.match(blocks[1].title, /Caused by: java.io.IOException/);

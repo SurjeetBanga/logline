@@ -10,7 +10,7 @@ class RecordBuffer {
   private parts: string[] = [];
   private length = 0;
   private truncated = false;
-  constructor(private limit: number) {}
+  constructor(private limit: number) { }
   append(text: string): void {
     const room = this.limit - this.length;
     if (text.length > room) this.truncated = true;

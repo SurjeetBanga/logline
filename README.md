@@ -110,16 +110,17 @@ Disk persistence buffers up to 8 MiB of estimated text storage, including writes
 
 ## Development
 
-This directory contains the extension core, written in TypeScript (`src/`, compiled to `out/`). The webview UI (`media/viewer.js`) is plain JS. Manual testing uses a pair of demo servers — a Node server that emits mixed JSON and plain-text events, and a Spring Boot app — kept outside this repository and not part of the published package.
+The extension host and browser UI are written in TypeScript. Host code compiles to `out/`; `src/webview/main.ts` bundles into the generated `media/viewer.js`. Edit the webview sources and run `npm run compile` to update that bundle.
 
-`src/log-store.ts` owns retention, indexes, filtering, and paging. `src/log-analysis.ts` computes metrics, error groups, and patterns from matching events without depending on the store or VS Code. Performance regression tests check how many retained entries paging and context requests read, and verify that unchanged viewer controls keep their DOM nodes.
+See [ARCHITECTURE.md](ARCHITECTURE.md) for module responsibilities, dependency boundaries, state ownership, and testing. `src/core/log-store.ts` owns retention, indexes, filtering, and paging. Independent parsing, analysis, capture, persistence, transfer, and VS Code integration have their own modules.
 
 `samples/demo-logs.jsonl` is a synthetic JSON Lines fixture (not part of the published package) for exercising the viewer without a live server: **Logline: Import Logs** it to get a realistic mix of services, levels, HTTP fields, linked trace/span ids, and two recurring, distinct error call sites, useful for screenshots or trying search, sort, facets, and Analyze.
 
 ```sh
 npm install
 npm run check     # type-check, compile, and run the test suite
-npm run watch     # recompile on change
+npm run watch     # watch host and browser sources
+npm run smoke     # isolated VS Code activation/task smoke test
 npm run package
 ```
 
