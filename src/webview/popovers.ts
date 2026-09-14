@@ -27,11 +27,13 @@ export function createPopovers(scope: EventScope) {
         panel.style.bottom = '';
         panel.style.maxHeight = '';
         panel.style.position = '';
-        // Columns and the syntax guide need a longer, independently scrolling
-        // panel. In a short docked view, an absolutely positioned panel can be
-        // clipped by the log table's scroll layer, leaving only its heading
-        // visible. Anchor these panels to the viewport instead.
-        if (panel.classList.contains('fields-panel') || panel.classList.contains('cheat-sheet')) {
+        // The search toolbar is horizontally scrollable so its controls stay
+        // on one row. Any absolutely positioned menu inside that scroller is
+        // clipped to the toolbar's height, which makes All levels and Saved
+        // searches appear not to open. Anchor every toolbar menu to the
+        // viewport so it can escape that clipping layer.
+        if (panel.classList.contains('fields-panel') || panel.classList.contains('cheat-sheet')
+          || panel.classList.contains('level-menu') || panel.classList.contains('saved-searches')) {
           const trigger = button.getBoundingClientRect();
           const margin = 8;
           const spaceBelow = window.innerHeight - trigger.bottom - margin;
