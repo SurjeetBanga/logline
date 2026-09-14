@@ -37,24 +37,33 @@ export class ViewerState {
     this.columnWidths = saved.columnWidths && typeof saved.columnWidths === 'object' ? saved.columnWidths : {};
     this.columnOrder = Array.isArray(saved.columnOrder) ? saved.columnOrder : [];
     this.hiddenColumns = new Set(Array.isArray(saved.hiddenColumns) ? saved.hiddenColumns : []);
-    this.checkedLevels = new Set(Array.isArray(saved.levels) ? saved.levels : LEVELS);
+    this.checkedLevels = new Set(Array.isArray(saved.levels) ? saved.levels.filter(level => LEVELS.includes(level)) : LEVELS);
   }
   currentLevels(): string[] | undefined { return this.checkedLevels.size === LEVELS.length ? undefined : [...this.checkedLevels]; }
   setFollowing(value: boolean): void { this.following = value; this.before = value ? undefined : this.newest; }
   filterChanged(): void { this.page = 0; this.lastRows = undefined; }
   resetSelection(): void { this.selected = undefined; this.selectedDetailText = undefined; this.selectedExceptions = []; }
+  /** Explicit changes close inspection while keeping a fixed history boundary. */
+  browseFromInspection(): void {
+    if (!this.paused) return;
+    this.paused = false; this.resetSelection(); this.following = false;
+    this.before ??= this.newest;
+    this.lastRows = undefined;
+  }
   resume(): void {
     this.paused = false; this.resetSelection(); this.selectedSort = ''; this.filterChanged(); this.setFollowing(true);
   }
   inspect(id: number): boolean {
     const opening = this.selected !== id;
     this.resetSelection();
-    if (opening) { this.selected = id; this.paused = true; }
+    if (opening) { this.selected = id; this.paused = true; this.before ??= this.newest; }
     return opening;
   }
   sort(field: string): void {
     this.selectedSortDirection = this.selectedSort === field && this.selectedSortDirection === 'desc' ? 'asc' : 'desc';
-    this.selectedSort = field; this.setFollowing(false); this.filterChanged();
+    this.selectedSort = field;
+    if (!this.paused) this.setFollowing(false);
+    this.filterChanged();
   }
   persist(query: string): PersistedState {
     return {

@@ -26,7 +26,7 @@ export function createViewer(api: WebviewApi) {
   const inspection = createInspection(elements, scrollViewport, api, formatTimestamp, scope);
   const search = createSearch(elements, state, api, popovers, { filterChanged }, scope);
   const table = createTable(elements, scrollViewport, state, api, formatTimestamp,
-    { request, saveState, filterChanged, setFollowing, updateFollowControl, updateModeLabel }, scope);
+    { request: requestInteraction, saveState, filterChanged, setFollowing, updateFollowControl, updateModeLabel }, scope);
   let serverSignature = '';
   let searchDebounce: ReturnType<typeof setTimeout> | undefined;
   let autocompleteDebounce: ReturnType<typeof setTimeout> | undefined;
@@ -59,6 +59,7 @@ export function createViewer(api: WebviewApi) {
       // The browser's built-in search clear button fires an input event. A
       // response for the text just cleared may still be in transit, but an
       // empty search should never open a field-name dropdown.
+      if (data.input !== elements.search.value || (data.serverId ?? '') !== state.selectedServer) return;
       if (elements.search.value.trim()) search.renderAutocomplete(data);
       else search.clearAutocomplete();
       return;
@@ -203,7 +204,11 @@ export function createViewer(api: WebviewApi) {
     elements.copyResults.hidden = !hasActiveFilter();
     elements.copyResults.textContent = 'Copy results';
   }
-  function filterChanged() { state.filterChanged(); updateCopyResultsControl(); saveState(); request(true); }
+  function requestInteraction() {
+    if (state.paused) { state.browseFromInspection(); table.resetDetails(); table.renderWindow(); }
+    updateFollowControl(); updateModeLabel(); request(true);
+  }
+  function filterChanged() { state.filterChanged(); updateCopyResultsControl(); saveState(); requestInteraction(); }
 
   function filterForCell(id: number, column: string): { query: string; label: string; } | undefined {
     const event = table.events.find(item => item.id === id);
@@ -271,6 +276,7 @@ export function createViewer(api: WebviewApi) {
   });
 
   scope.listen(elements.search, 'input', () => {
+    search.clearAutocomplete();
     updateCopyResultsControl();
     clearTimeout(searchDebounce);
     searchDebounce = setTimeout(filterChanged, 150);
@@ -336,13 +342,14 @@ export function createViewer(api: WebviewApi) {
   scope.listen(elements.analysisClose, 'click', () => elements.analysisDialog.close());
 
   scope.listen(elements.server, 'change', () => {
+    search.clearAutocomplete();
     state.selectedServer = elements.server.value;
     state.page = 0;
     state.lastRows = undefined;
     table.resetAutomaticColumns();
     updateCopyResultsControl();
     saveState();
-    request(true);
+    requestInteraction();
   });
 
   scope.listen(elements.follow, 'click', () => {
@@ -352,13 +359,13 @@ export function createViewer(api: WebviewApi) {
     } else { setFollowing(false); updateFollowControl(); request(true); }
   });
   scope.listen(elements.older, 'click', () => {
-    if (state.following)
+    if (state.following && !state.paused)
       setFollowing(false);
     state.page = Math.min(state.pages - 1, state.page + 1);
-    request(true);
+    requestInteraction();
   });
 
-  scope.listen(elements.newer, 'click', () => { state.page = Math.max(0, state.page - 1); request(true); });
+  scope.listen(elements.newer, 'click', () => { state.page = Math.max(0, state.page - 1); requestInteraction(); });
 
   scope.listen(elements.clear, 'click', () => {
     // The host clears asynchronously. Reset the data-derived column picker
@@ -370,8 +377,10 @@ export function createViewer(api: WebviewApi) {
     table.updateColumns([], true);
     table.renderFieldList();
     search.clearAutocomplete();
+    state.browseFromInspection();
+    table.resetDetails();
     api.postMessage({ type: 'clear' });
-    request(true);
+    requestInteraction();
   });
 
   scope.listen(elements.stop, 'click', () => api.postMessage({ type: 'stop', serverId: state.selectedServer || undefined }));

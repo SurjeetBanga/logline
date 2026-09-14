@@ -3,7 +3,7 @@ import type * as vscode from 'vscode';
 import type { Ingestion } from '../../capture/ingestion';
 import type { RuntimeState } from '../../capture/runtime-state';
 import type { SessionRegistry } from '../../capture/session-registry';
-import { slugify } from '../../core/server-config';
+import { taskIdentity } from '../../capture/task-identity';
 import type { SessionSummary } from '../../core/types';
 import { dependencyNames, taskDefinitionLabel } from './definition';
 
@@ -24,22 +24,25 @@ export class TaskLifecycle {
     const taskName = taskDefinitionLabel(task);
     const definition = task.definition as Record<string, unknown>;
     const deps = dependencyNames(task);
+    const taskScope = typeof task.scope === 'object' ? task.scope.uri.toString() : undefined;
     const record: SessionSummary = {
       id: randomBytes(8).toString('hex'),
-      serverId: `task:${slugify(taskName)}`,
+      serverId: taskIdentity(taskName, String(definition.type), taskScope),
       server: taskName,
       status: 'running',
       startedAt: Date.now(),
       events: 0,
       taskName,
       taskType: String(definition.type),
+      taskScope, taskLabel: task.name,
       taskState: 'running',
       dependencies: deps,
-      dependencyState: this.registry.dependencyState(deps),
+      dependencyState: this.registry.dependencyState(deps, taskScope),
       source: task.source
     };
     this.executions.set(execution, record);
     this.registry.records.set(record.id, record);
+    this.registry.refreshDependents(record.taskName, record.taskScope, record.taskLabel);
     // Keep the command useful in the header when the task is the most recent
     // thing the user started.
     this.state.command = taskName;
@@ -99,7 +102,7 @@ export class TaskLifecycle {
     record.exitReason = exitCode === undefined ? 'terminated' : `exit code ${exitCode}`;
     record.taskState = exitCode === undefined || exitCode !== 0 ? 'failed' : 'exited';
     if (record.taskState === 'failed') record.status = 'failed';
-    this.registry.refreshDependents(record.taskName);
+    this.registry.refreshDependents(record.taskName, record.taskScope, record.taskLabel);
     this.taskLifecycleEvent(record, `Task process ended: ${record.taskName} (${record.exitReason})`, record.status === 'failed' ? 'error' : 'info', { exitCode });
     this.registry.pruneSessionRegistry();
   }
@@ -111,7 +114,7 @@ export class TaskLifecycle {
     if (record.status !== 'failed') record.status = record.exitCode === undefined || record.exitCode === 0 ? 'exited' : 'failed';
     record.taskState = record.status;
     record.exitReason ??= record.status === 'exited' ? 'completed' : 'failed';
-    this.registry.refreshDependents(record.taskName);
+    this.registry.refreshDependents(record.taskName, record.taskScope, record.taskLabel);
     this.taskLifecycleEvent(record, `Task ended: ${record.taskName} (${record.exitReason})`, record.status === 'failed' ? 'error' : 'info');
     this.executions.delete(execution);
     if (!this.executions.size && !this.hasProcesses()) {

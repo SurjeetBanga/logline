@@ -2,6 +2,27 @@
 
 All notable changes to Logline are documented in this file.
 
+## Unreleased
+
+- Stream full exports with cancellable progress and staged local writes; cap CSV at 200 payload columns and whole-file provider exports at 16 MiB.
+- Normalize configuration ranges and types before capture, require integer count/timer settings, and validate saved server entries before auto-start.
+- Apply explicit filters, paging, sorting, and column selection while inspecting an event by returning to Browse; continue ignoring live row updates while inspection stays open.
+- Preserve the query prefix in autocomplete, escape suggested values, ignore stale input/server responses, and use server indexes for value suggestions.
+- Generate scoped task identities and resolve dependencies against the latest run in the same workspace folder, including converted labels.
+- Target the selected server when names are duplicated, validate persisted saved searches, and reuse default text-redaction patterns.
+
+- Limit Copy results and AI exports before cloning/redaction by reusing indexed paging; read export settings once per selection.
+- Include flattened fields and dependency strings in estimated retention memory. Wide events may now be evicted sooner under the same budget.
+- Preserve regex case, uppercase escapes, and flags; support numeric `id` and `timestampMs` queries.
+- Handle non-primitive log metadata without interrupting ingestion and preserve payload fields named like JavaScript prototype properties.
+- Replace deeply nested JSON with the redaction marker if structured redaction cannot complete, preventing a fallback to unredacted JSON text.
+- Count and report failed persistence batches while allowing later writes to continue.
+- Save level-only searches and distinguish otherwise identical searches with different level filters.
+- Discover tasks across workspace folders, preserve their scope, and retain literal argument mode for an explicit empty argument array.
+- Refuse task conversion into malformed or concurrently changed files; preserve multiple trailing JSONC comments during insertion.
+- Allow structured columns after plain startup output and include fields from all case variants of a selected server ID.
+- Correct import/export, saved-search, memory, and process-control documentation; add a reproducible benchmark and prioritized code review.
+
 ## 1.5.0 — 2026-09-09
 
 - Fix Live following after layout changes and resume, avoid losing updates while a snapshot is in flight, and switch sorting to Browse until Live is explicitly resumed.

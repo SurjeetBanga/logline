@@ -14,8 +14,11 @@ function pickColumns(event: LogEvent, columns: string[]): LogEvent['fields'] {
   if (!fields) return fields;
   const picked: Record<string, string | number | boolean> = {};
   for (const column of columns) {
-    const value = fields[column] ?? getField(event, column);
-    if (value !== undefined) picked[column] = value;
+    const value = Object.hasOwn(fields, column) ? fields[column] : getField(event, column);
+    if (value !== undefined) {
+      if (column === '__proto__') Object.defineProperty(picked, column, { value, enumerable: true, writable: true, configurable: true });
+      else picked[column] = value;
+    }
   }
   return picked;
 }

@@ -1,4 +1,5 @@
 import type { HostMessage } from '../../protocol/messages';
+import { completeQuery } from '../../core/query-completion';
 import type { SavedSearch } from '../../storage/saved-searches';
 import type { Elements } from '../dom';
 import { emptyMessage } from '../dom';
@@ -121,9 +122,12 @@ export function createSearch(elements: Elements, state: ViewerState, api: Webvie
   function renderAutocomplete(data: Extract<HostMessage, { type: 'autocomplete'; }>) {
     if (!elements.fieldSuggestions)
       return;
-    elements.fieldSuggestions.replaceChildren(...[...(data.fields ?? []), ...(data.values ?? []).map(value => value.value)].map(value => {
+    elements.fieldSuggestions.replaceChildren(...completeQuery(data.input, data.fields, data.values).map(value => {
       const option = document.createElement('option');
       option.value = value;
+      // Quoting may interrupt the typed prefix in the replacement value.
+      // Native datalists also match labels, so retain that prefix there.
+      if (!value.toLowerCase().includes(data.input.toLowerCase())) option.setAttribute('label', data.input);
       return option;
     }));
     // clearAutocomplete removes this association to dismiss the native menu

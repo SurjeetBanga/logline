@@ -3,6 +3,21 @@ import test from 'node:test';
 import { normalizeLevel, parseLogLine, stripAnsi } from './core/log-event';
 const now = new Date('2026-09-06T18:00:00.123Z');
 
+test('payload keys named like object prototype properties remain ordinary fields', () => {
+  const event = parseLogLine('{"toString":"value","constructor":"type","__proto__":"data"}', 'stdout', 1, now);
+  assert.deepEqual(Object.keys(event.fields!), ['toString', 'constructor', '__proto__']);
+  assert.equal(event.fields?.__proto__, 'data');
+  assert.equal(Object.getPrototypeOf(event.fields), Object.prototype);
+});
+
+test('non-primitive metadata cannot interrupt ingestion', () => {
+  const event = parseLogLine('{"message":{"toString":0},"level":{"toString":0},"timestamp":{"toString":0}}', 'stderr', 1, now);
+  assert.equal(event.isJson, true);
+  assert.equal(event.level, 'error');
+  assert.equal(event.message, 'JSON event');
+  assert.equal(event.timestampMs, now.getTime());
+});
+
 test('extracts common fields from JSON logs', () => {
   const event = parseLogLine('{"level":"warn","message":"Slow request","requestId":"abc"}', 'stdout', 7, now);
   assert.equal(event.id, 7); assert.equal(event.level, 'warn');

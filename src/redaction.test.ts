@@ -36,3 +36,10 @@ test('redacts JSON raw details and fields in an event', () => {
   assert.match(redacted.raw!, /\[REDACTED\]/);
   assert.doesNotMatch(redacted.raw!, /test-key|test-password/);
 });
+
+test('deep JSON never falls back to unredacted structured credentials', () => {
+  const raw = '{"nested":'.repeat(10000) + '{"password":"deep-secret"}' + '}'.repeat(10000);
+  const result = redactEvent({ id: 1, level: 'info', isJson: true, raw });
+  assert.ok(!result.raw?.includes('deep-secret'));
+  assert.ok(result.raw?.includes('[REDACTED]'));
+});

@@ -57,4 +57,6 @@ export interface SessionSummary {
   dependencyState?: string;
   exitReason?: string;
   source?: string;
+  taskScope?: string;
+  taskLabel?: string;
 }

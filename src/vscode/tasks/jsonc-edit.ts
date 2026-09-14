@@ -29,6 +29,8 @@ export function appendTasksToJsonc(text: string, additions: unknown[]): string |
   let escaped = false;
   let lineComment = false;
   let blockComment = false;
+  let lastToken = '[';
+  let lastTokenEnd = open + 1;
   for (let i = open; i < text.length; i++) {
     const char = text[i];
     const next = text[i + 1];
@@ -37,7 +39,7 @@ export function appendTasksToJsonc(text: string, additions: unknown[]): string |
     if (quote) {
       if (escaped) escaped = false;
       else if (char === '\\') escaped = true;
-      else if (char === '"') quote = false;
+      else if (char === '"') { quote = false; lastToken = char; lastTokenEnd = i + 1; }
       continue;
     }
     if (char === '"') { quote = true; continue; }
@@ -45,13 +47,11 @@ export function appendTasksToJsonc(text: string, additions: unknown[]): string |
     if (char === '/' && next === '*') { blockComment = true; i++; continue; }
     if (char === '[') depth++;
     if (char === ']' && --depth === 0) {
-      const contents = text.slice(open + 1, i);
-      const trailing = /,\s*(?:(?:\/\/[^\n]*)|(?:\/\*[\s\S]*?\*\/))*\s*$/.test(contents);
-      const hasValue = contents.replace(/(?:\/\/[^\n]*|\/\*[\s\S]*?\*\/|\s)/g, '').length > 0;
       const serialized = JSON.stringify(additions, null, 2).slice(1, -1);
-      const insertion = `${hasValue && !trailing ? ',' : ''}${serialized}`;
-      return text.slice(0, i) + insertion + text.slice(i);
+      const comma = lastToken !== '[' && lastToken !== ',' ? ',' : '';
+      return text.slice(0, lastTokenEnd) + comma + text.slice(lastTokenEnd, i) + serialized + text.slice(i);
     }
+    if (!/\s/.test(char)) { lastToken = char; lastTokenEnd = i + 1; }
   }
   return undefined;
 }

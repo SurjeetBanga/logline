@@ -9,7 +9,8 @@ import type { LogStore } from '../core/log-store';
 import { redactEvent, type RedactionOptions } from '../core/redaction';
 import type { Settings } from '../core/settings';
 import type { LogEvent } from '../core/types';
-import { exportQuery, serializeExport, type ExportFormat, type ExportRequest } from '../transfer/log-export';
+import { exportChunks, exportQuery, serializeExport, type ExportFormat, type ExportRequest } from '../transfer/log-export';
+import { writeExportFile } from '../storage/export-file';
 import { importRecords } from '../transfer/log-import';
 
 export class LogTransfer {
@@ -33,15 +34,19 @@ export class LogTransfer {
     return choice?.format;
   }
 
-  async saveExport(content: string, fileFormat: ExportFormat | 'md', defaultName: string): Promise<boolean> {
+  private async chooseDestination(fileFormat: ExportFormat | 'md', defaultName: string): Promise<vscode.Uri | undefined> {
     const filters: { [name: string]: string[]; } = fileFormat === 'md' ? { Markdown: ['md'] }
       : fileFormat === 'csv' ? { CSV: ['csv'] } : fileFormat === 'json' ? { JSON: ['json'] } : { 'JSON Lines': ['jsonl'] };
     const folder = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-    const uri = await vscode.window.showSaveDialog({
+    return vscode.window.showSaveDialog({
       ...(folder ? { defaultUri: vscode.Uri.file(path.join(folder, defaultName)) } : {}),
       filters,
       saveLabel: 'Export'
     });
+  }
+
+  async saveExport(content: string, fileFormat: ExportFormat | 'md', defaultName: string): Promise<boolean> {
+    const uri = await this.chooseDestination(fileFormat, defaultName);
     if (!uri) return false;
     try {
       await vscode.workspace.fs.writeFile(uri, Buffer.from(content, 'utf8'));
@@ -53,31 +58,42 @@ export class LogTransfer {
     return true;
   }
 
-  queryExportEvents(request: ExportRequest = {}): LogEvent[] {
-    return this.store.all({ query: request.query, serverId: request.serverId, levels: request.levels });
-  }
-
-  collectExportEvents(request: ExportRequest = {}): LogEvent[] {
-    return this.queryExportEvents(request).map(event => redactEvent(event, this.redactionOptions()));
+  private latestExportEvents(request: ExportRequest): { events: LogEvent[]; matched: number; } {
+    // Reuse indexed/cached paging, then fetch full records only for that page.
+    // Clipboard and AI exports must not clone or redact all retained history.
+    const page = this.store.page(request);
+    const options = this.redactionOptions();
+    return { matched: page.matched, events: page.events.map(row => redactEvent(this.store.find(row.id)!, options)) };
   }
 
   async exportLogs(request: ExportRequest = {}): Promise<void> {
     const format = await this.chooseExportFormat();
     if (!format) return;
     if (format === 'md') return this.exportForAI(request);
-    const events = this.collectExportEvents(request);
-    await this.saveExport(serializeExport(events, format), format, `logline-export.${format}`);
+    const uri = await this.chooseDestination(format, `logline-export.${format}`);
+    if (!uri) return;
+    await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: 'Exporting logs', cancellable: true }, async (_progress, token) => {
+      try {
+        if (token.isCancellationRequested) return;
+        const events = this.store.exportEvents(request);
+        await writeExportFile(uri.scheme === 'file' ? uri.fsPath : undefined,
+          exportChunks(events, format, this.redactionOptions(), () => token.isCancellationRequested),
+          () => token.isCancellationRequested, bytes => vscode.workspace.fs.writeFile(uri, bytes));
+        void vscode.window.showInformationMessage(`Exported ${events.length.toLocaleString()} logs to ${path.basename(uri.fsPath)}.`);
+      } catch (error) {
+        if (!token.isCancellationRequested) void vscode.window.showErrorMessage(`Could not export logs: ${(error as Error).message}`);
+      }
+    });
   }
 
   async exportForAI(request: ExportRequest = {}): Promise<void> {
     const limit = 1000;
-    const events = this.queryExportEvents(request);
-    const selected = events.slice(-limit).map(event => redactEvent(event, this.redactionOptions()));
-    const omitted = events.length - selected.length;
+    const { events: selected, matched } = this.latestExportEvents(request);
+    const omitted = matched - selected.length;
     const lines = selected.map(event => JSON.stringify(event)).join('\n');
     const content = [
       '# Logline incident context', '',
-      `Events: ${events.length}${omitted > 0 ? ` (latest ${limit} included)` : ''}`,
+      `Events: ${matched}${omitted > 0 ? ` (latest ${limit} included)` : ''}`,
       `Query: ${exportQuery(request) || '(none)'}`,
       '', '```jsonl', lines, '```', ''
     ].join('\n');
@@ -86,10 +102,9 @@ export class LogTransfer {
 
   async copyFiltered(request: ExportRequest = {}): Promise<void> {
     const limit = 1000;
-    const events = this.collectExportEvents(request);
-    const selected = events.slice(-limit);
+    const { events: selected, matched } = this.latestExportEvents(request);
     await vscode.env.clipboard.writeText(serializeExport(selected, 'jsonl'));
-    const suffix = events.length > limit ? ` (latest ${limit.toLocaleString()} of ${events.length.toLocaleString()})` : '';
+    const suffix = matched > limit ? ` (latest ${limit.toLocaleString()} of ${matched.toLocaleString()})` : '';
     void vscode.window.showInformationMessage(`Copied ${selected.length.toLocaleString()} filtered log rows${suffix}.`);
   }
 
