@@ -60,8 +60,18 @@ header { padding: 10px 14px 6px; flex: none; }
 }
 .toolbar-actions { display: flex; gap: 6px; flex: 0 0 auto; flex-wrap: nowrap; margin-left: auto; }
 .toolbar-actions button { background: transparent; border-color: transparent; }
-.search-toolbar { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-top: 10px; }
-.search-toolbar > .popover-container:not(.search-group) { flex: none; }
+.search-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  scrollbar-width: thin;
+  overscroll-behavior-x: contain;
+  margin-top: 10px;
+}
+.search-toolbar > .popover-container:not(.search-group), .search-toolbar > button { flex: 0 0 auto; }
 input, select, button { font: inherit; border: 1px solid var(--vscode-input-border, #555); border-radius: 3px; }
 input, select { height: 30px; padding: 3px 10px; color: var(--vscode-input-foreground, #ddd); background: var(--vscode-input-background, #333); }
 .popover-container { position: relative; }
@@ -128,9 +138,6 @@ input, select { height: 30px; padding: 3px 10px; color: var(--vscode-input-foreg
 .field-toggle input { width: auto; height: auto; padding: 0; }
 .message-content { display: flex; align-items: center; gap: 8px; }
 .message-content .message-button { flex: 1; min-width: 0; }
-@media (max-width: 700px) {
-  .search-group { flex-basis: 100%; }
-}
 #analysisDialog { width: min(1000px, 96vw); max-width: 96vw; height: 88vh; max-height: 88vh; padding: 14px; color: inherit; background: var(--vscode-editor-background, #1e1e1e); border: 1px solid var(--vscode-panel-border, #555); border-radius: 6px; }
 #analysisDialog[open] { display: flex; flex-direction: column; }
 #analysisDialog::backdrop { background: rgba(0, 0, 0, .5); }

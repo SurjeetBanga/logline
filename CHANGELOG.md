@@ -4,7 +4,7 @@ All notable changes to Logline are documented in this file.
 
 ## Unreleased
 
-- Keep the server selector width stable as session status labels change; keep toolbar actions on one row and allow narrow panels to scroll horizontally.
+- Keep the server selector width stable as session status labels change; keep toolbar and search actions on one row and allow narrow panels to scroll horizontally.
 - Stream full exports with cancellable progress and staged local writes; cap CSV at 200 payload columns and whole-file provider exports at 16 MiB.
 - Normalize configuration ranges and types before capture, require integer count/timer settings, and validate saved server entries before auto-start.
 - Apply explicit filters, paging, sorting, and column selection while inspecting an event by returning to Browse; continue ignoring live row updates while inspection stays open.
