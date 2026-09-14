@@ -39,8 +39,26 @@ body {
   font: 13px/1.5 var(--vscode-font-family, system-ui);
 }
 header { padding: 10px 14px 6px; flex: none; }
-.toolbar, .pagination { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
-.toolbar-actions { display: flex; gap: 6px; flex-wrap: wrap; margin-left: auto; }
+.toolbar, .pagination { display: flex; align-items: center; gap: 10px; }
+.toolbar {
+  min-width: 0;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  scrollbar-width: thin;
+  overscroll-behavior-x: contain;
+}
+.pagination { flex-wrap: wrap; }
+.toolbar > button { flex: 0 0 auto; }
+#server {
+  flex: 0 1 220px;
+  width: 220px;
+  min-width: 160px;
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.toolbar-actions { display: flex; gap: 6px; flex: 0 0 auto; flex-wrap: nowrap; margin-left: auto; }
 .toolbar-actions button { background: transparent; border-color: transparent; }
 .search-toolbar { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-top: 10px; }
 .search-toolbar > .popover-container:not(.search-group) { flex: none; }
@@ -112,7 +130,6 @@ input, select { height: 30px; padding: 3px 10px; color: var(--vscode-input-foreg
 .message-content .message-button { flex: 1; min-width: 0; }
 @media (max-width: 700px) {
   .search-group { flex-basis: 100%; }
-  .toolbar-actions { margin-left: 0; }
 }
 #analysisDialog { width: min(1000px, 96vw); max-width: 96vw; height: 88vh; max-height: 88vh; padding: 14px; color: inherit; background: var(--vscode-editor-background, #1e1e1e); border: 1px solid var(--vscode-panel-border, #555); border-radius: 6px; }
 #analysisDialog[open] { display: flex; flex-direction: column; }
