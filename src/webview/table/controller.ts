@@ -325,7 +325,7 @@ export function createTable(elements: Elements, scrollViewport: HTMLElement, sta
     automaticColumnsLocked = false;
   }
 
-  function lockAutomaticColumns() { automaticColumnsLocked = true; }
+  function lockAutomaticColumns() { if (automaticColumns.length) automaticColumnsLocked = true; }
 
   function layoutColumns() { layoutColumnWidths(displayedColumns, columnElements, state.columnWidths, scrollViewport.clientWidth || 0, element('eventsTable')); }
 

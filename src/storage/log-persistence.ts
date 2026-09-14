@@ -15,6 +15,7 @@ export class LogPersistence {
   persistTimer: ReturnType<typeof setTimeout> | undefined;
   persistedBytes: number | undefined;
   persistChain: Promise<void> | undefined;
+  private writeErrorReported = false;
   constructor(private readonly config: Settings, private readonly workspaceFolder: () => string | undefined,
     private readonly warn: (message: string) => void) { }
   invalidate(): void { this.persistedBytes = undefined; }
@@ -45,31 +46,38 @@ export class LogPersistence {
     if (!this.pendingWrites.length) return;
     const batch = this.pendingWrites.join('\n') + '\n';
     const bytes = this.pendingWriteBytes;
+    const lines = this.pendingWrites.length;
     this.pendingWrites.length = 0;
     this.pendingWriteBytes = 0;
     this.persistChain = (this.persistChain ?? Promise.resolve())
       .then(() => this.writeBatch(batch))
+      .catch(error => {
+        this.persistDropped += lines;
+        this.persistedBytes = undefined;
+        if (!this.writeErrorReported) {
+          this.writeErrorReported = true;
+          this.warn(`Logline could not persist logs: ${String(error)}. Live capture continues; the Logs footer counts failed disk writes.`);
+        }
+      })
       .finally(() => { this.queuedWriteBytes -= bytes; });
   }
 
   async writeBatch(batch: string): Promise<void> {
     const folder = this.workspaceFolder();
-    if (!folder) return;
+    if (!folder) throw new Error('No workspace folder is available.');
     const file = path.join(folder, '.logline', 'latest.log');
-    try {
-      await mkdir(path.dirname(file), { recursive: true });
-      const max = this.config.get('maxDiskMb', 1000) * 1024 * 1024;
-      // Roll to latest.log.1 rather than discarding history outright.
-      if (this.persistedBytes === undefined) {
-        this.persistedBytes = (await stat(file).catch(() => undefined))?.size ?? 0;
-      }
-      const size = Buffer.byteLength(batch);
-      if (this.persistedBytes > 0 && this.persistedBytes + size > max) {
-        await rename(file, file + '.1');
-        this.persistedBytes = 0;
-      }
-      await appendFile(file, batch, 'utf8');
-      this.persistedBytes += size;
-    } catch { /* persistence must not interrupt ingestion */ }
+    await mkdir(path.dirname(file), { recursive: true });
+    const max = this.config.get('maxDiskMb', 1000) * 1024 * 1024;
+    // Roll to latest.log.1 rather than discarding history outright.
+    if (this.persistedBytes === undefined) {
+      this.persistedBytes = (await stat(file).catch(() => undefined))?.size ?? 0;
+    }
+    const size = Buffer.byteLength(batch);
+    if (this.persistedBytes > 0 && this.persistedBytes + size > max) {
+      await rename(file, file + '.1');
+      this.persistedBytes = 0;
+    }
+    await appendFile(file, batch, 'utf8');
+    this.persistedBytes += size;
   }
 }

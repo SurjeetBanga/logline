@@ -34,7 +34,7 @@ export type HostMessage = Snapshot
   | { type: 'context'; id: number; events: LogEvent[]; server?: string; missing: boolean; }
   | { type: 'details'; id: number; text: string; target: 'main' | 'context'; exceptions: ExceptionBlock[]; }
   | { type: 'searches'; searches: { saved: SavedSearch[]; }; saved?: SavedSearch; }
-  | { type: 'autocomplete'; fields: string[]; values: SuggestedValue[]; }
+  | { type: 'autocomplete'; input: string; serverId?: string; fields: string[]; values: SuggestedValue[]; }
   | { type: 'analysis'; analysis: AnalysisResult; };
 
 /** Normalize untrusted webview input once, before dispatching any host action. */
@@ -55,7 +55,7 @@ export function parseViewRequest(value: unknown): ViewRequest | undefined {
     case 'export': case 'exportForAI': case 'copyFiltered': return { type: msg.type, ...filter };
     case 'saveSearch': return { type: msg.type, ...filter, name: string('name') };
     case 'deleteSavedSearch': { const id = string('id'); return id === undefined ? undefined : { type: msg.type, id }; }
-    case 'autocomplete': return { type: msg.type, input: string('input'), serverId: filter.serverId };
+    case 'autocomplete': return { type: msg.type, input: string('input')?.slice(0, 256), serverId: filter.serverId };
     case 'context': case 'details': case 'copy': {
       const id = index('id'); if (id === undefined) return;
       return msg.type === 'context' ? { type: msg.type, id } : { type: msg.type, id, target: msg.target === 'context' ? 'context' : 'main' };

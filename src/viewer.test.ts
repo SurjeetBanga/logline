@@ -172,6 +172,15 @@ test('plain logs initialize interactive headers and sorting toggles the displaye
   assert.equal(get('older').textContent, 'Next →');
 });
 
+test('plain startup output does not lock out columns from later structured logs', () => {
+  const { app, receive } = viewer();
+  receive({ type: 'snapshot', generation: 1, newest: 101, status: 'Running', running: true,
+    total: 101, retained: 101, discarded: 0, bytes: 1000, maxBytes: 10000, truncated: 0,
+    events: [{ id: 101, level: 'info', message: 'request', fields: { service: 'api' } }],
+    columns: ['service'], columnFields: ['service'], page: 0, pages: 1, matched: 1 });
+  assert.deepEqual([...app.table.currentColumns], ['service']);
+});
+
 test('resize updates the actual table column and preserves its width after column reorder', () => {
   const { get, app, dom, messages } = viewer();
   const timeHeader = get('head-row').children[0];
@@ -275,14 +284,14 @@ test('analysis renders status codes', () => {
 
 test('autocomplete suggestions list known field names alongside matching values', () => {
   const { get, receive } = viewer();
-  receive({ type: 'autocomplete', fields: ['service', 'status'], values: [{ value: 'api', count: 4 }] });
-  assert.deepEqual(get('fieldSuggestions').children.map(option => option.value), ['service', 'status', 'api']);
+  receive({ type: 'autocomplete', input: 'timeout', serverId: 'api', fields: ['service', 'status'], values: [{ value: 'api', count: 4 }] });
+  assert.deepEqual(get('fieldSuggestions').children.map(option => option.value), ['service:', 'status:']);
   assert.equal(get('search').attributes.list, 'fieldSuggestions');
 });
 
 test('Clear removes stale autocomplete suggestions', () => {
   const { get, receive } = viewer();
-  receive({ type: 'autocomplete', fields: ['service'], values: [{ value: 'api', count: 4 }] });
+  receive({ type: 'autocomplete', input: 'timeout', serverId: 'api', fields: ['service'], values: [{ value: 'api', count: 4 }] });
 
   get('clear').listeners.get('click')!();
 
@@ -291,12 +300,12 @@ test('Clear removes stale autocomplete suggestions', () => {
 
 test('clearing Search logs removes column suggestions and ignores an in-flight autocomplete response', () => {
   const { get, receive } = viewer();
-  receive({ type: 'autocomplete', fields: ['service'], values: [{ value: 'api', count: 4 }] });
-  assert.equal(get('fieldSuggestions').children.length, 2);
+  receive({ type: 'autocomplete', input: 'timeout', serverId: 'api', fields: ['service'], values: [{ value: 'api', count: 4 }] });
+  assert.equal(get('fieldSuggestions').children.length, 1);
 
   get('search').value = '';
   get('search').listeners.get('input')!();
-  receive({ type: 'autocomplete', fields: ['service'], values: [{ value: 'api', count: 4 }] });
+  receive({ type: 'autocomplete', input: 'timeout', serverId: 'api', fields: ['service'], values: [{ value: 'api', count: 4 }] });
 
   assert.equal(get('fieldSuggestions').children.length, 0);
 });
@@ -305,7 +314,7 @@ test('new autocomplete suggestions restore the search datalist after it was clea
   const { get, receive } = viewer();
   get('search').removeAttribute('list');
 
-  receive({ type: 'autocomplete', fields: ['service'], values: [] });
+  receive({ type: 'autocomplete', input: 'timeout', serverId: 'api', fields: ['service'], values: [] });
 
   assert.equal(get('search').attributes.list, 'fieldSuggestions');
 });
@@ -360,13 +369,50 @@ test('Live settles at the new bottom after layout and resumes even when row IDs 
 test('opening a live row freezes its result set while a snapshot is in flight', () => {
   const { app, receive } = viewer();
   app.table.toggleExpand(42);
-  app.bridge.forcedRequest = true;
   receive({
     type: 'snapshot', generation: 1, newest: 101, total: 101, retained: 101, discarded: 0, bytes: 1000, maxBytes: 10000,
     columns: [], events: [{ id: 101, level: 'info', message: 'new line' }], page: 0, pages: 1, matched: 101
   });
   assert.equal(app.state.selected, 42);
   assert.equal(app.table.events[0].id, 42, 'the selected row remains available until Live is resumed');
+});
+
+test('explicit paging, filtering, sorting and column selection leave inspection in Browse', () => {
+  for (const action of ['page', 'filter', 'sort', 'columns']) {
+    const { app, get, receive, messages } = viewer();
+    app.table.toggleExpand(42);
+    if (action === 'page') get('older').listeners.get('click')!();
+    if (action === 'filter') get('levelMenu').children[0].children[0].listeners.get('click')!({ stopPropagation() {} });
+    if (action === 'sort') get('head-row').children[0].querySelector('.column-sort')!.listeners.get('click')!();
+    if (action === 'columns') get('fieldsAll').listeners.get('click')!();
+    const request = messages.at(-1)!;
+    assert.equal(request.type, 'snapshot', action);
+    assert.equal(request.statsOnly, false, action);
+    assert.equal(request.before, 100, action);
+    assert.equal(app.state.paused, false, action);
+    assert.equal(app.state.following, false, action);
+    assert.equal(app.state.selected, undefined, action);
+    receive({ type: 'snapshot', generation: 1, newest: 110, status: 'Running', running: true,
+      total: 110, retained: 110, discarded: 0, bytes: 1000, maxBytes: 10000, truncated: 0,
+      events: [{ id: 43, level: 'info', message: 'new result' }], columns: [], page: 0, pages: 1, matched: 1 });
+    assert.equal(app.table.events[0].id, 43, action);
+  }
+});
+
+test('autocomplete ignores changed input or server and inserts a complete query', () => {
+  const { get, app, receive } = viewer();
+  get('search').value = 'level:error service:a';
+  const response = { type: 'autocomplete', input: 'level:error service:a', serverId: 'api', fields: ['service'], values: [{ value: 'API west', count: 1 }] };
+  receive(response);
+  assert.equal(get('fieldSuggestions').children[0].value, 'level:error service:"API west"');
+  assert.equal(get('fieldSuggestions').children[0].attributes.label, 'level:error service:a');
+  get('search').value = 'level:error service:b';
+  get('search').listeners.get('input')!();
+  receive(response);
+  assert.equal(get('fieldSuggestions').children.length, 0);
+  get('search').value = response.input; app.state.selectedServer = 'worker';
+  receive(response);
+  assert.equal(get('fieldSuggestions').children.length, 0);
 });
 
 test('scrolling past expanded details keeps their DOM state and does not repeatedly replace rows', () => {

@@ -23,3 +23,26 @@ test('deleteSavedSearch removes only the matching entry', () => {
   searches.deleteSavedSearch(a.id);
   assert.deepEqual(searches.savedSearches().map(search => search.query), ['b']);
 });
+
+test('saved searches retain distinct level filters, including level-only and empty selections', () => {
+  const searches = new SavedSearches({ get: (_key, fallback) => fallback, update() { } });
+  searches.saveSearch('Errors', '', ['error']);
+  searches.saveSearch('No levels', '', []);
+  searches.saveSearch('Warnings', 'service:api', ['warn']);
+  searches.saveSearch('Errors and warnings', 'service:api', ['error', 'warn']);
+  searches.saveSearch('Renamed', 'service:api', ['warn', 'error', 'error']);
+  assert.equal(searches.savedSearches().length, 4);
+  assert.equal(searches.savedSearches()[0].name, 'Renamed');
+});
+
+test('malformed persisted searches are ignored and loaded entries stay bounded', () => {
+  const values = [null, { id: 'broken', levels: 'error' }, { id: 'bad-name', name: {}, query: 'x' },
+    ...Array.from({ length: 60 }, (_, id) => ({ id: String(id), name: 'n'.repeat(100), query: 'q'.repeat(300), levels: ['error'] }))];
+  const searches = new SavedSearches({ get: <T>() => values as T, update() {} });
+  const saved = searches.savedSearches();
+  assert.equal(saved.length, 50);
+  assert.equal(saved[0].name.length, 80);
+  assert.equal(saved[0].query.length, 256);
+  assert.equal(saved[0].createdAt, 0);
+  assert.doesNotThrow(() => searches.saveSearch('next', 'query'));
+});

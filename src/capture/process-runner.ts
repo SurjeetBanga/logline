@@ -57,10 +57,12 @@ export class ProcessRunner {
       id: randomBytes(8).toString('hex'), serverId: server.id, server: server.label,
       status: 'running', startedAt: Date.now(), pid: child.pid, events: 0,
       taskName: server.taskName, taskType: server.taskType, taskState: server.taskName ? 'running' : undefined,
+      taskScope: server.taskScope, taskLabel: server.taskLabel,
       dependencies: server.dependencies, dependencyState: server.dependencyState, source: server.source
     };
     const session: Session = { child, stopping: false, exited: false, server, record };
     this.registry.records.set(record.id, record);
+    this.registry.refreshDependents(record.taskName, record.taskScope, record.taskLabel);
     this.sessions.add(session);
     const source = this.config.get<string>('source', 'both');
     // Both pipes must flow even when only one stream is retained. Otherwise a
@@ -89,7 +91,7 @@ export class ProcessRunner {
       if (record.taskName) {
         record.taskState = 'failed';
         record.exitReason = `error: ${error.message}`;
-        this.registry.refreshDependents(record.taskName);
+        this.registry.refreshDependents(record.taskName, record.taskScope, record.taskLabel);
       }
       if (this.sessions.has(session)) this.state.status = `Failed: ${error.message}`;
       this.state.notify();
@@ -104,7 +106,7 @@ export class ProcessRunner {
       if (record.taskName) {
         record.taskState = record.status;
         record.exitReason = signal ? `signal ${signal}` : `exit code ${typeof code === 'number' ? code : 'unknown'}`;
-        this.registry.refreshDependents(record.taskName);
+        this.registry.refreshDependents(record.taskName, record.taskScope, record.taskLabel);
       }
       if (this.sessions.delete(session)) {
         if (!this.state.status.startsWith('Failed:')) {

@@ -11,6 +11,8 @@ export interface SessionServer {
   dependencies?: string[];
   dependencyState?: string;
   source?: string;
+  taskScope?: string;
+  taskLabel?: string;
 }
 
 export interface Session {

@@ -1,5 +1,5 @@
 import type * as vscode from 'vscode';
-import { slugify } from '../../core/server-config';
+import { taskIdentity } from '../../capture/task-identity';
 
 export interface LoglineTaskDefinition extends vscode.TaskDefinition {
   label?: string;
@@ -58,7 +58,7 @@ export function taskToLoglineDefinition(task: vscode.Task): LoglineTaskDefinitio
     type: 'logline' as const,
     label: `Logline: ${label}`,
     taskName: label,
-    taskId: `task:${slugify(label)}`,
+    taskId: taskIdentity(label, String(definition.type), typeof task.scope === 'object' ? task.scope.uri.toString() : undefined),
     taskType: String(definition.type),
     detail: task.detail,
     isBackground: task.isBackground || undefined,

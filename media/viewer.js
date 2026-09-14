@@ -247,7 +247,6 @@
     pending = false;
     refreshRequested = false;
     updateRequested = false;
-    forcedRequest = false;
     request(force = false) {
       if (document.hidden) return;
       if (this.pending) {
@@ -256,7 +255,6 @@
         return;
       }
       this.pending = true;
-      this.forcedRequest = force;
       const state = this.state;
       this.api.postMessage({
         type: "snapshot",
@@ -609,6 +607,27 @@
     return { popovers, createPopover };
   }
 
+  // src/core/query-completion.ts
+  function completionTarget(input) {
+    const tokens = [...input.matchAll(/(?:[^\s"]+|"(?:\\.|[^"\\])*"?)+/g)];
+    const last = /\s$/.test(input) ? void 0 : tokens.at(-1);
+    const text = last?.[0] ?? "";
+    const match = text.match(/^(-?)(@?([A-Za-z_][A-Za-z0-9_.]*):)?(.*)$/);
+    let value = match[4];
+    try {
+      if (value.startsWith('"')) value = JSON.parse(value);
+    } catch {
+      value = value.slice(1);
+    }
+    return { prefix: input.slice(0, last?.index ?? input.length), negate: match[1], field: match[3], fieldText: match[2], value };
+  }
+  function completeQuery(input, fields, values) {
+    const target = completionTarget(input);
+    const prefix = target.prefix + target.negate;
+    const options = target.field ? values.map(({ value }) => prefix + target.fieldText + JSON.stringify(value)) : fields.filter((field) => /^[A-Za-z_][A-Za-z0-9_.]*$/.test(field)).map((field) => prefix + field + ":");
+    return options.filter((value) => value.length <= 256);
+  }
+
   // src/webview/state.ts
   var LEVELS = ["trace", "debug", "info", "warn", "error", "fatal"];
   var ViewerState = class {
@@ -643,7 +662,7 @@
       this.columnWidths = saved.columnWidths && typeof saved.columnWidths === "object" ? saved.columnWidths : {};
       this.columnOrder = Array.isArray(saved.columnOrder) ? saved.columnOrder : [];
       this.hiddenColumns = new Set(Array.isArray(saved.hiddenColumns) ? saved.hiddenColumns : []);
-      this.checkedLevels = new Set(Array.isArray(saved.levels) ? saved.levels : LEVELS);
+      this.checkedLevels = new Set(Array.isArray(saved.levels) ? saved.levels.filter((level) => LEVELS.includes(level)) : LEVELS);
     }
     currentLevels() {
       return this.checkedLevels.size === LEVELS.length ? void 0 : [...this.checkedLevels];
@@ -661,6 +680,15 @@
       this.selectedDetailText = void 0;
       this.selectedExceptions = [];
     }
+    /** Explicit changes close inspection while keeping a fixed history boundary. */
+    browseFromInspection() {
+      if (!this.paused) return;
+      this.paused = false;
+      this.resetSelection();
+      this.following = false;
+      this.before ??= this.newest;
+      this.lastRows = void 0;
+    }
     resume() {
       this.paused = false;
       this.resetSelection();
@@ -674,13 +702,14 @@
       if (opening) {
         this.selected = id;
         this.paused = true;
+        this.before ??= this.newest;
       }
       return opening;
     }
     sort(field) {
       this.selectedSortDirection = this.selectedSort === field && this.selectedSortDirection === "desc" ? "asc" : "desc";
       this.selectedSort = field;
-      this.setFollowing(false);
+      if (!this.paused) this.setFollowing(false);
       this.filterChanged();
     }
     persist(query) {
@@ -798,9 +827,10 @@
     function renderAutocomplete(data) {
       if (!elements.fieldSuggestions)
         return;
-      elements.fieldSuggestions.replaceChildren(...[...data.fields ?? [], ...(data.values ?? []).map((value) => value.value)].map((value) => {
+      elements.fieldSuggestions.replaceChildren(...completeQuery(data.input, data.fields, data.values).map((value) => {
         const option = document.createElement("option");
         option.value = value;
+        if (!value.toLowerCase().includes(data.input.toLowerCase())) option.setAttribute("label", data.input);
         return option;
       }));
       elements.search.setAttribute("list", "fieldSuggestions");
@@ -1197,7 +1227,7 @@
       automaticColumnsLocked = false;
     }
     function lockAutomaticColumns() {
-      automaticColumnsLocked = true;
+      if (automaticColumns.length) automaticColumnsLocked = true;
     }
     function layoutColumns() {
       layoutColumnWidths(displayedColumns, columnElements, state.columnWidths, scrollViewport.clientWidth || 0, element("eventsTable"));
@@ -1405,7 +1435,7 @@
       state,
       api,
       formatTimestamp,
-      { request, saveState, filterChanged, setFollowing, updateFollowControl, updateModeLabel },
+      { request: requestInteraction, saveState, filterChanged, setFollowing, updateFollowControl, updateModeLabel },
       scope
     );
     let serverSignature = "";
@@ -1436,6 +1466,7 @@
         return;
       }
       if (data.type === "autocomplete") {
+        if (data.input !== elements.search.value || (data.serverId ?? "") !== state.selectedServer) return;
         if (elements.search.value.trim()) search.renderAutocomplete(data);
         else search.clearAutocomplete();
         return;
@@ -1589,11 +1620,21 @@
       elements.copyResults.hidden = !hasActiveFilter();
       elements.copyResults.textContent = "Copy results";
     }
+    function requestInteraction() {
+      if (state.paused) {
+        state.browseFromInspection();
+        table.resetDetails();
+        table.renderWindow();
+      }
+      updateFollowControl();
+      updateModeLabel();
+      request(true);
+    }
     function filterChanged() {
       state.filterChanged();
       updateCopyResultsControl();
       saveState();
-      request(true);
+      requestInteraction();
     }
     function filterForCell(id, column) {
       const event = table.events.find((item) => item.id === id);
@@ -1646,6 +1687,7 @@
       if (event.key === "Escape") closeCellFilterMenu();
     });
     scope.listen(elements.search, "input", () => {
+      search.clearAutocomplete();
       updateCopyResultsControl();
       clearTimeout(searchDebounce);
       searchDebounce = setTimeout(filterChanged, 150);
@@ -1695,13 +1737,14 @@
     });
     scope.listen(elements.analysisClose, "click", () => elements.analysisDialog.close());
     scope.listen(elements.server, "change", () => {
+      search.clearAutocomplete();
       state.selectedServer = elements.server.value;
       state.page = 0;
       state.lastRows = void 0;
       table.resetAutomaticColumns();
       updateCopyResultsControl();
       saveState();
-      request(true);
+      requestInteraction();
     });
     scope.listen(elements.follow, "click", () => {
       if (state.paused || !state.following) {
@@ -1720,14 +1763,14 @@
       }
     });
     scope.listen(elements.older, "click", () => {
-      if (state.following)
+      if (state.following && !state.paused)
         setFollowing(false);
       state.page = Math.min(state.pages - 1, state.page + 1);
-      request(true);
+      requestInteraction();
     });
     scope.listen(elements.newer, "click", () => {
       state.page = Math.max(0, state.page - 1);
-      request(true);
+      requestInteraction();
     });
     scope.listen(elements.clear, "click", () => {
       state.columnFields = [];
@@ -1736,8 +1779,10 @@
       table.updateColumns([], true);
       table.renderFieldList();
       search.clearAutocomplete();
+      state.browseFromInspection();
+      table.resetDetails();
       api.postMessage({ type: "clear" });
-      request(true);
+      requestInteraction();
     });
     scope.listen(elements.stop, "click", () => api.postMessage({ type: "stop", serverId: state.selectedServer || void 0 }));
     scope.listen(elements.config, "click", () => api.postMessage({ type: "config" }));

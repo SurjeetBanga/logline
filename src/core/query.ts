@@ -50,7 +50,7 @@ export function canonicalField(field: string): string {
 
 export function parseQuery(input = ''): ParsedQuery {
   const normalized = input.replace(/\[([^\]]+)\]/g, (_, value) => `[${value.replace(/\s+TO\s+/i, '__TO__')}]`);
-  const tokens = (normalized.match(/(?:[^\s"]+|"[^"]*")+/g) ?? []).map(token => token.replace('__TO__', ' TO '));
+  const tokens = (normalized.match(/(?:[^\s"]+|"(?:\\.|[^"\\])*")+/g) ?? []).map(token => token.replace('__TO__', ' TO '));
   const groups: TokenGroup[] = [[]];
   for (const token of tokens) {
     if (token === 'OR' || token === 'or') groups.push([]);
@@ -72,17 +72,22 @@ function parseToken(token: string): Token {
     value = match[2];
   }
   const canonical = field === undefined ? undefined : canonicalField(field);
-  value = value.replace(/^"|"$/g, '');
-  if (canonical !== 'exists') value = value.toLowerCase();
+  const quoted = value.startsWith('"') && value.endsWith('"');
+  if (quoted) {
+    try { value = JSON.parse(value); } catch { value = value.slice(1, -1); }
+  }
   // Compiled once here, at parse time, rather than once per event in matchesQuery.
   let regex: RegExp | null | undefined;
   // Only treat slash-delimited input as a regex when the suffix is made of
   // JavaScript regex flags. A literal route such as path:/users/42 otherwise
   // looks like a regex with an invalid "42" flag suffix.
-  const regexMatch = value.match(/^\/(.+)\/([dgimsuvy]*)$/);
+  const regexMatch = quoted ? null : value.match(/^\/(.+)\/([dgimsuvy]*)$/);
   if (regexMatch) {
     try { regex = new RegExp(regexMatch[1], regexMatch[2]); } catch { regex = null; }
   }
+  // Regex syntax and input are case-sensitive unless the expression uses /i.
+  // Lowercasing a pattern also changes escapes such as \D into \d.
+  if (canonical !== 'exists' && regex === undefined) value = value.toLowerCase();
   // Testing an /i regex against each field beats lower-casing a joined copy of
   // level + message + raw for every event. A term containing a space could span
   // the joining spaces, so those keep the original joined comparison.
@@ -90,7 +95,7 @@ function parseToken(token: string): Token {
   if (field === undefined && regex === undefined && value && !value.includes(' ')) {
     try { search = new RegExp(value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i'); } catch { search = undefined; }
   }
-  const compare = /^(>=|<=|>|<)\s*-?\d+(?:\.\d+)?$/.test(value) || /^\[.*\s+to\s+.*\]$/.test(value);
+  const compare = !quoted && (/^(>=|<=|>|<)\s*-?\d+(?:\.\d+)?$/.test(value) || /^\[.*\s+to\s+.*\]$/.test(value));
   return { negate, field, canonical, value, regex, search, compare };
 }
 
@@ -124,7 +129,7 @@ export function matchesQuery(event: LogEvent, input: string | ParsedQuery): bool
       return token.negate ? !found : found;
     }
     const actualValue: FieldValue = token.field ? getField(event, token.field) : `${event.level} ${event.message} ${event.raw}`;
-    const actual = String(actualValue ?? '').toLowerCase();
+    const actual = token.regex === undefined ? String(actualValue ?? '').toLowerCase() : String(actualValue ?? '');
     let matched: boolean | undefined;
     const numeric = token.compare && actual !== '' ? Number(actual) : NaN;
     const isNumeric = Number.isFinite(numeric);
@@ -156,6 +161,8 @@ export function matchesQuery(event: LogEvent, input: string | ParsedQuery): bool
 // reachable via `exists:time`, which was already a no-op before this file
 // had types.
 function readField(event: LogEvent, field: string): FieldValue {
+  if (field === 'id') return event.id;
+  if (field === 'timestampMs') return event.timestampMs;
   if (field === 'level') return event.level;
   if (field === 'message') return event.message;
   if (field === 'stream') return event.stream;
@@ -170,7 +177,7 @@ function readField(event: LogEvent, field: string): FieldValue {
   if (field === 'dependencyState') return event.dependencyState;
   if (field === 'exitReason') return event.exitReason;
   if (field === 'time') return undefined;
-  return event.fields?.[field];
+  return event.fields && Object.hasOwn(event.fields, field) ? event.fields[field] : undefined;
 }
 
 export function getField(event: LogEvent, field: string): FieldValue {

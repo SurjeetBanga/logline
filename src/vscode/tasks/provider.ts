@@ -29,21 +29,21 @@ export function registerTasks(runner: ProcessRunner, registry: SessionRegistry, 
   return [
     vscode.tasks.registerTaskProvider('logline', {
       provideTasks: () => {
-        const folder = vscode.workspace.workspaceFolders?.[0];
-        if (!folder) return [];
-        let definitions: LoglineTaskDefinition[] = [];
-        try {
-          const file = path.join(folder.uri.fsPath, '.vscode', 'tasks.json');
-          const parsed = parseJsonc(readFileSync(file, 'utf8')) as { tasks?: LoglineTaskDefinition[]; };
-          definitions = parsed.tasks ?? [];
-        } catch { return []; }
-        return definitions.filter(task => task.type === 'logline' && task.command).map(task => makeLoglineTask(runner, registry, task, folder));
+        return (vscode.workspace.workspaceFolders ?? []).flatMap(folder => {
+          try {
+            const file = path.join(folder.uri.fsPath, '.vscode', 'tasks.json');
+            const parsed = parseJsonc(readFileSync(file, 'utf8')) as { tasks?: LoglineTaskDefinition[]; };
+            if (!Array.isArray(parsed?.tasks)) return [];
+            return parsed.tasks.filter(task => task?.type === 'logline' && typeof task.command === 'string' && task.command)
+              .map(task => makeLoglineTask(runner, registry, task, folder));
+          } catch { return []; }
+        });
       },
       resolveTask: task => {
         const definition = task.definition as LoglineTaskDefinition;
         if (definition?.type !== 'logline' || !definition.command) return undefined;
-        const folder = vscode.workspace.workspaceFolders?.[0];
-        return makeLoglineTask(runner, registry, definition, folder!);
+        const folder = typeof task.scope === 'object' ? task.scope : vscode.workspace.workspaceFolders?.[0];
+        return folder ? makeLoglineTask(runner, registry, definition, folder) : undefined;
       }
     }),
     // VS Code exposes task lifecycle and process events, but deliberately does
