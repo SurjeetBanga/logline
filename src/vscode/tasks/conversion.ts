@@ -12,7 +12,7 @@ export async function convertTask(): Promise<void> {
   }
   const folders = vscode.workspace.workspaceFolders ?? [];
   if (!folders.length) { vscode.window.showInformationMessage('Open a workspace before converting a task.'); return; }
-  interface ParsedTasksFile { file: string; document: { version?: string; tasks?: unknown[]; }; sourceText?: string; }
+  interface ParsedTasksFile { file: string; document: { version?: string; tasks?: unknown[]; }; sourceText?: string; error?: string; }
   // Keyed by folder URI rather than the WorkspaceFolder object itself, since
   // a Task's `.scope` folder instance isn't guaranteed to be reference-equal
   // to the entries in vscode.workspace.workspaceFolders.
@@ -24,13 +24,18 @@ export async function convertTask(): Promise<void> {
     const file = path.join(workspaceFolder.uri.fsPath, '.vscode', 'tasks.json');
     let document: { version?: string; tasks?: unknown[]; } = { version: '2.0.0', tasks: [] };
     let sourceText: string | undefined;
+    let error: string | undefined;
     try {
       sourceText = readFileSync(file, 'utf8');
       document = parseJsonc(sourceText) as { version?: string; tasks?: unknown[]; };
-      if (!document || typeof document !== 'object') document = { version: '2.0.0', tasks: [] };
-      if (!Array.isArray(document.tasks)) document.tasks = [];
-    } catch { /* create tasks.json when this folder has no task file yet */ }
-    parsedByFolder.set(workspaceFolder.uri.toString(), { file, document, sourceText });
+      if (!document || typeof document !== 'object' || Array.isArray(document)
+        || (document.tasks !== undefined && !Array.isArray(document.tasks))) throw new Error('Expected an object with a tasks array.');
+      document.tasks ??= [];
+    } catch (cause) {
+      if ((cause as NodeJS.ErrnoException).code !== 'ENOENT') error = String(cause);
+      document = { version: '2.0.0', tasks: [] };
+    }
+    parsedByFolder.set(workspaceFolder.uri.toString(), { file, document, sourceText, error });
     for (const raw of document.tasks ?? []) {
       if (!raw || typeof raw !== 'object') continue;
       const value = raw as Record<string, unknown>;
@@ -53,7 +58,11 @@ export async function convertTask(): Promise<void> {
   if (!picked) return;
   const scopeFolder = typeof picked.task.scope === 'object' ? picked.task.scope : undefined;
   const targetFolder = (scopeFolder && folders.find(f => f.uri.toString() === scopeFolder.uri.toString())) ?? folders[0];
-  const { file, document, sourceText } = parsedByFolder.get(targetFolder.uri.toString())!;
+  const { file, document, sourceText, error } = parsedByFolder.get(targetFolder.uri.toString())!;
+  if (error) {
+    vscode.window.showErrorMessage(`Could not read ${file}: ${error} Fix the file before converting a task.`);
+    return;
+  }
   const byName = new Map<string, vscode.Task>();
   const ambiguousNames = new Set<string>();
   // A name shared by two different tasks can't be resolved unambiguously,
@@ -94,6 +103,7 @@ export async function convertTask(): Promise<void> {
   };
   convert(picked.task);
   const existingLabels = new Set(document.tasks!.map(task => {
+    if (!task || typeof task !== 'object') return undefined;
     const value = task as Record<string, unknown>;
     return typeof value.label === 'string' ? value.label : undefined;
   }).filter((value): value is string => Boolean(value)));
@@ -105,6 +115,12 @@ export async function convertTask(): Promise<void> {
   document.version ??= '2.0.0';
   document.tasks!.push(...additions);
   try {
+    // A picker may stay open while the user edits tasks.json. Do not overwrite
+    // those edits with the document read before the picker opened.
+    let currentText: string | undefined;
+    try { currentText = readFileSync(file, 'utf8'); }
+    catch (cause) { if ((cause as NodeJS.ErrnoException).code !== 'ENOENT') throw cause; }
+    if (currentText !== sourceText) throw new Error('tasks.json changed during conversion. Run the command again.');
     mkdirSync(path.dirname(file), { recursive: true });
     const preserved = sourceText && appendTasksToJsonc(sourceText, additions);
     writeFileSync(file, preserved ?? (JSON.stringify(document, null, 2) + '\n'), 'utf8');

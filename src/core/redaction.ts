@@ -9,6 +9,14 @@ export interface RedactionOptions {
 const DEFAULT_REPLACEMENT = '[REDACTED]';
 const SENSITIVE_KEY = /(?:password|passphrase|secret|token|api[-_ ]?key|authorization|cookie|private[-_ ]?key|access[-_ ]?key|credential)/i;
 
+// Permit a camelCase or snake_case field prefix (sessionToken,
+// userPassword, client_secret) while still requiring the sensitive keyword
+// to be immediately followed by an assignment separator. This catches
+// secrets embedded in free-text messages as well as JSON object keys.
+const key = '(?:[A-Za-z0-9_.-]*?(?:password|passphrase|secret|token|api[-_ ]?key|authorization|cookie|private[-_ ]?key|access[-_ ]?key|credential))';
+const quoted = new RegExp(`(${key})(\\s*[:=]\\s*)(["'])(.*?)\\3`, 'gi');
+const bare = new RegExp(`(${key})(\\s*[:=]\\s*)(?!["'])((?:(?:Bearer|Basic)\\s+)?[^\\s,;\\]}]+)`, 'gi');
+
 function normalizedKey(key: string): string {
   return key.toLowerCase().replace(/[^a-z0-9]/g, '');
 }
@@ -22,13 +30,6 @@ function isSensitiveKey(key: string, fields: string[] = []): boolean {
 export function redactText(text: string, options: RedactionOptions = {}): string {
   if (options.enabled === false) return text;
   const replacement = options.replacement ?? DEFAULT_REPLACEMENT;
-  // Permit a camelCase or snake_case field prefix (sessionToken,
-  // userPassword, client_secret) while still requiring the sensitive keyword
-  // to be immediately followed by an assignment separator. This catches
-  // secrets embedded in free-text messages as well as JSON object keys.
-  const key = '(?:[A-Za-z0-9_.-]*?(?:password|passphrase|secret|token|api[-_ ]?key|authorization|cookie|private[-_ ]?key|access[-_ ]?key|credential))';
-  const quoted = new RegExp(`(${key})(\\s*[:=]\\s*)(["'])(.*?)\\3`, 'gi');
-  const bare = new RegExp(`(${key})(\\s*[:=]\\s*)(?!["'])((?:(?:Bearer|Basic)\\s+)?[^\\s,;\\]}]+)`, 'gi');
   return text
     .replace(quoted, (_match, key, separator, quote) => `${key}${separator}${quote}${replacement}${quote}`)
     .replace(bare, (_match, key, separator) => `${key}${separator}${replacement}`);
@@ -54,10 +55,19 @@ export function redactEvent(event: LogEvent, options: RedactionOptions = {}): Lo
     message: event.message === undefined ? event.message : redactText(event.message, options)
   };
   if (event.raw !== undefined) {
+    let value: unknown;
     try {
-      redacted.raw = JSON.stringify(redactValue(JSON.parse(event.raw), options));
+      value = JSON.parse(event.raw);
     } catch {
       redacted.raw = redactText(event.raw, options);
+      return redacted;
+    }
+    try {
+      redacted.raw = JSON.stringify(redactValue(value, options));
+    } catch {
+      // Deep valid JSON can exceed the recursive serializer's stack. Falling
+      // back to text here would expose quoted JSON credentials unchanged.
+      redacted.raw = options.replacement ?? DEFAULT_REPLACEMENT;
     }
   }
   return redacted;

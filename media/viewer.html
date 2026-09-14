@@ -21,7 +21,7 @@
     </div>
     <div class="search-toolbar" role="group" aria-label="Search and filter logs">
       <div class="popover-container search-group">
-        <input id="search" type="search" placeholder="Search logs…" aria-label="Search logs" maxlength="256" list="fieldSuggestions">
+        <input id="search" type="search" placeholder="Search logs…" aria-label="Search logs" maxlength="256" autocomplete="off" list="fieldSuggestions">
         <datalist id="fieldSuggestions"></datalist>
         <button id="searchHelp" class="search-help-button" type="button" aria-haspopup="true" aria-expanded="false" aria-controls="searchHelpPanel" aria-label="Search syntax help" title="Search syntax help">Syntax</button>
         <div id="searchHelpPanel" class="popover cheat-sheet" hidden>
@@ -42,6 +42,7 @@
           </dl>
         </div>
       </div>
+      <button id="copyResults" class="copy-filter" type="button" hidden title="Copy up to 1,000 filtered log rows as JSON Lines">Copy results</button>
       <div class="popover-container toolbar-divider">
         <button id="levelButton" class="level-button dropdown-button" type="button" aria-haspopup="true" aria-expanded="false" aria-controls="levelMenu" aria-label="Log level filter">All levels</button>
         <div id="levelMenu" class="popover level-menu" hidden role="group" aria-label="Log level filter"></div>
@@ -54,19 +55,10 @@
         </div>
       </div>
       <div class="popover-container">
-        <button id="facetButton" class="dropdown-button" type="button" aria-haspopup="true" aria-expanded="false" aria-controls="facetPanel">Filter by value</button>
-        <div id="facetPanel" class="popover facet-panel" hidden>
-          <h3>Filter by value</h3>
-          <p class="popover-description">Choose a value to search this field.</p>
-          <label>Field <select id="facetField" aria-label="Facet field"></select></label>
-          <div id="facetValues" aria-live="polite">Choose a field to see values.</div>
-        </div>
-      </div>
-      <div class="popover-container">
         <button id="fieldsButton" class="dropdown-button" type="button" aria-haspopup="true" aria-expanded="false" aria-controls="fieldsPanel">Columns</button>
         <div id="fieldsPanel" class="popover fields-panel" hidden>
-          <h3>Table columns</h3>
-          <p class="popover-description">Choose fields to show in the table.</p>
+          <div class="popover-heading"><h3>Table columns</h3><div class="field-actions"><button id="fieldsAll" type="button">All</button><button id="fieldsNone" type="button">None</button></div></div>
+          <p class="popover-description">Select fields to show. Newly found fields stay off until selected.</p>
           <div id="fieldList"></div>
         </div>
       </div>
@@ -82,6 +74,7 @@
     </table>
     <p id="empty">Run a server command to see its logs here.</p>
   </section>
+  <div id="cellFilterMenu" class="cell-filter-menu" hidden><button id="cellFilterAction" type="button">Filter by this value</button></div>
   <footer>
     <div class="pagination"><button id="older">← Older</button><span id="page">Page 1 of 1</span><button id="newer">Newer →</button><span id="mode">Live</span></div>
     <div id="counts" role="status">0 received · 0 retained · 0 discarded</div>

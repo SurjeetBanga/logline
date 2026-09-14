@@ -8,7 +8,9 @@ import { withVscode } from './test/vscode-mock';
 const settings = new Map<string, unknown>();
 const warnings: string[] = [];
 let importUris: { scheme: string; path: string; fsPath: string; }[] = [];
+let clipboard = '';
 const mock = {
+  env: { clipboard: { writeText: async (text: string) => { clipboard = text; } } },
   workspace: {
     getConfiguration: () => ({ get: (key: string, fallback: unknown) => settings.get(key) ?? fallback }),
     onDidChangeConfiguration: () => ({ dispose() { } }),
@@ -80,6 +82,20 @@ test('native imports stream, yield to the host, retain session boundaries and tr
   } finally { p.notifications.dispose(); await rm(dir, { recursive: true, force: true }); }
 });
 
+test('clear resets completed import status along with retained logs', () => {
+  const p = provider();
+  p.ingestion.accept('{"message":"imported"}', 'import', { serverId: 'imported', server: 'Imported', sessionId: 'file' });
+  p.state.status = 'Imported 19 events';
+  p.state.command = 'stale command';
+
+  p.clear();
+
+  assert.equal(p.store.total, 0);
+  assert.equal(p.store.size, 0);
+  assert.equal(p.state.status, 'Ready — run a server command to begin');
+  assert.equal(p.state.command, '');
+});
+
 test('snapshot projects selected custom columns and exposes server-scoped payload choices', () => {
   const p = provider();
   p.store.add({ id: 1, level: 'info', serverId: 'api', fields: { service: 'api', logger: 'main', requestId: 'r1', traceId: 't1', method: 'GET', path: '/', custom: 'value' } });
@@ -102,4 +118,43 @@ test('configured canonical columns resolve aliases in structured payloads', () =
 
   p.handleMessage(message => { messages.push(message); }, { type: 'snapshot' });
   assert.deepEqual(messages[0].events[0].fields, { service: 'api', status: 201 });
+});
+
+test('snapshot projects own prototype-named fields without inherited values', () => {
+  const p = provider();
+  settings.set('columns', ['__proto__', 'toString', 'constructor']);
+  p.ingestion.accept('{"__proto__":"payload","constructor":"value"}', 'stdout', { serverId: 'api', server: 'API', sessionId: 'session' });
+  const snapshot = p.snapshot({ type: 'snapshot' });
+  assert.deepEqual(Object.keys(snapshot.events![0].fields!), ['__proto__', 'constructor']);
+  assert.equal(snapshot.events![0].fields!.__proto__, 'payload');
+});
+
+test('clipboard and AI exports only read raw data for the latest 1,000 matching rows', async () => {
+  const p = provider();
+  for (let id = 1; id <= 4000; id++) {
+    p.store.add({ id, level: 'error', serverId: id % 2 ? 'api' : 'worker', raw: JSON.stringify({ message: `event ${id}`, token: 'secret' }) });
+  }
+  let rawReads = 0;
+  for (let id = 1; id <= 4000; id++) {
+    const event = p.store.find(id)!;
+    const raw = event.raw;
+    Object.defineProperty(event, 'raw', { enumerable: true, get() {
+      assert.ok(id > 2000 && id % 2 === 1, 'omitted rows must not be copied or redacted');
+      rawReads++; return raw;
+    } });
+  }
+  const request = { serverId: 'api', levels: ['error'] };
+  await p.transfer.copyFiltered(request);
+  const rows = clipboard.trim().split('\n').map(line => JSON.parse(line));
+  assert.equal(rows.length, 1000);
+  assert.equal(rows[0].id, 2001);
+  assert.equal(rows.at(-1).id, 3999);
+  assert.ok(rawReads > 0);
+  assert.ok(!clipboard.includes('secret'));
+  let markdown = '';
+  p.transfer.saveExport = async content => { markdown = content; return true; };
+  await p.transfer.exportForAI(request);
+  assert.match(markdown, /Events: 2000 \(latest 1000 included\)/);
+  assert.ok(!markdown.includes('secret'));
+  await p.dispose();
 });

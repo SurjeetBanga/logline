@@ -1,4 +1,5 @@
 import type { HostMessage } from '../../protocol/messages';
+import { completeQuery } from '../../core/query-completion';
 import type { SavedSearch } from '../../storage/saved-searches';
 import type { Elements } from '../dom';
 import { emptyMessage } from '../dom';
@@ -8,8 +9,8 @@ import type { ViewerState } from '../state';
 import { LEVELS } from '../state';
 import type { ViewerActions, WebviewApi } from '../types';
 
-export function createSearch(elements: Elements, state: ViewerState, api: WebviewApi, popovers: Popover[], actions: Pick<ViewerActions, 'request' | 'saveState' | 'filterChanged'>, scope: EventScope) {
-  const { request, saveState, filterChanged } = actions;
+export function createSearch(elements: Elements, state: ViewerState, api: WebviewApi, popovers: Popover[], actions: Pick<ViewerActions, 'filterChanged'>, scope: EventScope) {
+  const { filterChanged } = actions;
   // A checkbox per level (any combination, Kayak-filter style) rather than a
   // single "at least X" choice, so e.g. Info + Error but not Warn is possible.
 
@@ -96,11 +97,8 @@ export function createSearch(elements: Elements, state: ViewerState, api: Webvie
         for (const popover of popovers)
           popover.close();
         elements.search.focus();
-        state.page = 0;
         state.before = undefined;
-        state.lastRows = undefined;
-        saveState();
-        request(true);
+        filterChanged();
       });
       if (!removable)
         return button;
@@ -124,61 +122,25 @@ export function createSearch(elements: Elements, state: ViewerState, api: Webvie
   function renderAutocomplete(data: Extract<HostMessage, { type: 'autocomplete'; }>) {
     if (!elements.fieldSuggestions)
       return;
-    elements.fieldSuggestions.replaceChildren(...[...(data.fields ?? []), ...(data.values ?? []).map(value => value.value)].map(value => {
+    elements.fieldSuggestions.replaceChildren(...completeQuery(data.input, data.fields, data.values).map(value => {
       const option = document.createElement('option');
       option.value = value;
+      // Quoting may interrupt the typed prefix in the replacement value.
+      // Native datalists also match labels, so retain that prefix there.
+      if (!value.toLowerCase().includes(data.input.toLowerCase())) option.setAttribute('label', data.input);
       return option;
     }));
+    // clearAutocomplete removes this association to dismiss the native menu
+    // promptly. Restore it whenever fresh suggestions arrive.
+    elements.search.setAttribute('list', 'fieldSuggestions');
   }
 
-  let facetFieldsSignature: string | undefined;
-
-  function populateFacetFields(columns = state.allFields.length ? state.allFields : []) {
-    if (!elements.facetField)
-      return;
-    const names = [...new Set(['level', 'service', 'status', 'statusCode', 'durationMs', 'traceId', 'spanId', ...columns])];
-    const signature = JSON.stringify(names);
-    if (signature === facetFieldsSignature)
-      return;
-    facetFieldsSignature = signature;
-    const current = elements.facetField.value;
-    elements.facetField.replaceChildren(...names.map(name => { const option = document.createElement('option'); option.value = name; option.textContent = name; return option; }));
-    elements.facetField.value = names.includes(current) ? current : names[0];
+  function clearAutocomplete() {
+    elements.fieldSuggestions?.replaceChildren();
+    // Removing the association closes the native dropdown immediately rather
+    // than merely emptying its backing options.
+    elements.search.removeAttribute('list');
   }
 
-  function requestFacets() {
-    const field = elements.facetField?.value;
-    if (!field)
-      return;
-    elements.facetValues.replaceChildren(emptyMessage('Loading values…'));
-    api.postMessage({ type: 'facets', field, query: elements.search.value, serverId: state.selectedServer || undefined });
-  }
-
-  function renderFacets(data: Extract<HostMessage, { type: 'facets'; }>) {
-    if (!elements.facetValues)
-      return;
-    const values = (data.values ?? []).map(value => {
-      const button = document.createElement('button');
-      button.className = 'facet-value';
-      button.type = 'button';
-      const label = document.createElement('span');
-      label.className = 'facet-label';
-      label.textContent = value.value;
-      button.title = value.value;
-      const count = document.createElement('span');
-      count.className = 'facet-count';
-      count.textContent = String(value.count);
-      button.append(label, count);
-      scope.listen(button, 'click', () => {
-        elements.search.value = `${data.field}:"${value.value}"`;
-        for (const popover of popovers)
-          popover.close();
-        elements.search.focus();
-        filterChanged();
-      });
-      return button;
-    });
-    elements.facetValues.replaceChildren(...(values.length ? values : [emptyMessage('No values found for this field in the current results.')]));
-  }
-  return { updateLevelButtonLabel, buildLevelMenu, renderSearchState, renderAutocomplete, populateFacetFields, requestFacets, renderFacets };
+  return { updateLevelButtonLabel, buildLevelMenu, renderSearchState, renderAutocomplete, clearAutocomplete };
 }

@@ -12,6 +12,5 @@ export interface ViewerActions {
   setFollowing(value: boolean): void;
   updateFollowControl(): void;
   updateModeLabel(): void;
-  populateFacetFields(columns?: string[]): void;
 }
 declare global { function acquireVsCodeApi(): WebviewApi; }

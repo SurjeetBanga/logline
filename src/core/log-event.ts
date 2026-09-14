@@ -43,7 +43,7 @@ export function normalizeLevel(level: string | number | undefined, stream: strin
     const byCode: Record<number, string> = { 10: 'trace', 20: 'debug', 30: 'info', 40: 'warn', 50: 'error', 60: 'fatal' };
     return byCode[level] ?? (stream === 'stderr' ? 'error' : 'info');
   }
-  const normalized = String(level ?? '').toLowerCase();
+  const normalized = typeof level === 'string' ? level.toLowerCase() : '';
   if (LEVELS.includes(normalized)) return normalized;
   if (normalized === 'warning') return 'warn';
   if (normalized === 'critical') return 'fatal';
@@ -53,7 +53,7 @@ export function normalizeLevel(level: string | number | undefined, stream: strin
 function getMessage(object: JsonObject | undefined, value: unknown, fallback: string): string {
   const candidate = object?.message ?? object?.msg ?? object?.event ?? object?.name
     ?? readValue(object, 'body.stringValue', 'Body.stringValue', 'body', 'Body');
-  if (candidate !== undefined) return String(candidate);
+  if (candidate === null || isPrimitive(candidate)) return String(candidate);
   if (value === undefined || typeof value === 'string') return String(value ?? fallback);
   if (Array.isArray(value)) return `Array (${value.length} items)`;
   return 'JSON event';
@@ -62,7 +62,7 @@ function getMessage(object: JsonObject | undefined, value: unknown, fallback: st
 function getTimestamp(object: JsonObject | undefined, receivedAt: Date): { text: string; ms: number } {
   // timeMillis is Log4j2 JsonLayout's event time (epoch ms); Date() accepts it directly.
   const candidate = (object?.timestamp ?? object?.time ?? object?.ts ?? object?.datetime ?? object?.timeMillis ?? object?.['@timestamp']) as string | number | undefined;
-  if (candidate !== undefined) {
+  if (typeof candidate === 'string' || typeof candidate === 'number') {
     const parsed = new Date(candidate);
     if (!Number.isNaN(parsed.getTime())) return { text: formatTime(parsed), ms: parsed.getTime() };
   }
@@ -91,8 +91,9 @@ function extractFields(object: JsonObject): Record<string, string | number | boo
   const entries = Object.entries(object);
   let fieldCount = 0;
   const add = (key: string, value: unknown) => {
-    if (fieldCount < MAX_FIELDS && isPrimitive(value) && fields[key] === undefined) {
-      fields[key] = value;
+    if (fieldCount < MAX_FIELDS && isPrimitive(value) && !Object.hasOwn(fields, key)) {
+      if (key === '__proto__') Object.defineProperty(fields, key, { value, enumerable: true, writable: true, configurable: true });
+      else fields[key] = value;
       fieldCount++;
     }
   };

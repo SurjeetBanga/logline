@@ -9,7 +9,7 @@ import { layoutColumnWidths } from './layout';
 import { createRows } from './rows';
 
 export function createTable(elements: Elements, scrollViewport: HTMLElement, state: ViewerState, api: WebviewApi, formatTimestamp: (event: LogEvent) => string | undefined, actions: ViewerActions, scope: EventScope) {
-  const { request, saveState, updateFollowControl, updateModeLabel, populateFacetFields } = actions;
+  const { request, saveState, updateFollowControl, updateModeLabel } = actions;
   function totalColumnCount() { return displayedColumns.length; }
 
   const { buildRow, buildDetailRow } = createRows(state, () => displayedColumns, formatTimestamp);
@@ -191,6 +191,12 @@ export function createTable(elements: Elements, scrollViewport: HTMLElement, sta
 
   let automaticColumns: string[] = [];
 
+  // The host's preferred columns grow as it observes more structured fields.
+  // Applying every growth immediately makes the table move under the reader,
+  // so freeze the set from the first actual result. Later discoveries remain
+  // in the Columns menu and are opt-in.
+  let automaticColumnsLocked = false;
+
   let draggedColumn: string | undefined;
 
   let columnsInitialized = false;
@@ -198,7 +204,9 @@ export function createTable(elements: Elements, scrollViewport: HTMLElement, sta
   let columnElements = new Map<string, HTMLTableColElement>();
 
   function updateColumns(columns: string[], force = false) {
-    automaticColumns = Array.isArray(columns) ? columns : [];
+    const detected = Array.isArray(columns) ? columns : [];
+    if (!automaticColumnsLocked)
+      automaticColumns = detected;
     const next = [...new Set([...automaticColumns, ...state.extraColumns.filter(field => state.columnFields.includes(field))])];
     if (columnsInitialized && !force && JSON.stringify(next) === JSON.stringify(availableColumns))
       return;
@@ -309,9 +317,15 @@ export function createTable(elements: Elements, scrollViewport: HTMLElement, sta
       return th;
     }));
     renderFieldList();
-    populateFacetFields(state.allFields.length ? state.allFields : currentColumns);
     state.lastRows = undefined;
   }
+
+  function resetAutomaticColumns() {
+    automaticColumns = [];
+    automaticColumnsLocked = false;
+  }
+
+  function lockAutomaticColumns() { if (automaticColumns.length) automaticColumnsLocked = true; }
 
   function layoutColumns() { layoutColumnWidths(displayedColumns, columnElements, state.columnWidths, scrollViewport.clientWidth || 0, element('eventsTable')); }
 
@@ -341,10 +355,50 @@ export function createTable(elements: Elements, scrollViewport: HTMLElement, sta
 
   let fieldListSignature: string | undefined;
 
+  // Keep the chooser stable as fields move between the automatic and explicit
+  // column sets. Without this, checking a field promotes it in the picker on
+  // the next render, which makes the selection feel as though it moved.
+  let fieldChoiceOrder: string[] = [];
+
+  function fieldChoices() {
+    const available = new Set([...availableColumns, ...state.columnFields]);
+    const known = new Set(fieldChoiceOrder);
+    fieldChoiceOrder = [
+      ...fieldChoiceOrder.filter(field => available.has(field)),
+      ...[...available].filter(field => !known.has(field))
+    ];
+    return fieldChoiceOrder;
+  }
+
+  function setAllFields(visible: boolean) {
+    const choices = fieldChoices();
+    for (const label of choices) {
+      const key = `field:${label}`;
+      if (visible) {
+        state.hiddenColumns.delete(key);
+        if (!state.extraColumns.includes(label))
+          state.extraColumns.push(label);
+      }
+      else {
+        state.hiddenColumns.add(key);
+        state.extraColumns = state.extraColumns.filter(field => field !== label);
+      }
+    }
+    saveState();
+    updateColumns(automaticColumns, true);
+    renderWindow();
+    request(true);
+  }
+
+  scope.listen(elements.fieldsAll, 'click', () => setAllFields(true));
+  scope.listen(elements.fieldsNone, 'click', () => setAllFields(false));
+
   function renderFieldList() {
     if (!elements.fieldList)
       return;
-    const choices = [...new Set([...availableColumns, ...state.columnFields])];
+    const choices = fieldChoices();
+    elements.fieldsAll.disabled = !choices.length || choices.every(label => currentColumns.includes(label));
+    elements.fieldsNone.disabled = !choices.length || choices.every(label => !currentColumns.includes(label));
     const signature = JSON.stringify([choices, currentColumns]);
     if (signature === fieldListSignature)
       return;
@@ -382,6 +436,12 @@ export function createTable(elements: Elements, scrollViewport: HTMLElement, sta
   }
 
   function toggleExpand(id: number) {
+    // Virtual rows are replaced when details open. Preserve the clicked row's
+    // position so a pending Live layout cannot move it out of the viewport.
+    const oldRow = elements.logs.querySelector<HTMLTableRowElement>(`tr.event-row[data-id="${id}"]`);
+    const viewportTop = scrollViewport.getBoundingClientRect().top;
+    const oldTop = oldRow?.getBoundingClientRect().top;
+    const rowOffset = oldTop === undefined ? undefined : oldTop - viewportTop;
     expandedHeight = 0;
     expandedRow = undefined;
     detailResizeObserver.disconnect();
@@ -390,6 +450,11 @@ export function createTable(elements: Elements, scrollViewport: HTMLElement, sta
     updateFollowControl();
     updateModeLabel();
     renderWindow();
+    if (rowOffset !== undefined && Number.isFinite(rowOffset)) {
+      const newTop = elements.logs.querySelector<HTMLTableRowElement>(`tr.event-row[data-id="${id}"]`)?.getBoundingClientRect().top;
+      if (newTop !== undefined && Number.isFinite(newTop))
+        scrollViewport.scrollTop += newTop - viewportTop - rowOffset;
+    }
   }
   function resetDetails() { expandedHeight = 0; expandedRow = undefined; detailResizeObserver.disconnect(); renderRevision++; }
   function receiveDetails(data: Extract<HostMessage, { type: 'details'; }>) {
@@ -399,7 +464,7 @@ export function createTable(elements: Elements, scrollViewport: HTMLElement, sta
   }
 
   return {
-    updateColumns, layoutColumns, renderFieldList, renderRows, renderWindow, scheduleRenderWindow, toggleExpand, resetDetails, receiveDetails,
+    updateColumns, resetAutomaticColumns, lockAutomaticColumns, layoutColumns, renderFieldList, renderRows, renderWindow, scheduleRenderWindow, toggleExpand, resetDetails, receiveDetails,
     get currentColumns() { return currentColumns; }, get automaticColumns() { return automaticColumns; },
     get events() { return virtualEvents; }, get expandedHeight() { return expandedHeight; }
   };
