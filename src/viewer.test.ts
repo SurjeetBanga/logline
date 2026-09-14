@@ -218,6 +218,21 @@ test('saved searches restore visible filter controls and expose useful empty sta
   assert.equal(get('searchToolsPanel').hidden, true);
 });
 
+test('toolbar popovers escape the horizontal search scroller', () => {
+  const { get } = viewer();
+  get('levelMenu').className = 'level-menu';
+  get('levelMenu').hidden = true;
+  get('levelButton').listeners.get('click')!({ stopPropagation() { } });
+  assert.equal(get('levelMenu').hidden, false);
+  assert.equal(get('levelMenu').style.position, 'fixed');
+
+  get('searchToolsPanel').className = 'saved-searches';
+  get('searchToolsPanel').hidden = true;
+  get('searchTools').listeners.get('click')!({ stopPropagation() { } });
+  assert.equal(get('searchToolsPanel').hidden, false);
+  assert.equal(get('searchToolsPanel').style.position, 'fixed');
+});
+
 test('saved searches refresh Copy results visibility', () => {
   const { get, receive } = viewer();
   assert.equal(get('copyResults').hidden, false, 'the initial timeout filter exposes Copy results');
