@@ -42,13 +42,23 @@ export function layoutColumnWidths(displayedColumns: Column[], columnElements: M
     shrinkRatio = remainingForOthers > minTotal && autoOthersNatural > minTotal
       ? (remainingForOthers - minTotal) / (autoOthersNatural - minTotal) : 0;
   }
+  const widths = new Map<string, number>();
   let total = 0;
   for (const { key } of columns) {
     const width = key === 'base:message' ? messageWidth
       : isExplicit(key) ? widthFor(key)
         : Math.round(minWidth + (widthFor(key) - minWidth) * shrinkRatio);
-    columnElements.get(key)!.style.width = `${width}px`;
+    widths.set(key, width);
     total += width;
   }
-  table.style.width = `${total}px`;
+  // A manually narrowed Message column used to leave an empty strip at the
+  // right edge. Treat its saved width as a floor so the table always uses the
+  // available panel width while retaining horizontal scrolling when needed.
+  if (available > total && widths.has('base:message')) {
+    widths.set('base:message', widths.get('base:message')! + available - total);
+    total = available;
+  }
+  for (const [key, width] of widths)
+    columnElements.get(key)!.style.width = `${width}px`;
+  table.style.width = `${Math.max(total, available)}px`;
 }

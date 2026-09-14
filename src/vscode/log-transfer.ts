@@ -28,7 +28,7 @@ export class LogTransfer {
       { label: 'JSON Lines', description: 'One redacted event per line', format: 'jsonl' as const },
       { label: 'JSON', description: 'A redacted JSON array', format: 'json' as const },
       { label: 'CSV', description: 'Rows with common fields as columns', format: 'csv' as const },
-      { label: 'AI context (Markdown)', description: 'Up to 2,000 filtered events for AI tools', format: 'md' as const }
+      { label: 'AI context (Markdown)', description: 'Up to 1,000 filtered events for AI tools', format: 'md' as const }
     ], { title: 'Export retained logs' });
     return choice?.format;
   }
@@ -70,7 +70,7 @@ export class LogTransfer {
   }
 
   async exportForAI(request: ExportRequest = {}): Promise<void> {
-    const limit = 2000;
+    const limit = 1000;
     const events = this.queryExportEvents(request);
     const selected = events.slice(-limit).map(event => redactEvent(event, this.redactionOptions()));
     const omitted = events.length - selected.length;
@@ -82,6 +82,15 @@ export class LogTransfer {
       '', '```jsonl', lines, '```', ''
     ].join('\n');
     await this.saveExport(content, 'md', 'logline-ai-context.md');
+  }
+
+  async copyFiltered(request: ExportRequest = {}): Promise<void> {
+    const limit = 1000;
+    const events = this.collectExportEvents(request);
+    const selected = events.slice(-limit);
+    await vscode.env.clipboard.writeText(serializeExport(selected, 'jsonl'));
+    const suffix = events.length > limit ? ` (latest ${limit.toLocaleString()} of ${events.length.toLocaleString()})` : '';
+    void vscode.window.showInformationMessage(`Copied ${selected.length.toLocaleString()} filtered log rows${suffix}.`);
   }
 
   async exportContext(ids: number[]): Promise<void> {

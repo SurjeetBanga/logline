@@ -12,7 +12,7 @@ A saved server can also start automatically when the extension activates by sett
 
 **Live** follows the newest events automatically. Turn it off to browse retained history with Older/Newer. Sorting switches to Browse; returning to Live (or Resume after inspecting an event) clears the sort and expanded event and jumps to the newest rows in capture order. The panel renders up to **1,000 rows per page**.
 
-The server selector shows each server's current session state and active-session count. Use **Export** to save the current server, search, and level filters as redacted JSON Lines, JSON, CSV, or **AI context (Markdown)**. The AI context option includes the latest 2,000 matching events in a redacted Markdown file. **Import** loads JSON, JSONL, CSV, and plain-text log files into an `Imported` server entry for offline searching. A CSV exported by Logline round-trips exactly; any other CSV becomes an event per row, built from its own header names.
+The server selector shows each server's current session state and active-session count. Use **Export** to save the current server, search, and level filters as redacted JSON Lines, JSON, CSV, or **AI context (Markdown)**. The AI context option includes the latest 1,000 matching events in a redacted Markdown file. **Import** loads JSON, JSONL, CSV, and plain-text log files into an `Imported` server entry for offline searching. A CSV exported by Logline round-trips exactly; any other CSV becomes an event per row, built from its own header names.
 
 The level filter (next to the search box) is a multi-select — check any combination of Trace/Debug/Info/Warn/Error/Fatal, not just "this level and above." Click **Syntax** in the search box for a cheat sheet of the query syntax below.
 
@@ -40,7 +40,7 @@ Log4j2 JsonLayout output is supported directly: the `timeMillis` field is read a
 
 The timezone setting supports Local and UTC.
 
-The search row has separate **Saved searches**, **Filter by value**, **Columns**, and **Analyze** controls. **Saved searches** lets you save named searches and shows the 10 most recent entries from the last 30 retained searches, with a **Clear** action to drop that history. While typing, field names and common values are suggested; **Filter by value** shows counts for a field and lets you search a selected value.
+The search row has separate **Saved searches**, **Columns**, and **Analyze** controls. **Saved searches** lets you save named searches and shows the 10 most recent entries from the last 30 retained searches, with a **Clear** action to drop that history. While typing, field names and common values are suggested for the same field-query syntax used by search.
 
 Click a column's name to sort by that field and click it again to reverse the direction; the arrow shows the active direction. Drag its grip to rearrange columns, or drag the divider at its right edge to resize. Payload fields also have an `×` remove control, and **Columns** restores them. Column widths and order are saved per webview. Rows keep a single-line preview; expand an event to read its full contents. Scrolling past an expanded event preserves its details and internal scroll position.
 
@@ -104,7 +104,7 @@ Set `shell: true` when the command is a shell line containing pipes, redirects, 
 
 The viewer retains up to **50,000 events or 100 MiB** of estimated event storage by default, whichever limit is reached first. Older events are evicted automatically, and the footer shows the live figure against the configured budget. Raising or lowering `maxEvents` or `maxMemoryMb` takes effect immediately, without reloading the window.
 
-Search, facets, and analysis cover retained history only; enable `persistLogs` or use a log service for archival storage. Persisted logs are written to `.logline/` in the first workspace folder — add that directory to your `.gitignore`.
+Search and analysis cover retained history only; enable `persistLogs` or use a log service for archival storage. Persisted logs are written to `.logline/` in the first workspace folder — add that directory to your `.gitignore`.
 
 Disk persistence buffers up to 8 MiB of estimated text storage, including writes in progress. If the disk falls behind, new disk writes are skipped until space becomes available; live capture continues. A warning and the footer's **disk writes skipped** counter report this loss. Accepted writes remain ordered. Field-name indexes release names when their last retained event is evicted, and each event exposes at most 120 flattened fields, including MDC fields; the original raw event remains available within the line-length limit.
 
@@ -114,7 +114,7 @@ The extension host and browser UI are written in TypeScript. Host code compiles 
 
 See [ARCHITECTURE.md](ARCHITECTURE.md) for module responsibilities, dependency boundaries, state ownership, and testing. `src/core/log-store.ts` owns retention, indexes, filtering, and paging. Independent parsing, analysis, capture, persistence, transfer, and VS Code integration have their own modules.
 
-`samples/demo-logs.jsonl` is a synthetic JSON Lines fixture (not part of the published package) for exercising the viewer without a live server: **Logline: Import Logs** it to get a realistic mix of services, levels, HTTP fields, linked trace/span ids, and two recurring, distinct error call sites, useful for screenshots or trying search, sort, facets, and Analyze.
+`samples/demo-logs.jsonl` is a synthetic JSON Lines fixture (not part of the published package) for exercising the viewer without a live server: **Logline: Import Logs** it to get a realistic mix of services, levels, HTTP fields, linked trace/span ids, and two recurring, distinct error call sites, useful for screenshots or trying search, sort, and Analyze.
 
 ```sh
 npm install

@@ -80,6 +80,20 @@ test('native imports stream, yield to the host, retain session boundaries and tr
   } finally { p.notifications.dispose(); await rm(dir, { recursive: true, force: true }); }
 });
 
+test('clear resets completed import status along with retained logs', () => {
+  const p = provider();
+  p.ingestion.accept('{"message":"imported"}', 'import', { serverId: 'imported', server: 'Imported', sessionId: 'file' });
+  p.state.status = 'Imported 19 events';
+  p.state.command = 'stale command';
+
+  p.clear();
+
+  assert.equal(p.store.total, 0);
+  assert.equal(p.store.size, 0);
+  assert.equal(p.state.status, 'Ready — run a server command to begin');
+  assert.equal(p.state.command, '');
+});
+
 test('snapshot projects selected custom columns and exposes server-scoped payload choices', () => {
   const p = provider();
   p.store.add({ id: 1, level: 'info', serverId: 'api', fields: { service: 'api', logger: 'main', requestId: 'r1', traceId: 't1', method: 'GET', path: '/', custom: 'value' } });

@@ -76,9 +76,12 @@ function parseToken(token: string): Token {
   if (canonical !== 'exists') value = value.toLowerCase();
   // Compiled once here, at parse time, rather than once per event in matchesQuery.
   let regex: RegExp | null | undefined;
-  if (value.startsWith('/') && value.lastIndexOf('/') > 0) {
-    const end = value.lastIndexOf('/');
-    try { regex = new RegExp(value.slice(1, end), value.slice(end + 1)); } catch { regex = null; }
+  // Only treat slash-delimited input as a regex when the suffix is made of
+  // JavaScript regex flags. A literal route such as path:/users/42 otherwise
+  // looks like a regex with an invalid "42" flag suffix.
+  const regexMatch = value.match(/^\/(.+)\/([dgimsuvy]*)$/);
+  if (regexMatch) {
+    try { regex = new RegExp(regexMatch[1], regexMatch[2]); } catch { regex = null; }
   }
   // Testing an /i regex against each field beats lower-casing a joined copy of
   // level + message + raw for every event. A term containing a space could span

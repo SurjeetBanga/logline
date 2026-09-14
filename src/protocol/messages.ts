@@ -1,7 +1,7 @@
 import type { ServerSummary, SessionRegistry } from '../capture/session-registry';
 import type { ExceptionBlock } from '../core/exceptions';
 import type { AnalysisResult } from '../core/log-analysis';
-import type { FacetValue, PageOptions, Stats } from '../core/log-store';
+import type { PageOptions, Stats, SuggestedValue } from '../core/log-store';
 import type { LogEvent } from '../core/types';
 import type { SavedSearch } from '../storage/saved-searches';
 
@@ -10,10 +10,10 @@ export type ViewRequest =
   | ({ type: 'snapshot'; columns?: string[]; statsOnly?: boolean; } & PageOptions)
   | ({ type: 'analysis'; sessionId?: string; from?: number; to?: number; } & Filter)
   | ({ type: 'export' | 'exportForAI'; } & Filter)
+  | ({ type: 'copyFiltered'; } & Filter)
   | ({ type: 'saveSearch'; name?: string; } & Filter)
   | { type: 'deleteSavedSearch'; id: string; }
   | { type: 'autocomplete'; input?: string; serverId?: string; }
-  | ({ type: 'facets'; field?: string; } & Filter)
   | { type: 'context'; id: number; }
   | { type: 'details' | 'copy'; id: number; target?: 'main' | 'context'; }
   | { type: 'openSource'; id: number; block: number; line: number; }
@@ -34,8 +34,7 @@ export type HostMessage = Snapshot
   | { type: 'context'; id: number; events: LogEvent[]; server?: string; missing: boolean; }
   | { type: 'details'; id: number; text: string; target: 'main' | 'context'; exceptions: ExceptionBlock[]; }
   | { type: 'searches'; searches: { saved: SavedSearch[]; }; saved?: SavedSearch; }
-  | { type: 'autocomplete'; fields: string[]; values: FacetValue[]; }
-  | { type: 'facets'; field: string; values: FacetValue[]; }
+  | { type: 'autocomplete'; fields: string[]; values: SuggestedValue[]; }
   | { type: 'analysis'; analysis: AnalysisResult; };
 
 /** Normalize untrusted webview input once, before dispatching any host action. */
@@ -53,11 +52,10 @@ export function parseViewRequest(value: unknown): ViewRequest | undefined {
       sort: string('sort'), sortDirection: msg.sortDirection === 'desc' ? 'desc' : 'asc', columns: strings('columns'), statsOnly: msg.statsOnly === true
     };
     case 'analysis': return { type: msg.type, ...filter, sessionId: string('sessionId'), from: number('from'), to: number('to') };
-    case 'export': case 'exportForAI': return { type: msg.type, ...filter };
+    case 'export': case 'exportForAI': case 'copyFiltered': return { type: msg.type, ...filter };
     case 'saveSearch': return { type: msg.type, ...filter, name: string('name') };
     case 'deleteSavedSearch': { const id = string('id'); return id === undefined ? undefined : { type: msg.type, id }; }
     case 'autocomplete': return { type: msg.type, input: string('input'), serverId: filter.serverId };
-    case 'facets': return { type: msg.type, ...filter, field: string('field') };
     case 'context': case 'details': case 'copy': {
       const id = index('id'); if (id === undefined) return;
       return msg.type === 'context' ? { type: msg.type, id } : { type: msg.type, id, target: msg.target === 'context' ? 'context' : 'main' };

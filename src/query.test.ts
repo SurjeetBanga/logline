@@ -38,6 +38,12 @@ test('supports regex matching, including invalid patterns', () => {
   assert.equal(matchesQuery(event, 'message:/[/'), false);
 });
 
+test('literal path filters are not mistaken for regular expressions', () => {
+  const route = parseLogLine('{"message":"request","path":"/users/42"}', 'stdout', 1, new Date());
+  assert.equal(matchesQuery(route, 'path:/users/42'), true);
+  assert.equal(matchesQuery(route, 'path:/users/99'), false);
+});
+
 test('global and sticky regex queries start fresh for every event and scan', () => {
   const events = ['error', 'error', 'ok', 'error'].map((message, id) => ({ id, level: 'info', message }));
   for (const flags of ['g', 'y', 'gy']) {
