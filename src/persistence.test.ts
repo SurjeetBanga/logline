@@ -51,3 +51,23 @@ test('disk writes stay ordered during disposal and oversized lines cannot fill t
   assert.equal(batches.join(''), 'first\nlast\n');
   assert.equal(p.queuedWriteBytes, 0);
 });
+
+test('failed writes are counted and reported without poisoning subsequent batches', async () => {
+  const p = persistence();
+  settings.set('persistLogs', true);
+  p.persistedBytes = 123;
+  p.writeBatch = async () => { throw new Error('disk full'); };
+  p.persist('first'); p.persist('second'); p.flushPersist();
+  await p.persistChain;
+  assert.equal(p.persistDropped, 2);
+  assert.equal(p.queuedWriteBytes, 0);
+  assert.equal(p.persistedBytes, undefined);
+  assert.match(warnings[0], /disk full/);
+  p.persist('third'); p.flushPersist(); await p.persistChain;
+  assert.equal(warnings.length, 1);
+  const written: string[] = [];
+  p.writeBatch = async batch => { written.push(batch); };
+  p.persist('recovered'); await p.dispose();
+  assert.deepEqual(written, ['recovered\n']);
+  assert.equal(p.persistDropped, 3);
+});

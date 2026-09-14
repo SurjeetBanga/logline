@@ -26,6 +26,35 @@ export function createPopovers(scope: EventScope) {
         panel.style.top = '';
         panel.style.bottom = '';
         panel.style.maxHeight = '';
+        panel.style.position = '';
+        // The search toolbar is horizontally scrollable so its controls stay
+        // on one row. Any absolutely positioned menu inside that scroller is
+        // clipped to the toolbar's height, which makes All levels and Saved
+        // searches appear not to open. Anchor every toolbar menu to the
+        // viewport so it can escape that clipping layer.
+        if (panel.classList.contains('fields-panel') || panel.classList.contains('cheat-sheet')
+          || panel.classList.contains('level-menu') || panel.classList.contains('saved-searches')) {
+          const trigger = button.getBoundingClientRect();
+          const margin = 8;
+          const spaceBelow = window.innerHeight - trigger.bottom - margin;
+          const spaceAbove = trigger.top - margin;
+          const openAbove = spaceBelow < 160 && spaceAbove > spaceBelow;
+          const maxHeight = Math.max(0, openAbove ? spaceAbove : spaceBelow);
+          panel.style.position = 'fixed';
+          // The syntax trigger lives at the right edge of the search input.
+          // Align a wide panel to that edge so it expands back over the input
+          // rather than appearing to hang from a small button. Clamp the
+          // result for narrow docked panels where the preferred edge cannot
+          // fit on screen.
+          const panelWidth = panel.getBoundingClientRect().width;
+          const maxLeft = Math.max(margin, window.innerWidth - margin - panelWidth);
+          const preferredLeft = trigger.right - panelWidth;
+          panel.style.left = `${Math.max(margin, Math.min(preferredLeft, maxLeft))}px`;
+          panel.style.top = openAbove ? `${margin}px` : `${trigger.bottom + 4}px`;
+          panel.style.bottom = openAbove ? `${window.innerHeight - trigger.top + 4}px` : '';
+          panel.style.maxHeight = `${maxHeight}px`;
+          return;
+        }
         const bounds = panel.getBoundingClientRect();
         if (Number.isFinite(bounds.left) && Number.isFinite(window.innerWidth)) {
           panel.style.left = `${Math.max(14 - bounds.left, Math.min(0, window.innerWidth - 14 - bounds.right))}px`;

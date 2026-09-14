@@ -40,10 +40,12 @@ class Element {
     options?.signal?.addEventListener('abort', () => this.removeEventListener(name, callback), { once: true });
   }
   removeEventListener(name: string, callback: (event?: any) => void) { if (this.listeners.get(name) === callback) this.listeners.delete(name); }
+  removeAttribute(name: string) { delete this.attributes[name]; }
   setAttribute(name: string, value: string) { this.attributes[name] = value; if (name === 'class') this.className = value; }
   contains(element: Element): boolean { return element === this || this.children.some(child => child.contains(element)); }
   closest(selector: string): Element | undefined {
-    if (selector === 'tr') return this.classList.contains('event-row') || this.classList.contains('detail-row') ? this : this.parent?.closest(selector);
+    if (selector === 'tr' || selector === 'tr.event-row') return this.classList.contains('event-row') ? this : selector === 'tr' && this.classList.contains('detail-row') ? this : this.parent?.closest(selector);
+    if (selector === 'td[data-column]') return this.dataset.column ? this : this.parent?.closest(selector);
     return this;
   }
   querySelectorAll(selector: string): Element[] {
@@ -170,6 +172,15 @@ test('plain logs initialize interactive headers and sorting toggles the displaye
   assert.equal(get('older').textContent, 'Next →');
 });
 
+test('plain startup output does not lock out columns from later structured logs', () => {
+  const { app, receive } = viewer();
+  receive({ type: 'snapshot', generation: 1, newest: 101, status: 'Running', running: true,
+    total: 101, retained: 101, discarded: 0, bytes: 1000, maxBytes: 10000, truncated: 0,
+    events: [{ id: 101, level: 'info', message: 'request', fields: { service: 'api' } }],
+    columns: ['service'], columnFields: ['service'], page: 0, pages: 1, matched: 1 });
+  assert.deepEqual([...app.table.currentColumns], ['service']);
+});
+
 test('resize updates the actual table column and preserves its width after column reorder', () => {
   const { get, app, dom, messages } = viewer();
   const timeHeader = get('head-row').children[0];
@@ -181,6 +192,11 @@ test('resize updates the actual table column and preserves its width after colum
   dom.listeners.get('pointerup')!();
   assert.equal(dom.listeners.has('pointermove'), false);
   assert.equal(messages.length, messageCount, 'resizing must not issue a sort request');
+  const messageHeader = get('head-row').children.find(header => header.dataset.column === 'base:message')!;
+  messageHeader.querySelector('.resize-handle')!.listeners.get('pointerdown')!({ clientX: 100, button: 0 });
+  dom.listeners.get('pointermove')!({ clientX: 140 });
+  dom.listeners.get('pointerup')!();
+  assert.equal(get('eventsTable').style.width, '1000px', 'a narrowed message column must not leave empty right-edge space');
   (() => {
     app.state.columnOrder = ['base:message', 'base:level', 'base:source', 'base:time'];
     app.table.updateColumns([], true);
@@ -200,6 +216,34 @@ test('saved searches restore visible filter controls and expose useful empty sta
   assert.equal(get('server').value, 'worker');
   assert.equal(get('levelButton').textContent, 'Warn only');
   assert.equal(get('searchToolsPanel').hidden, true);
+});
+
+test('toolbar popovers escape the horizontal search scroller', () => {
+  const { get } = viewer();
+  get('levelMenu').className = 'level-menu';
+  get('levelMenu').hidden = true;
+  get('levelButton').listeners.get('click')!({ stopPropagation() { } });
+  assert.equal(get('levelMenu').hidden, false);
+  assert.equal(get('levelMenu').style.position, 'fixed');
+
+  get('searchToolsPanel').className = 'saved-searches';
+  get('searchToolsPanel').hidden = true;
+  get('searchTools').listeners.get('click')!({ stopPropagation() { } });
+  assert.equal(get('searchToolsPanel').hidden, false);
+  assert.equal(get('searchToolsPanel').style.position, 'fixed');
+});
+
+test('saved searches refresh Copy results visibility', () => {
+  const { get, receive } = viewer();
+  assert.equal(get('copyResults').hidden, false, 'the initial timeout filter exposes Copy results');
+
+  receive({ type: 'searches', searches: { saved: [{ id: 'all', name: 'Everything', query: '' }] } });
+  get('savedSearchList').children[0].querySelector('.search-item')!.listeners.get('click')!();
+  assert.equal(get('copyResults').hidden, true);
+
+  receive({ type: 'searches', searches: { saved: [{ id: 'errors', name: 'Errors', query: 'failure', levels: ['error'] }] } });
+  get('savedSearchList').children[0].querySelector('.search-item')!.listeners.get('click')!();
+  assert.equal(get('copyResults').hidden, false);
 });
 
 test('save current opens a dialog (not window.prompt, which webviews block) and posts the entered name', () => {
@@ -253,25 +297,66 @@ test('analysis renders status codes', () => {
   assert.deepEqual(statusSection.children.slice(1).map(p => p.textContent), ['200: 8', '500: 2']);
 });
 
-test('facets popover requests values for the selected field and a value click inserts a filter', () => {
-  const { get, app, messages, receive } = viewer();
-  app.search.requestFacets();
-  const request = messages.at(-1)!;
-  assert.equal(request.type, 'facets');
-  assert.equal(request.field, 'level');
-  receive({ type: 'facets', field: 'level', values: [{ value: 'error', count: 5 }] });
-  const button = get('facetValues').children[0];
-  assert.equal(button.querySelector('.facet-count')!.textContent, '5');
-  button.listeners.get('click')!();
-  assert.equal(get('search').value, 'level:"error"');
-  receive({ type: 'facets', field: 'level', values: [] });
-  assert.match(get('facetValues').children[0].textContent, /No values found/);
-});
-
 test('autocomplete suggestions list known field names alongside matching values', () => {
   const { get, receive } = viewer();
-  receive({ type: 'autocomplete', fields: ['service', 'status'], values: [{ value: 'api', count: 4 }] });
-  assert.deepEqual(get('fieldSuggestions').children.map(option => option.value), ['service', 'status', 'api']);
+  receive({ type: 'autocomplete', input: 'timeout', serverId: 'api', fields: ['service', 'status'], values: [{ value: 'api', count: 4 }] });
+  assert.deepEqual(get('fieldSuggestions').children.map(option => option.value), ['service:', 'status:']);
+  assert.equal(get('search').attributes.list, 'fieldSuggestions');
+});
+
+test('Clear removes stale autocomplete suggestions', () => {
+  const { get, receive } = viewer();
+  receive({ type: 'autocomplete', input: 'timeout', serverId: 'api', fields: ['service'], values: [{ value: 'api', count: 4 }] });
+
+  get('clear').listeners.get('click')!();
+
+  assert.equal(get('fieldSuggestions').children.length, 0);
+});
+
+test('clearing Search logs removes column suggestions and ignores an in-flight autocomplete response', () => {
+  const { get, receive } = viewer();
+  receive({ type: 'autocomplete', input: 'timeout', serverId: 'api', fields: ['service'], values: [{ value: 'api', count: 4 }] });
+  assert.equal(get('fieldSuggestions').children.length, 1);
+
+  get('search').value = '';
+  get('search').listeners.get('input')!();
+  receive({ type: 'autocomplete', input: 'timeout', serverId: 'api', fields: ['service'], values: [{ value: 'api', count: 4 }] });
+
+  assert.equal(get('fieldSuggestions').children.length, 0);
+});
+
+test('new autocomplete suggestions restore the search datalist after it was cleared', () => {
+  const { get, receive } = viewer();
+  get('search').removeAttribute('list');
+
+  receive({ type: 'autocomplete', input: 'timeout', serverId: 'api', fields: ['service'], values: [] });
+
+  assert.equal(get('search').attributes.list, 'fieldSuggestions');
+});
+
+test('Copy results appears for an active filter and requests the filtered rows', () => {
+  const { get, messages } = viewer();
+  assert.equal(get('copyResults').hidden, false);
+  get('copyResults').listeners.get('click')!();
+  assert.deepEqual(JSON.parse(JSON.stringify(messages.at(-1))), {
+    type: 'copyFiltered', query: 'timeout', levels: ['error'], serverId: 'api'
+  });
+  assert.equal(get('copyResults').textContent, 'Copied');
+});
+
+test('right-clicking a table value offers an additional field-value filter', () => {
+  const { get, messages } = viewer();
+  const row = get('logs').querySelectorAll('.event-row').find(row => String(row.dataset.id) === '42')!;
+  const levelCell = row.children.find(cell => cell.dataset.column === 'base:level')!;
+  let prevented = false;
+  get('logs').listeners.get('contextmenu')!({ target: levelCell, clientX: 20, clientY: 20, preventDefault() { prevented = true; } });
+  assert.equal(prevented, true);
+  assert.equal(get('cellFilterMenu').hidden, false);
+  assert.equal(get('cellFilterAction').textContent, 'Filter level: error');
+  get('cellFilterAction').listeners.get('click')!();
+  assert.equal(get('search').value, 'timeout level:error');
+  assert.equal(messages.at(-1)?.type, 'snapshot');
+  assert.equal(messages.at(-1)?.query, 'timeout level:error');
 });
 
 test('Live settles at the new bottom after layout and resumes even when row IDs are unchanged', () => {
@@ -294,6 +379,55 @@ test('Live settles at the new bottom after layout and resumes even when row IDs 
   assert.equal(get('viewport').scrollTop, 32000);
   assert.equal(app.state.following && !app.state.paused && app.state.page === 0 && app.state.before === undefined && app.state.selectedSort === "" && app.state.selected === undefined, true);
   assert.equal(app.state.lastRows, undefined, 'the same result IDs must still be rendered after resuming');
+});
+
+test('opening a live row freezes its result set while a snapshot is in flight', () => {
+  const { app, receive } = viewer();
+  app.table.toggleExpand(42);
+  receive({
+    type: 'snapshot', generation: 1, newest: 101, total: 101, retained: 101, discarded: 0, bytes: 1000, maxBytes: 10000,
+    columns: [], events: [{ id: 101, level: 'info', message: 'new line' }], page: 0, pages: 1, matched: 101
+  });
+  assert.equal(app.state.selected, 42);
+  assert.equal(app.table.events[0].id, 42, 'the selected row remains available until Live is resumed');
+});
+
+test('explicit paging, filtering, sorting and column selection leave inspection in Browse', () => {
+  for (const action of ['page', 'filter', 'sort', 'columns']) {
+    const { app, get, receive, messages } = viewer();
+    app.table.toggleExpand(42);
+    if (action === 'page') get('older').listeners.get('click')!();
+    if (action === 'filter') get('levelMenu').children[0].children[0].listeners.get('click')!({ stopPropagation() {} });
+    if (action === 'sort') get('head-row').children[0].querySelector('.column-sort')!.listeners.get('click')!();
+    if (action === 'columns') get('fieldsAll').listeners.get('click')!();
+    const request = messages.at(-1)!;
+    assert.equal(request.type, 'snapshot', action);
+    assert.equal(request.statsOnly, false, action);
+    assert.equal(request.before, 100, action);
+    assert.equal(app.state.paused, false, action);
+    assert.equal(app.state.following, false, action);
+    assert.equal(app.state.selected, undefined, action);
+    receive({ type: 'snapshot', generation: 1, newest: 110, status: 'Running', running: true,
+      total: 110, retained: 110, discarded: 0, bytes: 1000, maxBytes: 10000, truncated: 0,
+      events: [{ id: 43, level: 'info', message: 'new result' }], columns: [], page: 0, pages: 1, matched: 1 });
+    assert.equal(app.table.events[0].id, 43, action);
+  }
+});
+
+test('autocomplete ignores changed input or server and inserts a complete query', () => {
+  const { get, app, receive } = viewer();
+  get('search').value = 'level:error service:a';
+  const response = { type: 'autocomplete', input: 'level:error service:a', serverId: 'api', fields: ['service'], values: [{ value: 'API west', count: 1 }] };
+  receive(response);
+  assert.equal(get('fieldSuggestions').children[0].value, 'level:error service:"API west"');
+  assert.equal(get('fieldSuggestions').children[0].attributes.label, 'level:error service:a');
+  get('search').value = 'level:error service:b';
+  get('search').listeners.get('input')!();
+  receive(response);
+  assert.equal(get('fieldSuggestions').children.length, 0);
+  get('search').value = response.input; app.state.selectedServer = 'worker';
+  receive(response);
+  assert.equal(get('fieldSuggestions').children.length, 0);
 });
 
 test('scrolling past expanded details keeps their DOM state and does not repeatedly replace rows', () => {
@@ -358,6 +492,97 @@ test('Columns exposes additional payload fields and requests their values when s
   assert.equal(app.table.currentColumns.includes("custom.jobId"), false);
 });
 
+test('checking a column keeps its position in the Columns picker', () => {
+  const { get, receive } = viewer();
+  receive({
+    type: 'snapshot', generation: 1, newest: 100, total: 100, retained: 100, discarded: 0, bytes: 1000, maxBytes: 10000,
+    columns: ['service'], columnFields: ['service', 'custom.jobId', 'attempt'], fields: ['service', 'custom.jobId', 'attempt']
+  });
+  const fields = () => get('fieldList').children.map(row => row.dataset.field);
+  assert.deepEqual(JSON.parse(JSON.stringify(fields())), ['service', 'custom.jobId', 'attempt']);
+
+  const attempt = get('fieldList').children.find(row => row.dataset.field === 'attempt')!;
+  const checkbox = attempt.children[0] as Element & { checked: boolean; };
+  checkbox.checked = true; checkbox.listeners.get('change')!();
+
+  assert.deepEqual(JSON.parse(JSON.stringify(fields())), ['service', 'custom.jobId', 'attempt']);
+});
+
+test('Columns All and None apply to every field offered by the picker', () => {
+  const { get, app, receive } = viewer();
+  receive({
+    type: 'snapshot', generation: 1, newest: 100, total: 100, retained: 100, discarded: 0, bytes: 1000, maxBytes: 10000,
+    columns: ['service'], columnFields: ['service', 'custom.jobId', 'attempt'], fields: ['service', 'custom.jobId', 'attempt']
+  });
+  get('fieldsAll').listeners.get('click')!();
+  assert.deepEqual(JSON.parse(JSON.stringify(app.table.currentColumns)), ['service', 'custom.jobId', 'attempt']);
+  get('fieldsNone').listeners.get('click')!();
+  assert.deepEqual(JSON.parse(JSON.stringify(app.table.currentColumns)), []);
+});
+
+test('Clear immediately removes payload fields from the Columns picker', () => {
+  const { get, receive } = viewer();
+  receive({
+    type: 'snapshot', generation: 1, newest: 100, total: 100, retained: 100, discarded: 0, bytes: 1000, maxBytes: 10000,
+    columns: ['service'], columnFields: ['service', 'custom.jobId'], fields: ['service', 'custom.jobId']
+  });
+  assert.equal(get('fieldList').children.length, 2);
+
+  get('clear').listeners.get('click')!();
+
+  assert.equal(get('fieldList').children.some(row => row.dataset.field), false);
+});
+
+test('Clear ignores an in-flight pre-clear snapshot so it cannot restore Columns fields', () => {
+  const { app, get, messages, receive } = viewer();
+  receive({
+    type: 'snapshot', generation: 1, newest: 100, total: 100, retained: 100, discarded: 0, bytes: 1000, maxBytes: 10000,
+    columns: ['service'], columnFields: ['service'], fields: ['service']
+  });
+  app.bridge.request();
+  get('clear').listeners.get('click')!();
+
+  receive({
+    type: 'snapshot', generation: 1, newest: 100, total: 100, retained: 100, discarded: 0, bytes: 1000, maxBytes: 10000,
+    columns: ['service'], columnFields: ['service'], fields: ['service']
+  });
+
+  assert.equal(get('fieldList').children.some(row => row.dataset.field), false);
+  assert.equal(messages.at(-1)?.type, 'snapshot', 'the queued post-clear snapshot is requested');
+
+  receive({
+    type: 'snapshot', generation: 2, newest: 100, total: 0, retained: 0, discarded: 0, bytes: 0, maxBytes: 10000,
+    columns: [], columnFields: [], fields: []
+  });
+  assert.equal(get('fieldList').children.some(row => row.dataset.field), false);
+});
+
+test('automatic columns settle after the first useful schema while later fields remain opt-in', () => {
+  const { app, get } = viewer();
+  app.state.columnFields = ['service', 'status'];
+  app.table.resetAutomaticColumns();
+  app.table.updateColumns(['service'], true);
+  app.table.lockAutomaticColumns();
+  app.table.updateColumns(['service', 'status'], true);
+  assert.deepEqual(JSON.parse(JSON.stringify(app.table.currentColumns)), ['service']);
+  assert.ok(get('fieldList').children.some(row => row.dataset.field === 'status'));
+});
+
+test('an empty snapshot does not lock automatic columns before structured logs arrive', () => {
+  const { app, receive } = viewer();
+  app.table.resetAutomaticColumns();
+  receive({
+    type: 'snapshot', generation: 1, newest: 100, total: 100, retained: 100, discarded: 0, bytes: 1000, maxBytes: 10000,
+    columns: [], columnFields: [], fields: [], events: [], page: 0, pages: 1, matched: 0
+  });
+  receive({
+    type: 'snapshot', generation: 1, newest: 101, total: 101, retained: 101, discarded: 0, bytes: 1000, maxBytes: 10000,
+    columns: ['service'], columnFields: ['service'], fields: ['service'],
+    events: [{ id: 101, level: 'info', message: 'ready', fields: { service: 'api' } }], page: 0, pages: 1, matched: 1
+  });
+  assert.deepEqual(JSON.parse(JSON.stringify(app.table.currentColumns)), ['service']);
+});
+
 test('an update received during a snapshot queues another request without hiding the current rows', () => {
   const { receive, messages, app } = viewer();
   app.bridge.request();
@@ -377,30 +602,24 @@ test('unchanged snapshot controls preserve their DOM and update when metadata ch
   const { get, app } = viewer();
   const render = () => (() => {
     app.search.renderSearchState({ saved: [{ id: 'saved', name: 'Errors', query: 'error', createdAt: 0, lastUsedAt: 0 }] });
-    app.search.populateFacetFields(['custom']);
     app.state.columnFields = ['custom'];
     app.table.renderFieldList();
   })();
   render();
   const search = get('savedSearchList').firstChild;
-  const facet = get('facetField').firstChild;
   const field = get('fieldList').firstChild;
-  get('facetField').value = 'custom';
   render();
   assert.equal(get('savedSearchList').firstChild, search);
-  assert.equal(get('facetField').firstChild, facet);
-  assert.equal(get('facetField').value, 'custom');
   assert.equal(get('fieldList').firstChild, field);
   (() => {
     app.search.renderSearchState({ saved: [] });
-    app.search.populateFacetFields(['next']);
     app.state.columnFields = ['next'];
     app.table.renderFieldList();
   })();
   assert.notEqual(get('savedSearchList').firstChild, search);
-  assert.notEqual(get('facetField').firstChild, facet);
   assert.notEqual(get('fieldList').firstChild, field);
   const unchecked = get('fieldList').firstChild;
+  app.table.resetAutomaticColumns();
   app.table.updateColumns(['next'], true);
   assert.notEqual(get('fieldList').firstChild, unchecked);
   assert.equal((get('fieldList').firstChild.firstChild as Element & { checked: boolean; }).checked, true);

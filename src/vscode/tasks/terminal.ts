@@ -3,7 +3,7 @@ import * as vscode from 'vscode';
 import type { ProcessRunner } from '../../capture/process-runner';
 import type { SessionRegistry } from '../../capture/session-registry';
 import type { SessionServer } from '../../capture/types';
-import { slugify } from '../../core/server-config';
+import { taskIdentity } from '../../capture/task-identity';
 import type { LoglineTaskDefinition } from './definition';
 
 export class LogPseudoTerminal implements vscode.Pseudoterminal {
@@ -30,14 +30,17 @@ export class LogPseudoTerminal implements vscode.Pseudoterminal {
     const label = this.task.taskName ?? this.task.label ?? this.task.command;
     const dependencies = this.task.dependsOn
       ? (Array.isArray(this.task.dependsOn) ? this.task.dependsOn : [this.task.dependsOn]) : [];
-    const dependencyState = this.registry.dependencyState(dependencies);
+    const taskScope = this.folder?.uri.toString();
+    const taskType = this.task.taskType ?? 'logline';
+    const dependencyState = this.registry.dependencyState(dependencies, taskScope);
     const server: SessionServer = {
-      id: this.task.taskId ?? `task:${slugify(label)}`, label,
-      jsonOnly: this.task.jsonOnly, shell: this.task.shell, taskName: label, taskType: this.task.taskType ?? 'logline',
+      id: this.task.taskId ?? taskIdentity(label, taskType, taskScope), label,
+      jsonOnly: this.task.jsonOnly, shell: this.task.shell, taskName: label, taskType,
+      taskScope, taskLabel: this.task.label ?? label,
       dependencies, dependencyState, source: 'logline'
     };
     this.sessionId = this.runner.run(String(this.task.command), cwd, server,
-      { write: text => this.writeEmitter.fire(text) }, this.task.options?.env, args.length ? args : undefined,
+      { write: text => this.writeEmitter.fire(text) }, this.task.options?.env, this.task.args !== undefined ? args : undefined,
       code => this.closeEmitter.fire(code));
   }
   close(): void {

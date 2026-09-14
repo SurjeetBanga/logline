@@ -37,7 +37,7 @@ export function registerCommands(controller: LogsController): vscode.Disposable[
 }
 
 export function startAutoServers(controller: LogsController): void {
-  const config = vscode.workspace.getConfiguration('logline');
+  const config = controller.config;
   const { blocked, servers } = resolveAutoStartServers(config.get<ServerConfig[]>('servers', []), vscode.workspace.isTrusted);
   if (blocked) {
     vscode.window.showWarningMessage('Trust this workspace to auto-start saved servers.');

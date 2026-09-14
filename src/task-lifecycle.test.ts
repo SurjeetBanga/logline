@@ -57,3 +57,37 @@ test('dependencyState turns ready only once every named dependency has finished'
   provider.tasks.captureTaskEnd(generate);
   assert.equal(buildRecord.dependencyState, 'ready');
 });
+
+test('task identities distinguish workspace roots and labels with identical slugs', () => {
+  const { tasks, registry } = setup();
+  const execution = (name: string, folder: string) => ({ task: { name, source: 'shell', definition: { type: 'shell' },
+    scope: { uri: { toString: () => folder } } } }) as unknown as import('vscode').TaskExecution;
+  for (const task of [execution('Build API', 'root-a'), execution('Build-API', 'root-a'), execution('Build API', 'root-b')]) tasks.captureTaskStart(task);
+  assert.equal(new Set([...registry.records.values()].map(record => record.serverId)).size, 3);
+  tasks.captureTaskStart(execution('Build API', 'root-a'));
+  assert.equal(new Set([...registry.records.values()].map(record => record.serverId)).size, 3, 'reruns reuse identity');
+});
+
+test('dependencies follow the latest run in the same scope and recognize converted labels', () => {
+  const { tasks, registry } = setup();
+  const execution = (name: string, folder: string, dependsOn?: string[]) => ({ task: { name, source: 'shell', definition: { type: 'shell', dependsOn },
+    scope: { uri: { toString: () => folder } } } }) as unknown as import('vscode').TaskExecution;
+  const lint = execution('Lint', 'root-a');
+  tasks.captureTaskStart(lint); tasks.captureTaskEnd(lint);
+  const build = execution('Build', 'root-a', ['Lint']);
+  tasks.captureTaskStart(build);
+  const buildRecord = tasks.executions.get(build)!;
+  assert.equal(buildRecord.dependencyState, 'ready');
+  const rerun = execution('Lint', 'root-a');
+  tasks.captureTaskStart(rerun);
+  assert.equal(buildRecord.dependencyState, 'pending');
+  const other = execution('Lint', 'root-b');
+  tasks.captureTaskStart(other); tasks.captureTaskEnd(other);
+  assert.equal(buildRecord.dependencyState, 'pending');
+  const record = tasks.executions.get(rerun)!;
+  record.taskLabel = 'Logline: Lint';
+  assert.equal(registry.dependencyState(['Logline: Lint'], 'root-a'), 'pending');
+  tasks.captureTaskEnd(rerun);
+  assert.equal(buildRecord.dependencyState, 'ready');
+  assert.equal(registry.dependencyState(['Logline: Lint'], 'root-a'), 'ready');
+});

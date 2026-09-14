@@ -58,7 +58,13 @@ export class LogsController {
       snapshot: request => this.snapshot(request), clear: () => this.clear(), stop: id => this.stop(id), runner: this.runner
     }, send, message);
   }
-  clear(): void { this.store.clear(); this.registry.clearCompleted(); this.state.invalidate(); }
+  clear(): void {
+    this.store.clear();
+    this.registry.clearCompleted();
+    // A clear must also remove a completed import's status. Active capture is
+    // intentionally retained, so keep its truthful running state instead.
+    this.state.reset(this.runner.sessions.size > 0 || this.tasks.executions.size > 0);
+  }
   stop(serverId?: string): void {
     if (serverId) this.runner.stopServer(serverId); else this.runner.stop();
     this.tasks.stop(serverId);

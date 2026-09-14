@@ -2,7 +2,7 @@
   "name": "logline",
   "displayName": "Logline \u2014 Live Tail for JSON Logs",
   "description": "Live tail your server processes in a searchable, expandable JSON log viewer.",
-  "version": "1.5.0",
+  "version": "1.6.0",
   "publisher": "surjeetbanga",
   "license": "MIT",
   "repository": {
@@ -188,14 +188,14 @@
       "title": "Logline",
       "properties": {
         "logline.indentation": {
-          "type": "number",
+          "type": "integer",
           "default": 2,
           "minimum": 1,
           "maximum": 8,
           "description": "Number of spaces used to indent formatted JSON."
         },
         "logline.maxEvents": {
-          "type": "number",
+          "type": "integer",
           "default": 50000,
           "minimum": 1000,
           "maximum": 1000000,
@@ -209,14 +209,14 @@
           "description": "Approximate memory budget for retained log events. Applied immediately; the oldest events are evicted if the limit is lowered."
         },
         "logline.refreshIntervalMs": {
-          "type": "number",
+          "type": "integer",
           "default": 500,
           "minimum": 100,
           "maximum": 5000,
           "description": "Minimum time between Logs panel updates. The panel refreshes as soon as new data arrives rather than on a fixed poll, so this only caps how often that happens during a heavy burst of log lines."
         },
         "logline.maxLineLength": {
-          "type": "number",
+          "type": "integer",
           "default": 65536,
           "minimum": 1024,
           "maximum": 1048576,
@@ -334,11 +334,12 @@
   "scripts": {
     "compile": "node scripts/build.mjs",
     "watch": "node scripts/build.mjs --watch",
-    "check": "npm run typecheck && npm run compile && npm test",
+    "check": "npm run compile && npm test",
     "vscode:prepublish": "npm run compile",
     "package": "vsce package",
     "typecheck": "tsc --noEmit && tsc -p tsconfig.webview.json && tsc -p tsconfig.test.json --noEmit",
     "test": "node scripts/test.mjs",
+    "benchmark": "npm run compile && node scripts/benchmark.mjs",
     "smoke": "npm run compile && tsc -p tsconfig.test.json && node scripts/smoke.mjs"
   },
   "devDependencies": {

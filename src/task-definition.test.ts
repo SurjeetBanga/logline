@@ -61,3 +61,12 @@ test('appendTasksToJsonc ignores a commented-out tasks property and nested array
 test('appendTasksToJsonc returns undefined when there is no tasks array to preserve', () => {
   assert.equal(appendTasksToJsonc('{"version": "2.0.0"}', [{ label: 'New' }]), undefined);
 });
+
+test('task insertion preserves multiple trailing comments and inserts commas before them', () => {
+  for (const comma of ['', ',']) {
+    const text = `{ "tasks": [{ "label": "Existing" }${comma} // first\n // second\n /* third */ ] }`;
+    const result = appendTasksToJsonc(text, [{ label: 'New' }])!;
+    assert.deepEqual((parseJsonc(result) as { tasks: { label: string }[] }).tasks.map(task => task.label), ['Existing', 'New']);
+    assert.ok(result.includes('// first\n // second\n /* third */'));
+  }
+});

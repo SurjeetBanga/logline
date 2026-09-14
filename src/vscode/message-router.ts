@@ -29,11 +29,12 @@ export async function handleMessage(services: MessageServices, send: (message: H
       send({ type: 'searches', searches: { saved: searches.savedSearches() }, saved }); return;
     }
     case 'deleteSavedSearch': searches.deleteSavedSearch(msg.id); send({ type: 'searches', searches: { saved: searches.savedSearches() } }); return;
-    case 'autocomplete': send({ type: 'autocomplete', ...store.fieldSuggestions(msg.input, msg.serverId) }); return;
-    case 'facets': send({ type: 'facets', field: msg.field ?? '', values: store.facets(msg.field ?? '', { query: msg.query, serverId: msg.serverId }) }); return;
+    case 'autocomplete': send({ type: 'autocomplete', input: msg.input ?? '', serverId: msg.serverId,
+      ...store.fieldSuggestions(msg.input, msg.serverId) }); return;
     case 'analysis': send({ type: 'analysis', analysis: store.analysis(msg) }); return;
     case 'export': await transfer.exportLogs(msg); return;
     case 'exportForAI': await transfer.exportForAI(msg); return;
+    case 'copyFiltered': await transfer.copyFiltered(msg); return;
     case 'exportContext': await transfer.exportContext(msg.ids); return;
     case 'import': await transfer.importLogs(); return;
     case 'details': case 'copy': {

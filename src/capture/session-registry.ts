@@ -20,21 +20,25 @@ export class SessionRegistry {
   clearCompleted(): void {
     for (const [id, record] of this.records) if (record.status !== 'running' && record.status !== 'stopping') this.records.delete(id);
   }
-  dependencyState(deps: string[]): string {
+  dependencyState(deps: string[], scope?: string): string {
     if (!deps.length) return 'none';
     const records = [...this.records.values()];
     const pending = deps.some(name => {
-      const match = records.find(record => record.taskName === name);
+      const match = records.reduce<SessionSummary | undefined>((latest, record) => {
+        if (record.taskScope !== scope || (record.taskName !== name && record.taskLabel !== name)) return latest;
+        return !latest || record.startedAt >= latest.startedAt ? record : latest;
+      }, undefined);
       return !match || match.taskState === 'running';
     });
     return pending ? 'pending' : 'ready';
   }
 
-  refreshDependents(taskName: string | undefined): void {
+  refreshDependents(taskName: string | undefined, scope?: string, taskLabel?: string): void {
     if (!taskName) return;
     for (const record of this.records.values()) {
-      if (record.taskState === 'running' && record.dependencies?.includes(taskName)) {
-        record.dependencyState = this.dependencyState(record.dependencies);
+      if (record.taskState === 'running' && record.taskScope === scope
+        && (record.dependencies?.includes(taskName) || (taskLabel !== undefined && record.dependencies?.includes(taskLabel)))) {
+        record.dependencyState = this.dependencyState(record.dependencies!, scope);
       }
     }
   }

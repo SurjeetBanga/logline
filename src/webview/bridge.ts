@@ -5,12 +5,11 @@ export class SnapshotBridge {
   pending = false;
   refreshRequested = false;
   updateRequested = false;
-  forcedRequest = false;
   constructor(private readonly api: WebviewApi, private readonly state: ViewerState, private readonly query: () => string) { }
   request(force = false): void {
     if (document.hidden) return;
     if (this.pending) { if (force) this.refreshRequested = true; else this.updateRequested = true; return; }
-    this.pending = true; this.forcedRequest = force;
+    this.pending = true;
     const state = this.state;
     this.api.postMessage({
       type: 'snapshot', query: this.query(), serverId: state.selectedServer || undefined,

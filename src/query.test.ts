@@ -38,6 +38,24 @@ test('supports regex matching, including invalid patterns', () => {
   assert.equal(matchesQuery(event, 'message:/[/'), false);
 });
 
+test('regex preserves uppercase escapes, character classes and explicit case flags', () => {
+  const value = { id: 42, level: 'info', message: 'ABC', timestampMs: 1234 };
+  assert.equal(matchesQuery(value, String.raw`message:/^\D+$/`), true);
+  assert.equal(matchesQuery(value, String.raw`message:/^\d+$/`), false);
+  assert.equal(matchesQuery(value, 'message:/^[A-Z]+$/'), true);
+  assert.equal(matchesQuery(value, 'message:/^abc$/'), false);
+  assert.equal(matchesQuery(value, 'message:/^abc$/i'), true);
+  assert.equal(matchesQuery(value, 'message:abc'), true);
+  assert.equal(matchesQuery(value, 'id:42 timestampMs:>1000'), true);
+  assert.equal(matchesQuery(value, 'exists:toString'), false);
+});
+
+test('literal path filters are not mistaken for regular expressions', () => {
+  const route = parseLogLine('{"message":"request","path":"/users/42"}', 'stdout', 1, new Date());
+  assert.equal(matchesQuery(route, 'path:/users/42'), true);
+  assert.equal(matchesQuery(route, 'path:/users/99'), false);
+});
+
 test('global and sticky regex queries start fresh for every event and scan', () => {
   const events = ['error', 'error', 'ok', 'error'].map((message, id) => ({ id, level: 'info', message }));
   for (const flags of ['g', 'y', 'gy']) {

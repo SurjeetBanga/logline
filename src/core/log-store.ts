@@ -2,6 +2,7 @@ import { fieldValue, sortEvents } from './event-order';
 import { analyzeEvents, findPatterns, groupErrors, type AnalysisResult, type ErrorGroup, type LogPattern } from './log-analysis';
 import { canonicalField, matchesQuery, parseQuery, type ParsedQuery } from './query';
 import type { LogEvent } from './types';
+import { completionTarget } from './query-completion';
 
 export type { AnalysisResult, ErrorGroup, LogPattern } from './log-analysis';
 
@@ -114,7 +115,7 @@ export interface PageResult extends Stats {
   matched: number;
 }
 
-export interface FacetValue { value: string; count: number; }
+export interface SuggestedValue { value: string; count: number; }
 const BUILTIN_FIELDS = ['id', 'level', 'message', 'timestamp', 'timestampMs', 'stream', 'server', 'serverId', 'sessionId',
   'taskName', 'taskType', 'taskState', 'dependencies', 'dependencyState', 'exitReason', 'traceId', 'spanId', 'parentSpanId',
   'requestId', 'status', 'statusCode', 'durationMs'];
@@ -219,6 +220,13 @@ export class LogStore {
       const value = (event as unknown as Record<string, unknown>)[key];
       if (typeof value === 'string') bytes += value.length * 2;
     }
+    // Flattened fields retain their own keys, values and property slots. Raw
+    // text alone significantly undercounts wide records and nested aliases.
+    for (const key in event.fields) {
+      const value = event.fields[key];
+      bytes += 32 + key.length * 2 + (typeof value === 'string' ? value.length * 2 : 8);
+    }
+    for (const dependency of event.dependencies ?? []) bytes += 8 + dependency.length * 2;
     if (bytes > this.maxBytes) { this.discarded++; return; }
     while (this.size && (this.size === this.maxRows || this.bytes + bytes > this.maxBytes)) this.evictOldest();
     this.insertSlot({ event, bytes });
@@ -413,6 +421,9 @@ export class LogStore {
     return options.sort ? sortEvents(events, options.sort, options.sortDirection ?? 'asc') : events;
   }
 
+  /** Fixed capture-order snapshot for streaming exports. Callers must not mutate events. */
+  exportEvents(options: PageOptions = {}): readonly LogEvent[] { return this.scan(options); }
+
   // Chronological references to the matching retained events. all() copies these
   // for export callers that hand events on to redaction and serialization; the
   // in-process readers below only ever read them, and cloning 100k events (and
@@ -439,44 +450,34 @@ export class LogStore {
   }
 
   /** Field names and the most common values for the current search input. */
-  fieldSuggestions(input = '', serverId?: string): { fields: string[]; values: FacetValue[]; } {
+  fieldSuggestions(input = '', serverId?: string): { fields: string[]; values: SuggestedValue[]; } {
     const fields = new Set(BUILTIN_FIELDS);
     const values = new Map<string, number>();
-    const match = input.match(/(?:^|\s)(?:@?([A-Za-z_][A-Za-z0-9_.]*):)?([^\s]*)$/);
-    const fieldPrefix = (match?.[1] ?? match?.[2] ?? '').toLowerCase();
-    const valuePrefix = match?.[1] ? (match[2] ?? '').toLowerCase() : '';
+    const target = completionTarget(input);
+    const fieldPrefix = (target.field ?? target.value).toLowerCase();
+    const valuePrefix = target.field ? target.value.toLowerCase() : '';
     // Field names are already maintained on ingest, so the common case — typing a
     // bare word — answers without touching the ring at all.
     const wantedServer = serverId?.toLowerCase();
-    const known = serverId
-      ? this.serverIndex.get([...this.serverIndex.keys()].find(key => key.toLowerCase() === wantedServer) ?? serverId)?.fields.keys()
-      : this.columnCache;
-    for (const key of known ?? []) fields.add(key);
-    if (match?.[1]) {
-      for (let i = 0; i < this.size; i++) {
-        const event = this.slots[(this.head + i) % this.maxRows]!.event;
-        if (wantedServer !== undefined && event.serverId?.toLowerCase() !== wantedServer) continue;
-        const value = fieldValue(event, match[1]);
+    for (const key of this.columnKeys(serverId)) fields.add(key);
+    if (target.field) {
+      const count = (event: LogEvent) => {
+        const value = fieldValue(event, target.field!);
         if (value !== undefined && String(value).toLowerCase().startsWith(valuePrefix)) {
           const text = String(value); values.set(text, (values.get(text) ?? 0) + 1);
         }
+      };
+      if (wantedServer === undefined) {
+        for (let i = 0; i < this.size; i++) count(this.slots[(this.head + i) % this.maxRows]!.event);
+      } else for (const [id, index] of this.serverIndex) {
+        if (id.toLowerCase() !== wantedServer) continue;
+        for (let i = index.start; i < index.items.length; i++) count(index.items[i]!.event);
       }
     }
     return {
       fields: [...fields].filter(field => field.toLowerCase().startsWith(fieldPrefix)).sort().slice(0, 40),
       values: [...values.entries()].sort((a, b) => b[1] - a[1]).slice(0, 20).map(([value, count]) => ({ value, count }))
     };
-  }
-
-  facets(field: string, options: PageOptions = {}): FacetValue[] {
-    const counts = new Map<string, number>();
-    for (const event of this.filtered(options)) {
-      const value = fieldValue(event, field);
-      if (value === undefined || value === null || value === '') continue;
-      const text = String(value).slice(0, 160);
-      counts.set(text, (counts.get(text) ?? 0) + 1);
-    }
-    return [...counts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 50).map(([value, count]) => ({ value, count }));
   }
 
   errorGroups(options: PageOptions = {}, events?: LogEvent[]): ErrorGroup[] {
@@ -506,16 +507,16 @@ export class LogStore {
     };
   }
 
-  private columnKeys(serverId?: string): Iterable<string> {
-    if (serverId === undefined) return this.columnCache;
-    const key = [...this.serverIndex.keys()].find(key => key.toLowerCase() === serverId.toLowerCase());
-    return key === undefined ? [] : this.serverIndex.get(key)!.fields.keys();
+  private *columnKeys(serverId?: string): Iterable<string> {
+    if (serverId === undefined) { yield* this.columnCache; return; }
+    const wanted = serverId.toLowerCase();
+    for (const [key, index] of this.serverIndex) if (key.toLowerCase() === wanted) yield* index.fields.keys();
   }
 
   columnFields(serverId?: string): string[] {
-    const fields: string[] = [];
-    for (const field of this.columnKeys(serverId)) { fields.push(field); if (fields.length === 200) break; }
-    return fields.sort(fieldCollator.compare);
+    const fields = new Set<string>();
+    for (const field of this.columnKeys(serverId)) { fields.add(field); if (fields.size === 200) break; }
+    return [...fields].sort(fieldCollator.compare);
   }
 
   columns(serverId?: string): string[] {
@@ -540,7 +541,7 @@ export class LogStore {
     return chosen.slice(0, 6);
   }
 
-  /** Every field observed in retained payloads, for sort/facet controls. */
+  /** Every field observed in retained payloads, for sort and autocomplete controls. */
   fieldNames(): string[] {
     if (!this.fieldNamesCache) {
       const extra = [...this.columnCache].filter(field => !BUILTIN_FIELDS.includes(field)).sort(fieldCollator.compare);

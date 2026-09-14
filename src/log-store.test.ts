@@ -54,6 +54,28 @@ test('oversized records cannot exceed the storage budget', () => {
   assert.equal(store.bytes, 0);
 });
 
+test('retention accounts for flattened field storage even without raw text', () => {
+  const store = new LogStore(100, 4096);
+  for (let id = 1; id <= 5; id++) store.add({ id, level: 'info', fields: { payload: 'x'.repeat(1000) } });
+  assert.equal(store.size, 1);
+  assert.equal(String(store.find(5)?.fields?.payload).length, 1000);
+  assert.ok(store.bytes >= 2000 && store.bytes <= 4096);
+  store.add({ id: 6, level: 'info', fields: { payload: 'x'.repeat(4096) } });
+  assert.equal(store.find(6), undefined);
+  assert.equal(store.size, 1);
+});
+
+test('case-insensitive server selection exposes fields from every matching identity', () => {
+  const store = new LogStore();
+  store.add({ id: 1, level: 'info', serverId: 'API', fields: { first: 1, common: true } });
+  store.add({ id: 2, level: 'info', serverId: 'api', fields: { second: 2, common: true } });
+  store.add({ id: 3, level: 'info', serverId: 'worker', fields: { unrelated: true } });
+  assert.equal(store.page({ serverId: 'Api' }).matched, 2);
+  assert.deepEqual(store.columnFields('Api'), ['common', 'first', 'second']);
+  assert.ok(store.fieldSuggestions('sec', 'Api').fields.includes('second'));
+  assert.ok(!store.columnFields('Api').includes('unrelated'));
+});
+
 test('server indexes release evicted records under the memory budget', () => {
   const store = new LogStore(5000, 8192);
   for (let id = 1; id <= 3000; id++) {
@@ -204,7 +226,7 @@ test('all returns filtered retained events chronologically for exports', () => {
   assert.equal(store.serverLabel('api'), 'API');
 });
 
-test('analysis helpers provide facets, arbitrary sorting, groups and charts', () => {
+test('analysis helpers provide arbitrary sorting, groups and charts', () => {
   const store = new LogStore();
   const add = (id: number, level: string, message: string, fields: Record<string, string | number | boolean>, timestampMs: number) =>
     store.add({ id, level, message, timestampMs, timestamp: new Date(timestampMs).toISOString(), fields, sessionId: id < 3 ? 'one' : 'two' });
@@ -212,7 +234,6 @@ test('analysis helpers provide facets, arbitrary sorting, groups and charts', ()
   add(2, 'error', 'timeout for user 456', { service: 'api', statusCode: 500, durationMs: 100 }, 1100);
   add(3, 'info', 'ok', { service: 'web', statusCode: 200, durationMs: 20 }, 1200);
   assert.deepEqual(store.page({ sort: 'durationMs', sortDirection: 'desc' }).events.map(event => event.id), [2, 1, 3]);
-  assert.equal(store.facets('service').find(value => value.value === 'api')?.count, 2);
   assert.equal(store.fieldSuggestions('ser').fields.includes('service'), true);
   const analysis = store.analysis();
   assert.equal(analysis.errorGroups[0].count, 2);
