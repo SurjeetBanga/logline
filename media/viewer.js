@@ -292,8 +292,11 @@
   function getElements() {
     return {
       logs: element("logs"),
+      cellFilterMenu: element("cellFilterMenu"),
+      cellFilterAction: element("cellFilterAction"),
       empty: element("empty"),
       search: element("search"),
+      copyResults: element("copyResults"),
       fieldSuggestions: element("fieldSuggestions"),
       searchHelp: element("searchHelp"),
       searchHelpPanel: element("searchHelpPanel"),
@@ -301,12 +304,10 @@
       searchToolsPanel: element("searchToolsPanel"),
       saveSearch: element("saveSearch"),
       savedSearchList: element("savedSearchList"),
-      facetButton: element("facetButton"),
-      facetPanel: element("facetPanel"),
-      facetField: element("facetField"),
-      facetValues: element("facetValues"),
       fieldsButton: element("fieldsButton"),
       fieldsPanel: element("fieldsPanel"),
+      fieldsAll: element("fieldsAll"),
+      fieldsNone: element("fieldsNone"),
       fieldList: element("fieldList"),
       analyze: element("analyze"),
       analysisDialog: element("analysisDialog"),
@@ -547,6 +548,24 @@
           panel.style.top = "";
           panel.style.bottom = "";
           panel.style.maxHeight = "";
+          panel.style.position = "";
+          if (panel.classList.contains("fields-panel") || panel.classList.contains("cheat-sheet")) {
+            const trigger = button.getBoundingClientRect();
+            const margin2 = 8;
+            const spaceBelow2 = window.innerHeight - trigger.bottom - margin2;
+            const spaceAbove2 = trigger.top - margin2;
+            const openAbove = spaceBelow2 < 160 && spaceAbove2 > spaceBelow2;
+            const maxHeight = Math.max(0, openAbove ? spaceAbove2 : spaceBelow2);
+            panel.style.position = "fixed";
+            const panelWidth = panel.getBoundingClientRect().width;
+            const maxLeft = Math.max(margin2, window.innerWidth - margin2 - panelWidth);
+            const preferredLeft = trigger.right - panelWidth;
+            panel.style.left = `${Math.max(margin2, Math.min(preferredLeft, maxLeft))}px`;
+            panel.style.top = openAbove ? `${margin2}px` : `${trigger.bottom + 4}px`;
+            panel.style.bottom = openAbove ? `${window.innerHeight - trigger.top + 4}px` : "";
+            panel.style.maxHeight = `${maxHeight}px`;
+            return;
+          }
           const bounds = panel.getBoundingClientRect();
           if (Number.isFinite(bounds.left) && Number.isFinite(window.innerWidth)) {
             panel.style.left = `${Math.max(14 - bounds.left, Math.min(0, window.innerWidth - 14 - bounds.right))}px`;
@@ -681,7 +700,7 @@
 
   // src/webview/search/controls.ts
   function createSearch(elements, state, api, popovers, actions, scope) {
-    const { request, saveState, filterChanged } = actions;
+    const { filterChanged } = actions;
     const LEVEL_LABELS = { trace: "Trace", debug: "Debug", info: "Info", warn: "Warn", error: "Error", fatal: "Fatal" };
     function updateLevelButtonLabel() {
       if (state.checkedLevels.size === LEVELS.length)
@@ -752,11 +771,8 @@
           for (const popover of popovers)
             popover.close();
           elements.search.focus();
-          state.page = 0;
           state.before = void 0;
-          state.lastRows = void 0;
-          saveState();
-          request(true);
+          filterChanged();
         });
         if (!removable)
           return button;
@@ -787,59 +803,13 @@
         option.value = value;
         return option;
       }));
+      elements.search.setAttribute("list", "fieldSuggestions");
     }
-    let facetFieldsSignature;
-    function populateFacetFields(columns = state.allFields.length ? state.allFields : []) {
-      if (!elements.facetField)
-        return;
-      const names = [.../* @__PURE__ */ new Set(["level", "service", "status", "statusCode", "durationMs", "traceId", "spanId", ...columns])];
-      const signature = JSON.stringify(names);
-      if (signature === facetFieldsSignature)
-        return;
-      facetFieldsSignature = signature;
-      const current = elements.facetField.value;
-      elements.facetField.replaceChildren(...names.map((name) => {
-        const option = document.createElement("option");
-        option.value = name;
-        option.textContent = name;
-        return option;
-      }));
-      elements.facetField.value = names.includes(current) ? current : names[0];
+    function clearAutocomplete() {
+      elements.fieldSuggestions?.replaceChildren();
+      elements.search.removeAttribute("list");
     }
-    function requestFacets() {
-      const field = elements.facetField?.value;
-      if (!field)
-        return;
-      elements.facetValues.replaceChildren(emptyMessage("Loading values\u2026"));
-      api.postMessage({ type: "facets", field, query: elements.search.value, serverId: state.selectedServer || void 0 });
-    }
-    function renderFacets(data) {
-      if (!elements.facetValues)
-        return;
-      const values = (data.values ?? []).map((value) => {
-        const button = document.createElement("button");
-        button.className = "facet-value";
-        button.type = "button";
-        const label = document.createElement("span");
-        label.className = "facet-label";
-        label.textContent = value.value;
-        button.title = value.value;
-        const count = document.createElement("span");
-        count.className = "facet-count";
-        count.textContent = String(value.count);
-        button.append(label, count);
-        scope.listen(button, "click", () => {
-          elements.search.value = `${data.field}:"${value.value}"`;
-          for (const popover of popovers)
-            popover.close();
-          elements.search.focus();
-          filterChanged();
-        });
-        return button;
-      });
-      elements.facetValues.replaceChildren(...values.length ? values : [emptyMessage("No values found for this field in the current results.")]);
-    }
-    return { updateLevelButtonLabel, buildLevelMenu, renderSearchState, renderAutocomplete, populateFacetFields, requestFacets, renderFacets };
+    return { updateLevelButtonLabel, buildLevelMenu, renderSearchState, renderAutocomplete, clearAutocomplete };
   }
 
   // src/webview/table/layout.ts
@@ -876,13 +846,20 @@
       const remainingForOthers = remaining - messageFloor;
       shrinkRatio = remainingForOthers > minTotal && autoOthersNatural > minTotal ? (remainingForOthers - minTotal) / (autoOthersNatural - minTotal) : 0;
     }
+    const widths = /* @__PURE__ */ new Map();
     let total = 0;
     for (const { key } of columns) {
       const width = key === "base:message" ? messageWidth : isExplicit(key) ? widthFor(key) : Math.round(minWidth + (widthFor(key) - minWidth) * shrinkRatio);
-      columnElements.get(key).style.width = `${width}px`;
+      widths.set(key, width);
       total += width;
     }
-    table.style.width = `${total}px`;
+    if (available > total && widths.has("base:message")) {
+      widths.set("base:message", widths.get("base:message") + available - total);
+      total = available;
+    }
+    for (const [key, width] of widths)
+      columnElements.get(key).style.width = `${width}px`;
+    table.style.width = `${Math.max(total, available)}px`;
   }
 
   // src/webview/table/rows.ts
@@ -902,16 +879,19 @@
       messageContent.append(button);
       messageCell.append(messageContent);
       for (const column of columns()) {
+        let tableCell;
         if (column.key === "base:time")
-          row.append(cell(formatTimestamp(event), "time"));
+          tableCell = cell(formatTimestamp(event), "time");
         else if (column.key === "base:level")
-          row.append(cell(event.level, `level ${event.level}`));
+          tableCell = cell(event.level, `level ${event.level}`);
         else if (column.key === "base:message")
-          row.append(messageCell);
+          tableCell = messageCell;
         else if (column.key === "base:source")
-          row.append(cell(event.stream, "source"));
+          tableCell = cell(event.stream, "source");
         else
-          row.append(cell(event.fields?.[column.label] ?? ""));
+          tableCell = cell(event.fields?.[column.label] ?? "");
+        tableCell.dataset.column = column.key;
+        row.append(tableCell);
       }
       return row;
     }
@@ -936,7 +916,7 @@
 
   // src/webview/table/controller.ts
   function createTable(elements, scrollViewport, state, api, formatTimestamp, actions, scope) {
-    const { request, saveState, updateFollowControl, updateModeLabel, populateFacetFields } = actions;
+    const { request, saveState, updateFollowControl, updateModeLabel } = actions;
     function totalColumnCount() {
       return displayedColumns.length;
     }
@@ -1080,11 +1060,14 @@
     let displayedColumns = [...baseColumns];
     let availableColumns = [];
     let automaticColumns = [];
+    let automaticColumnsLocked = false;
     let draggedColumn;
     let columnsInitialized = false;
     let columnElements = /* @__PURE__ */ new Map();
     function updateColumns(columns, force = false) {
-      automaticColumns = Array.isArray(columns) ? columns : [];
+      const detected = Array.isArray(columns) ? columns : [];
+      if (!automaticColumnsLocked)
+        automaticColumns = detected;
       const next = [.../* @__PURE__ */ new Set([...automaticColumns, ...state.extraColumns.filter((field) => state.columnFields.includes(field))])];
       if (columnsInitialized && !force && JSON.stringify(next) === JSON.stringify(availableColumns))
         return;
@@ -1207,8 +1190,14 @@
         return th;
       }));
       renderFieldList();
-      populateFacetFields(state.allFields.length ? state.allFields : currentColumns);
       state.lastRows = void 0;
+    }
+    function resetAutomaticColumns() {
+      automaticColumns = [];
+      automaticColumnsLocked = false;
+    }
+    function lockAutomaticColumns() {
+      automaticColumnsLocked = true;
     }
     function layoutColumns() {
       layoutColumnWidths(displayedColumns, columnElements, state.columnWidths, scrollViewport.clientWidth || 0, element("eventsTable"));
@@ -1237,10 +1226,42 @@
       event.stopPropagation?.();
     }
     let fieldListSignature;
+    let fieldChoiceOrder = [];
+    function fieldChoices() {
+      const available = /* @__PURE__ */ new Set([...availableColumns, ...state.columnFields]);
+      const known = new Set(fieldChoiceOrder);
+      fieldChoiceOrder = [
+        ...fieldChoiceOrder.filter((field) => available.has(field)),
+        ...[...available].filter((field) => !known.has(field))
+      ];
+      return fieldChoiceOrder;
+    }
+    function setAllFields(visible) {
+      const choices = fieldChoices();
+      for (const label of choices) {
+        const key = `field:${label}`;
+        if (visible) {
+          state.hiddenColumns.delete(key);
+          if (!state.extraColumns.includes(label))
+            state.extraColumns.push(label);
+        } else {
+          state.hiddenColumns.add(key);
+          state.extraColumns = state.extraColumns.filter((field) => field !== label);
+        }
+      }
+      saveState();
+      updateColumns(automaticColumns, true);
+      renderWindow();
+      request(true);
+    }
+    scope.listen(elements.fieldsAll, "click", () => setAllFields(true));
+    scope.listen(elements.fieldsNone, "click", () => setAllFields(false));
     function renderFieldList() {
       if (!elements.fieldList)
         return;
-      const choices = [.../* @__PURE__ */ new Set([...availableColumns, ...state.columnFields])];
+      const choices = fieldChoices();
+      elements.fieldsAll.disabled = !choices.length || choices.every((label) => currentColumns.includes(label));
+      elements.fieldsNone.disabled = !choices.length || choices.every((label) => !currentColumns.includes(label));
       const signature = JSON.stringify([choices, currentColumns]);
       if (signature === fieldListSignature)
         return;
@@ -1276,6 +1297,10 @@
       }));
     }
     function toggleExpand(id) {
+      const oldRow = elements.logs.querySelector(`tr.event-row[data-id="${id}"]`);
+      const viewportTop = scrollViewport.getBoundingClientRect().top;
+      const oldTop = oldRow?.getBoundingClientRect().top;
+      const rowOffset = oldTop === void 0 ? void 0 : oldTop - viewportTop;
       expandedHeight = 0;
       expandedRow = void 0;
       detailResizeObserver.disconnect();
@@ -1284,6 +1309,11 @@
       updateFollowControl();
       updateModeLabel();
       renderWindow();
+      if (rowOffset !== void 0 && Number.isFinite(rowOffset)) {
+        const newTop = elements.logs.querySelector(`tr.event-row[data-id="${id}"]`)?.getBoundingClientRect().top;
+        if (newTop !== void 0 && Number.isFinite(newTop))
+          scrollViewport.scrollTop += newTop - viewportTop - rowOffset;
+      }
     }
     function resetDetails() {
       expandedHeight = 0;
@@ -1300,6 +1330,8 @@
     }
     return {
       updateColumns,
+      resetAutomaticColumns,
+      lockAutomaticColumns,
       layoutColumns,
       renderFieldList,
       renderRows,
@@ -1366,19 +1398,22 @@
     const formatTimestamp = createTimestampFormatter(state);
     const analysis = createAnalysis(elements, state);
     const inspection = createInspection(elements, scrollViewport, api, formatTimestamp, scope);
-    const search = createSearch(elements, state, api, popovers, { request, saveState, filterChanged }, scope);
+    const search = createSearch(elements, state, api, popovers, { filterChanged }, scope);
     const table = createTable(
       elements,
       scrollViewport,
       state,
       api,
       formatTimestamp,
-      { request, saveState, filterChanged, setFollowing, updateFollowControl, updateModeLabel, populateFacetFields: (fields) => search.populateFacetFields(fields) },
+      { request, saveState, filterChanged, setFollowing, updateFollowControl, updateModeLabel },
       scope
     );
     let serverSignature = "";
     let searchDebounce;
     let autocompleteDebounce;
+    let copyFeedbackTimer;
+    let cellFilterQuery;
+    let minimumSnapshotGeneration = 0;
     const onMessage = (event) => receive(event.data);
     scope.listen(window, "message", onMessage);
     function receive(data) {
@@ -1401,11 +1436,8 @@
         return;
       }
       if (data.type === "autocomplete") {
-        search.renderAutocomplete(data);
-        return;
-      }
-      if (data.type === "facets") {
-        search.renderFacets(data);
+        if (elements.search.value.trim()) search.renderAutocomplete(data);
+        else search.clearAutocomplete();
         return;
       }
       if (data.type === "analysis") {
@@ -1420,6 +1452,11 @@
       if (data.type !== "snapshot")
         return;
       bridge.received();
+      if (data.generation < minimumSnapshotGeneration) {
+        bridge.flush();
+        return;
+      }
+      minimumSnapshotGeneration = 0;
       if (state.generation !== void 0 && state.generation !== data.generation) {
         state.before = void 0;
         state.page = 0;
@@ -1428,6 +1465,7 @@
         state.selectedDetailText = void 0;
         state.selectedExceptions = [];
         table.resetDetails();
+        table.resetAutomaticColumns();
         table.renderRows([]);
         bridge.refreshRequested = true;
       }
@@ -1492,14 +1530,14 @@
       if (Array.isArray(data.columnFields))
         state.columnFields = data.columnFields;
       table.updateColumns(data.columns ?? []);
+      if (data.events?.length)
+        table.lockAutomaticColumns();
       table.renderFieldList();
-      if (Array.isArray(data.fields)) {
+      if (Array.isArray(data.fields))
         state.allFields = data.fields;
-        search.populateFacetFields(data.fields);
-      }
       if (data.searches)
         search.renderSearchState(data.searches);
-      if (data.events && !bridge.refreshRequested && (!state.paused || bridge.forcedRequest)) {
+      if (data.events && !bridge.refreshRequested && !state.paused) {
         state.page = data.page ?? 0;
         state.pages = data.pages ?? 1;
         elements.page.textContent = `Page ${state.page + 1} of ${state.pages} \xB7 ${number(data.matched ?? 0)} matches`;
@@ -1544,10 +1582,33 @@
     function saveState() {
       api.setState(state.persist(elements.search.value));
     }
+    function hasActiveFilter() {
+      return Boolean(elements.search.value.trim()) || state.checkedLevels.size !== 6 || Boolean(state.selectedServer);
+    }
+    function updateCopyResultsControl() {
+      elements.copyResults.hidden = !hasActiveFilter();
+      elements.copyResults.textContent = "Copy results";
+    }
     function filterChanged() {
       state.filterChanged();
+      updateCopyResultsControl();
       saveState();
       request(true);
+    }
+    function filterForCell(id, column) {
+      const event = table.events.find((item) => item.id === id);
+      if (!event) return;
+      const field = column === "base:time" ? "timestamp" : column === "base:level" ? "level" : column === "base:message" ? "message" : column === "base:source" ? "stream" : column.startsWith("field:") ? column.slice("field:".length) : void 0;
+      if (!field) return;
+      const value = field === "timestamp" ? event.timestamp : field === "level" ? event.level : field === "message" ? event.message : field === "stream" ? event.stream : event.fields?.[field];
+      const text = String(value ?? "").trim().replace(/"/g, "");
+      if (!text) return;
+      const query = /\s/.test(text) ? `${field}:"${text}"` : `${field}:${text}`;
+      return { query, label: `Filter ${field}: ${text}` };
+    }
+    function closeCellFilterMenu() {
+      cellFilterQuery = void 0;
+      elements.cellFilterMenu.hidden = true;
     }
     scope.listen(elements.logs, "click", (event) => {
       if (inspection.handleDetailAction(event))
@@ -1557,10 +1618,42 @@
         return;
       table.toggleExpand(Number(button.closest("tr").dataset.id));
     });
+    scope.listen(elements.logs, "contextmenu", (event) => {
+      const cell2 = event.target.closest("td[data-column]");
+      const row = cell2?.closest("tr.event-row");
+      const choice = cell2 && row ? filterForCell(Number(row.dataset.id), cell2.dataset.column ?? "") : void 0;
+      if (!choice) return;
+      event.preventDefault();
+      cellFilterQuery = choice.query;
+      elements.cellFilterAction.textContent = choice.label;
+      elements.cellFilterAction.title = choice.label;
+      elements.cellFilterMenu.style.left = `${Math.max(8, event.clientX)}px`;
+      elements.cellFilterMenu.style.top = `${Math.max(8, event.clientY)}px`;
+      elements.cellFilterMenu.hidden = false;
+    });
+    scope.listen(elements.cellFilterAction, "click", () => {
+      if (!cellFilterQuery) return;
+      elements.search.value = [elements.search.value.trim(), cellFilterQuery].filter(Boolean).join(" ");
+      closeCellFilterMenu();
+      elements.search.focus();
+      filterChanged();
+    });
+    scope.listen(document, "click", (event) => {
+      if (!elements.cellFilterMenu.hidden && !elements.cellFilterMenu.contains(event.target))
+        closeCellFilterMenu();
+    });
+    scope.listen(document, "keydown", (event) => {
+      if (event.key === "Escape") closeCellFilterMenu();
+    });
     scope.listen(elements.search, "input", () => {
+      updateCopyResultsControl();
       clearTimeout(searchDebounce);
       searchDebounce = setTimeout(filterChanged, 150);
       clearTimeout(autocompleteDebounce);
+      if (!elements.search.value.trim()) {
+        search.clearAutocomplete();
+        return;
+      }
       autocompleteDebounce = setTimeout(() => {
         api.postMessage({ type: "autocomplete", input: elements.search.value, serverId: state.selectedServer || void 0 });
       }, 150);
@@ -1569,17 +1662,18 @@
     search.updateLevelButtonLabel();
     updateFollowControl();
     updateModeLabel();
+    updateCopyResultsControl();
     createPopover(elements.levelButton.closest(".popover-container"), elements.levelButton, elements.levelMenu);
     createPopover(elements.searchHelp.closest(".popover-container"), elements.searchHelp, elements.searchHelpPanel);
     createPopover(elements.searchTools.closest(".popover-container"), elements.searchTools, elements.searchToolsPanel);
-    createPopover(elements.facetButton.closest(".popover-container"), elements.facetButton, elements.facetPanel);
     createPopover(elements.fieldsButton.closest(".popover-container"), elements.fieldsButton, elements.fieldsPanel);
-    scope.listen(elements.facetButton, "click", () => {
-      if (!elements.facetPanel.hidden)
-        search.requestFacets();
+    scope.listen(elements.copyResults, "click", () => {
+      if (!hasActiveFilter()) return;
+      api.postMessage({ type: "copyFiltered", query: elements.search.value, levels: state.currentLevels(), serverId: state.selectedServer || void 0 });
+      elements.copyResults.textContent = "Copied";
+      clearTimeout(copyFeedbackTimer);
+      copyFeedbackTimer = setTimeout(updateCopyResultsControl, 1200);
     });
-    search.populateFacetFields();
-    scope.listen(elements.facetField, "change", search.requestFacets);
     scope.listen(elements.saveSearch, "click", () => {
       for (const popover of popovers)
         popover.close();
@@ -1604,6 +1698,8 @@
       state.selectedServer = elements.server.value;
       state.page = 0;
       state.lastRows = void 0;
+      table.resetAutomaticColumns();
+      updateCopyResultsControl();
       saveState();
       request(true);
     });
@@ -1634,6 +1730,12 @@
       request(true);
     });
     scope.listen(elements.clear, "click", () => {
+      state.columnFields = [];
+      minimumSnapshotGeneration = Math.max(minimumSnapshotGeneration, (state.generation ?? 0) + 1);
+      table.resetAutomaticColumns();
+      table.updateColumns([], true);
+      table.renderFieldList();
+      search.clearAutocomplete();
       api.postMessage({ type: "clear" });
       request(true);
     });
@@ -1664,6 +1766,7 @@
         clearInterval(fallbackTimer);
         clearTimeout(searchDebounce);
         clearTimeout(autocompleteDebounce);
+        clearTimeout(copyFeedbackTimer);
         window.removeEventListener("message", onMessage);
       }
     };

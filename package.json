@@ -2,7 +2,7 @@
   "name": "logline",
   "displayName": "Logline \u2014 Live Tail for JSON Logs",
   "description": "Live tail your server processes in a searchable, expandable JSON log viewer.",
-  "version": "1.5.0",
+  "version": "1.6.0",
   "publisher": "surjeetbanga",
   "license": "MIT",
   "repository": {

@@ -9,6 +9,8 @@ test('message boundary rejects invalid actions and source coordinates', () => {
   }
   assert.deepEqual(parseViewRequest({ type: 'openSource', id: 1, block: 0, line: 2, file: '/tmp/other', command: 'run' }),
     { type: 'openSource', id: 1, block: 0, line: 2 });
+  assert.deepEqual(parseViewRequest({ type: 'copyFiltered', query: 'status:500', levels: ['error'], serverId: 'api' }),
+    { type: 'copyFiltered', query: 'status:500', levels: ['error'], serverId: 'api' });
 });
 
 test('message boundary preserves an empty level selection and normalizes pagination', () => {

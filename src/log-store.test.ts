@@ -204,7 +204,7 @@ test('all returns filtered retained events chronologically for exports', () => {
   assert.equal(store.serverLabel('api'), 'API');
 });
 
-test('analysis helpers provide facets, arbitrary sorting, groups and charts', () => {
+test('analysis helpers provide arbitrary sorting, groups and charts', () => {
   const store = new LogStore();
   const add = (id: number, level: string, message: string, fields: Record<string, string | number | boolean>, timestampMs: number) =>
     store.add({ id, level, message, timestampMs, timestamp: new Date(timestampMs).toISOString(), fields, sessionId: id < 3 ? 'one' : 'two' });
@@ -212,7 +212,6 @@ test('analysis helpers provide facets, arbitrary sorting, groups and charts', ()
   add(2, 'error', 'timeout for user 456', { service: 'api', statusCode: 500, durationMs: 100 }, 1100);
   add(3, 'info', 'ok', { service: 'web', statusCode: 200, durationMs: 20 }, 1200);
   assert.deepEqual(store.page({ sort: 'durationMs', sortDirection: 'desc' }).events.map(event => event.id), [2, 1, 3]);
-  assert.equal(store.facets('service').find(value => value.value === 'api')?.count, 2);
   assert.equal(store.fieldSuggestions('ser').fields.includes('service'), true);
   const analysis = store.analysis();
   assert.equal(analysis.errorGroups[0].count, 2);

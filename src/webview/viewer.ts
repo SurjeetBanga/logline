@@ -24,12 +24,17 @@ export function createViewer(api: WebviewApi) {
   const formatTimestamp = createTimestampFormatter(state);
   const analysis = createAnalysis(elements, state);
   const inspection = createInspection(elements, scrollViewport, api, formatTimestamp, scope);
-  const search = createSearch(elements, state, api, popovers, { request, saveState, filterChanged }, scope);
+  const search = createSearch(elements, state, api, popovers, { filterChanged }, scope);
   const table = createTable(elements, scrollViewport, state, api, formatTimestamp,
-    { request, saveState, filterChanged, setFollowing, updateFollowControl, updateModeLabel, populateFacetFields: fields => search.populateFacetFields(fields) }, scope);
+    { request, saveState, filterChanged, setFollowing, updateFollowControl, updateModeLabel }, scope);
   let serverSignature = '';
   let searchDebounce: ReturnType<typeof setTimeout> | undefined;
   let autocompleteDebounce: ReturnType<typeof setTimeout> | undefined;
+  let copyFeedbackTimer: ReturnType<typeof setTimeout> | undefined;
+  let cellFilterQuery: string | undefined;
+  // The host increments its generation when logs are cleared. An older
+  // snapshot can arrive afterwards, so keep it from restoring the old schema.
+  let minimumSnapshotGeneration = 0;
   const onMessage = (event: MessageEvent<HostMessage>) => receive(event.data);
   scope.listen(window, 'message', onMessage);
   function receive(data: HostMessage) {
@@ -51,11 +56,11 @@ export function createViewer(api: WebviewApi) {
       return;
     }
     if (data.type === 'autocomplete') {
-      search.renderAutocomplete(data);
-      return;
-    }
-    if (data.type === 'facets') {
-      search.renderFacets(data);
+      // The browser's built-in search clear button fires an input event. A
+      // response for the text just cleared may still be in transit, but an
+      // empty search should never open a field-name dropdown.
+      if (elements.search.value.trim()) search.renderAutocomplete(data);
+      else search.clearAutocomplete();
       return;
     }
     if (data.type === 'analysis') {
@@ -70,6 +75,11 @@ export function createViewer(api: WebviewApi) {
     if (data.type !== 'snapshot')
       return;
     bridge.received();
+    if (data.generation < minimumSnapshotGeneration) {
+      bridge.flush();
+      return;
+    }
+    minimumSnapshotGeneration = 0;
     if (state.generation !== undefined && state.generation !== data.generation) {
       state.before = undefined;
       state.page = 0;
@@ -78,6 +88,7 @@ export function createViewer(api: WebviewApi) {
       state.selectedDetailText = undefined;
       state.selectedExceptions = [];
       table.resetDetails();
+      table.resetAutomaticColumns();
       table.renderRows([]);
       bridge.refreshRequested = true;
     }
@@ -135,15 +146,14 @@ export function createViewer(api: WebviewApi) {
     if (Array.isArray(data.columnFields))
       state.columnFields = data.columnFields;
     table.updateColumns(data.columns ?? []);
+    if (data.events?.length)
+      table.lockAutomaticColumns();
     table.renderFieldList();
-    if (Array.isArray(data.fields)) {
+    if (Array.isArray(data.fields))
       state.allFields = data.fields;
-
-      search.populateFacetFields(data.fields);
-    }
     if (data.searches)
       search.renderSearchState(data.searches);
-    if (data.events && !bridge.refreshRequested && (!state.paused || bridge.forcedRequest)) {
+    if (data.events && !bridge.refreshRequested && !state.paused) {
       state.page = data.page ?? 0;
       state.pages = data.pages ?? 1;
       elements.page.textContent = `Page ${state.page + 1} of ${state.pages} · ${number(data.matched ?? 0)} matches`;
@@ -186,7 +196,39 @@ export function createViewer(api: WebviewApi) {
 
   function setFollowing(value: boolean) { state.setFollowing(value); updateFollowControl(); updateModeLabel(); }
   function saveState() { api.setState(state.persist(elements.search.value)); }
-  function filterChanged() { state.filterChanged(); saveState(); request(true); }
+  function hasActiveFilter() {
+    return Boolean(elements.search.value.trim()) || state.checkedLevels.size !== 6 || Boolean(state.selectedServer);
+  }
+  function updateCopyResultsControl() {
+    elements.copyResults.hidden = !hasActiveFilter();
+    elements.copyResults.textContent = 'Copy results';
+  }
+  function filterChanged() { state.filterChanged(); updateCopyResultsControl(); saveState(); request(true); }
+
+  function filterForCell(id: number, column: string): { query: string; label: string; } | undefined {
+    const event = table.events.find(item => item.id === id);
+    if (!event) return;
+    const field = column === 'base:time' ? 'timestamp'
+      : column === 'base:level' ? 'level'
+        : column === 'base:message' ? 'message'
+          : column === 'base:source' ? 'stream'
+            : column.startsWith('field:') ? column.slice('field:'.length) : undefined;
+    if (!field) return;
+    const value = field === 'timestamp' ? event.timestamp
+      : field === 'level' ? event.level
+        : field === 'message' ? event.message
+          : field === 'stream' ? event.stream
+            : event.fields?.[field];
+    const text = String(value ?? '').trim().replace(/"/g, '');
+    if (!text) return;
+    const query = /\s/.test(text) ? `${field}:"${text}"` : `${field}:${text}`;
+    return { query, label: `Filter ${field}: ${text}` };
+  }
+
+  function closeCellFilterMenu() {
+    cellFilterQuery = undefined;
+    elements.cellFilterMenu.hidden = true;
+  }
 
   scope.listen(elements.logs, 'click', event => {
     if (inspection.handleDetailAction(event))
@@ -197,10 +239,46 @@ export function createViewer(api: WebviewApi) {
     table.toggleExpand(Number(button.closest('tr')!.dataset.id));
   });
 
+  scope.listen(elements.logs, 'contextmenu', event => {
+    const cell = (event.target as HTMLElement).closest<HTMLTableCellElement>('td[data-column]');
+    const row = cell?.closest<HTMLTableRowElement>('tr.event-row');
+    const choice = cell && row ? filterForCell(Number(row.dataset.id), cell.dataset.column ?? '') : undefined;
+    if (!choice) return;
+    event.preventDefault();
+    cellFilterQuery = choice.query;
+    elements.cellFilterAction.textContent = choice.label;
+    elements.cellFilterAction.title = choice.label;
+    elements.cellFilterMenu.style.left = `${Math.max(8, event.clientX)}px`;
+    elements.cellFilterMenu.style.top = `${Math.max(8, event.clientY)}px`;
+    elements.cellFilterMenu.hidden = false;
+  });
+
+  scope.listen(elements.cellFilterAction, 'click', () => {
+    if (!cellFilterQuery) return;
+    elements.search.value = [elements.search.value.trim(), cellFilterQuery].filter(Boolean).join(' ');
+    closeCellFilterMenu();
+    elements.search.focus();
+    filterChanged();
+  });
+
+  scope.listen(document, 'click', event => {
+    if (!elements.cellFilterMenu.hidden && !elements.cellFilterMenu.contains(event.target as Node))
+      closeCellFilterMenu();
+  });
+
+  scope.listen(document, 'keydown', event => {
+    if (event.key === 'Escape') closeCellFilterMenu();
+  });
+
   scope.listen(elements.search, 'input', () => {
+    updateCopyResultsControl();
     clearTimeout(searchDebounce);
     searchDebounce = setTimeout(filterChanged, 150);
     clearTimeout(autocompleteDebounce);
+    if (!elements.search.value.trim()) {
+      search.clearAutocomplete();
+      return;
+    }
     autocompleteDebounce = setTimeout(() => {
       api.postMessage({ type: 'autocomplete', input: elements.search.value, serverId: state.selectedServer || undefined });
     }, 150);
@@ -214,24 +292,23 @@ export function createViewer(api: WebviewApi) {
 
   updateModeLabel();
 
+  updateCopyResultsControl();
+
   createPopover(elements.levelButton.closest<HTMLElement>('.popover-container')!, elements.levelButton, elements.levelMenu);
 
   createPopover(elements.searchHelp.closest<HTMLElement>('.popover-container')!, elements.searchHelp, elements.searchHelpPanel);
 
   createPopover(elements.searchTools.closest<HTMLElement>('.popover-container')!, elements.searchTools, elements.searchToolsPanel);
 
-  createPopover(elements.facetButton.closest<HTMLElement>('.popover-container')!, elements.facetButton, elements.facetPanel);
-
   createPopover(elements.fieldsButton.closest<HTMLElement>('.popover-container')!, elements.fieldsButton, elements.fieldsPanel);
 
-  scope.listen(elements.facetButton, 'click', () => {
-    if (!elements.facetPanel.hidden)
-      search.requestFacets();
+  scope.listen(elements.copyResults, 'click', () => {
+    if (!hasActiveFilter()) return;
+    api.postMessage({ type: 'copyFiltered', query: elements.search.value, levels: state.currentLevels(), serverId: state.selectedServer || undefined });
+    elements.copyResults.textContent = 'Copied';
+    clearTimeout(copyFeedbackTimer);
+    copyFeedbackTimer = setTimeout(updateCopyResultsControl, 1200);
   });
-
-  search.populateFacetFields();
-
-  scope.listen(elements.facetField, 'change', search.requestFacets);
 
   scope.listen(elements.saveSearch, 'click', () => {
     for (const popover of popovers)
@@ -262,6 +339,8 @@ export function createViewer(api: WebviewApi) {
     state.selectedServer = elements.server.value;
     state.page = 0;
     state.lastRows = undefined;
+    table.resetAutomaticColumns();
+    updateCopyResultsControl();
     saveState();
     request(true);
   });
@@ -282,6 +361,15 @@ export function createViewer(api: WebviewApi) {
   scope.listen(elements.newer, 'click', () => { state.page = Math.max(0, state.page - 1); request(true); });
 
   scope.listen(elements.clear, 'click', () => {
+    // The host clears asynchronously. Reset the data-derived column picker
+    // immediately, rather than leaving the previous session's fields visible
+    // until its next snapshot arrives.
+    state.columnFields = [];
+    minimumSnapshotGeneration = Math.max(minimumSnapshotGeneration, (state.generation ?? 0) + 1);
+    table.resetAutomaticColumns();
+    table.updateColumns([], true);
+    table.renderFieldList();
+    search.clearAutocomplete();
     api.postMessage({ type: 'clear' });
     request(true);
   });
@@ -314,6 +402,6 @@ export function createViewer(api: WebviewApi) {
   request();
   return {
     state, bridge, table, search, inspection, receive,
-    dispose() { scope.dispose(); clearInterval(fallbackTimer); clearTimeout(searchDebounce); clearTimeout(autocompleteDebounce); window.removeEventListener('message', onMessage); }
+    dispose() { scope.dispose(); clearInterval(fallbackTimer); clearTimeout(searchDebounce); clearTimeout(autocompleteDebounce); clearTimeout(copyFeedbackTimer); window.removeEventListener('message', onMessage); }
   };
 }

@@ -20,16 +20,19 @@ export function createRows(state: ViewerState, columns: () => Column[], formatTi
     messageContent.append(button);
     messageCell.append(messageContent);
     for (const column of columns()) {
+      let tableCell: HTMLTableCellElement;
       if (column.key === 'base:time')
-        row.append(cell(formatTimestamp(event), 'time'));
+        tableCell = cell(formatTimestamp(event), 'time');
       else if (column.key === 'base:level')
-        row.append(cell(event.level, `level ${event.level}`));
+        tableCell = cell(event.level, `level ${event.level}`);
       else if (column.key === 'base:message')
-        row.append(messageCell);
+        tableCell = messageCell;
       else if (column.key === 'base:source')
-        row.append(cell(event.stream, 'source'));
+        tableCell = cell(event.stream, 'source');
       else
-        row.append(cell(event.fields?.[column.label] ?? ''));
+        tableCell = cell(event.fields?.[column.label] ?? '');
+      tableCell.dataset.column = column.key;
+      row.append(tableCell);
     }
     return row;
   }

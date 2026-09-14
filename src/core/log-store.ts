@@ -114,7 +114,7 @@ export interface PageResult extends Stats {
   matched: number;
 }
 
-export interface FacetValue { value: string; count: number; }
+export interface SuggestedValue { value: string; count: number; }
 const BUILTIN_FIELDS = ['id', 'level', 'message', 'timestamp', 'timestampMs', 'stream', 'server', 'serverId', 'sessionId',
   'taskName', 'taskType', 'taskState', 'dependencies', 'dependencyState', 'exitReason', 'traceId', 'spanId', 'parentSpanId',
   'requestId', 'status', 'statusCode', 'durationMs'];
@@ -439,7 +439,7 @@ export class LogStore {
   }
 
   /** Field names and the most common values for the current search input. */
-  fieldSuggestions(input = '', serverId?: string): { fields: string[]; values: FacetValue[]; } {
+  fieldSuggestions(input = '', serverId?: string): { fields: string[]; values: SuggestedValue[]; } {
     const fields = new Set(BUILTIN_FIELDS);
     const values = new Map<string, number>();
     const match = input.match(/(?:^|\s)(?:@?([A-Za-z_][A-Za-z0-9_.]*):)?([^\s]*)$/);
@@ -466,17 +466,6 @@ export class LogStore {
       fields: [...fields].filter(field => field.toLowerCase().startsWith(fieldPrefix)).sort().slice(0, 40),
       values: [...values.entries()].sort((a, b) => b[1] - a[1]).slice(0, 20).map(([value, count]) => ({ value, count }))
     };
-  }
-
-  facets(field: string, options: PageOptions = {}): FacetValue[] {
-    const counts = new Map<string, number>();
-    for (const event of this.filtered(options)) {
-      const value = fieldValue(event, field);
-      if (value === undefined || value === null || value === '') continue;
-      const text = String(value).slice(0, 160);
-      counts.set(text, (counts.get(text) ?? 0) + 1);
-    }
-    return [...counts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 50).map(([value, count]) => ({ value, count }));
   }
 
   errorGroups(options: PageOptions = {}, events?: LogEvent[]): ErrorGroup[] {
@@ -540,7 +529,7 @@ export class LogStore {
     return chosen.slice(0, 6);
   }
 
-  /** Every field observed in retained payloads, for sort/facet controls. */
+  /** Every field observed in retained payloads, for sort and autocomplete controls. */
   fieldNames(): string[] {
     if (!this.fieldNamesCache) {
       const extra = [...this.columnCache].filter(field => !BUILTIN_FIELDS.includes(field)).sort(fieldCollator.compare);
