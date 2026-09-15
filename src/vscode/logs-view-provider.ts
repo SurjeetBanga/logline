@@ -18,10 +18,12 @@ export class LogsProvider implements vscode.WebviewViewProvider {
       '{{CSP_SOURCE}}': view.webview.cspSource,
       '{{NONCE}}': randomBytes(16).toString('hex'),
       '{{STYLE_URI}}': String(view.webview.asWebviewUri(vscode.Uri.joinPath(media, 'viewer.css'))),
-      '{{SCRIPT_URI}}': String(view.webview.asWebviewUri(vscode.Uri.joinPath(media, 'viewer.js')))
+      '{{SCRIPT_URI}}': String(view.webview.asWebviewUri(vscode.Uri.joinPath(media, 'viewer.js'))),
+      '{{GUIDE_UNREAD}}': String(this.controller.guideStatus().unread)
     };
     view.webview.html = readFileSync(vscode.Uri.joinPath(media, 'viewer.html').fsPath, 'utf8')
       .replace(/\{\{[A-Z_]+\}\}/g, key => replacements[key] ?? '');
+    void view.webview.postMessage({ type: 'guideStatus', ...this.controller.guideStatus() });
     // Hiding or disposing the view does not stop the server or retain a UI queue.
   }
 }

@@ -13,6 +13,7 @@ import type { createViewer } from './webview/viewer';
 class Element {
   children: Element[] = [];
   listeners = new Map<string, (event?: any) => void>();
+  handlers = new Map<string, Set<(event?: any) => void>>();
   dataset: Record<string, unknown> = {};
   style: Record<string, string> = {};
   attributes: Record<string, string> = {};
@@ -21,12 +22,15 @@ class Element {
   value = '';
   open = false;
   hidden = false;
+  disabled = false;
+  tabIndex = -1;
   scrollTop = 0;
   scrollHeight = 1000;
   clientHeight = 300;
   clientWidth = 1000;
   parent?: Element;
   height = 30;
+  width = 140;
   focusCalls: unknown[] = [];
   scrollIntoViewCalls: unknown[] = [];
   onFocus?: (options?: { preventScroll?: boolean; }) => void;
@@ -35,11 +39,16 @@ class Element {
   append(...children: Element[]) { for (const child of children) child.parent = this; this.children.push(...children); }
   replaceChildren(...children: Element[]) { this.children = []; this.append(...children); }
   addEventListener(name: string, callback: (event?: any) => void, options?: AddEventListenerOptions) {
-    this.listeners.set(name, callback);
+    if (!this.handlers.has(name)) this.handlers.set(name, new Set());
+    this.handlers.get(name)!.add(callback);
+    this.listeners.set(name, event => { for (const handler of [...this.handlers.get(name) ?? []]) handler(event); });
     if (options?.signal) setMaxListeners(0, options.signal);
     options?.signal?.addEventListener('abort', () => this.removeEventListener(name, callback), { once: true });
   }
-  removeEventListener(name: string, callback: (event?: any) => void) { if (this.listeners.get(name) === callback) this.listeners.delete(name); }
+  removeEventListener(name: string, callback: (event?: any) => void) {
+    this.handlers.get(name)?.delete(callback);
+    if (!this.handlers.get(name)?.size) this.listeners.delete(name);
+  }
   removeAttribute(name: string) { delete this.attributes[name]; }
   setAttribute(name: string, value: string) { this.attributes[name] = value; if (name === 'class') this.className = value; }
   contains(element: Element): boolean { return element === this || this.children.some(child => child.contains(element)); }
@@ -51,6 +60,7 @@ class Element {
   querySelectorAll(selector: string): Element[] {
     return this.children.flatMap(child => [
       ...(selector.startsWith('.') && child.classList.contains(selector.slice(1)) ? [child] : []),
+      ...(selector === 'td[data-column]' && child.dataset.column ? [child] : []),
       ...child.querySelectorAll(selector)
     ]);
   }
@@ -59,7 +69,7 @@ class Element {
     if (row) return this.querySelectorAll('.event-row').find(element => String(element.dataset.id) === row[1])?.querySelector('.message-button');
     return this.querySelectorAll(selector)[0];
   }
-  getBoundingClientRect() { return { height: this.height, width: 140 }; }
+  getBoundingClientRect() { return { height: this.height, width: this.width, top: 0, left: 0, bottom: this.height, right: this.width }; }
   remove() { }
   focus(options?: { preventScroll?: boolean; }) { this.focusCalls.push(options); this.onFocus?.(options); }
   scrollIntoView(options?: unknown) { this.scrollIntoViewCalls.push(options); }
@@ -73,20 +83,25 @@ const bundle = buildSync({ stdin: { contents: "export { createViewer } from './s
 function viewer() {
   const frames: (() => void)[] = [];
   const elements = new Map<string, Element>();
-  const get = (id: string) => { if (!elements.has(id)) elements.set(id, new Element()); return elements.get(id)!; };
+  const makeElement = () => { const element = new Element(); element.onFocus = () => { document.activeElement = element; }; return element; };
+  const get = (id: string) => { if (!elements.has(id)) elements.set(id, makeElement()); return elements.get(id)!; };
   const messages: Record<string, any>[] = [];
-  const window = new Element();
+  const savedStates: Record<string, any>[] = [];
+  const timers = new Map<number, () => void>();
+  let nextTimer = 0;
+  const window = Object.assign(new Element(), { innerWidth: 1000, innerHeight: 600 });
   const document = Object.assign(new Element(), {
     activeElement: undefined as Element | undefined, getElementById: get, querySelector: () => get('viewport'),
-    createElement: () => new Element(), createElementNS: () => new Element(), createTextNode: () => new Element(), createDocumentFragment: () => new Element()
+    createElement: makeElement, createElementNS: makeElement, createTextNode: makeElement, createDocumentFragment: makeElement
   });
+  get('cellFilterMenu').append(get('cellFilterLabel'), get('cellFilterInclude'), get('cellFilterExclude'), get('cellFilterReason'));
   const runtime = createContext({
     document, window, Intl, console, AbortController, cancelAnimationFrame() { }, clearInterval() { }, module: { exports: {} },
     acquireVsCodeApi: () => ({
-      getState: () => ({ query: 'timeout', levels: ['error'], server: 'api' }), setState() { },
+      getState: () => ({ query: 'timeout', levels: ['error'], server: 'api' }), setState: (state: Record<string, any>) => savedStates.push(state),
       postMessage: (message: Record<string, any>) => messages.push(message)
     }),
-    ResizeObserver: class { observe() { } disconnect() { } }, requestAnimationFrame: (callback: () => void) => frames.push(callback), setInterval() { }, setTimeout() { }, clearTimeout() { }
+    ResizeObserver: class { observe() { } disconnect() { } }, requestAnimationFrame: (callback: () => void) => frames.push(callback), setInterval() { }, setTimeout(callback: () => void) { timers.set(++nextTimer, callback); return nextTimer; }, clearTimeout(id: number) { timers.delete(id); }
   });
   runInContext(bundle, runtime);
   const exports = runtime.module.exports as { createViewer: typeof createViewer; buildEventDetails: typeof buildEventDetails; };
@@ -101,7 +116,7 @@ function viewer() {
     columns: [], page: 0, pages: 2, matched: 100
   });
   const flushFrames = () => { let count = 0; while (frames.length && count++ < 10) frames.shift()!(); assert.ok(count < 10, 'rendering settles without a scroll loop'); };
-  return { get, messages, app, runtime, dom: document, renderDetails, receive, flushFrames };
+  return { get, messages, savedStates, timers, app, runtime, dom: document, renderDetails, receive, flushFrames };
 }
 
 test('context preserves search, levels, server, paging, pause state and scroll position', () => {
@@ -334,6 +349,48 @@ test('new autocomplete suggestions restore the search datalist after it was clea
   assert.equal(get('search').attributes.list, 'fieldSuggestions');
 });
 
+test('search drafts become removable include and exclude chips when applied', () => {
+  const { get, app, messages } = viewer();
+  get('searchClear').listeners.get('click')!({ stopPropagation() { } });
+  const snapshots = () => messages.filter(message => message.type === 'snapshot');
+  const before = snapshots().length;
+  get('search').value = 'service:api';
+  get('search').listeners.get('input')!();
+  assert.equal(snapshots().length, before, 'typing keeps the current filter until Enter');
+  get('search').listeners.get('keydown')!({ key: 'Enter', preventDefault() { } });
+  assert.equal(app.search.query(), 'service:api');
+  assert.equal(get('searchChips').children.length, 1);
+  const chip = get('searchChips').children[0];
+  assert.equal(chip.className, 'filter-chip');
+  chip.children[1].listeners.get('click')!({ stopPropagation() { } });
+  assert.equal(app.search.query(), '');
+  assert.equal(get('searchChips').children.length, 0);
+  get('search').value = 'first';
+  get('search').listeners.get('keydown')!({ key: 'Enter', preventDefault() { } });
+  get('search').value = 'OR second';
+  get('search').listeners.get('keydown')!({ key: 'Enter', preventDefault() { } });
+  assert.equal(app.search.query(), 'first OR second');
+  get('searchClear').listeners.get('click')!({ stopPropagation() { } });
+  get('search').value = '-status:500';
+  get('search').listeners.get('keydown')!({ key: 'Enter', preventDefault() { } });
+  assert.equal(app.search.query(), '-status:500');
+  assert.match(get('searchChips').children[0].className, /exclude/);
+});
+
+test('clicking a chip edits its value inline', () => {
+  const { get, app } = viewer();
+  get('searchClear').listeners.get('click')!({ stopPropagation() { } });
+  get('search').value = 'service:api';
+  get('search').listeners.get('keydown')!({ key: 'Enter', preventDefault() { } });
+  get('searchChips').children[0].children[0].listeners.get('click')!({ stopPropagation() { } });
+  const editor = get('searchChips').children[0].children[0];
+  assert.equal(editor.className, 'filter-chip-input');
+  assert.equal(editor.value, 'service:api');
+  editor.value = 'service:web';
+  editor.listeners.get('keydown')!({ key: 'Enter', preventDefault() { } });
+  assert.equal(app.search.query(), 'service:web');
+});
+
 test('Copy results appears for an active filter and requests the filtered rows', () => {
   const { get, messages } = viewer();
   assert.equal(get('copyResults').hidden, false);
@@ -352,11 +409,132 @@ test('right-clicking a table value offers an additional field-value filter', () 
   get('logs').listeners.get('contextmenu')!({ target: levelCell, clientX: 20, clientY: 20, preventDefault() { prevented = true; } });
   assert.equal(prevented, true);
   assert.equal(get('cellFilterMenu').hidden, false);
-  assert.equal(get('cellFilterAction').textContent, 'Filter level: error');
-  get('cellFilterAction').listeners.get('click')!();
-  assert.equal(get('search').value, 'timeout level:error');
+  assert.equal(get('cellFilterLabel').textContent, 'level: "error"');
+  get('cellFilterInclude').listeners.get('click')!();
+  assert.equal(get('search').value, 'timeout level:"error"');
   assert.equal(messages.at(-1)?.type, 'snapshot');
-  assert.equal(messages.at(-1)?.query, 'timeout level:error');
+  assert.equal(messages.at(-1)?.query, 'timeout level:"error"');
+});
+
+test('Exclude saves the narrowed query and preserves scope while leaving inspection', () => {
+  const { get, app, messages, savedStates, timers, receive } = viewer();
+  get('search').value = 'service:api OR service:worker';
+  get('search').listeners.get('input')!();
+  assert.equal(timers.size, 2);
+  app.table.toggleExpand(42);
+  app.state.page = 1;
+  const row = get('logs').querySelectorAll('.event-row')[0];
+  const cell = row.children.find(cell => cell.dataset.column === 'base:level')!;
+  get('logs').listeners.get('contextmenu')!({ target: cell, clientX: 20, clientY: 20, preventDefault() {} });
+  get('cellFilterExclude').listeners.get('click')!();
+  const expected = 'service:api -level:"error" OR service:worker -level:"error"';
+  assert.equal(get('search').value, expected);
+  assert.equal(savedStates.at(-1)?.query, expected);
+  assert.equal(messages.at(-1)?.query, expected);
+  assert.equal(messages.at(-1)?.serverId, 'api');
+  assert.deepEqual([...messages.at(-1)?.levels], ['error']);
+  assert.equal(app.state.page, 0);
+  assert.equal(app.state.following, false);
+  assert.equal(app.state.paused, false);
+  assert.equal(app.state.selected, undefined);
+  assert.equal(get('cellFilterMenu').hidden, true);
+  assert.equal(timers.size, 0);
+  assert.equal(get('fieldSuggestions').children.length, 0);
+  receive({ type: 'autocomplete', input: 'service:api OR service:worker', serverId: 'api', fields: ['service'], values: [] });
+  assert.equal(get('fieldSuggestions').children.length, 0);
+});
+
+test('cell menu explains disabled actions and revalidates against the current search', () => {
+  const { get, app, messages } = viewer();
+  app.table.updateColumns(['bad-key', 'empty']);
+  app.table.renderRows([{ id: 43, level: 'info', fields: { 'bad-key': 'x', empty: '' } }]);
+  const open = (column: string) => {
+    const cell = get('logs').querySelectorAll('.event-row')[0].children.find(cell => cell.dataset.column === column)!;
+    get('logs').listeners.get('contextmenu')!({ target: cell, clientX: 20, clientY: 20, preventDefault() {} });
+  };
+  for (const column of ['field:bad-key', 'field:empty', 'base:message']) {
+    open(column);
+    assert.equal(get('cellFilterInclude').disabled, true);
+    assert.equal(get('cellFilterExclude').disabled, true);
+    assert.match(get('cellFilterReason').textContent, column === 'field:bad-key' ? /field name/ : /no value/);
+  }
+  open('base:level');
+  assert.equal(get('cellFilterInclude').disabled, false);
+  get('search').value = 'x'.repeat(256);
+  const count = messages.length;
+  get('cellFilterInclude').listeners.get('click')!();
+  assert.equal(messages.length, count);
+  assert.equal(get('search').value, 'x'.repeat(256));
+  assert.match(get('cellFilterReason').textContent, /256-character/);
+  assert.equal(get('cellFilterInclude').disabled, true);
+});
+
+test('cell menu fits viewport edges and dismisses on outside click, scroll and row replacement', () => {
+  const { get, app, dom, runtime } = viewer();
+  runtime.window.innerWidth = 220;
+  runtime.window.innerHeight = 150;
+  get('cellFilterMenu').width = 180;
+  get('cellFilterMenu').height = 120;
+  const open = () => {
+    const cell = get('logs').querySelectorAll('.event-row')[0].children[1];
+    get('logs').listeners.get('contextmenu')!({ target: cell, clientX: 215, clientY: 145, preventDefault() {} });
+  };
+  open();
+  assert.equal(get('cellFilterMenu').style.left, '32px');
+  assert.equal(get('cellFilterMenu').style.top, '22px');
+  dom.listeners.get('click')!({ target: get('search') });
+  assert.equal(get('cellFilterMenu').hidden, true);
+  open();
+  dom.listeners.get('scroll')!({ target: get('viewport') });
+  assert.equal(get('cellFilterMenu').hidden, true);
+  open();
+  app.table.renderRows([{ id: 99, level: 'info' }]);
+  assert.equal(get('cellFilterMenu').hidden, true);
+  assert.equal(dom.activeElement, get('logs').querySelectorAll('.event-row')[0].children[0]);
+});
+
+test('roving table focus opens keyboard actions, navigates them and restores focus on Escape', () => {
+  const { get, app, dom } = viewer();
+  app.table.renderRows([{ id: 42, level: 'error', message: 'timeout' }, { id: 43, level: 'info' }]);
+  const rows = get('logs').querySelectorAll('.event-row');
+  const all = rows.flatMap(row => row.children);
+  assert.equal(all.filter(cell => cell.tabIndex === 0).length, 1);
+  assert.equal(rows[0].children[0].tabIndex, 0);
+  const key = (target: Element, key: string, shiftKey = false) => {
+    get('logs').listeners.get('keydown')!({ target, key, shiftKey, preventDefault() {} });
+  };
+  rows[0].children[0].focus();
+  key(rows[0].children[0], 'ArrowRight');
+  assert.equal(dom.activeElement, rows[0].children[1]);
+  key(rows[0].children[1], 'ArrowDown');
+  assert.equal(dom.activeElement, rows[1].children[1]);
+  key(rows[1].children[1], 'ArrowUp');
+  assert.equal(dom.activeElement, rows[0].children[1]);
+  key(rows[0].children[1], 'F10', true);
+  assert.equal(dom.activeElement, get('cellFilterInclude'));
+  get('cellFilterMenu').listeners.get('keydown')!({ key: 'ArrowDown', preventDefault() {} });
+  assert.equal(dom.activeElement, get('cellFilterExclude'));
+  dom.listeners.get('keydown')!({ key: 'Escape', preventDefault() {} });
+  assert.equal(get('cellFilterMenu').hidden, true);
+  assert.equal(dom.activeElement, rows[0].children[1]);
+  assert.equal(all.filter(cell => cell.tabIndex === 0).length, 1);
+  key(rows[0].children[1], 'F10', true);
+  get('cellFilterMenu').listeners.get('keydown')!({ key: 'ArrowDown', preventDefault() {} });
+  get('cellFilterMenu').listeners.get('keydown')!({ key: 'Enter', preventDefault() {} });
+  assert.equal(get('search').value, 'timeout -level:"error"');
+});
+
+test('a refreshed table restores the focused cell and keeps one tab stop', () => {
+  const { get, app, dom } = viewer();
+  const row = get('logs').querySelectorAll('.event-row')[0];
+  const cell = row.children[1];
+  cell.focus();
+  get('logs').listeners.get('focusin')!({ target: cell });
+  app.table.renderRows(app.table.events);
+  const newCells = get('logs').querySelectorAll('.event-row').flatMap(row => row.children);
+  assert.equal(dom.activeElement, newCells[1]);
+  assert.equal(newCells.filter(cell => cell.tabIndex === 0).length, 1);
+  assert.equal(newCells[1].tabIndex, 0);
 });
 
 test('Live settles at the new bottom after layout and resumes even when row IDs are unchanged', () => {
@@ -646,4 +824,16 @@ test('the packaged browser entry starts and renders without a module loader', ()
     columns: [], events: [{ id: 7, level: 'info', message: 'Packaged viewer ready' }], page: 0, pages: 1, matched: 1 });
   assert.equal(get('status').textContent, 'Running');
   assert.equal(get('logs').querySelector('.message-button')?.textContent, 'Packaged viewer ready');
+});
+
+test('Help opens What’s new for unread highlights and the guide after acknowledgement', () => {
+  const { get, receive, messages } = viewer();
+  receive({ type: 'guideStatus', version: '1.7.0', unread: true });
+  get('help').listeners.get('click')!();
+  assert.equal(messages.at(-1)?.type, 'showGuide');
+  assert.equal(messages.at(-1)?.section, 'whatsNew');
+  receive({ type: 'guideStatus', version: '1.7.0', unread: false });
+  get('help').listeners.get('click')!();
+  assert.equal(messages.at(-1)?.type, 'showGuide');
+  assert.equal(messages.at(-1)?.section, 'guide');
 });

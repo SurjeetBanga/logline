@@ -7,25 +7,33 @@
   <link rel="stylesheet" href="{{STYLE_URI}}">
   <title>Logs</title>
 </head>
-<body>
+<body data-guide-unread="{{GUIDE_UNREAD}}">
   <header>
     <div class="toolbar">
       <select id="server" aria-label="Server"><option value="">All servers</option></select>
       <button id="run">Run selected</button>
       <button id="follow" aria-pressed="true">Live</button>
       <div class="toolbar-actions">
-        <button id="config">Settings</button><button id="manage">Manage servers</button>
+        <button id="help" aria-label="Open the Logline Guide" title="Open the Logline Guide"><span id="helpLabel">Help</span><span id="helpBadge" class="new-badge" hidden>New</span></button><button id="config">Settings</button><button id="manage">Manage servers</button>
         <button id="export" title="Export filtered logs as JSON Lines, JSON, CSV, or AI context (Markdown)">Export</button><button id="import">Import</button>
         <button id="clear">Clear</button><button id="stop" disabled>Stop all</button>
       </div>
     </div>
     <div class="search-toolbar" role="group" aria-label="Search and filter logs">
       <div class="popover-container search-group">
-        <input id="search" type="search" placeholder="Search logs…" aria-label="Search logs" maxlength="256" autocomplete="off" list="fieldSuggestions">
+        <div id="searchEditor" class="search-editor">
+          <div class="search-terms">
+            <div id="searchChips" class="search-chips" aria-label="Active filters"></div>
+            <input id="search" type="text" placeholder="Add a filter…" aria-label="Add a filter" maxlength="256" autocomplete="off" list="fieldSuggestions">
+          </div>
+          <button id="searchClear" class="search-clear" type="button" title="Clear all filters" aria-label="Clear all filters" hidden>×</button>
+          <button id="searchHelp" class="search-help-button" type="button" aria-haspopup="true" aria-expanded="false" aria-controls="searchHelpPanel" aria-label="Search syntax help" title="Search syntax help">Syntax</button>
+        </div>
         <datalist id="fieldSuggestions"></datalist>
-        <button id="searchHelp" class="search-help-button" type="button" aria-haspopup="true" aria-expanded="false" aria-controls="searchHelpPanel" aria-label="Search syntax help" title="Search syntax help">Syntax</button>
+        <div id="searchError" class="search-error" role="alert" hidden></div>
         <div id="searchHelpPanel" class="popover cheat-sheet" hidden>
           <h3>Search syntax</h3>
+          <p class="search-help-note">Press Enter to apply a term. Click a filter chip to edit it, or × to remove it.</p>
           <dl>
             <dt>error timeout</dt><dd>Free text — matches all words</dd>
             <dt>"database timeout"</dt><dd>Exact phrase</dd>
@@ -74,7 +82,12 @@
     </table>
     <p id="empty">Run a server command to see its logs here.</p>
   </section>
-  <div id="cellFilterMenu" class="cell-filter-menu" hidden><button id="cellFilterAction" type="button">Filter by this value</button></div>
+  <div id="cellFilterMenu" class="cell-filter-menu" role="menu" aria-labelledby="cellFilterLabel" aria-describedby="cellFilterReason" tabindex="-1" hidden>
+    <div id="cellFilterLabel" class="cell-filter-label"></div>
+    <button id="cellFilterInclude" type="button" role="menuitem" tabindex="-1">Include value</button>
+    <button id="cellFilterExclude" type="button" role="menuitem" tabindex="-1">Exclude value</button>
+    <p id="cellFilterReason" class="cell-filter-reason" hidden></p>
+  </div>
   <footer>
     <div class="pagination"><button id="older">← Older</button><span id="page">Page 1 of 1</span><button id="newer">Newer →</button><span id="mode">Live</span></div>
     <div id="counts" role="status">0 received · 0 retained · 0 discarded</div>

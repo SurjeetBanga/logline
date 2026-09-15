@@ -3,17 +3,21 @@ import { registerCommands, startAutoServers } from './vscode/commands';
 import { LogsController } from './vscode/logs-controller';
 import { LogsProvider } from './vscode/logs-view-provider';
 import { registerTasks } from './vscode/tasks/provider';
+import { GuidePanel } from './vscode/guide-panel';
 
 let controller: LogsController | undefined;
 
 export function activate(context: vscode.ExtensionContext): { provider: LogsProvider; } {
   controller = new LogsController(context);
+  const guide = new GuidePanel(context, () => controller!.acknowledgeGuide());
+  controller.setGuideOpener(section => guide.open(section));
   const provider = new LogsProvider(context, controller);
   context.subscriptions.push(
     vscode.window.registerWebviewViewProvider('logline.logs', provider),
-    ...registerCommands(controller),
+    ...registerCommands(controller, section => guide.open(section)),
     ...registerTasks(controller.runner, controller.registry, controller.tasks),
-    controller
+    controller,
+    guide
   );
   startAutoServers(controller);
   return { provider };

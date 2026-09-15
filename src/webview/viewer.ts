@@ -8,6 +8,7 @@ import { createPopovers } from './popovers';
 import { createSearch } from './search/controls';
 import { ViewerState } from './state';
 import { createTable } from './table/controller';
+import { createCellActions } from './table/cell-actions';
 import { createTimestampFormatter } from './time';
 import type { WebviewApi } from './types';
 
@@ -18,26 +19,39 @@ export function createViewer(api: WebviewApi) {
   const saved = api.getState() ?? {};
   const state = new ViewerState(saved);
   elements.search.value = saved.query ?? '';
-  const bridge = new SnapshotBridge(api, state, () => elements.search.value);
-  const request = (force = false) => bridge.request(force);
   const { popovers, createPopover } = createPopovers(scope);
   const formatTimestamp = createTimestampFormatter(state);
   const analysis = createAnalysis(elements, state);
   const inspection = createInspection(elements, scrollViewport, api, formatTimestamp, scope);
   const search = createSearch(elements, state, api, popovers, { filterChanged }, scope);
+  const bridge = new SnapshotBridge(api, state, () => search.query());
+  const request = (force = false) => bridge.request(force);
+  let cellActions: ReturnType<typeof createCellActions> | undefined;
   const table = createTable(elements, scrollViewport, state, api, formatTimestamp,
-    { request: requestInteraction, saveState, filterChanged, setFollowing, updateFollowControl, updateModeLabel }, scope);
+    { request: requestInteraction, saveState, filterChanged, setFollowing, updateFollowControl, updateModeLabel }, scope, () => cellActions?.rowsChanged());
   let serverSignature = '';
+  let guideUnread = document.body?.dataset.guideUnread === 'true';
+  elements.helpBadge.hidden = !guideUnread;
   let searchDebounce: ReturnType<typeof setTimeout> | undefined;
   let autocompleteDebounce: ReturnType<typeof setTimeout> | undefined;
   let copyFeedbackTimer: ReturnType<typeof setTimeout> | undefined;
-  let cellFilterQuery: string | undefined;
+  cellActions = createCellActions(elements, () => table.events, () => search.query(), query => {
+    clearTimeout(searchDebounce);
+    clearTimeout(autocompleteDebounce);
+    search.clearAutocomplete();
+    search.setQuery(query, true);
+    elements.search.focus();
+  }, scope);
   // The host increments its generation when logs are cleared. An older
   // snapshot can arrive afterwards, so keep it from restoring the old schema.
   let minimumSnapshotGeneration = 0;
   const onMessage = (event: MessageEvent<HostMessage>) => receive(event.data);
   scope.listen(window, 'message', onMessage);
   function receive(data: HostMessage) {
+    if (data.type === 'guideStatus') {
+      updateGuideStatus(data);
+      return;
+    }
     // Pushed by the extension whenever retained data or status actually
     // changes, coalesced on its side. This replaces polling on a fixed
     // interval, so an idle server costs nothing here.
@@ -56,11 +70,10 @@ export function createViewer(api: WebviewApi) {
       return;
     }
     if (data.type === 'autocomplete') {
-      // The browser's built-in search clear button fires an input event. A
-      // response for the text just cleared may still be in transit, but an
-      // empty search should never open a field-name dropdown.
-      if (data.input !== elements.search.value || (data.serverId ?? '') !== state.selectedServer) return;
-      if (elements.search.value.trim()) search.renderAutocomplete(data);
+      // A response for draft text that was just cleared may still be in
+      // transit, but an empty search should never open a field-name dropdown.
+      if (data.input !== search.draft() || (data.serverId ?? '') !== state.selectedServer) return;
+      if (search.draft().trim()) search.renderAutocomplete(data);
       else search.clearAutocomplete();
       return;
     }
@@ -75,6 +88,7 @@ export function createViewer(api: WebviewApi) {
     }
     if (data.type !== 'snapshot')
       return;
+    if (data.guideStatus) updateGuideStatus(data.guideStatus);
     bridge.received();
     if (data.generation < minimumSnapshotGeneration) {
       bridge.flush();
@@ -196,44 +210,25 @@ export function createViewer(api: WebviewApi) {
   }
 
   function setFollowing(value: boolean) { state.setFollowing(value); updateFollowControl(); updateModeLabel(); }
-  function saveState() { api.setState(state.persist(elements.search.value)); }
+  function saveState() { api.setState(state.persist(search.query())); }
   function hasActiveFilter() {
-    return Boolean(elements.search.value.trim()) || state.checkedLevels.size !== 6 || Boolean(state.selectedServer);
+    return Boolean(search.query()) || state.checkedLevels.size !== 6 || Boolean(state.selectedServer);
   }
   function updateCopyResultsControl() {
     elements.copyResults.hidden = !hasActiveFilter();
     elements.copyResults.textContent = 'Copy results';
+  }
+  function updateGuideStatus(status: { unread: boolean; version: string }) {
+    guideUnread = status.unread;
+    elements.helpBadge.hidden = !status.unread;
+    elements.help.setAttribute('aria-label', status.unread ? 'Open the Logline Guide — new features available' : 'Open the Logline Guide');
+    elements.help.title = status.unread ? `Open the Logline Guide · New in ${status.version}` : 'Open the Logline Guide';
   }
   function requestInteraction() {
     if (state.paused) { state.browseFromInspection(); table.resetDetails(); table.renderWindow(); }
     updateFollowControl(); updateModeLabel(); request(true);
   }
   function filterChanged() { state.filterChanged(); updateCopyResultsControl(); saveState(); requestInteraction(); }
-
-  function filterForCell(id: number, column: string): { query: string; label: string; } | undefined {
-    const event = table.events.find(item => item.id === id);
-    if (!event) return;
-    const field = column === 'base:time' ? 'timestamp'
-      : column === 'base:level' ? 'level'
-        : column === 'base:message' ? 'message'
-          : column === 'base:source' ? 'stream'
-            : column.startsWith('field:') ? column.slice('field:'.length) : undefined;
-    if (!field) return;
-    const value = field === 'timestamp' ? event.timestamp
-      : field === 'level' ? event.level
-        : field === 'message' ? event.message
-          : field === 'stream' ? event.stream
-            : event.fields?.[field];
-    const text = String(value ?? '').trim().replace(/"/g, '');
-    if (!text) return;
-    const query = /\s/.test(text) ? `${field}:"${text}"` : `${field}:${text}`;
-    return { query, label: `Filter ${field}: ${text}` };
-  }
-
-  function closeCellFilterMenu() {
-    cellFilterQuery = undefined;
-    elements.cellFilterMenu.hidden = true;
-  }
 
   scope.listen(elements.logs, 'click', event => {
     if (inspection.handleDetailAction(event))
@@ -244,49 +239,21 @@ export function createViewer(api: WebviewApi) {
     table.toggleExpand(Number(button.closest('tr')!.dataset.id));
   });
 
-  scope.listen(elements.logs, 'contextmenu', event => {
-    const cell = (event.target as HTMLElement).closest<HTMLTableCellElement>('td[data-column]');
-    const row = cell?.closest<HTMLTableRowElement>('tr.event-row');
-    const choice = cell && row ? filterForCell(Number(row.dataset.id), cell.dataset.column ?? '') : undefined;
-    if (!choice) return;
-    event.preventDefault();
-    cellFilterQuery = choice.query;
-    elements.cellFilterAction.textContent = choice.label;
-    elements.cellFilterAction.title = choice.label;
-    elements.cellFilterMenu.style.left = `${Math.max(8, event.clientX)}px`;
-    elements.cellFilterMenu.style.top = `${Math.max(8, event.clientY)}px`;
-    elements.cellFilterMenu.hidden = false;
-  });
-
-  scope.listen(elements.cellFilterAction, 'click', () => {
-    if (!cellFilterQuery) return;
-    elements.search.value = [elements.search.value.trim(), cellFilterQuery].filter(Boolean).join(' ');
-    closeCellFilterMenu();
-    elements.search.focus();
-    filterChanged();
-  });
-
-  scope.listen(document, 'click', event => {
-    if (!elements.cellFilterMenu.hidden && !elements.cellFilterMenu.contains(event.target as Node))
-      closeCellFilterMenu();
-  });
-
-  scope.listen(document, 'keydown', event => {
-    if (event.key === 'Escape') closeCellFilterMenu();
-  });
-
   scope.listen(elements.search, 'input', () => {
     search.clearAutocomplete();
     updateCopyResultsControl();
     clearTimeout(searchDebounce);
-    searchDebounce = setTimeout(filterChanged, 150);
+    // Filtering is committed by the editor's Enter handler. Retain a short
+    // draft timer for compatibility with hosts that expect input activity to
+    // be coalesced alongside autocomplete requests.
+    searchDebounce = setTimeout(() => { searchDebounce = undefined; }, 150);
     clearTimeout(autocompleteDebounce);
-    if (!elements.search.value.trim()) {
+    if (!search.draft().trim()) {
       search.clearAutocomplete();
       return;
     }
     autocompleteDebounce = setTimeout(() => {
-      api.postMessage({ type: 'autocomplete', input: elements.search.value, serverId: state.selectedServer || undefined });
+      api.postMessage({ type: 'autocomplete', input: search.draft(), serverId: state.selectedServer || undefined });
     }, 150);
   });
 
@@ -310,7 +277,7 @@ export function createViewer(api: WebviewApi) {
 
   scope.listen(elements.copyResults, 'click', () => {
     if (!hasActiveFilter()) return;
-    api.postMessage({ type: 'copyFiltered', query: elements.search.value, levels: state.currentLevels(), serverId: state.selectedServer || undefined });
+    api.postMessage({ type: 'copyFiltered', query: search.query(), levels: state.currentLevels(), serverId: state.selectedServer || undefined });
     elements.copyResults.textContent = 'Copied';
     clearTimeout(copyFeedbackTimer);
     copyFeedbackTimer = setTimeout(updateCopyResultsControl, 1200);
@@ -319,7 +286,7 @@ export function createViewer(api: WebviewApi) {
   scope.listen(elements.saveSearch, 'click', () => {
     for (const popover of popovers)
       popover.close();
-    elements.saveSearchName.value = elements.search.value || '';
+    elements.saveSearchName.value = search.query() || '';
     elements.saveSearchDialog.showModal();
     elements.saveSearchName.select?.();
   });
@@ -330,13 +297,13 @@ export function createViewer(api: WebviewApi) {
     event.preventDefault();
     const name = elements.saveSearchName.value;
     elements.saveSearchDialog.close();
-    api.postMessage({ type: 'saveSearch', name, query: elements.search.value, levels: state.currentLevels(), serverId: state.selectedServer || undefined });
+    api.postMessage({ type: 'saveSearch', name, query: search.query(), levels: state.currentLevels(), serverId: state.selectedServer || undefined });
   });
 
   scope.listen(elements.analyze, 'click', () => {
     elements.analysisDialog.showModal();
     elements.analysisStatus.textContent = 'Loading analysis…';
-    api.postMessage({ type: 'analysis', query: elements.search.value, levels: state.currentLevels(), serverId: state.selectedServer || undefined });
+    api.postMessage({ type: 'analysis', query: search.query(), levels: state.currentLevels(), serverId: state.selectedServer || undefined });
   });
 
   scope.listen(elements.analysisClose, 'click', () => elements.analysisDialog.close());
@@ -387,10 +354,12 @@ export function createViewer(api: WebviewApi) {
 
   scope.listen(elements.config, 'click', () => api.postMessage({ type: 'config' }));
 
+  scope.listen(elements.help, 'click', () => api.postMessage({ type: 'showGuide', section: guideUnread ? 'whatsNew' : 'guide' }));
+
   scope.listen(elements.manage, 'click', () => api.postMessage({ type: 'manageServers' }));
 
   function exportRequest(type: 'export' | 'exportForAI') {
-    api.postMessage({ type, query: elements.search.value, levels: state.currentLevels(), serverId: state.selectedServer || undefined });
+    api.postMessage({ type, query: search.query(), levels: state.currentLevels(), serverId: state.selectedServer || undefined });
   }
 
   scope.listen(elements.export, 'click', () => exportRequest('export'));

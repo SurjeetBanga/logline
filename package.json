@@ -2,7 +2,7 @@
   "name": "logline",
   "displayName": "Logline \u2014 Live Tail for JSON Logs",
   "description": "Live tail your server processes in a searchable, expandable JSON log viewer.",
-  "version": "1.6.0",
+  "version": "1.7.0",
   "publisher": "surjeetbanga",
   "license": "MIT",
   "repository": {
@@ -100,6 +100,16 @@
       {
         "command": "logline.captureTask",
         "title": "Capture VS Code Task in Logline",
+        "category": "Logline"
+      },
+      {
+        "command": "logline.showGuide",
+        "title": "Open Guide",
+        "category": "Logline"
+      },
+      {
+        "command": "logline.showWhatsNew",
+        "title": "What’s New",
         "category": "Logline"
       }
     ],

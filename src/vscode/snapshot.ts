@@ -5,7 +5,7 @@ import type { LogStore } from '../core/log-store';
 import { getField } from '../core/query';
 import type { Settings } from '../core/settings';
 import type { LogEvent } from '../core/types';
-import type { Snapshot, ViewRequest } from '../protocol/messages';
+import type { GuideStatus, Snapshot, ViewRequest } from '../protocol/messages';
 import type { LogPersistence } from '../storage/log-persistence';
 import type { SavedSearches } from '../storage/saved-searches';
 
@@ -26,9 +26,10 @@ function pickColumns(event: LogEvent, columns: string[]): LogEvent['fields'] {
 export interface SnapshotSources {
   store: LogStore; config: Settings; registry: SessionRegistry; state: RuntimeState;
   ingestion: Ingestion; persistence: LogPersistence; searches: SavedSearches; running: boolean;
+  guideStatus: GuideStatus;
 }
 export function buildSnapshot(msg: Extract<ViewRequest, { type: 'snapshot'; }>,
-  { store, config, registry, state, ingestion, persistence, searches, running }: SnapshotSources): Snapshot {
+  { store, config, registry, state, ingestion, persistence, searches, running, guideStatus }: SnapshotSources): Snapshot {
   const options = { query: msg.query, serverId: msg.serverId, levels: msg.levels,
     page: msg.page, before: msg.before, sort: msg.sort, sortDirection: msg.sortDirection };
   const configured = config.get<string[]>('columns', []);
@@ -55,7 +56,7 @@ export function buildSnapshot(msg: Extract<ViewRequest, { type: 'snapshot'; }>,
     searches: { saved: searches.savedSearches() },
     newest: ingestion.sequence, generation: state.generation,
     persistDropped: persistence.persistDropped,
-    timezone: config.get('timezone', 'local')
+    timezone: config.get('timezone', 'local'), guideStatus
   };
 
 }

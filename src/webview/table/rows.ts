@@ -32,6 +32,9 @@ export function createRows(state: ViewerState, columns: () => Column[], formatTi
       else
         tableCell = cell(event.fields?.[column.label] ?? '');
       tableCell.dataset.column = column.key;
+      tableCell.tabIndex = -1;
+      tableCell.setAttribute('aria-label', `${column.label}: ${tableCell.textContent ?? ''}`);
+      tableCell.setAttribute('aria-haspopup', 'menu');
       row.append(tableCell);
     }
     return row;

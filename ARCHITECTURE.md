@@ -15,7 +15,7 @@ Logline has two runtimes: the VS Code extension host and the browser webview. Th
 
 ## Construction and ownership
 
-`extension.ts` constructs `LogsController`, registers commands/tasks/the view, and delegates shutdown. `LogsController` wires services together; it does not implement feature algorithms. `LogsProvider` only loads the HTML and connects the view to messages and notifications.
+`extension.ts` constructs `LogsController`, registers commands/tasks/the view, and delegates shutdown. `LogsController` wires services together; it does not implement feature algorithms. `LogsProvider` only loads the HTML and connects the view to messages and notifications. `GuidePanel` owns one reusable editor webview for the offline guide; its release acknowledgement is stored in `globalState` and is independent of captured logs.
 
 `ProcessRunner` owns child processes and stop escalation timers. `TaskLifecycle` tracks VS Code task executions. Both use `SessionRegistry` for session metadata and `Ingestion` for event IDs and retained events. Imports use the same ingestion sequence, with a new session boundary per file. Live output preserves its physical text on disk; imported events are not persisted again.
 
@@ -45,7 +45,7 @@ Add a message to `ViewRequest`/`HostMessage`, validate it in `parseViewRequest`,
 
 ## Builds and tests
 
-- `npm run compile` type-checks and builds host code into `out/`, then bundles `src/webview/main.ts` into `media/viewer.js`. The generated browser file is checked in; edit its TypeScript sources and rebuild it.
+- `npm run compile` type-checks and builds host code into `out/`, then bundles `src/webview/main.ts` into `media/viewer.js`. The generated browser file is checked in; edit its TypeScript sources and rebuild it. Guide assets in `media/guide.*` are authored static files and are packaged as-is.
 - `npm run watch` watches host compilation, browser type checking, and browser bundling.
 - `npm run check` checks both runtimes and tests, builds, and runs the test suite.
 - `npm test` compiles tests into `out-tests/` and runs only `*.test.js`. Run `npm run compile` first when browser sources have changed.
