@@ -8,7 +8,7 @@ import type { ViewerActions, WebviewApi } from '../types';
 import { layoutColumnWidths } from './layout';
 import { createRows } from './rows';
 
-export function createTable(elements: Elements, scrollViewport: HTMLElement, state: ViewerState, api: WebviewApi, formatTimestamp: (event: LogEvent) => string | undefined, actions: ViewerActions, scope: EventScope) {
+export function createTable(elements: Elements, scrollViewport: HTMLElement, state: ViewerState, api: WebviewApi, formatTimestamp: (event: LogEvent) => string | undefined, actions: ViewerActions, scope: EventScope, onRowsChanged: () => void = () => {}) {
   const { request, saveState, updateFollowControl, updateModeLabel } = actions;
   function totalColumnCount() { return displayedColumns.length; }
 
@@ -101,6 +101,7 @@ export function createTable(elements: Elements, scrollViewport: HTMLElement, sta
     const focused = document.activeElement as HTMLElement | null;
     const focusedRow = !!focused && elements.logs.contains(focused) ? focused.closest('tr') : undefined;
     const refocusId = focusedRow?.classList.contains('event-row') ? focusedRow.dataset.id : undefined;
+    const refocusColumn = focused?.dataset.column;
     const detailScrollers = [...(expandedRow?.querySelectorAll<HTMLElement>('.event-details, pre') ?? [])]
       .map(element => ({ element, top: element.scrollTop, left: element.scrollLeft }));
     const fragment = document.createDocumentFragment();
@@ -121,14 +122,20 @@ export function createTable(elements: Elements, scrollViewport: HTMLElement, sta
     // (besides dropping keyboard focus) makes Chrome yank the scroll position
     // once focus falls back to <body>. Re-focus the same row's new button.
     elements.logs.replaceChildren(topSpacer!, fragment, bottomSpacer!);
+    onRowsChanged();
     for (const { element, top, left } of detailScrollers) {
       element.scrollTop = top;
       element.scrollLeft = left;
     }
     if (focused && !!focused && elements.logs.contains(focused))
       focused.focus({ preventScroll: true });
-    else if (refocusId !== undefined)
-      elements.logs.querySelector<HTMLElement>(`tr.event-row[data-id="${refocusId}"] .message-button`)?.focus({ preventScroll: true });
+    else if (refocusId !== undefined) {
+      const row = [...elements.logs.querySelectorAll<HTMLTableRowElement>('.event-row')].find(row => row.dataset.id === refocusId);
+      const target = refocusColumn
+        ? [...(row?.querySelectorAll<HTMLElement>('td[data-column]') ?? [])].find(cell => cell.dataset.column === refocusColumn)
+        : row?.querySelector<HTMLElement>('.message-button');
+      target?.focus({ preventScroll: true });
+    }
     const measured = elements.logs.querySelector<HTMLTableRowElement>('.detail-row')?.getBoundingClientRect().height;
     if (measured !== undefined && measured !== expandedHeight) {
       expandedHeight = measured;

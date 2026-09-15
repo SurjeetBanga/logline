@@ -6,6 +6,8 @@
 
 ## Use
 
+Open **Help** in the Logs toolbar for the offline **Logline Guide**. It is a visual quick reference for capture, search, inspection, analysis, sharing, and retention. The **What’s new** tab shows curated highlights for releases you have not viewed; the full version history is available from that tab. The Command Palette also exposes **Logline: Open Guide** and **Logline: What’s New**. The Help button gets a small **New** badge after an update, and the guide never opens by itself.
+
 Run **Logline: Run Command**, or open **Manage servers** in the Logs panel to add, edit, and delete saved commands. Multiple servers can run concurrently; the dropdown separates them by server ID. **Stop server** stops the selected process; **Stop all** stops every process. Running a command requires a trusted workspace.
 
 A saved server can also start automatically when the extension activates by setting `autoStart: true` on it (also requires a trusted workspace). Set `jsonOnly: true` on a server whose command interleaves build-tool output with its own JSON logs (for example `gradle bootRun`) to discard everything that isn't valid JSON.
@@ -20,7 +22,7 @@ JSON and JSONL exports contain Logline event envelopes, including normalized met
 
 Full JSON, JSONL, and CSV exports take a fixed snapshot after you choose a destination, then redact and write records in batches. Cancel through the progress notification. Local files are replaced only after the export completes; cancellation or failure preserves an existing destination. CSV includes the first 200 distinct payload fields encountered in capture order, sorted as columns, plus the standard metadata and full `raw` payload. Filesystem providers that require a whole-file write are limited to 16 MiB; use a local file or a narrower filter for larger exports. Small context and Markdown exports use the regular save flow.
 
-The level filter (next to the search box) is a multi-select — check any combination of Trace/Debug/Info/Warn/Error/Fatal, not just "this level and above." Click **Syntax** in the search box for a cheat sheet of the query syntax below.
+The level filter (next to the search box) is a multi-select — check any combination of Trace/Debug/Info/Warn/Error/Fatal, not just "this level and above." Click **Syntax** in the search box for a reference to the query syntax below.
 
 Local imports stream records in batches so capture and panel interactions can continue. Use `.json` for JSON documents (including arrays and multiline objects), `.jsonl`/`.ndjson` for one JSON event per line, and `.log`/`.txt` for mixed line-based output. Imported records share the `maxLineLength` limit with live capture; oversized records are marked truncated and the next record is still imported. CSV records support quoted multiline cells. Non-file VS Code filesystem providers require a whole-file read, followed by incremental processing.
 
@@ -37,6 +39,12 @@ Search supports Datadog-style queries:
 A term becomes a field filter when a bare identifier precedes the colon. URLs such as `http://api/health` and clock times such as `12:30:05` are free text. Quote an entire `host:port` value, such as `"localhost:3000"`, to prevent it being interpreted as a field filter. Ordinary text matching ignores case; regex patterns preserve case and escapes, and use the `i` flag for case-insensitive matching.
 
 Field names match as typed and fall back to common aliases, so `statusCode:200` and `status:200` both work whether the log calls the field `status` or `statusCode`. The same holds for `level`/`severity`, `message`/`msg`, `service`/`service_name`, `requestId`/`request_id`, `traceId`/`trace_id`, and `durationMs`/`duration`.
+
+Right-click a table cell to **Include value** or **Exclude value** in the current search. The menu shows the field and value, preserves quotes and whitespace, and applies the condition to every `OR` branch. Matching follows the normal search rules (usually case-insensitive contains matching, with special handling for status codes). Server and level selections remain active. Missing or empty values, unsupported field names, and actions that would exceed the 256-character search limit are disabled with an explanation.
+
+Applied search terms appear as removable chips inside the search control. Type a term and press Enter to add it; click a chip to edit it or use its **×** button to remove it. Use **Clear all filters** to remove every query term while keeping server and level selections.
+
+For keyboard access, Tab into a table cell, use arrow keys to move between rendered cells, and press **Shift+F10** to open its menu. Use Up/Down and Enter to choose an action; Escape returns focus to the cell. Applying a filter while inspecting an event returns to Browse. Menus close when the table scrolls or its displayed rows are replaced.
 
 Automatic columns use fields from the selected server, recognize common aliases, and fall back to custom JSON fields instead of showing no payload columns. **Columns** offers up to 200 retained payload fields, including nested dotted paths, so you can add fields beyond the six automatic choices. Added columns are saved with the webview state. Explicit `logline.columns` settings also resolve common aliases.
 
@@ -127,6 +135,8 @@ Redaction applies to exports and **Copy results** when enabled. **Copy event** a
 The extension host and browser UI are written in TypeScript. Host code compiles to `out/`; `src/webview/main.ts` bundles into the generated `media/viewer.js`. Edit the webview sources and run `npm run compile` to update that bundle.
 
 See [ARCHITECTURE.md](ARCHITECTURE.md) for module responsibilities, dependency boundaries, state ownership, and testing, and [REVIEW.md](REVIEW.md) for the code review, measured performance, and prioritized follow-up work. `src/core/log-store.ts` owns retention, indexes, filtering, and paging. Independent parsing, analysis, capture, persistence, transfer, and VS Code integration have their own modules.
+
+When releasing a version, update the affected cards in `media/guide.html`, add a short user-facing entry to `GUIDE_RELEASES` in `src/vscode/guide-content.ts` when there are highlights worth calling out, and update `CHANGELOG.md` with the complete history. Keep release highlight sections aligned with the guide's section ids (`capture`, `search`, `inspect`, `analyze`, or `share`), then run `npm run check` and `npm run package`.
 
 `samples/demo-logs.jsonl` is a synthetic JSON Lines fixture (not part of the published package) for exercising the viewer without a live server: **Logline: Import Logs** it to get a realistic mix of services, levels, HTTP fields, linked trace/span ids, and two recurring, distinct error call sites, useful for screenshots or trying search, sort, and Analyze.
 

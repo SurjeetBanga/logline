@@ -2,6 +2,15 @@
 
 All notable changes to Logline are documented in this file.
 
+## 1.7.0 — 2026-09-14
+
+- Add a visual Logline Guide with a responsive Quick reference tab, accessible tabs, keyboard navigation, and curated What’s New release cards.
+- Add compact visual previews for capture, search, inspection, analysis, sharing, and retention while keeping the existing feature cards and links.
+- Make applied filters editable as removable chips and add keyboard-friendly cell Include/Exclude actions that preserve OR branches and active scope.
+- Keep table focus, Live/Browse state, inspection, columns, and analysis context stable while snapshots and layout updates arrive.
+- Keep guide links keyboard-friendly, focus release destinations, acknowledge updates only after What’s New is shown, and preserve offline operation.
+- Align guide copy with the actual command palette and saved-search controls, including the full task-conversion command and delete action.
+
 ## 1.6.0 — 2026-09-14
 
 - Keep the server selector width stable as session status labels change; keep toolbar and search actions on one row and allow narrow panels to scroll horizontally.
@@ -131,7 +140,7 @@ All notable changes to Logline are documented in this file.
 **UI**
 
 - The level filter is now a multi-select (any combination of levels, not just "at least X"), with a summary label like "Error only" or "3 levels".
-- A search-syntax cheat sheet (ⓘ next to the search box) documents field filters, aliases, wildcards, numeric ranges, regex, and time-range queries.
+- A search-syntax reference (ⓘ next to the search box) documents field filters, aliases, wildcards, numeric ranges, regex, and time-range queries.
 - Fixed the toolbar and table layout squishing and wrapping oddly in a narrow panel.
 
 **Internal**

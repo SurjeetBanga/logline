@@ -291,9 +291,16 @@
     return {
       logs: element("logs"),
       cellFilterMenu: element("cellFilterMenu"),
-      cellFilterAction: element("cellFilterAction"),
+      cellFilterLabel: element("cellFilterLabel"),
+      cellFilterReason: element("cellFilterReason"),
+      cellFilterInclude: element("cellFilterInclude"),
+      cellFilterExclude: element("cellFilterExclude"),
       empty: element("empty"),
+      searchEditor: element("searchEditor"),
       search: element("search"),
+      searchChips: element("searchChips"),
+      searchClear: element("searchClear"),
+      searchError: element("searchError"),
       copyResults: element("copyResults"),
       fieldSuggestions: element("fieldSuggestions"),
       searchHelp: element("searchHelp"),
@@ -316,6 +323,8 @@
       levelMenu: element("levelMenu"),
       server: element("server"),
       follow: element("follow"),
+      help: element("help"),
+      helpBadge: element("helpBadge"),
       config: element("config"),
       manage: element("manage"),
       export: element("export"),
@@ -628,6 +637,11 @@
     return options.filter((value) => value.length <= 256);
   }
 
+  // src/core/query-tokens.ts
+  function queryTokens(input) {
+    return input.match(/(?:"(?:\\.|[^"\\])*"?|\[[^\]"\r\n]*\]|[^\s"\[]|\[)+/g) ?? [];
+  }
+
   // src/webview/state.ts
   var LEVELS = ["trace", "debug", "info", "warn", "error", "fatal"];
   var ViewerState = class {
@@ -730,7 +744,178 @@
   // src/webview/search/controls.ts
   function createSearch(elements, state, api, popovers, actions, scope) {
     const { filterChanged } = actions;
+    const MAX_QUERY_LENGTH = 256;
+    let appliedQuery = queryTokens(elements.search.value.trim()).map((value) => value.toLowerCase() === "or" ? "OR" : value).join(" ").slice(0, MAX_QUERY_LENGTH);
+    let editingIndex;
     const LEVEL_LABELS = { trace: "Trace", debug: "Debug", info: "Info", warn: "Warn", error: "Error", fatal: "Fatal" };
+    function tokens(query2) {
+      return queryTokens(query2.trim()).map((value) => value.toLowerCase() === "or" ? "OR" : value);
+    }
+    function validDraft(input, canStartWithOr = Boolean(appliedQuery)) {
+      const value = input.trim();
+      if (!value) return { values: [] };
+      let escaped = false;
+      let quoted = false;
+      let brackets = 0;
+      for (const character of value) {
+        if (escaped) {
+          escaped = false;
+          continue;
+        }
+        if (character === "\\") {
+          escaped = true;
+          continue;
+        }
+        if (character === '"') quoted = !quoted;
+        else if (!quoted && character === "[") brackets++;
+        else if (!quoted && character === "]") brackets--;
+        if (brackets < 0) return { values: [], error: "Close the filter range before applying it." };
+      }
+      if (quoted) return { values: [], error: "Close the quoted filter before applying it." };
+      if (brackets !== 0) return { values: [], error: "Close the filter range before applying it." };
+      const values = tokens(value);
+      if (!values.length) return { values: [], error: "Enter a filter term." };
+      if (values[0] === "OR" && !canStartWithOr || values.at(-1) === "OR" || values.some((item, index) => item === "OR" && values[index - 1] === "OR"))
+        return { values: [], error: "OR must have a filter on both sides." };
+      return { values };
+    }
+    function setError(error) {
+      elements.searchError.textContent = error ?? "";
+      elements.searchError.hidden = !error;
+    }
+    function cleanQuery(values) {
+      const cleaned = [];
+      values.forEach((value, index) => {
+        if (value === "OR" && (index === 0 || index === values.length - 1 || values[index - 1] === "OR")) return;
+        cleaned.push(value);
+      });
+      if (cleaned.at(-1) === "OR") cleaned.pop();
+      if (cleaned[0] === "OR") cleaned.shift();
+      return cleaned;
+    }
+    function renderChips() {
+      const values = tokens(appliedQuery);
+      let editingInput;
+      elements.searchChips.replaceChildren(...values.map((value, index) => {
+        if (value === "OR") {
+          const separator = document.createElement("span");
+          separator.className = "search-or";
+          separator.textContent = "OR";
+          separator.setAttribute("aria-hidden", "true");
+          return separator;
+        }
+        const chip = document.createElement("span");
+        chip.className = `filter-chip${value.startsWith("-") ? " exclude" : ""}${editingIndex === index ? " editing" : ""}`;
+        chip.title = value;
+        if (editingIndex === index) {
+          const input = document.createElement("input");
+          input.type = "text";
+          input.className = "filter-chip-input";
+          input.value = value;
+          input.maxLength = MAX_QUERY_LENGTH;
+          input.title = `Edit filter: ${value}`;
+          input.setAttribute("aria-label", `Edit filter: ${value}`);
+          scope.listen(input, "input", () => setError());
+          scope.listen(input, "keydown", (event) => {
+            if (event.key === "Enter") {
+              event.preventDefault();
+              applyValue(input.value, index);
+            } else if (event.key === "Escape") {
+              event.preventDefault();
+              cancelEdit();
+            }
+          });
+          editingInput = input;
+          chip.append(input);
+        } else {
+          const label = document.createElement("button");
+          label.type = "button";
+          label.className = "filter-chip-label";
+          label.textContent = value;
+          label.title = `Edit filter: ${value}`;
+          label.setAttribute("aria-label", `Edit filter: ${value}`);
+          scope.listen(label, "click", (event) => {
+            event.stopPropagation();
+            beginEdit(index);
+          });
+          chip.append(label);
+        }
+        const remove = document.createElement("button");
+        remove.type = "button";
+        remove.className = "filter-chip-remove";
+        remove.textContent = "\xD7";
+        remove.title = `Remove filter: ${value}`;
+        remove.setAttribute("aria-label", `Remove filter: ${value}`);
+        scope.listen(remove, "click", (event) => {
+          event.stopPropagation();
+          removeAt(index);
+        });
+        chip.append(remove);
+        return chip;
+      }));
+      const editorClasses = elements.searchEditor.className.split(" ").filter(Boolean).filter((value) => value !== "has-chips");
+      if (values.some((value) => value !== "OR")) editorClasses.push("has-chips");
+      elements.searchEditor.className = editorClasses.join(" ");
+      elements.searchClear.hidden = values.every((value) => value === "OR");
+      if (editingInput) {
+        editingInput.focus();
+        editingInput.select?.();
+      }
+    }
+    function query() {
+      return appliedQuery;
+    }
+    function setQuery(value, notify = false) {
+      appliedQuery = tokens(value).join(" ").slice(0, MAX_QUERY_LENGTH);
+      editingIndex = void 0;
+      elements.search.value = appliedQuery;
+      setError();
+      clearAutocomplete();
+      renderChips();
+      if (notify) filterChanged();
+    }
+    function beginEdit(index) {
+      editingIndex = index;
+      setError();
+      renderChips();
+    }
+    function cancelEdit() {
+      editingIndex = void 0;
+      setError();
+      renderChips();
+      elements.search.focus();
+    }
+    function removeAt(index) {
+      const values = cleanQuery(tokens(appliedQuery).filter((_, itemIndex) => itemIndex !== index));
+      setQuery(values.join(" "), true);
+      elements.search.focus();
+    }
+    function applyValue(value, replacingIndex) {
+      const result = validDraft(value, replacingIndex === void 0 && Boolean(appliedQuery));
+      if (result.error) {
+        setError(result.error);
+        return false;
+      }
+      if (!result.values.length) return false;
+      const current = tokens(appliedQuery);
+      const next = replacingIndex === void 0 ? [...current, ...result.values] : [...current.slice(0, replacingIndex), ...result.values, ...current.slice(replacingIndex + 1)];
+      const normalized = cleanQuery(next).join(" ");
+      if (normalized.length > MAX_QUERY_LENGTH) {
+        setError(`Filters cannot exceed ${MAX_QUERY_LENGTH} characters.`);
+        return false;
+      }
+      setQuery(normalized, true);
+      elements.search.value = "";
+      return true;
+    }
+    function applyDraft() {
+      return applyValue(elements.search.value);
+    }
+    function clear() {
+      if (!appliedQuery && !elements.search.value) return;
+      setQuery("", true);
+      elements.search.focus();
+    }
     function updateLevelButtonLabel() {
       if (state.checkedLevels.size === LEVELS.length)
         elements.levelButton.textContent = "All levels";
@@ -791,7 +976,7 @@
         button.textContent = label;
         button.title = item.query || item.serverId || "";
         scope.listen(button, "click", () => {
-          elements.search.value = item.query || "";
+          setQuery(item.query || "");
           state.selectedServer = item.serverId || "";
           state.checkedLevels = new Set(Array.isArray(item.levels) ? item.levels : LEVELS);
           elements.server.value = state.selectedServer;
@@ -839,7 +1024,45 @@
       elements.fieldSuggestions?.replaceChildren();
       elements.search.removeAttribute("list");
     }
-    return { updateLevelButtonLabel, buildLevelMenu, renderSearchState, renderAutocomplete, clearAutocomplete };
+    scope.listen(elements.search, "keydown", (event) => {
+      if (event.key === "Enter") {
+        event.preventDefault();
+        applyDraft();
+      } else if (event.key === "Escape" && editingIndex !== void 0) {
+        event.preventDefault();
+        cancelEdit();
+      } else if (event.key === "Backspace" && !elements.search.value && editingIndex === void 0) {
+        const values = tokens(appliedQuery);
+        let index = values.length - 1;
+        while (index >= 0 && values[index] === "OR") index--;
+        if (index >= 0) {
+          event.preventDefault();
+          removeAt(index);
+        }
+      }
+    });
+    scope.listen(elements.search, "focus", () => {
+      if (editingIndex === void 0 && elements.search.value === appliedQuery)
+        elements.search.value = "";
+    });
+    scope.listen(elements.search, "input", () => setError());
+    scope.listen(elements.searchClear, "click", (event) => {
+      event.stopPropagation();
+      clear();
+    });
+    renderChips();
+    return {
+      updateLevelButtonLabel,
+      buildLevelMenu,
+      renderSearchState,
+      renderAutocomplete,
+      clearAutocomplete,
+      query,
+      draft: () => elements.search.value,
+      setQuery,
+      appendQuery: (value) => setQuery(`${appliedQuery} ${value}`, true),
+      clear
+    };
   }
 
   // src/webview/table/layout.ts
@@ -921,6 +1144,9 @@
         else
           tableCell = cell(event.fields?.[column.label] ?? "");
         tableCell.dataset.column = column.key;
+        tableCell.tabIndex = -1;
+        tableCell.setAttribute("aria-label", `${column.label}: ${tableCell.textContent ?? ""}`);
+        tableCell.setAttribute("aria-haspopup", "menu");
         row.append(tableCell);
       }
       return row;
@@ -945,7 +1171,8 @@
   }
 
   // src/webview/table/controller.ts
-  function createTable(elements, scrollViewport, state, api, formatTimestamp, actions, scope) {
+  function createTable(elements, scrollViewport, state, api, formatTimestamp, actions, scope, onRowsChanged = () => {
+  }) {
     const { request, saveState, updateFollowControl, updateModeLabel } = actions;
     function totalColumnCount() {
       return displayedColumns.length;
@@ -1015,6 +1242,7 @@
       const focused = document.activeElement;
       const focusedRow = !!focused && elements.logs.contains(focused) ? focused.closest("tr") : void 0;
       const refocusId = focusedRow?.classList.contains("event-row") ? focusedRow.dataset.id : void 0;
+      const refocusColumn = focused?.dataset.column;
       const detailScrollers = [...expandedRow?.querySelectorAll(".event-details, pre") ?? []].map((element2) => ({ element: element2, top: element2.scrollTop, left: element2.scrollLeft }));
       const fragment = document.createDocumentFragment();
       for (let i = start; i < end; i++) {
@@ -1031,14 +1259,18 @@
         }
       }
       elements.logs.replaceChildren(topSpacer, fragment, bottomSpacer);
+      onRowsChanged();
       for (const { element: element2, top, left } of detailScrollers) {
         element2.scrollTop = top;
         element2.scrollLeft = left;
       }
       if (focused && !!focused && elements.logs.contains(focused))
         focused.focus({ preventScroll: true });
-      else if (refocusId !== void 0)
-        elements.logs.querySelector(`tr.event-row[data-id="${refocusId}"] .message-button`)?.focus({ preventScroll: true });
+      else if (refocusId !== void 0) {
+        const row = [...elements.logs.querySelectorAll(".event-row")].find((row2) => row2.dataset.id === refocusId);
+        const target = refocusColumn ? [...row?.querySelectorAll("td[data-column]") ?? []].find((cell2) => cell2.dataset.column === refocusColumn) : row?.querySelector(".message-button");
+        target?.focus({ preventScroll: true });
+      }
       const measured = elements.logs.querySelector(".detail-row")?.getBoundingClientRect().height;
       if (measured !== void 0 && measured !== expandedHeight) {
         expandedHeight = measured;
@@ -1385,6 +1617,193 @@
     };
   }
 
+  // src/webview/search/cell-filter.ts
+  function valueForCell(event, column) {
+    switch (column) {
+      case "base:time":
+        return { field: "timestamp", value: event.timestamp };
+      case "base:level":
+        return { field: "level", value: event.level };
+      case "base:message":
+        return { field: "message", value: event.message };
+      case "base:source":
+        return { field: "stream", value: event.stream };
+    }
+    if (column.startsWith("field:")) {
+      const field = column.slice(6);
+      return { field, value: Object.hasOwn(event.fields ?? {}, field) ? event.fields[field] : void 0 };
+    }
+  }
+  function cellFilterQuery(input, cell2, exclude, limit = 256) {
+    if (!/^[A-Za-z_][A-Za-z0-9_.]*$/.test(cell2.field) || /^(exists|last)$/i.test(cell2.field))
+      return { reason: "This field name cannot be used in a field filter." };
+    if (cell2.value === void 0 || cell2.value === null || String(cell2.value) === "")
+      return { reason: "This cell has no value to filter." };
+    const term = `${exclude ? "-" : ""}${cell2.field}:${JSON.stringify(String(cell2.value))}`;
+    const groups = [[]];
+    for (const token of queryTokens(input)) {
+      if (token === "OR" || token === "or") groups.push([]);
+      else groups.at(-1).push(token);
+    }
+    const branches = groups.filter((group) => group.length);
+    const query = (branches.length ? branches : [[]]).map((group) => [...group, term].join(" ")).join(" OR ");
+    return query.length > limit ? { reason: `This filter would exceed the ${limit}-character search limit.` } : { query };
+  }
+
+  // src/webview/table/cell-actions.ts
+  function createCellActions(elements, events, query, apply, scope) {
+    const menu = elements.cellFilterMenu;
+    const buttons = [elements.cellFilterInclude, elements.cellFilterExclude];
+    let origin;
+    let selected;
+    let active;
+    function rows() {
+      return [...elements.logs.querySelectorAll(".event-row")];
+    }
+    function cells(row) {
+      return [...row.querySelectorAll("td[data-column]")].filter((cell2) => cell2.getBoundingClientRect().width > 0);
+    }
+    function identify(cell2) {
+      return { id: cell2.closest("tr.event-row").dataset.id, column: cell2.dataset.column };
+    }
+    function setActive(cell2) {
+      active = identify(cell2);
+      for (const row of rows()) for (const item of cells(row)) item.tabIndex = item === cell2 ? 0 : -1;
+    }
+    function close(restoreFocus = false) {
+      const previous = origin;
+      const focusedMenu = menu.contains(document.activeElement);
+      menu.hidden = true;
+      selected = void 0;
+      origin = void 0;
+      if (restoreFocus && previous && elements.logs.contains(previous)) previous.focus({ preventScroll: true });
+      else if (focusedMenu) {
+        const fallback = rows().flatMap(cells).find((cell2) => cell2.tabIndex === 0);
+        (fallback ?? elements.search).focus({ preventScroll: true });
+      }
+    }
+    function choices() {
+      if (!selected) return;
+      const results = buttons.map((button, index) => {
+        const draft = elements.search.value.trim();
+        const currentQuery = draft && draft !== query() ? draft : query();
+        const choice = cellFilterQuery(currentQuery, selected, index === 1);
+        button.disabled = choice.query === void 0;
+        button.title = choice.reason ?? "";
+        return choice;
+      });
+      elements.cellFilterReason.textContent = [...new Set(results.map((choice) => choice.reason).filter(Boolean))].join(" ");
+      elements.cellFilterReason.hidden = !elements.cellFilterReason.textContent;
+      return results;
+    }
+    function open(cell2, x, y) {
+      const id = identify(cell2);
+      const event = events().find((event2) => String(event2.id) === id.id);
+      const value = event && valueForCell(event, id.column);
+      if (!value) return false;
+      origin = cell2;
+      selected = value;
+      setActive(cell2);
+      elements.cellFilterLabel.textContent = `${value.field}: ${value.value === void 0 ? "(missing)" : JSON.stringify(String(value.value))}`;
+      elements.cellFilterLabel.title = elements.cellFilterLabel.textContent;
+      choices();
+      menu.hidden = false;
+      menu.style.left = "8px";
+      menu.style.top = "8px";
+      const bounds = menu.getBoundingClientRect();
+      menu.style.left = `${Math.max(8, Math.min(x, window.innerWidth - bounds.width - 8))}px`;
+      menu.style.top = `${Math.max(8, Math.min(y, window.innerHeight - bounds.height - 8))}px`;
+      (buttons.find((button) => !button.disabled) ?? menu).focus({ preventScroll: true });
+      return true;
+    }
+    function activate(index) {
+      const choice = choices()?.[index];
+      if (choice?.query === void 0) return;
+      close();
+      apply(choice.query);
+    }
+    buttons.forEach((button, index) => scope.listen(button, "click", () => activate(index)));
+    scope.listen(elements.logs, "contextmenu", (event) => {
+      const cell2 = event.target.closest("td[data-column]");
+      if (!cell2?.closest("tr.event-row")) return;
+      const bounds = cell2.getBoundingClientRect();
+      if (open(cell2, event.clientX || bounds.left, event.clientY || bounds.bottom)) event.preventDefault();
+    });
+    scope.listen(elements.logs, "focusin", (event) => {
+      const cell2 = event.target.closest("td[data-column]");
+      if (cell2?.closest("tr.event-row")) setActive(cell2);
+    });
+    scope.listen(elements.logs, "keydown", (event) => {
+      const target = event.target;
+      const cell2 = target.closest("td[data-column]");
+      if (!cell2?.closest("tr.event-row")) return;
+      if (event.shiftKey && event.key === "F10" || event.key === "ContextMenu") {
+        const bounds = cell2.getBoundingClientRect();
+        if (open(cell2, bounds.left, bounds.bottom)) event.preventDefault();
+        return;
+      }
+      if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
+      if (target !== cell2) return;
+      const visibleRows = rows();
+      const row = cell2.closest("tr.event-row");
+      const rowIndex = visibleRows.indexOf(row);
+      const rowCells = cells(row);
+      const columnIndex = rowCells.indexOf(cell2);
+      let next;
+      if (event.key === "ArrowLeft") next = rowCells[Math.max(0, columnIndex - 1)];
+      else if (event.key === "ArrowRight") next = rowCells[Math.min(rowCells.length - 1, columnIndex + 1)];
+      else if (event.key === "ArrowUp" || event.key === "ArrowDown") {
+        const nextRow = visibleRows[Math.max(0, Math.min(visibleRows.length - 1, rowIndex + (event.key === "ArrowUp" ? -1 : 1)))];
+        next = cells(nextRow).find((item) => item.dataset.column === cell2.dataset.column);
+      }
+      if (next) {
+        event.preventDefault();
+        setActive(next);
+        next.focus({ preventScroll: true });
+        next.scrollIntoView({ block: "nearest", inline: "nearest" });
+      }
+    });
+    scope.listen(menu, "keydown", (event) => {
+      const enabled = buttons.filter((button) => !button.disabled);
+      const index = enabled.indexOf(document.activeElement);
+      if (event.key === "ArrowDown" || event.key === "ArrowUp" || event.key === "Home" || event.key === "End") {
+        event.preventDefault();
+        const next = event.key === "Home" ? 0 : event.key === "End" ? enabled.length - 1 : (index + (event.key === "ArrowDown" ? 1 : -1) + enabled.length) % enabled.length;
+        enabled[next]?.focus({ preventScroll: true });
+      } else if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        if (index >= 0) activate(buttons.indexOf(enabled[index]));
+      } else if (event.key === "Tab") close(true);
+    });
+    scope.listen(document, "keydown", (event) => {
+      if (event.key === "Escape" && !menu.hidden) {
+        event.preventDefault();
+        close(true);
+      }
+    });
+    scope.listen(document, "click", (event) => {
+      if (!menu.hidden && !menu.contains(event.target)) close();
+    });
+    scope.listen(document, "scroll", (event) => {
+      if (!menu.hidden && !menu.contains(event.target)) close();
+    }, { capture: true });
+    scope.listen(window, "resize", () => {
+      if (!menu.hidden) close();
+    });
+    function rowsChanged() {
+      const all = rows().flatMap(cells);
+      const current = all.find((cell2) => {
+        const id = identify(cell2);
+        return id.id === active?.id && id.column === active.column;
+      }) ?? all[0];
+      if (current) setActive(current);
+      if (!menu.hidden) close();
+    }
+    menu.hidden = true;
+    rowsChanged();
+    return { rowsChanged };
+  }
+
   // src/webview/time.ts
   function createTimestampFormatter(state) {
     let cachedFormatter;
@@ -1422,13 +1841,14 @@
     const saved = api.getState() ?? {};
     const state = new ViewerState(saved);
     elements.search.value = saved.query ?? "";
-    const bridge = new SnapshotBridge(api, state, () => elements.search.value);
-    const request = (force = false) => bridge.request(force);
     const { popovers, createPopover } = createPopovers(scope);
     const formatTimestamp = createTimestampFormatter(state);
     const analysis = createAnalysis(elements, state);
     const inspection = createInspection(elements, scrollViewport, api, formatTimestamp, scope);
     const search = createSearch(elements, state, api, popovers, { filterChanged }, scope);
+    const bridge = new SnapshotBridge(api, state, () => search.query());
+    const request = (force = false) => bridge.request(force);
+    let cellActions;
     const table = createTable(
       elements,
       scrollViewport,
@@ -1436,17 +1856,30 @@
       api,
       formatTimestamp,
       { request: requestInteraction, saveState, filterChanged, setFollowing, updateFollowControl, updateModeLabel },
-      scope
+      scope,
+      () => cellActions?.rowsChanged()
     );
     let serverSignature = "";
+    let guideUnread = document.body?.dataset.guideUnread === "true";
+    elements.helpBadge.hidden = !guideUnread;
     let searchDebounce;
     let autocompleteDebounce;
     let copyFeedbackTimer;
-    let cellFilterQuery;
+    cellActions = createCellActions(elements, () => table.events, () => search.query(), (query) => {
+      clearTimeout(searchDebounce);
+      clearTimeout(autocompleteDebounce);
+      search.clearAutocomplete();
+      search.setQuery(query, true);
+      elements.search.focus();
+    }, scope);
     let minimumSnapshotGeneration = 0;
     const onMessage = (event) => receive(event.data);
     scope.listen(window, "message", onMessage);
     function receive(data) {
+      if (data.type === "guideStatus") {
+        updateGuideStatus(data);
+        return;
+      }
       if (data.type === "update") {
         request();
         return;
@@ -1466,8 +1899,8 @@
         return;
       }
       if (data.type === "autocomplete") {
-        if (data.input !== elements.search.value || (data.serverId ?? "") !== state.selectedServer) return;
-        if (elements.search.value.trim()) search.renderAutocomplete(data);
+        if (data.input !== search.draft() || (data.serverId ?? "") !== state.selectedServer) return;
+        if (search.draft().trim()) search.renderAutocomplete(data);
         else search.clearAutocomplete();
         return;
       }
@@ -1482,6 +1915,7 @@
       }
       if (data.type !== "snapshot")
         return;
+      if (data.guideStatus) updateGuideStatus(data.guideStatus);
       bridge.received();
       if (data.generation < minimumSnapshotGeneration) {
         bridge.flush();
@@ -1611,14 +2045,20 @@
       updateModeLabel();
     }
     function saveState() {
-      api.setState(state.persist(elements.search.value));
+      api.setState(state.persist(search.query()));
     }
     function hasActiveFilter() {
-      return Boolean(elements.search.value.trim()) || state.checkedLevels.size !== 6 || Boolean(state.selectedServer);
+      return Boolean(search.query()) || state.checkedLevels.size !== 6 || Boolean(state.selectedServer);
     }
     function updateCopyResultsControl() {
       elements.copyResults.hidden = !hasActiveFilter();
       elements.copyResults.textContent = "Copy results";
+    }
+    function updateGuideStatus(status) {
+      guideUnread = status.unread;
+      elements.helpBadge.hidden = !status.unread;
+      elements.help.setAttribute("aria-label", status.unread ? "Open the Logline Guide \u2014 new features available" : "Open the Logline Guide");
+      elements.help.title = status.unread ? `Open the Logline Guide \xB7 New in ${status.version}` : "Open the Logline Guide";
     }
     function requestInteraction() {
       if (state.paused) {
@@ -1636,21 +2076,6 @@
       saveState();
       requestInteraction();
     }
-    function filterForCell(id, column) {
-      const event = table.events.find((item) => item.id === id);
-      if (!event) return;
-      const field = column === "base:time" ? "timestamp" : column === "base:level" ? "level" : column === "base:message" ? "message" : column === "base:source" ? "stream" : column.startsWith("field:") ? column.slice("field:".length) : void 0;
-      if (!field) return;
-      const value = field === "timestamp" ? event.timestamp : field === "level" ? event.level : field === "message" ? event.message : field === "stream" ? event.stream : event.fields?.[field];
-      const text = String(value ?? "").trim().replace(/"/g, "");
-      if (!text) return;
-      const query = /\s/.test(text) ? `${field}:"${text}"` : `${field}:${text}`;
-      return { query, label: `Filter ${field}: ${text}` };
-    }
-    function closeCellFilterMenu() {
-      cellFilterQuery = void 0;
-      elements.cellFilterMenu.hidden = true;
-    }
     scope.listen(elements.logs, "click", (event) => {
       if (inspection.handleDetailAction(event))
         return;
@@ -1659,45 +2084,20 @@
         return;
       table.toggleExpand(Number(button.closest("tr").dataset.id));
     });
-    scope.listen(elements.logs, "contextmenu", (event) => {
-      const cell2 = event.target.closest("td[data-column]");
-      const row = cell2?.closest("tr.event-row");
-      const choice = cell2 && row ? filterForCell(Number(row.dataset.id), cell2.dataset.column ?? "") : void 0;
-      if (!choice) return;
-      event.preventDefault();
-      cellFilterQuery = choice.query;
-      elements.cellFilterAction.textContent = choice.label;
-      elements.cellFilterAction.title = choice.label;
-      elements.cellFilterMenu.style.left = `${Math.max(8, event.clientX)}px`;
-      elements.cellFilterMenu.style.top = `${Math.max(8, event.clientY)}px`;
-      elements.cellFilterMenu.hidden = false;
-    });
-    scope.listen(elements.cellFilterAction, "click", () => {
-      if (!cellFilterQuery) return;
-      elements.search.value = [elements.search.value.trim(), cellFilterQuery].filter(Boolean).join(" ");
-      closeCellFilterMenu();
-      elements.search.focus();
-      filterChanged();
-    });
-    scope.listen(document, "click", (event) => {
-      if (!elements.cellFilterMenu.hidden && !elements.cellFilterMenu.contains(event.target))
-        closeCellFilterMenu();
-    });
-    scope.listen(document, "keydown", (event) => {
-      if (event.key === "Escape") closeCellFilterMenu();
-    });
     scope.listen(elements.search, "input", () => {
       search.clearAutocomplete();
       updateCopyResultsControl();
       clearTimeout(searchDebounce);
-      searchDebounce = setTimeout(filterChanged, 150);
+      searchDebounce = setTimeout(() => {
+        searchDebounce = void 0;
+      }, 150);
       clearTimeout(autocompleteDebounce);
-      if (!elements.search.value.trim()) {
+      if (!search.draft().trim()) {
         search.clearAutocomplete();
         return;
       }
       autocompleteDebounce = setTimeout(() => {
-        api.postMessage({ type: "autocomplete", input: elements.search.value, serverId: state.selectedServer || void 0 });
+        api.postMessage({ type: "autocomplete", input: search.draft(), serverId: state.selectedServer || void 0 });
       }, 150);
     });
     search.buildLevelMenu();
@@ -1711,7 +2111,7 @@
     createPopover(elements.fieldsButton.closest(".popover-container"), elements.fieldsButton, elements.fieldsPanel);
     scope.listen(elements.copyResults, "click", () => {
       if (!hasActiveFilter()) return;
-      api.postMessage({ type: "copyFiltered", query: elements.search.value, levels: state.currentLevels(), serverId: state.selectedServer || void 0 });
+      api.postMessage({ type: "copyFiltered", query: search.query(), levels: state.currentLevels(), serverId: state.selectedServer || void 0 });
       elements.copyResults.textContent = "Copied";
       clearTimeout(copyFeedbackTimer);
       copyFeedbackTimer = setTimeout(updateCopyResultsControl, 1200);
@@ -1719,7 +2119,7 @@
     scope.listen(elements.saveSearch, "click", () => {
       for (const popover of popovers)
         popover.close();
-      elements.saveSearchName.value = elements.search.value || "";
+      elements.saveSearchName.value = search.query() || "";
       elements.saveSearchDialog.showModal();
       elements.saveSearchName.select?.();
     });
@@ -1728,12 +2128,12 @@
       event.preventDefault();
       const name = elements.saveSearchName.value;
       elements.saveSearchDialog.close();
-      api.postMessage({ type: "saveSearch", name, query: elements.search.value, levels: state.currentLevels(), serverId: state.selectedServer || void 0 });
+      api.postMessage({ type: "saveSearch", name, query: search.query(), levels: state.currentLevels(), serverId: state.selectedServer || void 0 });
     });
     scope.listen(elements.analyze, "click", () => {
       elements.analysisDialog.showModal();
       elements.analysisStatus.textContent = "Loading analysis\u2026";
-      api.postMessage({ type: "analysis", query: elements.search.value, levels: state.currentLevels(), serverId: state.selectedServer || void 0 });
+      api.postMessage({ type: "analysis", query: search.query(), levels: state.currentLevels(), serverId: state.selectedServer || void 0 });
     });
     scope.listen(elements.analysisClose, "click", () => elements.analysisDialog.close());
     scope.listen(elements.server, "change", () => {
@@ -1786,9 +2186,10 @@
     });
     scope.listen(elements.stop, "click", () => api.postMessage({ type: "stop", serverId: state.selectedServer || void 0 }));
     scope.listen(elements.config, "click", () => api.postMessage({ type: "config" }));
+    scope.listen(elements.help, "click", () => api.postMessage({ type: "showGuide", section: guideUnread ? "whatsNew" : "guide" }));
     scope.listen(elements.manage, "click", () => api.postMessage({ type: "manageServers" }));
     function exportRequest(type) {
-      api.postMessage({ type, query: elements.search.value, levels: state.currentLevels(), serverId: state.selectedServer || void 0 });
+      api.postMessage({ type, query: search.query(), levels: state.currentLevels(), serverId: state.selectedServer || void 0 });
     }
     scope.listen(elements.export, "click", () => exportRequest("export"));
     scope.listen(elements.import, "click", () => api.postMessage({ type: "import" }));

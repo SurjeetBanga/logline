@@ -1,4 +1,5 @@
 import type { LogEvent } from './types';
+import { queryTokens } from './query-tokens';
 
 // Names that mean the same thing across logging libraries. A field filter tries
 // the name exactly as typed first and only then the rest of its group, so
@@ -49,8 +50,7 @@ export function canonicalField(field: string): string {
 }
 
 export function parseQuery(input = ''): ParsedQuery {
-  const normalized = input.replace(/\[([^\]]+)\]/g, (_, value) => `[${value.replace(/\s+TO\s+/i, '__TO__')}]`);
-  const tokens = (normalized.match(/(?:[^\s"]+|"(?:\\.|[^"\\])*")+/g) ?? []).map(token => token.replace('__TO__', ' TO '));
+  const tokens = queryTokens(input);
   const groups: TokenGroup[] = [[]];
   for (const token of tokens) {
     if (token === 'OR' || token === 'or') groups.push([]);
@@ -114,7 +114,7 @@ export function matchesQuery(event: LogEvent, input: string | ParsedQuery): bool
       return token.negate ? !present : present;
     }
     if (token.canonical === 'timestamp' || token.canonical === 'time') {
-      const range = token.value.match(/^\[([^\s]+)\s+TO\s+([^\]]+)\]$/i);
+      const range = token.compare ? token.value.match(/^\[([^\s]+)\s+TO\s+([^\]]+)\]$/i) : null;
       let matched: boolean;
       if (range) matched = (event.timestampMs ?? 0) >= Date.parse(range[1]) && (event.timestampMs ?? 0) <= Date.parse(range[2]);
       else matched = (event.timestamp ?? '').toLowerCase().includes(token.value);
