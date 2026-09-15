@@ -11,7 +11,7 @@ export async function run(): Promise<void> {
     await extension.activate();
     assert.equal(extension.isActive, true);
     const commands = await vscode.commands.getCommands();
-    for (const command of ['showLogs', 'runCommand', 'stopCommand', 'export', 'import', 'exportForAI', 'convertTask', 'captureTask']) {
+    for (const command of ['showLogs', 'runCommand', 'stopCommand', 'export', 'import', 'exportForAI', 'convertTask', 'captureTask', 'showGuide', 'showWhatsNew']) {
       assert.ok(commands.includes(`logline.${command}`), `${command} is registered`);
     }
     await vscode.commands.executeCommand('logline.showLogs');

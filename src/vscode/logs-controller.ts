@@ -13,6 +13,7 @@ import { handleMessage } from './message-router';
 import { buildSnapshot } from './snapshot';
 import { TaskLifecycle } from './tasks/lifecycle';
 import { ViewNotifications } from './view-notifications';
+import { GUIDE_STATE_KEY, guideStatus as getGuideStatus } from './guide-content';
 
 /** Composition root for services used by commands, tasks and the Logs view. */
 export class LogsController {
@@ -28,10 +29,13 @@ export class LogsController {
   readonly tasks = new TaskLifecycle(this.registry, this.ingestion, this.state, () => this.runner.sessions.size > 0);
   readonly transfer = new LogTransfer(this.store, this.config, this.ingestion, this.state);
   readonly searches: SavedSearches;
+  private readonly globalState: Pick<vscode.ExtensionContext, 'globalState'>['globalState'];
   private readonly configSubscription: vscode.Disposable;
   private disposing?: Promise<void>;
+  private guideOpener?: (section: 'guide' | 'whatsNew') => void;
 
   constructor(context: Pick<vscode.ExtensionContext, 'globalState'>) {
+    this.globalState = context.globalState;
     this.searches = new SavedSearches(context.globalState);
     this.configSubscription = vscode.workspace.onDidChangeConfiguration(event => {
       if (!event.affectsConfiguration('logline')) return;
@@ -50,12 +54,22 @@ export class LogsController {
   snapshot(request: Extract<ViewRequest, { type: 'snapshot'; }>) {
     return buildSnapshot(request, { store: this.store, config: this.config, registry: this.registry, state: this.state,
       ingestion: this.ingestion, persistence: this.persistence, searches: this.searches,
-      running: this.runner.sessions.size > 0 || this.tasks.executions.size > 0 });
+      running: this.runner.sessions.size > 0 || this.tasks.executions.size > 0,
+      guideStatus: this.guideStatus() });
   }
+  guideStatus() {
+    return getGuideStatus(this.globalState.get<string>(GUIDE_STATE_KEY));
+  }
+  async acknowledgeGuide(): Promise<void> {
+    await this.globalState.update(GUIDE_STATE_KEY, this.guideStatus().version);
+    this.notifications.send({ type: 'guideStatus', ...this.guideStatus() });
+  }
+  setGuideOpener(opener: (section: 'guide' | 'whatsNew') => void): void { this.guideOpener = opener; }
   handleMessage(send: (message: HostMessage) => void, message: unknown): Promise<void> {
     return handleMessage({
       store: this.store, config: this.config, transfer: this.transfer, searches: this.searches,
-      snapshot: request => this.snapshot(request), clear: () => this.clear(), stop: id => this.stop(id), runner: this.runner
+      snapshot: request => this.snapshot(request), clear: () => this.clear(), stop: id => this.stop(id), runner: this.runner,
+      showGuide: section => this.guideOpener?.(section)
     }, send, message);
   }
   clear(): void {

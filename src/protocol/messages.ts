@@ -18,6 +18,7 @@ export type ViewRequest =
   | { type: 'details' | 'copy'; id: number; target?: 'main' | 'context'; }
   | { type: 'openSource'; id: number; block: number; line: number; }
   | { type: 'exportContext'; ids: number[]; }
+  | { type: 'showGuide'; section?: 'guide' | 'whatsNew'; }
   | { type: 'run' | 'stop'; serverId?: string; }
   | { type: 'import' | 'clear' | 'config' | 'manageServers'; };
 
@@ -28,9 +29,12 @@ export interface Snapshot extends Stats {
   servers: ServerSummary[]; sessions: ReturnType<SessionRegistry['sessionSummaries']>;
   searches: { saved: SavedSearch[]; }; newest: number; generation: number;
   persistDropped: number; timezone: string;
+  guideStatus: GuideStatus;
 }
+export interface GuideStatus { version: string; unread: boolean; }
 export type HostMessage = Snapshot
   | { type: 'update' | 'serversChanged'; }
+  | ({ type: 'guideStatus' } & GuideStatus)
   | { type: 'context'; id: number; events: LogEvent[]; server?: string; missing: boolean; }
   | { type: 'details'; id: number; text: string; target: 'main' | 'context'; exceptions: ExceptionBlock[]; }
   | { type: 'searches'; searches: { saved: SavedSearch[]; }; saved?: SavedSearch; }
@@ -66,6 +70,7 @@ export function parseViewRequest(value: unknown): ViewRequest | undefined {
       return { type: msg.type, id, block, line };
     }
     case 'exportContext': return Array.isArray(msg.ids) ? { type: msg.type, ids: msg.ids.filter((id): id is number => Number.isSafeInteger(id) && id >= 0) } : undefined;
+    case 'showGuide': return { type: msg.type, section: msg.section === 'whatsNew' ? 'whatsNew' : 'guide' };
     case 'run': case 'stop': return { type: msg.type, serverId: filter.serverId };
     case 'import': case 'clear': case 'config': case 'manageServers': return { type: msg.type };
   }

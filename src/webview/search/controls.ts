@@ -1,5 +1,6 @@
 import type { HostMessage } from '../../protocol/messages';
 import { completeQuery } from '../../core/query-completion';
+import { queryTokens } from '../../core/query-tokens';
 import type { SavedSearch } from '../../storage/saved-searches';
 import type { Elements } from '../dom';
 import { emptyMessage } from '../dom';
@@ -11,10 +12,179 @@ import type { ViewerActions, WebviewApi } from '../types';
 
 export function createSearch(elements: Elements, state: ViewerState, api: WebviewApi, popovers: Popover[], actions: Pick<ViewerActions, 'filterChanged'>, scope: EventScope) {
   const { filterChanged } = actions;
+  const MAX_QUERY_LENGTH = 256;
+  let appliedQuery = queryTokens(elements.search.value.trim()).map(value => value.toLowerCase() === 'or' ? 'OR' : value).join(' ').slice(0, MAX_QUERY_LENGTH);
+  let editingIndex: number | undefined;
   // A checkbox per level (any combination, Kayak-filter style) rather than a
   // single "at least X" choice, so e.g. Info + Error but not Warn is possible.
 
   const LEVEL_LABELS: Record<string, string> = { trace: 'Trace', debug: 'Debug', info: 'Info', warn: 'Warn', error: 'Error', fatal: 'Fatal' };
+
+  function tokens(query: string) {
+    return queryTokens(query.trim()).map(value => value.toLowerCase() === 'or' ? 'OR' : value);
+  }
+
+  function validDraft(input: string, canStartWithOr = Boolean(appliedQuery)): { values: string[]; error?: string; } {
+    const value = input.trim();
+    if (!value) return { values: [] };
+    let escaped = false;
+    let quoted = false;
+    let brackets = 0;
+    for (const character of value) {
+      if (escaped) { escaped = false; continue; }
+      if (character === '\\') { escaped = true; continue; }
+      if (character === '"') quoted = !quoted;
+      else if (!quoted && character === '[') brackets++;
+      else if (!quoted && character === ']') brackets--;
+      if (brackets < 0) return { values: [], error: 'Close the filter range before applying it.' };
+    }
+    if (quoted) return { values: [], error: 'Close the quoted filter before applying it.' };
+    if (brackets !== 0) return { values: [], error: 'Close the filter range before applying it.' };
+    const values = tokens(value);
+    if (!values.length) return { values: [], error: 'Enter a filter term.' };
+    if ((values[0] === 'OR' && !canStartWithOr) || values.at(-1) === 'OR' || values.some((item, index) => item === 'OR' && values[index - 1] === 'OR'))
+      return { values: [], error: 'OR must have a filter on both sides.' };
+    return { values };
+  }
+
+  function setError(error?: string) {
+    elements.searchError.textContent = error ?? '';
+    elements.searchError.hidden = !error;
+  }
+
+  function cleanQuery(values: string[]) {
+    const cleaned: string[] = [];
+    values.forEach((value, index) => {
+      if (value === 'OR' && (index === 0 || index === values.length - 1 || values[index - 1] === 'OR')) return;
+      cleaned.push(value);
+    });
+    if (cleaned.at(-1) === 'OR') cleaned.pop();
+    if (cleaned[0] === 'OR') cleaned.shift();
+    return cleaned;
+  }
+
+  function renderChips() {
+    const values = tokens(appliedQuery);
+    let editingInput: HTMLInputElement | undefined;
+    elements.searchChips.replaceChildren(...values.map((value, index) => {
+      if (value === 'OR') {
+        const separator = document.createElement('span');
+        separator.className = 'search-or';
+        separator.textContent = 'OR';
+        separator.setAttribute('aria-hidden', 'true');
+        return separator;
+      }
+      const chip = document.createElement('span');
+      chip.className = `filter-chip${value.startsWith('-') ? ' exclude' : ''}${editingIndex === index ? ' editing' : ''}`;
+      chip.title = value;
+      if (editingIndex === index) {
+        const input = document.createElement('input');
+        input.type = 'text';
+        input.className = 'filter-chip-input';
+        input.value = value;
+        input.maxLength = MAX_QUERY_LENGTH;
+        input.title = `Edit filter: ${value}`;
+        input.setAttribute('aria-label', `Edit filter: ${value}`);
+        scope.listen(input, 'input', () => setError());
+        scope.listen(input, 'keydown', event => {
+          if (event.key === 'Enter') {
+            event.preventDefault();
+            applyValue(input.value, index);
+          } else if (event.key === 'Escape') {
+            event.preventDefault();
+            cancelEdit();
+          }
+        });
+        editingInput = input;
+        chip.append(input);
+      } else {
+        const label = document.createElement('button');
+        label.type = 'button';
+        label.className = 'filter-chip-label';
+        label.textContent = value;
+        label.title = `Edit filter: ${value}`;
+        label.setAttribute('aria-label', `Edit filter: ${value}`);
+        scope.listen(label, 'click', event => { event.stopPropagation(); beginEdit(index); });
+        chip.append(label);
+      }
+      const remove = document.createElement('button');
+      remove.type = 'button';
+      remove.className = 'filter-chip-remove';
+      remove.textContent = '×';
+      remove.title = `Remove filter: ${value}`;
+      remove.setAttribute('aria-label', `Remove filter: ${value}`);
+      scope.listen(remove, 'click', event => { event.stopPropagation(); removeAt(index); });
+      chip.append(remove);
+      return chip;
+    }));
+    const editorClasses = elements.searchEditor.className.split(' ').filter(Boolean).filter(value => value !== 'has-chips');
+    if (values.some(value => value !== 'OR')) editorClasses.push('has-chips');
+    elements.searchEditor.className = editorClasses.join(' ');
+    elements.searchClear.hidden = values.every(value => value === 'OR');
+    if (editingInput) {
+      editingInput.focus();
+      editingInput.select?.();
+    }
+  }
+
+  function query() { return appliedQuery; }
+
+  function setQuery(value: string, notify = false) {
+    appliedQuery = tokens(value).join(' ').slice(0, MAX_QUERY_LENGTH);
+    editingIndex = undefined;
+    // Keep the serialized value until focus moves into the editor. This makes
+    // the state inspectable to assistive tooling and lets the native input
+    // remain a useful fallback while the chips are being rendered.
+    elements.search.value = appliedQuery;
+    setError();
+    clearAutocomplete();
+    renderChips();
+    if (notify) filterChanged();
+  }
+
+  function beginEdit(index: number) {
+    editingIndex = index;
+    setError();
+    renderChips();
+  }
+
+  function cancelEdit() {
+    editingIndex = undefined;
+    setError();
+    renderChips();
+    elements.search.focus();
+  }
+
+  function removeAt(index: number) {
+    const values = cleanQuery(tokens(appliedQuery).filter((_, itemIndex) => itemIndex !== index));
+    setQuery(values.join(' '), true);
+    elements.search.focus();
+  }
+
+  function applyValue(value: string, replacingIndex?: number) {
+    const result = validDraft(value, replacingIndex === undefined && Boolean(appliedQuery));
+    if (result.error) { setError(result.error); return false; }
+    if (!result.values.length) return false;
+    const current = tokens(appliedQuery);
+    const next = replacingIndex === undefined ? [...current, ...result.values]
+      : [...current.slice(0, replacingIndex), ...result.values, ...current.slice(replacingIndex + 1)];
+    const normalized = cleanQuery(next).join(' ');
+    if (normalized.length > MAX_QUERY_LENGTH) {
+      setError(`Filters cannot exceed ${MAX_QUERY_LENGTH} characters.`);
+      return false;
+    }
+    setQuery(normalized, true);
+    elements.search.value = '';
+    return true;
+  }
+
+  function applyDraft() { return applyValue(elements.search.value); }
+
+  function clear() {
+    if (!appliedQuery && !elements.search.value) return;
+    setQuery('', true);
+    elements.search.focus();
+  }
 
   function updateLevelButtonLabel() {
     if (state.checkedLevels.size === LEVELS.length)
@@ -88,7 +258,7 @@ export function createSearch(elements: Elements, state: ViewerState, api: Webvie
       button.textContent = label;
       button.title = item.query || item.serverId || '';
       scope.listen(button, 'click', () => {
-        elements.search.value = item.query || '';
+        setQuery(item.query || '');
         state.selectedServer = item.serverId || '';
         state.checkedLevels = new Set(Array.isArray(item.levels) ? item.levels : LEVELS);
         elements.server.value = state.selectedServer;
@@ -142,5 +312,28 @@ export function createSearch(elements: Elements, state: ViewerState, api: Webvie
     elements.search.removeAttribute('list');
   }
 
-  return { updateLevelButtonLabel, buildLevelMenu, renderSearchState, renderAutocomplete, clearAutocomplete };
+  scope.listen(elements.search, 'keydown', event => {
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      applyDraft();
+    } else if (event.key === 'Escape' && editingIndex !== undefined) {
+      event.preventDefault();
+      cancelEdit();
+    } else if (event.key === 'Backspace' && !elements.search.value && editingIndex === undefined) {
+      const values = tokens(appliedQuery);
+      let index = values.length - 1;
+      while (index >= 0 && values[index] === 'OR') index--;
+      if (index >= 0) { event.preventDefault(); removeAt(index); }
+    }
+  });
+  scope.listen(elements.search, 'focus', () => {
+    if (editingIndex === undefined && elements.search.value === appliedQuery)
+      elements.search.value = '';
+  });
+  scope.listen(elements.search, 'input', () => setError());
+  scope.listen(elements.searchClear, 'click', event => { event.stopPropagation(); clear(); });
+
+  renderChips();
+  return { updateLevelButtonLabel, buildLevelMenu, renderSearchState, renderAutocomplete, clearAutocomplete,
+    query, draft: () => elements.search.value, setQuery, appendQuery: (value: string) => setQuery(`${appliedQuery} ${value}`, true), clear };
 }

@@ -4,7 +4,7 @@ import type { ServerConfig } from '../core/types';
 import type { LogsController } from './logs-controller';
 import { convertTask } from './tasks/conversion';
 
-export function registerCommands(controller: LogsController): vscode.Disposable[] {
+export function registerCommands(controller: LogsController, openGuide?: (section: 'guide' | 'whatsNew') => void): vscode.Disposable[] {
   return [
     vscode.commands.registerCommand('logline.runCommand', async () => {
       if (!vscode.workspace.isTrusted) {
@@ -31,6 +31,8 @@ export function registerCommands(controller: LogsController): vscode.Disposable[
     vscode.commands.registerCommand('logline.convertTask', () => convertTask()),
     // Keep a task-oriented alias for command palettes and keybindings.
     vscode.commands.registerCommand('logline.captureTask', () => convertTask()),
+    vscode.commands.registerCommand('logline.showGuide', () => openGuide?.('guide')),
+    vscode.commands.registerCommand('logline.showWhatsNew', () => openGuide?.('whatsNew')),
     vscode.commands.registerCommand('logline.showLogs', () =>
       vscode.commands.executeCommand('logline.logs.focus'))
   ];

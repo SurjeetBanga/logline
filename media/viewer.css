@@ -60,6 +60,8 @@ header { padding: 10px 14px 6px; flex: none; }
 }
 .toolbar-actions { display: flex; gap: 6px; flex: 0 0 auto; flex-wrap: nowrap; margin-left: auto; }
 .toolbar-actions button { background: transparent; border-color: transparent; }
+.new-badge { display: inline-block; pointer-events: none; margin-left: 5px; padding: 1px 5px; border: 1px solid var(--vscode-badge-background, var(--vscode-widget-border, transparent)); border-radius: 8px; background: var(--vscode-badge-background, var(--vscode-button-secondaryBackground, #3a3d41)); color: var(--vscode-badge-foreground, var(--vscode-button-secondaryForeground, #cccccc)); font-size: 10px; line-height: 1.3; }
+.new-badge[hidden] { display: none; }
 .search-toolbar {
   display: flex;
   align-items: center;
@@ -75,13 +77,30 @@ header { padding: 10px 14px 6px; flex: none; }
 input, select, button { font: inherit; border: 1px solid var(--vscode-input-border, #555); border-radius: 3px; }
 input, select { height: 30px; padding: 3px 10px; color: var(--vscode-input-foreground, #ddd); background: var(--vscode-input-background, #333); }
 .popover-container { position: relative; }
-.search-group { display: flex; align-items: center; flex: 1 1 280px; min-width: 180px; }
-.search-group input { width: 100%; min-width: 0; padding-right: 62px; }
+.search-group { display: flex; align-items: flex-start; flex: 1 1 280px; min-width: 180px; }
+.search-editor { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: start; gap: 4px; width: 100%; min-height: 30px; padding: 2px 4px 2px 5px; color: var(--vscode-input-foreground, #ddd); background: var(--vscode-input-background, #333); border: 1px solid var(--vscode-input-border, #555); border-radius: 3px; }
+.search-terms { display: flex; align-items: center; flex-wrap: wrap; gap: 4px; min-width: 0; }
+.search-editor:focus-within { border-color: var(--vscode-focusBorder, #007acc); outline: 1px solid var(--vscode-focusBorder, #007acc); }
+.search-editor input { flex: 1 1 100px; width: 100px; min-width: 80px; height: 24px; padding: 1px 2px; border: 0; outline: 0; background: transparent; color: inherit; }
+.search-editor input:focus { outline: 0; }
+.search-editor.has-chips:not(:focus-within) input { color: transparent; }
+.search-chips { display: contents; }
+.filter-chip { display: inline-flex; align-items: center; max-width: min(260px, 100%, 80vw); border: 1px solid var(--vscode-inputOption-activeBorder, #007acc); border-radius: 2px; background: var(--vscode-inputOption-activeBackground, rgba(0, 122, 204, .2)); color: var(--vscode-foreground, #d4d4d4); }
+.filter-chip.exclude { border-color: var(--vscode-testing-iconFailed, #f14c4c); background: color-mix(in srgb, var(--vscode-testing-iconFailed, #f14c4c) 16%, transparent); }
+.filter-chip-label, .filter-chip-remove { height: 22px; padding: 1px 7px; border: 0; border-radius: 2px; background: transparent; color: inherit; font: inherit; }
+.filter-chip-label { max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.filter-chip-input { flex: 0 1 220px !important; width: min(220px, 60vw) !important; min-width: 80px !important; height: 22px !important; padding: 1px 7px !important; border: 0 !important; outline: 0 !important; background: transparent !important; color: inherit !important; }
+.filter-chip-label:hover, .filter-chip-remove:hover { background: var(--vscode-list-hoverBackground, #2a2d2e); }
+.filter-chip-remove { padding-inline: 4px 7px; font-size: 15px; line-height: 1; cursor: pointer; }
+.search-or { padding: 0 2px; color: var(--vscode-descriptionForeground, #aaa); font-size: 11px; font-weight: 600; }
+.search-clear { grid-column: 2; padding: 0 5px; height: 24px; border: 0; background: transparent; color: var(--vscode-descriptionForeground, #aaa); font-size: 16px; line-height: 20px; }
+.search-clear:hover { color: var(--vscode-foreground, #fff); background: var(--vscode-list-hoverBackground, #2a2d2e); }
+.search-error { position: absolute; top: calc(100% + 3px); left: 0; z-index: 21; max-width: 100%; padding: 3px 7px; color: var(--vscode-errorForeground, #f48771); background: var(--vscode-editorWidget-background, #252526); border: 1px solid var(--vscode-testing-iconFailed, #f14c4c); border-radius: 3px; font-size: 11px; }
 /* Chromium adds a datalist disclosure chevron to inputs with `list`. The
-   suggestions remain available while typing, but this duplicate control makes
-   the search field look like it has an extra menu beside its clear button. */
+   suggestions remain available while typing, but the disclosure is redundant
+   beside the editor's own controls. */
 #search::-webkit-list-button { display: none; }
-.search-help-button { position: absolute; right: 4px; padding: 1px 6px; border: 0; background: transparent; color: var(--vscode-descriptionForeground, #aaa); font-size: 11px; }
+.search-help-button { grid-column: 3; height: 24px; padding: 1px 6px; border: 0; background: transparent; color: var(--vscode-descriptionForeground, #aaa); font-size: 11px; }
 .dropdown-button::after { content: ''; display: inline-block; width: 5px; height: 5px; border-right: 1px solid currentColor; border-bottom: 1px solid currentColor; transform: translateY(-2px) rotate(45deg); margin-left: 9px; opacity: .7; }
 /* Secondary filter/tool controls stay quiet (no fill or border) until hovered
    or opened, so the search row reads as one light strip instead of a wall of
@@ -102,10 +121,10 @@ input, select { height: 30px; padding: 3px 10px; color: var(--vscode-input-foreg
   border-radius: 4px; box-shadow: 0 4px 16px rgba(0, 0, 0, .35); padding: 8px;
 }
 .popover[hidden] { display: none; }
-.cell-filter-menu { position: fixed; z-index: 30; max-width: min(360px, calc(100vw - 16px)); padding: 4px; background: var(--vscode-editorWidget-background, #252526); border: 1px solid var(--vscode-editorWidget-border, var(--vscode-input-border, #555)); border-radius: 4px; box-shadow: 0 4px 16px rgba(0, 0, 0, .35); }
+.cell-filter-menu { box-sizing: border-box; min-width: min(180px, calc(100vw - 16px)); max-height: calc(100vh - 16px); overflow: auto; position: fixed; z-index: 30; max-width: min(360px, calc(100vw - 16px)); padding: 4px; background: var(--vscode-editorWidget-background, #252526); border: 1px solid var(--vscode-editorWidget-border, var(--vscode-input-border, #555)); border-radius: 4px; box-shadow: 0 4px 16px rgba(0, 0, 0, .35); }
 .cell-filter-menu[hidden] { display: none; }
-.cell-filter-menu button { max-width: 100%; overflow: hidden; text-overflow: ellipsis; background: transparent; border-color: transparent; color: var(--vscode-foreground, #d4d4d4); text-align: left; }
-.cell-filter-menu button:hover { background: var(--vscode-list-hoverBackground, #2a2d2e); }
+.cell-filter-menu button { display: block; width: 100%; max-width: 100%; overflow: hidden; text-overflow: ellipsis; background: transparent; border-color: transparent; color: var(--vscode-foreground, #d4d4d4); text-align: left; }
+.cell-filter-menu button:not(:disabled):hover { background: var(--vscode-list-hoverBackground, #2a2d2e); }
 .level-menu { display: flex; flex-direction: column; gap: 2px; min-width: 130px; }
 .level-actions { display: flex; gap: 4px; padding: 0 2px 6px; border-bottom: 1px solid var(--vscode-panel-border, #444); margin-bottom: 2px; }
 .level-actions button { flex: 1; padding: 2px 6px; font-size: 12px; }
@@ -114,6 +133,7 @@ input, select { height: 30px; padding: 3px 10px; color: var(--vscode-input-foreg
 .level-menu input[type="checkbox"] { margin: 0; width: auto; height: auto; padding: 0; border: none; background: none; }
 .cheat-sheet { width: 460px; max-width: calc(100vw - 20px); max-height: 80vh; overflow-y: auto; font-size: 12px; }
 .cheat-sheet h3 { margin: 0 0 8px; font-size: 11px; text-transform: uppercase; letter-spacing: .04em; color: var(--vscode-descriptionForeground, #aaa); }
+.search-help-note { margin: 0 0 8px; color: var(--vscode-descriptionForeground, #aaa); }
 .cheat-sheet dl { margin: 0; }
 .cheat-sheet dt { font-family: var(--vscode-editor-font-family, monospace); margin-top: 8px; }
 .cheat-sheet dt:first-of-type { margin-top: 0; }
@@ -228,3 +248,8 @@ td.time { white-space: nowrap; font-variant-numeric: tabular-nums; }
 footer { padding: 8px 14px; font-size: 12px; flex: none; }
 #counts { margin-top: 3px; color: var(--vscode-descriptionForeground, #aaa); }
 #mode { margin-left: auto; }
+
+.cell-filter-label { padding: 4px 8px 8px; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 90px; overflow: auto; font-weight: 600; }
+.cell-filter-reason { margin: 4px 8px; max-width: 320px; white-space: normal; color: var(--vscode-descriptionForeground, #aaa); }
+.cell-filter-menu button:disabled { opacity: .5; cursor: default; }
+.cell-filter-menu button:focus-visible, td[data-column]:focus-visible { outline: 1px solid var(--vscode-focusBorder, #007fd4); outline-offset: -2px; }
