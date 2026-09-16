@@ -2,6 +2,11 @@
 
 All notable changes to Logline are documented in this file.
 
+## 1.7.1 — 2026-09-15
+
+- Refresh the README with a quick start, current feature map, search examples, configuration guidance, and a demo GIF.
+- Add a detailed usage reference for import/export behavior, tasks, formats, and retention.
+
 ## 1.7.0 — 2026-09-14
 
 - Add a visual Logline Guide with a responsive Quick reference tab, accessible tabs, keyboard navigation, and curated What’s New release cards.
