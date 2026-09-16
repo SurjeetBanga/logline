@@ -14,9 +14,9 @@ interface Slot {
 }
 
 const pickFields = ({ id, timestamp, timestampMs, level, message, isJson, truncated, stream, fields,
-  taskName, taskType, taskState, dependencies, dependencyState, exitReason }: LogEvent): LogEvent =>
+  serverId, server, sessionId, taskName, taskType, taskState, dependencies, dependencyState, exitReason }: LogEvent): LogEvent =>
 ({
-  id, timestamp, timestampMs, level, message, isJson, truncated, stream, fields,
+  id, timestamp, timestampMs, level, message, isJson, truncated, stream, fields, serverId, server, sessionId,
   taskName, taskType, taskState, dependencies, dependencyState, exitReason
 });
 
@@ -493,6 +493,24 @@ export class LogStore {
   }
 
   serverIds(): string[] { return [...this.serverIndex.keys()]; }
+
+  /** Exact source count for agent sharing; unlike viewer selection this is case-sensitive. */
+  serverEventCount(serverId: string): number { return this.serverIndex.get(serverId)?.length ?? 0; }
+
+  sessionEventCount(serverId: string, sessionId: string): number {
+    let count = 0;
+    const index = this.serverIndex.get(serverId);
+    if (!index) return 0;
+    for (const slot of index.iterateFromEnd()) if (slot.event.sessionId === sessionId) count++;
+    return count;
+  }
+
+  sessionIds(serverId?: string): string[] {
+    const ids = new Set<string>();
+    const indexes = serverId === undefined ? [...this.serverIndex.values()] : [this.serverIndex.get(serverId)].filter((index): index is ServerIndex => Boolean(index));
+    for (const index of indexes) for (const slot of index.iterateFromEnd()) ids.add(slot.event.sessionId ?? '*');
+    return [...ids];
+  }
 
   serverLabel(serverId: string): string | undefined {
     const index = this.serverIndex.get(serverId);

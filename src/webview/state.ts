@@ -1,7 +1,7 @@
 import type { ExceptionBlock } from '../core/exceptions';
-export const LEVELS = ['trace', 'debug', 'info', 'warn', 'error', 'fatal'];
+export const LEVELS = ['trace', 'debug', 'info', 'warn', 'error', 'fatal', 'unclassified'];
 export interface PersistedState {
-  query?: string; levels?: string[]; server?: string; sort?: string; sortDirection?: 'asc' | 'desc';
+  query?: string; levels?: string[]; server?: string; session?: string; sort?: string; sortDirection?: 'asc' | 'desc';
   extraColumns?: string[]; columnWidths?: Record<string, number>; columnOrder?: string[]; hiddenColumns?: string[];
 }
 /** Persistent preferences and interaction state, independent of DOM rendering. */
@@ -18,6 +18,7 @@ export class ViewerState {
   selectedDetailText?: string;
   selectedExceptions: ExceptionBlock[] = [];
   selectedServer: string;
+  selectedSession: string;
   selectedSort: string;
   selectedSortDirection: 'asc' | 'desc';
   allFields: string[] = [];
@@ -31,13 +32,17 @@ export class ViewerState {
   constructor(saved: PersistedState = {}) {
     this.following = !saved.sort;
     this.selectedServer = saved.server ?? '';
+    this.selectedSession = saved.session ?? '';
     this.selectedSort = saved.sort ?? '';
     this.selectedSortDirection = saved.sortDirection === 'asc' ? 'asc' : 'desc';
     this.extraColumns = Array.isArray(saved.extraColumns) ? saved.extraColumns.filter(field => typeof field === 'string') : [];
     this.columnWidths = saved.columnWidths && typeof saved.columnWidths === 'object' ? saved.columnWidths : {};
     this.columnOrder = Array.isArray(saved.columnOrder) ? saved.columnOrder : [];
     this.hiddenColumns = new Set(Array.isArray(saved.hiddenColumns) ? saved.hiddenColumns : []);
-    this.checkedLevels = new Set(Array.isArray(saved.levels) ? saved.levels.filter(level => LEVELS.includes(level)) : LEVELS);
+    const savedLevels = Array.isArray(saved.levels) ? saved.levels.filter(level => LEVELS.includes(level)) : LEVELS;
+    // A pre-1.8 persisted "all levels" preference contained six entries;
+    // retain its meaning when Unclassified is added.
+    this.checkedLevels = new Set(savedLevels.length === 6 && !savedLevels.includes('unclassified') ? LEVELS : savedLevels);
   }
   currentLevels(): string[] | undefined { return this.checkedLevels.size === LEVELS.length ? undefined : [...this.checkedLevels]; }
   setFollowing(value: boolean): void { this.following = value; this.before = value ? undefined : this.newest; }
@@ -67,7 +72,7 @@ export class ViewerState {
   }
   persist(query: string): PersistedState {
     return {
-      query, levels: [...this.checkedLevels], server: this.selectedServer, sort: this.selectedSort,
+      query, levels: [...this.checkedLevels], server: this.selectedServer, ...(this.selectedSession ? { session: this.selectedSession } : {}), sort: this.selectedSort,
       sortDirection: this.selectedSortDirection, columnWidths: this.columnWidths, columnOrder: this.columnOrder,
       hiddenColumns: [...this.hiddenColumns], extraColumns: this.extraColumns
     };

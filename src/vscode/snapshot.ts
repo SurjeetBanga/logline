@@ -8,6 +8,7 @@ import type { LogEvent } from '../core/types';
 import type { GuideStatus, Snapshot, ViewRequest } from '../protocol/messages';
 import type { LogPersistence } from '../storage/log-persistence';
 import type { SavedSearches } from '../storage/saved-searches';
+import type { AgentLogAccess } from './agent-access';
 
 function pickColumns(event: LogEvent, columns: string[]): LogEvent['fields'] {
   const fields = event.fields;
@@ -26,11 +27,11 @@ function pickColumns(event: LogEvent, columns: string[]): LogEvent['fields'] {
 export interface SnapshotSources {
   store: LogStore; config: Settings; registry: SessionRegistry; state: RuntimeState;
   ingestion: Ingestion; persistence: LogPersistence; searches: SavedSearches; running: boolean;
-  guideStatus: GuideStatus;
+  guideStatus: GuideStatus; agentAccess: AgentLogAccess; terminalCapture?: { status(): { state: 'off' | 'waiting' | 'capturing' | 'attention'; detail: string; active: number; failed: number } };
 }
 export function buildSnapshot(msg: Extract<ViewRequest, { type: 'snapshot'; }>,
-  { store, config, registry, state, ingestion, persistence, searches, running, guideStatus }: SnapshotSources): Snapshot {
-  const options = { query: msg.query, serverId: msg.serverId, levels: msg.levels,
+  { store, config, registry, state, ingestion, persistence, searches, running, guideStatus, agentAccess, terminalCapture }: SnapshotSources): Snapshot {
+  const options = { query: msg.query, serverId: msg.serverId, sessionId: msg.sessionId, levels: msg.levels,
     page: msg.page, before: msg.before, sort: msg.sort, sortDirection: msg.sortDirection };
   const configured = config.get<string[]>('columns', []);
   const columns = configured.length ? configured : store.columns(options.serverId);
@@ -45,6 +46,16 @@ export function buildSnapshot(msg: Extract<ViewRequest, { type: 'snapshot'; }>,
   // refresh payload proportional to what is on screen rather than to how
   // wide the log records happen to be.
   const events = pageResult?.events.map(event => ({ ...event, fields: pickColumns(event, projectedColumns) }));
+  const sessions = registry.sessionSummaries();
+  const known = new Set(sessions.map(session => `${session.serverId}\0${session.id}`));
+  // Imported files and retained runs whose registry record has been pruned
+  // still need to be selectable in the run picker.
+  for (const serverId of store.serverIds()) for (const sessionId of store.sessionIds(serverId)) {
+    if (sessionId === '*' || known.has(`${serverId}\0${sessionId}`)) continue;
+    const label = store.serverLabel(serverId) ?? serverId;
+    sessions.push({ id: sessionId, server: label, serverId, status: 'exited', startedAt: 0,
+      sourceKind: 'import', owned: false, captureComplete: true, command: label });
+  }
   return {
     type: 'snapshot',
     ...result, ...(events ? { events } : {}),
@@ -52,11 +63,12 @@ export function buildSnapshot(msg: Extract<ViewRequest, { type: 'snapshot'; }>,
     columnFields,
     fields: store.fieldNames(),
     status: state.status, command: state.command, running,
-    servers: registry.serverSummaries(config.get('servers', []), store), sessions: registry.sessionSummaries(),
+    servers: registry.serverSummaries(config.get('servers', []), store), sessions,
     searches: { saved: searches.savedSearches() },
     newest: ingestion.sequence, generation: state.generation,
     persistDropped: persistence.persistDropped,
-    timezone: config.get('timezone', 'local'), guideStatus
+    timezone: config.get('timezone', 'local'), guideStatus, agentSharing: agentAccess.status(),
+    captureTerminals: config.get('captureTerminals', false), captureStatus: terminalCapture?.status()
   };
 
 }

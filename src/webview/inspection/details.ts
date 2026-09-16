@@ -8,6 +8,11 @@ export function buildEventDetails(id: number, text: string | undefined, exceptio
   copy.textContent = 'Copy event';
   copy.dataset.id = String(id);
   container.append(copy);
+  const share = document.createElement('button');
+  share.className = 'share-source-button';
+  share.textContent = 'Share source with Agent';
+  share.dataset.id = String(id);
+  container.append(share);
   exceptions.forEach((exception, blockIndex) => {
     const section = document.createElement('section');
     section.className = 'exception-block';

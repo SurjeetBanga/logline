@@ -37,7 +37,7 @@ export class LogPseudoTerminal implements vscode.Pseudoterminal {
       id: this.task.taskId ?? taskIdentity(label, taskType, taskScope), label,
       jsonOnly: this.task.jsonOnly, shell: this.task.shell, taskName: label, taskType,
       taskScope, taskLabel: this.task.label ?? label,
-      dependencies, dependencyState, source: 'logline'
+      dependencies, dependencyState, source: 'logline', sourceKind: 'task', owned: true
     };
     this.sessionId = this.runner.run(String(this.task.command), cwd, server,
       { write: text => this.writeEmitter.fire(text) }, this.task.options?.env, this.task.args !== undefined ? args : undefined,

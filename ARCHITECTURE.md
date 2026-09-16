@@ -23,6 +23,8 @@ Shutdown stops tasks and processes, waits for child streams to close (including 
 
 `LogStore` keeps the retention ring, per-server indexes, field reference counts, and query caches together because they must invalidate atomically when events change. Stream framing and independent ordering helpers live outside it. Existing bounded-read and eviction tests protect the optimized paths.
 
+`TerminalCapture` observes shell-integrated terminal executions without owning their processes. Each execution has an independent capture lifecycle, so disabling capture or excluding a terminal stops accepting its output without terminating the command. `TerminalNormalizer` removes terminal presentation sequences incrementally, handles redraws, and emits bounded lines before they enter the shared ingestion path. `AgentLogAccess` is the in-memory sharing boundary for Copilot tools, with an all-runs mode that discovers new sources and runs and a selected-runs mode that excludes later runs; it owns grants, cursors, redaction, cancellation, and bounded reads, while the five registered language-model tools remain read-only.
+
 Retention accounting includes flattened field keys/values and approximate property overhead. It intentionally estimates retained event storage, not process RSS. Eviction must release both indexes and cached references. Field dictionaries may contain names such as `constructor` or `__proto__`; read only own payload properties and preserve these names as data.
 
 Full file exports keep a fixed array of matching event references, then redact/serialize records incrementally into batches of up to 128 parts or about 256 KiB, plus the size of one record. Those references can keep evicted events alive until the export completes. Local writes stage beside the destination and rename only on success; whole-file providers have a 16 MiB output cap. CSV schema discovery stops at 200 payload fields. Clipboard and AI exports reuse the newest page and fetch full records only for those rows; keep redaction after the limit. Persistence catches failures per batch, releases queue accounting, invalidates the cached disk size, and reports affected lines without rejecting later batches.
@@ -41,7 +43,7 @@ Explicit result changes close main-row inspection and enter Browse with a fixed 
 
 Automatic columns lock after the first nonempty detected schema, so plain startup output cannot prevent later JSON columns from appearing. Notifications coalesce ingestion bursts; the visible webview also requests a fallback refresh every five seconds. Hidden views skip snapshot requests. Relative-time queries bypass the incremental match cache because their results can change without ingestion.
 
-Add a message to `ViewRequest`/`HostMessage`, validate it in `parseViewRequest`, and dispatch it in `message-router.ts`. Build compact row responses in `snapshot.ts`; full event details are fetched separately. Keep exact server selection separate from the query language's substring matching.
+Add a message to `ViewRequest`/`HostMessage`, validate it in `parseViewRequest`, and dispatch it in `message-router.ts`. Build compact row responses in `snapshot.ts`; full event details are fetched separately. Keep exact source/run selection separate from the query language's substring matching.
 
 ## Builds and tests
 
@@ -55,4 +57,4 @@ Add a message to `ViewRequest`/`HostMessage`, validate it in `parseViewRequest`,
 
 Use direct module tests for core/capture/storage code. Only tests of VS Code adapters need `withVscode`. Viewer tests instantiate the exported controller inside an isolated DOM harness and exercise public APIs, plus the generated browser entry. The harness does not simulate browser layout; use a development host for visual checks of scrolling, resizing, and dialogs.
 
-Task adapter tests use temporary workspace folders to verify conversion preserves malformed or concurrently edited task files, discovers multiple roots, and retains task scope. See [REVIEW.md](REVIEW.md) for remaining design gaps and validation limits.
+Task adapter tests use temporary workspace folders to verify conversion preserves malformed or concurrently edited task files, discovers multiple roots, and retains task scope.

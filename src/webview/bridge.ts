@@ -12,7 +12,7 @@ export class SnapshotBridge {
     this.pending = true;
     const state = this.state;
     this.api.postMessage({
-      type: 'snapshot', query: this.query(), serverId: state.selectedServer || undefined,
+      type: 'snapshot', query: this.query(), serverId: state.selectedServer || undefined, sessionId: state.selectedSession || undefined,
       levels: state.currentLevels(), page: state.page, before: state.before, sort: state.selectedSort || undefined,
       sortDirection: state.selectedSortDirection, columns: state.extraColumns, statsOnly: state.paused && !force
     });

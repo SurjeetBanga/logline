@@ -2,6 +2,12 @@
 
 All notable changes to Logline are documented in this file.
 
+## 1.8.0 — 2026-09-15
+
+- Capture new commands from supported VS Code shell-integrated terminals after enabling **Capture**, with incremental ANSI normalization, progress-line handling, conservative plain-text severity detection, source/run filtering, and an **Unclassified** level.
+- Add **Share logs with agent** with a first-time confirmation, sharing of retained sources and new runs, a visible **Sharing logs · Stop** control, optional specific-run selection in More actions, and exact-run sharing from an expanded event. Five read-only Copilot tools support source listing, bounded search, event inspection, analysis, and waiting for fresh logs. Results respect the sharing scope and are always redacted; sharing is in-memory and revocable.
+- Add an editable **Ask Copilot** investigation handoff and keep Markdown export as a fallback when Copilot chat is unavailable.
+
 ## 1.7.1 — 2026-09-15
 
 - Refresh the README with a quick start, current feature map, search examples, configuration guidance, and a demo GIF.

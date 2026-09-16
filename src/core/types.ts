@@ -59,4 +59,13 @@ export interface SessionSummary {
   source?: string;
   taskScope?: string;
   taskLabel?: string;
+  /** Source metadata used by terminal capture and agent sharing. */
+  sourceKind?: 'process' | 'task' | 'terminal' | 'import';
+  owned?: boolean;
+  captureComplete?: boolean;
+  /** State of the observation stream for externally owned terminals. */
+  captureStatus?: 'streaming' | 'complete' | 'interrupted' | 'unavailable' | 'failed';
+  captureReason?: string;
+  command?: string;
+  cwd?: string;
 }

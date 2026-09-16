@@ -33,7 +33,8 @@ export function createPopovers(scope: EventScope) {
         // searches appear not to open. Anchor every toolbar menu to the
         // viewport so it can escape that clipping layer.
         if (panel.classList.contains('fields-panel') || panel.classList.contains('cheat-sheet')
-          || panel.classList.contains('level-menu') || panel.classList.contains('saved-searches')) {
+          || panel.classList.contains('level-menu') || panel.classList.contains('saved-searches')
+          || panel.classList.contains('actions-menu')) {
           const trigger = button.getBoundingClientRect();
           const margin = 8;
           const spaceBelow = window.innerHeight - trigger.bottom - margin;

@@ -248,6 +248,51 @@ test('toolbar popovers escape the horizontal search scroller', () => {
   assert.equal(get('searchToolsPanel').style.position, 'fixed');
 });
 
+test('More actions supports keyboard navigation and restores focus on dismissal', () => {
+  const { get, dom } = viewer();
+  get('actionsMenu').hidden = true;
+  get('actionsMenu').className = 'actions-menu';
+  get('moreActions').listeners.get('click')!({ stopPropagation() { } });
+  assert.equal(get('actionsMenu').hidden, false);
+  assert.equal(get('actionsMenu').style.position, 'fixed');
+  assert.equal(dom.activeElement, get('shareSpecificRuns'));
+  const key = (value: string) => get('actionsMenu').listeners.get('keydown')!({ key: value, preventDefault() { } });
+  key('ArrowUp');
+  assert.equal(dom.activeElement, get('help'));
+  key('ArrowDown');
+  assert.equal(dom.activeElement, get('shareSpecificRuns'));
+  key('End');
+  assert.equal(dom.activeElement, get('help'));
+  key('Home');
+  assert.equal(dom.activeElement, get('shareSpecificRuns'));
+  key('ArrowDown');
+  assert.equal(dom.activeElement, get('export'));
+  key('Tab');
+  assert.equal(get('actionsMenu').hidden, true);
+  assert.equal(dom.activeElement, get('moreActions'));
+  get('moreActions').listeners.get('keydown')!({ key: 'ArrowUp', preventDefault() { } });
+  assert.equal(dom.activeElement, get('help'));
+  dom.listeners.get('keydown')!({ key: 'Escape' });
+  assert.equal(get('actionsMenu').hidden, true);
+  assert.equal(dom.activeElement, get('moreActions'));
+});
+
+test('More actions preserves commands and closes after selection or an outside click', () => {
+  const { get, dom, messages } = viewer();
+  for (const [id, type] of [['export', 'export'], ['import', 'import'], ['manage', 'manageServers'], ['config', 'config'], ['help', 'showGuide']]) {
+    get('actionsMenu').hidden = true;
+    get('moreActions').listeners.get('click')!({ stopPropagation() { } });
+    get(id).listeners.get('click')!();
+    assert.equal(messages.at(-1)?.type, type);
+    assert.equal(get('actionsMenu').hidden, true);
+    assert.equal(get('moreActions').attributes['aria-expanded'], 'false');
+    assert.equal(dom.activeElement, get('moreActions'));
+  }
+  get('moreActions').listeners.get('click')!({ stopPropagation() { } });
+  dom.listeners.get('click')!({ target: get('search') });
+  assert.equal(get('actionsMenu').hidden, true);
+});
+
 test('saved searches refresh Copy results visibility', () => {
   const { get, receive } = viewer();
   assert.equal(get('copyResults').hidden, false, 'the initial timeout filter exposes Copy results');
@@ -836,4 +881,36 @@ test('Help opens What’s new for unread highlights and the guide after acknowle
   get('help').listeners.get('click')!();
   assert.equal(messages.at(-1)?.type, 'showGuide');
   assert.equal(messages.at(-1)?.section, 'guide');
+});
+
+
+test('the main sharing button ignores view filters and stops active sharing', () => {
+  const { get, messages, receive } = viewer();
+  get('server').value = 'api';
+  get('server').listeners.get('change')!();
+  get('session').value = 'selected-run';
+  get('session').listeners.get('change')!();
+  get('shareAgent').listeners.get('click')!();
+  assert.deepEqual(JSON.parse(JSON.stringify(messages.at(-1))), { type: 'shareWithAgent' });
+  receive({ type: 'snapshot', generation: 100, newest: 100, events: [], columns: [], total: 0, retained: 0, discarded: 0, bytes: 0, maxBytes: 10000, truncated: 0, page: 0, pages: 1, matched: 0,
+    agentSharing: { active: true, scope: 'all', revision: 1, sources: [] } });
+  assert.equal(get('shareAgent').textContent, 'Sharing logs · Stop');
+  assert.equal(get('shareAgent').attributes['aria-pressed'], 'true');
+  assert.equal(get('shareScope').hidden, false);
+  assert.match(get('shareScope').textContent, /existing and new runs/);
+  get('shareAgent').listeners.get('click')!();
+  assert.equal(messages.at(-1)?.type, 'stopSharing');
+  receive({ type: 'snapshot', generation: 101, newest: 100, events: [], columns: [], total: 0, retained: 0, discarded: 0, bytes: 0, maxBytes: 10000, truncated: 0, page: 0, pages: 1, matched: 0,
+    agentSharing: { active: false, revision: 2, sources: [] } });
+  assert.equal(get('shareAgent').textContent, 'Share logs with agent');
+  assert.equal(get('shareScope').hidden, true);
+});
+
+test('specific run sharing remains available through More actions', () => {
+  const { get, messages } = viewer();
+  get('actionsMenu').hidden = true;
+  get('moreActions').listeners.get('click')!({ stopPropagation() { } });
+  get('shareSpecificRuns').listeners.get('click')!();
+  assert.deepEqual(JSON.parse(JSON.stringify(messages.at(-1))), { type: 'shareWithAgent', chooseRuns: true });
+  assert.equal(get('actionsMenu').hidden, true);
 });

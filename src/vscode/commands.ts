@@ -34,7 +34,26 @@ export function registerCommands(controller: LogsController, openGuide?: (sectio
     vscode.commands.registerCommand('logline.showGuide', () => openGuide?.('guide')),
     vscode.commands.registerCommand('logline.showWhatsNew', () => openGuide?.('whatsNew')),
     vscode.commands.registerCommand('logline.showLogs', () =>
-      vscode.commands.executeCommand('logline.logs.focus'))
+      vscode.commands.executeCommand('logline.logs.focus')),
+    vscode.commands.registerCommand('logline.enableTerminalCapture', async () => {
+      await vscode.workspace.getConfiguration('logline').update('captureTerminals', true, vscode.ConfigurationTarget.Workspace);
+      void vscode.window.showInformationMessage('Logline will capture new commands in supported terminals. Run a command again to capture it.');
+    }),
+    vscode.commands.registerCommand('logline.disableTerminalCapture', async () => {
+      await vscode.workspace.getConfiguration('logline').update('captureTerminals', false, vscode.ConfigurationTarget.Workspace);
+      void vscode.window.showInformationMessage('Logline terminal capture is off. Running commands are not stopped.');
+    }),
+    vscode.commands.registerCommand('logline.shareWithAgent', () => controller.shareWithAgent()),
+    vscode.commands.registerCommand('logline.shareSpecificRuns', () => controller.shareWithAgent(undefined, undefined, undefined, true)),
+    vscode.commands.registerCommand('logline.stopSharing', () => controller.stopSharing()),
+    vscode.commands.registerCommand('logline.askCopilot', () => controller.askCopilot()),
+    vscode.commands.registerCommand('logline.manageTerminalCapture', async () => {
+      const terminals = controller.terminalCapture.availableTerminals();
+      const choice = await vscode.window.showQuickPick(terminals.map(item => ({
+        label: `${item.ignored ? 'Enable' : 'Ignore'} · ${item.label}`, id: item.id
+      })), { title: 'Manage terminal capture', placeHolder: 'Toggle capture for a terminal' });
+      if (choice) { controller.terminalCapture.toggleSource(choice.id); void vscode.window.showInformationMessage(`Terminal capture ${terminals.find(item => item.id === choice.id)?.ignored ? 'enabled' : 'ignored'} for ${choice.id}.`); }
+    })
   ];
 }
 

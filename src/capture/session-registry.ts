@@ -52,12 +52,14 @@ export class SessionRegistry {
     }
   }
 
-  sessionSummaries(): Pick<SessionSummary, 'id' | 'server' | 'serverId' | 'status' | 'startedAt' | 'endedAt' | 'taskName' | 'taskType' | 'dependencies' | 'dependencyState' | 'exitReason'>[] {
+  sessionSummaries(): Pick<SessionSummary, 'id' | 'server' | 'serverId' | 'status' | 'startedAt' | 'endedAt' | 'taskName' | 'taskType' | 'dependencies' | 'dependencyState' | 'exitReason' | 'sourceKind' | 'owned' | 'captureComplete' | 'captureStatus' | 'captureReason' | 'command' | 'cwd'>[] {
     return [...this.records.values()].map(record => ({
       id: record.id, server: record.server, serverId: record.serverId,
       startedAt: record.startedAt, endedAt: record.endedAt, status: record.status,
       taskName: record.taskName, taskType: record.taskType, dependencies: record.dependencies,
-      dependencyState: record.dependencyState, exitReason: record.exitReason
+      dependencyState: record.dependencyState, exitReason: record.exitReason, sourceKind: record.sourceKind,
+      owned: record.owned, captureComplete: record.captureComplete, captureStatus: record.captureStatus,
+      captureReason: record.captureReason, command: record.command, cwd: record.cwd
     }));
   }
 

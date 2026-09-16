@@ -64,6 +64,11 @@ export function createInspection(elements: Elements, scrollViewport: HTMLElement
       api.postMessage({ type: 'copy', id: Number(copy.dataset.id) });
       return true;
     }
+    const share = (event.target as HTMLElement).closest<HTMLElement>('.share-source-button');
+    if (share) {
+      api.postMessage({ type: 'shareEvent', id: Number(share.dataset.id) });
+      return true;
+    }
     const context = (event.target as HTMLElement).closest<HTMLElement>('.context-button');
     if (context) {
       showContext(Number(context.dataset.id));

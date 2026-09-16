@@ -8,9 +8,19 @@ Detailed behavior and settings for Logline. For an interactive quick reference, 
 
 Open **Help** in the Logs toolbar for the offline **Logline Guide**. It is a visual quick reference for capture, search, inspection, analysis, sharing, and retention. The **What’s new** tab shows curated highlights for releases you have not viewed; the full version history is available from that tab. The Command Palette also exposes **Logline: Open Guide** and **Logline: What’s New**. The Help button gets a small **New** badge after an update, and the guide never opens by itself.
 
-Run **Logline: Run Command**, or open **Manage servers** in the Logs panel to add, edit, and delete saved commands. Multiple servers can run concurrently; the dropdown separates them by server ID. **Stop server** stops the selected process; **Stop all** stops every process. Running a command requires a trusted workspace.
+Run **Logline: Run Command**, or open **Manage servers** in the Logs panel to add, edit, and delete saved commands. Multiple servers can run concurrently; the source dropdown separates them by server ID and the run dropdown separates individual command executions. **Stop server** stops the selected process; **Stop all** stops every process. Running a command requires a trusted workspace.
 
 A saved server can also start automatically when the extension activates by setting `autoStart: true` on it (also requires a trusted workspace). Set `jsonOnly: true` on a server whose command interleaves build-tool output with its own JSON logs (for example `gradle bootRun`) to discard everything that isn't valid JSON.
+
+Enable **Capture** in the toolbar (or run **Logline: Enable Terminal Capture**) to observe new commands in supported VS Code terminals. Capture starts at the next shell-integrated command; terminal scrollback from commands that were already running is not recoverable. Terminal output is stored as one `terminal` stream because the shell integration API does not expose stdout and stderr separately. Structured JSON levels remain authoritative; unstructured lines use an explicit leading level marker when present and otherwise appear as **Unclassified**. Capture is local and does not transmit logs by itself. Disable it at any time without stopping a terminal command.
+
+Use **Logline: Manage Terminal Capture** to ignore or re-enable a terminal for the lifetime of that terminal instance. Full-screen alternate-screen applications are skipped; run the command again in a regular shell to capture it.
+
+Choose **Share logs with agent** to make all retained Logline sources and new runs in this VS Code window available to Copilot, regardless of the current source, run, or search filters. The first use shows a confirmation explaining the scope and that common credentials are redacted but logs may still contain sensitive information. Accepting **Share logs** remembers that confirmation on this VS Code profile; later uses enable sharing immediately. Cancelling or choosing **Choose specific runs…** does not remember acceptance. You can enable sharing before any logs have arrived.
+
+The toolbar shows **Sharing logs · Stop** and a scope description. Click it to revoke access. Sharing itself is held in memory and ends when logs are cleared or the window or workspace changes; it is never restored automatically. Use **More actions → Choose specific runs to share…**, or **Logline: Choose Specific Runs to Share with Agent**, to select individual runs instead. Those runs include continuing output, but later commands are excluded. Expanding an event also offers **Share source with Agent**, which grants only that event’s source and exact run. Cancelling the picker preserves the current sharing scope.
+
+Agent tools respect the active sharing scope and are always redacted, even when export redaction is disabled. They can list shared sources and runs, search with bounded pagination, inspect one event with nearby context, analyze rates/errors/latency/status patterns, and wait briefly for fresh events after a reproduction. Log content is untrusted application data; sharing does not allow an agent to run or stop commands. Continue in any Copilot agent chat in this window and ask it to inspect the shared logs. With the Logline tools enabled in chat, Copilot can discover the shared runs without a chat picker or handoff prompt. Sharing makes logs available on request; it does not send all logs into chat or send a chat message. The optional **Logline: Ask Copilot to Investigate Logs** command still opens an editable prompt.
 
 **Live** follows the newest events automatically. Turn it off to browse retained history with Older/Newer. Sorting switches to Browse; returning to Live (or Resume after inspecting an event) clears the sort and expanded event and jumps to the newest rows in capture order. The panel renders up to **1,000 rows per page**.
 
@@ -20,7 +30,7 @@ Saved server commands and ad-hoc commands run through the platform's default she
 
 ## Import and export
 
-The server selector shows each server's current session state and active-session count. Use **Export** to save the current server, search, and level filters as JSON Lines, JSON, CSV, or **AI context (Markdown)**, with redaction enabled by default. The AI context option and **Copy results** include the latest 1,000 matching events in capture order. **Import** loads JSON, JSONL, CSV, and plain-text log files into an `Imported` server entry for offline searching. A CSV exported by Logline replays its `raw` payloads; imported events receive new IDs, an import stream, and a new session. Other CSV rows use their header names as fields, or replay a nonempty `raw` cell when present.
+The source selector shows terminal, server, task, and imported sources; the run selector narrows a source to one command. Use **Export** to save the current source, run, search, and level filters as JSON Lines, JSON, CSV, or **AI context (Markdown)**, with redaction enabled by default. The AI context option and **Copy results** include the latest 1,000 matching events in capture order. **Import** loads JSON, JSONL, CSV, and plain-text log files into a separate `Imported · filename` source for offline searching. A CSV exported by Logline replays its `raw` payloads; imported events receive new IDs, an import stream, and a new session. Other CSV rows use their header names as fields, or replay a nonempty `raw` cell when present.
 
 JSON and JSONL exports contain Logline event envelopes, including normalized metadata and `raw`. Import currently treats these envelopes as new JSON payloads; use CSV to replay the original raw records. Plain-text records without their own timestamps receive the import time.
 
@@ -30,7 +40,7 @@ Local imports stream records in batches so capture and panel interactions can co
 
 ## Search and filters
 
-The level filter (next to the search box) is a multi-select — check any combination of Trace/Debug/Info/Warn/Error/Fatal. Click **Syntax** in the search box for a reference to the query syntax below.
+The level filter (next to the search box) is a multi-select — check any combination of Trace/Debug/Info/Warn/Error/Fatal/Unclassified. Click **Syntax** in the search box for a reference to the query syntax below.
 
 Search supports Datadog-style queries:
 
@@ -76,7 +86,7 @@ Click a column's name to sort by that field and click it again to reverse the di
 
 Expand an event to read structured exceptions as stack frames with real line breaks and nested causes. Common `err`, `error`, `exception`, `thrown`, and stack fields are supported, including Log4j2 throwable frames and OpenTelemetry exception fields. Click a stack frame to open its source location in the workspace; ambiguous filenames open a file picker. **Original event** keeps the JSON available, and **Copy event** copies the original formatted event. Plain-text exception lines can link to source, but separate physical lines are not automatically grouped.
 
-Choose **Show context** on an expanded event to see up to 25 retained events before and after it, in capture order, from the same server session. Context includes all levels and both captured streams, regardless of the current search. Select any surrounding event to inspect its details. **Back to results** (or Escape) returns to the existing search and scroll position. Context is a fixed snapshot; ingestion continues, and discarded events cannot be recovered. Each newly imported file has its own context boundary.
+Choose **Show context** on an expanded event to see up to 25 retained events before and after it, in capture order, from the same command run. Context includes all levels and both captured streams, regardless of the current search. Select any surrounding event to inspect its details. **Back to results** (or Escape) returns to the existing search and scroll position. Context is a fixed snapshot; ingestion continues, and discarded events cannot be recovered. Each newly imported file has its own context boundary.
 
 ## Tasks
 
@@ -115,6 +125,7 @@ Set `shell: true` when the command is a shell line containing pipes, redirects, 
 | --- | --- | --- |
 | `logline.servers` | `[]` | Saved server commands shown in the server selector. Each entry supports `cwd` (which expands `${workspaceFolder}`), `env`, `autoStart`, and `jsonOnly`. |
 | `logline.source` | `both` | Capture `stdout`, `stderr`, or `both`. |
+| `logline.captureTerminals` | `false` | Capture new commands from supported shell-integrated VS Code terminals. |
 | `logline.columns` | `[]` | Preferred table columns. Empty auto-detects common fields. |
 | `logline.timezone` | `local` | `local` or `utc` for displayed timestamps. |
 | `logline.indentation` | `2` | Spaces used when formatting expanded JSON. |
@@ -124,9 +135,9 @@ Set `shell: true` when the command is a shell line containing pipes, redirects, 
 | `logline.refreshIntervalMs` | `500` | Minimum time between Logs panel updates. The panel refreshes as soon as new data arrives rather than on a fixed poll, so this only caps how often that happens during a heavy burst of log lines. |
 | `logline.persistLogs` | `false` | Persist captured logs to `.logline/latest.log` in the first workspace folder. |
 | `logline.maxDiskMb` | `1000` | Size at which `latest.log` rolls over to `latest.log.1`. Only the current and one previous file are kept. |
-| `logline.redactExports` | `true` | Redact common credentials and secret-like fields in exports. |
-| `logline.redactionFields` | `[]` | Additional field names to redact in exports. |
-| `logline.redactionReplacement` | `[REDACTED]` | Replacement text used for redacted values. |
+| `logline.redactExports` | `true` | Redact common credentials and secret-like fields in exports and **Copy results**. Shared-agent results are always redacted. |
+| `logline.redactionFields` | `[]` | Additional field names to redact in exports, **Copy results**, and shared-agent results. |
+| `logline.redactionReplacement` | `[REDACTED]` | Replacement text used for redacted exports, **Copy results**, and shared-agent results. |
 
 ## Bounded retention
 
@@ -138,7 +149,7 @@ Search and analysis cover retained history only; enable `persistLogs` or use a l
 
 Disk persistence buffers up to 8 MiB of estimated text storage, including writes in progress. If the disk falls behind, new disk writes are skipped until space becomes available; live capture continues. Write failures also warn and count the affected batch's lines in the footer's **disk writes skipped** counter; later batches can continue. Accepted writes remain ordered. Each rollover retains one previous file, so disk use can approach twice `maxDiskMb`, plus a batch. Field-name indexes release names when their last retained event is evicted, and each event exposes at most 120 flattened fields, including MDC fields; the original raw event remains available within the line-length limit.
 
-Redaction applies to exports and **Copy results** when enabled. **Copy event** and disk persistence retain original content. Additional `redactionFields` match structured field names; free-text redaction recognizes common credential assignments. If valid JSON is too deeply nested to redact and serialize, its exported raw payload is replaced entirely with the redaction marker.
+Redaction applies to exports and **Copy results** when enabled; shared-agent results are always redacted. **Copy event** and disk persistence retain original content. Additional `redactionFields` match structured field names; free-text redaction recognizes common credential assignments. If valid JSON is too deeply nested to redact and serialize, its exported raw payload is replaced entirely with the redaction marker.
 
 ## Workspace trust
 

@@ -30,9 +30,17 @@ function isSensitiveKey(key: string, fields: string[] = []): boolean {
 export function redactText(text: string, options: RedactionOptions = {}): string {
   if (options.enabled === false) return text;
   const replacement = options.replacement ?? DEFAULT_REPLACEMENT;
-  return text
+  let result = text
     .replace(quoted, (_match, key, separator, quote) => `${key}${separator}${quote}${replacement}${quote}`)
     .replace(bare, (_match, key, separator) => `${key}${separator}${replacement}`);
+  for (const field of options.fields ?? []) {
+    if (!field || !/^[A-Za-z0-9_.-]+$/.test(field)) continue;
+    const escaped = field.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    result = result
+      .replace(new RegExp(`(${escaped})(\\s*[:=]\\s*)(["'])(.*?)\\3`, 'gi'), (_match, key, separator, quote) => `${key}${separator}${quote}${replacement}${quote}`)
+      .replace(new RegExp(`(${escaped})(\\s*[:=]\\s*)(?!["'])((?:(?:Bearer|Basic)\\s+)?[^\\s,;\\]}]+)`, 'gi'), (_match, key, separator) => `${key}${separator}${replacement}`);
+  }
+  return result;
 }
 
 export function redactValue(value: unknown, options: RedactionOptions = {}, key?: string): unknown {
@@ -54,6 +62,13 @@ export function redactEvent(event: LogEvent, options: RedactionOptions = {}): Lo
     fields: event.fields ? redactValue(event.fields, options) as LogEvent['fields'] : event.fields,
     message: event.message === undefined ? event.message : redactText(event.message, options)
   };
+  // Metadata is part of the agent response too. A secret in a terminal label,
+  // command, task name, or working directory must not bypass redaction merely
+  // because it is outside the structured payload.
+  for (const key of ['timestamp', 'stream', 'serverId', 'server', 'sessionId', 'taskName', 'taskType', 'taskState', 'dependencyState', 'exitReason', 'command', 'cwd', 'captureReason']) {
+    const value = (redacted as unknown as Record<string, unknown>)[key];
+    if (typeof value === 'string') (redacted as unknown as Record<string, unknown>)[key] = redactText(value, options);
+  }
   if (event.raw !== undefined) {
     let value: unknown;
     try {

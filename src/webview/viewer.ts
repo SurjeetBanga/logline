@@ -7,6 +7,7 @@ import { createInspection } from './inspection/context';
 import { createPopovers } from './popovers';
 import { createSearch } from './search/controls';
 import { ViewerState } from './state';
+import { LEVELS } from './state';
 import { createTable } from './table/controller';
 import { createCellActions } from './table/cell-actions';
 import { createTimestampFormatter } from './time';
@@ -30,7 +31,9 @@ export function createViewer(api: WebviewApi) {
   const table = createTable(elements, scrollViewport, state, api, formatTimestamp,
     { request: requestInteraction, saveState, filterChanged, setFollowing, updateFollowControl, updateModeLabel }, scope, () => cellActions?.rowsChanged());
   let serverSignature = '';
+  let sessionSignature = '';
   let guideUnread = document.body?.dataset.guideUnread === 'true';
+  let agentSharingActive = false;
   elements.helpBadge.hidden = !guideUnread;
   let searchDebounce: ReturnType<typeof setTimeout> | undefined;
   let autocompleteDebounce: ReturnType<typeof setTimeout> | undefined;
@@ -119,6 +122,24 @@ export function createViewer(api: WebviewApi) {
     elements.command.textContent = data.command;
     elements.command.title = data.command;
     elements.stop.disabled = !data.running;
+    elements.captureToggle.textContent = data.captureStatus?.state === 'capturing' ? 'Capturing…'
+      : data.captureStatus?.state === 'attention' ? 'Capture needs attention'
+        : data.captureTerminals ? 'Terminal capture ready' : 'Enable terminal capture';
+    elements.captureToggle.setAttribute('aria-pressed', String(data.captureTerminals));
+    elements.captureToggle.title = data.captureStatus?.detail || 'Capture output from new supported VS Code terminal commands';
+    const sharing = data.agentSharing?.active;
+    agentSharingActive = Boolean(sharing);
+    const sharedRuns = sharing ? data.agentSharing.sources.reduce((sum, source) => sum + (source.runs?.length ?? source.sessions), 0) : 0;
+    const sharingAll = sharing && data.agentSharing.scope === 'all';
+    elements.shareAgent.textContent = sharing ? 'Sharing logs · Stop' : 'Share logs with agent';
+    elements.shareAgent.setAttribute('aria-pressed', String(Boolean(sharing)));
+    elements.shareAgent.title = sharing
+      ? sharingAll ? 'Existing and new captured logs are available to Copilot in this window. Click to stop sharing.'
+        : `${sharedRuns} selected command run${sharedRuns === 1 ? '' : 's'} available to Copilot in this window. Click to stop sharing.`
+      : 'Share existing and new captured logs in this window until stopped';
+    elements.shareScope.hidden = !sharing;
+    elements.shareScope.textContent = sharingAll ? 'Sharing existing and new runs in this window until stopped'
+      : sharing ? `Sharing ${sharedRuns} selected run${sharedRuns === 1 ? '' : 's'} only` : '';
     elements.stop.textContent = state.selectedServer ? 'Stop server' : 'Stop all';
     const activeSessions = Array.isArray(data.sessions) ? data.sessions.filter(session => ['running', 'stopping'].includes(session.status)) : [];
     elements.sessions.textContent = activeSessions.length
@@ -130,7 +151,7 @@ export function createViewer(api: WebviewApi) {
         serverSignature = signature;
         const activeCount = data.servers.reduce((sum, server) => sum + (server.activeSessions || 0), 0);
         const options = [document.createElement('option'), ...data.servers.map(() => document.createElement('option'))];
-        options[0].textContent = activeCount ? `All servers · ${activeCount} active` : 'All servers';
+        options[0].textContent = activeCount ? `All sources · ${activeCount} active` : 'All sources';
         options[0].value = '';
         data.servers.forEach((server, index) => {
           const state = server.status === 'idle' ? '' : ` · ${server.status}`;
@@ -151,6 +172,26 @@ export function createViewer(api: WebviewApi) {
         elements.server.replaceChildren(...options);
         elements.server.value = data.servers.some(server => server.id === state.selectedServer) ? state.selectedServer : '';
         state.selectedServer = elements.server.value;
+      }
+    }
+    if (data.sessions) {
+      const sessions = data.sessions.filter(session => !state.selectedServer || session.serverId === state.selectedServer);
+      const signature = JSON.stringify(sessions.map(session => [session.id, session.serverId, session.command, session.status, session.startedAt, session.endedAt, session.captureStatus, session.captureReason]));
+      if (signature !== sessionSignature) {
+        sessionSignature = signature;
+        const options = [document.createElement('option'), ...sessions.map(() => document.createElement('option'))];
+        options[0].textContent = sessions.length ? `All runs · ${sessions.length}` : 'All runs';
+        options[0].value = '';
+        sessions.forEach((session, index) => {
+          const started = session.startedAt ? new Date(session.startedAt).toLocaleTimeString() : '';
+          const stateText = session.status === 'running' ? 'running' : (session.exitReason || session.status);
+          options[index + 1].textContent = `${session.command || session.id} · ${started} · ${stateText}`;
+          options[index + 1].value = session.id;
+          options[index + 1].title = [session.cwd, session.captureStatus ? `Capture: ${session.captureStatus}` : undefined, session.captureReason].filter(Boolean).join(' · ');
+        });
+        elements.session.replaceChildren(...options);
+        elements.session.value = sessions.some(session => session.id === state.selectedSession) ? state.selectedSession : '';
+        state.selectedSession = elements.session.value;
       }
     }
     const number = (value: number) => value.toLocaleString();
@@ -212,7 +253,7 @@ export function createViewer(api: WebviewApi) {
   function setFollowing(value: boolean) { state.setFollowing(value); updateFollowControl(); updateModeLabel(); }
   function saveState() { api.setState(state.persist(search.query())); }
   function hasActiveFilter() {
-    return Boolean(search.query()) || state.checkedLevels.size !== 6 || Boolean(state.selectedServer);
+    return Boolean(search.query()) || state.checkedLevels.size !== LEVELS.length || Boolean(state.selectedServer) || Boolean(state.selectedSession);
   }
   function updateCopyResultsControl() {
     elements.copyResults.hidden = !hasActiveFilter();
@@ -275,13 +316,53 @@ export function createViewer(api: WebviewApi) {
 
   createPopover(elements.fieldsButton.closest<HTMLElement>('.popover-container')!, elements.fieldsButton, elements.fieldsPanel);
 
+  const actionsContainer = elements.moreActions.closest<HTMLElement>('.popover-container')!;
+  const actionsMenu = createPopover(actionsContainer, elements.moreActions, elements.actionsMenu);
+  const actionItems = [elements.shareSpecificRuns, elements.export, elements.import, elements.manage, elements.config, elements.help];
+  scope.listen(elements.moreActions, 'click', () => {
+    if (actionsMenu.isOpen()) actionItems[0].focus();
+  });
+  scope.listen(elements.moreActions, 'keydown', event => {
+    if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return;
+    event.preventDefault();
+    actionsMenu.open();
+    actionItems[event.key === 'ArrowUp' ? actionItems.length - 1 : 0].focus();
+  });
+  scope.listen(elements.actionsMenu, 'keydown', event => {
+    if (event.key === 'Tab') {
+      actionsMenu.close(true);
+      return;
+    }
+    const index = actionItems.indexOf(document.activeElement as HTMLButtonElement);
+    const next = event.key === 'Home' ? 0 : event.key === 'End' ? actionItems.length - 1
+      : event.key === 'ArrowDown' ? (index + 1) % actionItems.length
+        : event.key === 'ArrowUp' ? (index - 1 + actionItems.length) % actionItems.length : undefined;
+    if (next === undefined) return;
+    event.preventDefault();
+    actionItems[next].focus();
+  });
+  scope.listen(actionsContainer, 'focusout', event => {
+    if (!actionsContainer.contains(event.relatedTarget as Node | null)) actionsMenu.close();
+  });
+  for (const item of actionItems) scope.listen(item, 'click', () => actionsMenu.close(true));
+
   scope.listen(elements.copyResults, 'click', () => {
     if (!hasActiveFilter()) return;
-    api.postMessage({ type: 'copyFiltered', query: search.query(), levels: state.currentLevels(), serverId: state.selectedServer || undefined });
+    api.postMessage({ type: 'copyFiltered', query: search.query(), levels: state.currentLevels(), serverId: state.selectedServer || undefined, sessionId: state.selectedSession || undefined });
     elements.copyResults.textContent = 'Copied';
     clearTimeout(copyFeedbackTimer);
     copyFeedbackTimer = setTimeout(updateCopyResultsControl, 1200);
   });
+
+  scope.listen(elements.captureToggle, 'click', () => {
+    const enabled = elements.captureToggle.getAttribute('aria-pressed') !== 'true';
+    api.postMessage({ type: 'toggleTerminalCapture', enabled });
+  });
+  scope.listen(elements.shareAgent, 'click', () => {
+    if (agentSharingActive) api.postMessage({ type: 'stopSharing' });
+    else api.postMessage({ type: 'shareWithAgent' });
+  });
+  scope.listen(elements.shareSpecificRuns, 'click', () => api.postMessage({ type: 'shareWithAgent', chooseRuns: true }));
 
   scope.listen(elements.saveSearch, 'click', () => {
     for (const popover of popovers)
@@ -303,7 +384,7 @@ export function createViewer(api: WebviewApi) {
   scope.listen(elements.analyze, 'click', () => {
     elements.analysisDialog.showModal();
     elements.analysisStatus.textContent = 'Loading analysis…';
-    api.postMessage({ type: 'analysis', query: search.query(), levels: state.currentLevels(), serverId: state.selectedServer || undefined });
+    api.postMessage({ type: 'analysis', query: search.query(), levels: state.currentLevels(), serverId: state.selectedServer || undefined, sessionId: state.selectedSession || undefined });
   });
 
   scope.listen(elements.analysisClose, 'click', () => elements.analysisDialog.close());
@@ -311,10 +392,20 @@ export function createViewer(api: WebviewApi) {
   scope.listen(elements.server, 'change', () => {
     search.clearAutocomplete();
     state.selectedServer = elements.server.value;
+    state.selectedSession = '';
+    sessionSignature = '';
     state.page = 0;
     state.lastRows = undefined;
     table.resetAutomaticColumns();
     updateCopyResultsControl();
+    saveState();
+    requestInteraction();
+  });
+  scope.listen(elements.session, 'change', () => {
+    state.selectedSession = elements.session.value;
+    state.page = 0;
+    state.lastRows = undefined;
+    state.filterChanged();
     saveState();
     requestInteraction();
   });
@@ -359,7 +450,7 @@ export function createViewer(api: WebviewApi) {
   scope.listen(elements.manage, 'click', () => api.postMessage({ type: 'manageServers' }));
 
   function exportRequest(type: 'export' | 'exportForAI') {
-    api.postMessage({ type, query: search.query(), levels: state.currentLevels(), serverId: state.selectedServer || undefined });
+    api.postMessage({ type, query: search.query(), levels: state.currentLevels(), serverId: state.selectedServer || undefined, sessionId: state.selectedSession || undefined });
   }
 
   scope.listen(elements.export, 'click', () => exportRequest('export'));

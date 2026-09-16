@@ -58,7 +58,9 @@ export class ProcessRunner {
       status: 'running', startedAt: Date.now(), pid: child.pid, events: 0,
       taskName: server.taskName, taskType: server.taskType, taskState: server.taskName ? 'running' : undefined,
       taskScope: server.taskScope, taskLabel: server.taskLabel,
-      dependencies: server.dependencies, dependencyState: server.dependencyState, source: server.source
+      dependencies: server.dependencies, dependencyState: server.dependencyState, source: server.source,
+      sourceKind: server.sourceKind ?? (server.taskName ? 'task' : 'process'), owned: true,
+      captureComplete: false, command: args ? [command, ...args].join(' ') : command, cwd
     };
     const session: Session = { child, stopping: false, exited: false, server, record };
     this.registry.records.set(record.id, record);
@@ -99,6 +101,7 @@ export class ProcessRunner {
     child.on('close', (code, signal) => {
       session.exited = true;
       for (const reader of readers) reader.end();
+      record.captureComplete = true;
       record.endedAt = Date.now();
       record.exitCode = typeof code === 'number' ? code : undefined;
       record.signal = signal ?? undefined;
