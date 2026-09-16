@@ -76,8 +76,9 @@ export function taskToLoglineDefinition(task: vscode.Task): LoglineTaskDefinitio
   }
   const shell = execution as vscode.ShellExecution;
   if (shell.commandLine !== undefined) return { ...base, command: shell.commandLine, shell: true };
+  if (shell.command === undefined) return { ...base, command: '', shell: true };
   const command = shellValue(shell.command);
-  const args = shell.args.map(shellValue);
+  const args = (shell.args ?? []).map(shellValue);
   return { ...base, command: [command, ...args].map(quoteShell).join(' '), shell: true };
 }
 

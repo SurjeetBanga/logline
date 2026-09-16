@@ -17,6 +17,15 @@ export interface GuideRelease {
 
 export const GUIDE_RELEASES: GuideRelease[] = [
   {
+    version: '1.8.0',
+    date: '2026-09-15',
+    highlights: [
+      { title: 'Capture the terminal you already use', text: 'Enable Capture once and run commands normally; new shell-integrated terminal output becomes searchable in Logs, with plain text shown as Unclassified when no level is marked.', section: 'capture' },
+      { title: 'Share logs with agent', text: 'Confirm once to share retained sources and new runs in this window. Results are always redacted, but may still contain sensitive information. Choose specific runs from More actions to limit access.', section: 'share' },
+      { title: 'Keep using your existing agent chat', text: 'Sharing logs · Stop makes your sharing state visible. Ask Copilot to check the logs through read-only Logline tools, share an expanded event’s exact run, and click the sharing button again to stop.', section: 'share' }
+    ]
+  },
+  {
     version: '1.7.0',
     date: '2026-09-14',
     highlights: [
@@ -30,7 +39,7 @@ export const GUIDE_RELEASES: GuideRelease[] = [
     date: '2026-09-14',
     highlights: [
       { title: 'Faster, safer exports', text: 'Large JSON, JSONL, and CSV exports now stream in cancellable batches, with redaction and staged writes.', section: 'share' },
-      { title: 'Search suggestions stay in context', text: 'Autocomplete keeps your query prefix, escapes suggested values, and uses the selected server\'s index.', section: 'search' },
+      { title: 'Search suggestions stay in context', text: 'Autocomplete keeps your query prefix, escapes suggested values, and uses the selected source\'s index.', section: 'search' },
       { title: 'Inspect without losing your place', text: 'Changing filters, paging, sorting, or columns while inspecting an event returns cleanly to Browse mode.', section: 'inspect' }
     ]
   }

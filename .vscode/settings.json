@@ -7,5 +7,6 @@
       "label": "Demo API",
       "command": "npm run dev"
     }
-  ]
+  ],
+  "logline.captureTerminals": true
 }

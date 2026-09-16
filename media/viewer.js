@@ -260,6 +260,7 @@
         type: "snapshot",
         query: this.query(),
         serverId: state.selectedServer || void 0,
+        sessionId: state.selectedSession || void 0,
         levels: state.currentLevels(),
         page: state.page,
         before: state.before,
@@ -322,7 +323,10 @@
       levelButton: element("levelButton"),
       levelMenu: element("levelMenu"),
       server: element("server"),
+      session: element("session"),
       follow: element("follow"),
+      moreActions: element("moreActions"),
+      actionsMenu: element("actionsMenu"),
       help: element("help"),
       helpBadge: element("helpBadge"),
       config: element("config"),
@@ -332,6 +336,10 @@
       clear: element("clear"),
       stop: element("stop"),
       run: element("run"),
+      captureToggle: element("captureToggle"),
+      shareAgent: element("shareAgent"),
+      shareSpecificRuns: element("shareSpecificRuns"),
+      shareScope: element("shareScope"),
       status: element("status"),
       sessions: element("sessions"),
       command: element("command"),
@@ -410,6 +418,11 @@
     copy.textContent = "Copy event";
     copy.dataset.id = String(id);
     container.append(copy);
+    const share = document.createElement("button");
+    share.className = "share-source-button";
+    share.textContent = "Share source with Agent";
+    share.dataset.id = String(id);
+    container.append(share);
     exceptions.forEach((exception, blockIndex) => {
       const section = document.createElement("section");
       section.className = "exception-block";
@@ -497,6 +510,11 @@
         api.postMessage({ type: "copy", id: Number(copy.dataset.id) });
         return true;
       }
+      const share = event.target.closest(".share-source-button");
+      if (share) {
+        api.postMessage({ type: "shareEvent", id: Number(share.dataset.id) });
+        return true;
+      }
       const context = event.target.closest(".context-button");
       if (context) {
         showContext(Number(context.dataset.id));
@@ -556,7 +574,7 @@
           panel.style.bottom = "";
           panel.style.maxHeight = "";
           panel.style.position = "";
-          if (panel.classList.contains("fields-panel") || panel.classList.contains("cheat-sheet") || panel.classList.contains("level-menu") || panel.classList.contains("saved-searches")) {
+          if (panel.classList.contains("fields-panel") || panel.classList.contains("cheat-sheet") || panel.classList.contains("level-menu") || panel.classList.contains("saved-searches") || panel.classList.contains("actions-menu")) {
             const trigger = button.getBoundingClientRect();
             const margin2 = 8;
             const spaceBelow2 = window.innerHeight - trigger.bottom - margin2;
@@ -643,7 +661,7 @@
   }
 
   // src/webview/state.ts
-  var LEVELS = ["trace", "debug", "info", "warn", "error", "fatal"];
+  var LEVELS = ["trace", "debug", "info", "warn", "error", "fatal", "unclassified"];
   var ViewerState = class {
     paused = false;
     following;
@@ -657,6 +675,7 @@
     selectedDetailText;
     selectedExceptions = [];
     selectedServer;
+    selectedSession;
     selectedSort;
     selectedSortDirection;
     allFields = [];
@@ -670,13 +689,15 @@
     constructor(saved = {}) {
       this.following = !saved.sort;
       this.selectedServer = saved.server ?? "";
+      this.selectedSession = saved.session ?? "";
       this.selectedSort = saved.sort ?? "";
       this.selectedSortDirection = saved.sortDirection === "asc" ? "asc" : "desc";
       this.extraColumns = Array.isArray(saved.extraColumns) ? saved.extraColumns.filter((field) => typeof field === "string") : [];
       this.columnWidths = saved.columnWidths && typeof saved.columnWidths === "object" ? saved.columnWidths : {};
       this.columnOrder = Array.isArray(saved.columnOrder) ? saved.columnOrder : [];
       this.hiddenColumns = new Set(Array.isArray(saved.hiddenColumns) ? saved.hiddenColumns : []);
-      this.checkedLevels = new Set(Array.isArray(saved.levels) ? saved.levels.filter((level) => LEVELS.includes(level)) : LEVELS);
+      const savedLevels = Array.isArray(saved.levels) ? saved.levels.filter((level) => LEVELS.includes(level)) : LEVELS;
+      this.checkedLevels = new Set(savedLevels.length === 6 && !savedLevels.includes("unclassified") ? LEVELS : savedLevels);
     }
     currentLevels() {
       return this.checkedLevels.size === LEVELS.length ? void 0 : [...this.checkedLevels];
@@ -731,6 +752,7 @@
         query,
         levels: [...this.checkedLevels],
         server: this.selectedServer,
+        ...this.selectedSession ? { session: this.selectedSession } : {},
         sort: this.selectedSort,
         sortDirection: this.selectedSortDirection,
         columnWidths: this.columnWidths,
@@ -747,7 +769,7 @@
     const MAX_QUERY_LENGTH = 256;
     let appliedQuery = queryTokens(elements.search.value.trim()).map((value) => value.toLowerCase() === "or" ? "OR" : value).join(" ").slice(0, MAX_QUERY_LENGTH);
     let editingIndex;
-    const LEVEL_LABELS = { trace: "Trace", debug: "Debug", info: "Info", warn: "Warn", error: "Error", fatal: "Fatal" };
+    const LEVEL_LABELS = { trace: "Trace", debug: "Debug", info: "Info", warn: "Warn", error: "Error", fatal: "Fatal", unclassified: "Unclassified" };
     function tokens(query2) {
       return queryTokens(query2.trim()).map((value) => value.toLowerCase() === "or" ? "OR" : value);
     }
@@ -1860,7 +1882,9 @@
       () => cellActions?.rowsChanged()
     );
     let serverSignature = "";
+    let sessionSignature = "";
     let guideUnread = document.body?.dataset.guideUnread === "true";
+    let agentSharingActive = false;
     elements.helpBadge.hidden = !guideUnread;
     let searchDebounce;
     let autocompleteDebounce;
@@ -1946,6 +1970,18 @@
       elements.command.textContent = data.command;
       elements.command.title = data.command;
       elements.stop.disabled = !data.running;
+      elements.captureToggle.textContent = data.captureStatus?.state === "capturing" ? "Capturing\u2026" : data.captureStatus?.state === "attention" ? "Capture needs attention" : data.captureTerminals ? "Terminal capture ready" : "Enable terminal capture";
+      elements.captureToggle.setAttribute("aria-pressed", String(data.captureTerminals));
+      elements.captureToggle.title = data.captureStatus?.detail || "Capture output from new supported VS Code terminal commands";
+      const sharing = data.agentSharing?.active;
+      agentSharingActive = Boolean(sharing);
+      const sharedRuns = sharing ? data.agentSharing.sources.reduce((sum, source) => sum + (source.runs?.length ?? source.sessions), 0) : 0;
+      const sharingAll = sharing && data.agentSharing.scope === "all";
+      elements.shareAgent.textContent = sharing ? "Sharing logs \xB7 Stop" : "Share logs with agent";
+      elements.shareAgent.setAttribute("aria-pressed", String(Boolean(sharing)));
+      elements.shareAgent.title = sharing ? sharingAll ? "Existing and new captured logs are available to Copilot in this window. Click to stop sharing." : `${sharedRuns} selected command run${sharedRuns === 1 ? "" : "s"} available to Copilot in this window. Click to stop sharing.` : "Share existing and new captured logs in this window until stopped";
+      elements.shareScope.hidden = !sharing;
+      elements.shareScope.textContent = sharingAll ? "Sharing existing and new runs in this window until stopped" : sharing ? `Sharing ${sharedRuns} selected run${sharedRuns === 1 ? "" : "s"} only` : "";
       elements.stop.textContent = state.selectedServer ? "Stop server" : "Stop all";
       const activeSessions = Array.isArray(data.sessions) ? data.sessions.filter((session) => ["running", "stopping"].includes(session.status)) : [];
       elements.sessions.textContent = activeSessions.length ? `${activeSessions.length} active session${activeSessions.length === 1 ? "" : "s"}` : "No active sessions";
@@ -1965,7 +2001,7 @@
           serverSignature = signature;
           const activeCount = data.servers.reduce((sum, server) => sum + (server.activeSessions || 0), 0);
           const options = [document.createElement("option"), ...data.servers.map(() => document.createElement("option"))];
-          options[0].textContent = activeCount ? `All servers \xB7 ${activeCount} active` : "All servers";
+          options[0].textContent = activeCount ? `All sources \xB7 ${activeCount} active` : "All sources";
           options[0].value = "";
           data.servers.forEach((server, index) => {
             const state2 = server.status === "idle" ? "" : ` \xB7 ${server.status}`;
@@ -1986,6 +2022,26 @@
           elements.server.replaceChildren(...options);
           elements.server.value = data.servers.some((server) => server.id === state.selectedServer) ? state.selectedServer : "";
           state.selectedServer = elements.server.value;
+        }
+      }
+      if (data.sessions) {
+        const sessions = data.sessions.filter((session) => !state.selectedServer || session.serverId === state.selectedServer);
+        const signature = JSON.stringify(sessions.map((session) => [session.id, session.serverId, session.command, session.status, session.startedAt, session.endedAt, session.captureStatus, session.captureReason]));
+        if (signature !== sessionSignature) {
+          sessionSignature = signature;
+          const options = [document.createElement("option"), ...sessions.map(() => document.createElement("option"))];
+          options[0].textContent = sessions.length ? `All runs \xB7 ${sessions.length}` : "All runs";
+          options[0].value = "";
+          sessions.forEach((session, index) => {
+            const started = session.startedAt ? new Date(session.startedAt).toLocaleTimeString() : "";
+            const stateText = session.status === "running" ? "running" : session.exitReason || session.status;
+            options[index + 1].textContent = `${session.command || session.id} \xB7 ${started} \xB7 ${stateText}`;
+            options[index + 1].value = session.id;
+            options[index + 1].title = [session.cwd, session.captureStatus ? `Capture: ${session.captureStatus}` : void 0, session.captureReason].filter(Boolean).join(" \xB7 ");
+          });
+          elements.session.replaceChildren(...options);
+          elements.session.value = sessions.some((session) => session.id === state.selectedSession) ? state.selectedSession : "";
+          state.selectedSession = elements.session.value;
         }
       }
       const number = (value) => value.toLocaleString();
@@ -2048,7 +2104,7 @@
       api.setState(state.persist(search.query()));
     }
     function hasActiveFilter() {
-      return Boolean(search.query()) || state.checkedLevels.size !== 6 || Boolean(state.selectedServer);
+      return Boolean(search.query()) || state.checkedLevels.size !== LEVELS.length || Boolean(state.selectedServer) || Boolean(state.selectedSession);
     }
     function updateCopyResultsControl() {
       elements.copyResults.hidden = !hasActiveFilter();
@@ -2109,13 +2165,49 @@
     createPopover(elements.searchHelp.closest(".popover-container"), elements.searchHelp, elements.searchHelpPanel);
     createPopover(elements.searchTools.closest(".popover-container"), elements.searchTools, elements.searchToolsPanel);
     createPopover(elements.fieldsButton.closest(".popover-container"), elements.fieldsButton, elements.fieldsPanel);
+    const actionsContainer = elements.moreActions.closest(".popover-container");
+    const actionsMenu = createPopover(actionsContainer, elements.moreActions, elements.actionsMenu);
+    const actionItems = [elements.shareSpecificRuns, elements.export, elements.import, elements.manage, elements.config, elements.help];
+    scope.listen(elements.moreActions, "click", () => {
+      if (actionsMenu.isOpen()) actionItems[0].focus();
+    });
+    scope.listen(elements.moreActions, "keydown", (event) => {
+      if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
+      event.preventDefault();
+      actionsMenu.open();
+      actionItems[event.key === "ArrowUp" ? actionItems.length - 1 : 0].focus();
+    });
+    scope.listen(elements.actionsMenu, "keydown", (event) => {
+      if (event.key === "Tab") {
+        actionsMenu.close(true);
+        return;
+      }
+      const index = actionItems.indexOf(document.activeElement);
+      const next = event.key === "Home" ? 0 : event.key === "End" ? actionItems.length - 1 : event.key === "ArrowDown" ? (index + 1) % actionItems.length : event.key === "ArrowUp" ? (index - 1 + actionItems.length) % actionItems.length : void 0;
+      if (next === void 0) return;
+      event.preventDefault();
+      actionItems[next].focus();
+    });
+    scope.listen(actionsContainer, "focusout", (event) => {
+      if (!actionsContainer.contains(event.relatedTarget)) actionsMenu.close();
+    });
+    for (const item of actionItems) scope.listen(item, "click", () => actionsMenu.close(true));
     scope.listen(elements.copyResults, "click", () => {
       if (!hasActiveFilter()) return;
-      api.postMessage({ type: "copyFiltered", query: search.query(), levels: state.currentLevels(), serverId: state.selectedServer || void 0 });
+      api.postMessage({ type: "copyFiltered", query: search.query(), levels: state.currentLevels(), serverId: state.selectedServer || void 0, sessionId: state.selectedSession || void 0 });
       elements.copyResults.textContent = "Copied";
       clearTimeout(copyFeedbackTimer);
       copyFeedbackTimer = setTimeout(updateCopyResultsControl, 1200);
     });
+    scope.listen(elements.captureToggle, "click", () => {
+      const enabled = elements.captureToggle.getAttribute("aria-pressed") !== "true";
+      api.postMessage({ type: "toggleTerminalCapture", enabled });
+    });
+    scope.listen(elements.shareAgent, "click", () => {
+      if (agentSharingActive) api.postMessage({ type: "stopSharing" });
+      else api.postMessage({ type: "shareWithAgent" });
+    });
+    scope.listen(elements.shareSpecificRuns, "click", () => api.postMessage({ type: "shareWithAgent", chooseRuns: true }));
     scope.listen(elements.saveSearch, "click", () => {
       for (const popover of popovers)
         popover.close();
@@ -2133,16 +2225,26 @@
     scope.listen(elements.analyze, "click", () => {
       elements.analysisDialog.showModal();
       elements.analysisStatus.textContent = "Loading analysis\u2026";
-      api.postMessage({ type: "analysis", query: search.query(), levels: state.currentLevels(), serverId: state.selectedServer || void 0 });
+      api.postMessage({ type: "analysis", query: search.query(), levels: state.currentLevels(), serverId: state.selectedServer || void 0, sessionId: state.selectedSession || void 0 });
     });
     scope.listen(elements.analysisClose, "click", () => elements.analysisDialog.close());
     scope.listen(elements.server, "change", () => {
       search.clearAutocomplete();
       state.selectedServer = elements.server.value;
+      state.selectedSession = "";
+      sessionSignature = "";
       state.page = 0;
       state.lastRows = void 0;
       table.resetAutomaticColumns();
       updateCopyResultsControl();
+      saveState();
+      requestInteraction();
+    });
+    scope.listen(elements.session, "change", () => {
+      state.selectedSession = elements.session.value;
+      state.page = 0;
+      state.lastRows = void 0;
+      state.filterChanged();
       saveState();
       requestInteraction();
     });
@@ -2189,7 +2291,7 @@
     scope.listen(elements.help, "click", () => api.postMessage({ type: "showGuide", section: guideUnread ? "whatsNew" : "guide" }));
     scope.listen(elements.manage, "click", () => api.postMessage({ type: "manageServers" }));
     function exportRequest(type) {
-      api.postMessage({ type, query: search.query(), levels: state.currentLevels(), serverId: state.selectedServer || void 0 });
+      api.postMessage({ type, query: search.query(), levels: state.currentLevels(), serverId: state.selectedServer || void 0, sessionId: state.selectedSession || void 0 });
     }
     scope.listen(elements.export, "click", () => exportRequest("export"));
     scope.listen(elements.import, "click", () => api.postMessage({ type: "import" }));

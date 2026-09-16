@@ -4,6 +4,7 @@ import { LogsController } from './vscode/logs-controller';
 import { LogsProvider } from './vscode/logs-view-provider';
 import { registerTasks } from './vscode/tasks/provider';
 import { GuidePanel } from './vscode/guide-panel';
+import { registerAgentTools } from './vscode/agent-tools';
 
 let controller: LogsController | undefined;
 
@@ -16,6 +17,7 @@ export function activate(context: vscode.ExtensionContext): { provider: LogsProv
     vscode.window.registerWebviewViewProvider('logline.logs', provider),
     ...registerCommands(controller, section => guide.open(section)),
     ...registerTasks(controller.runner, controller.registry, controller.tasks),
+    ...registerAgentTools(context, controller.agentAccess),
     controller,
     guide
   );

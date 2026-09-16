@@ -10,12 +10,18 @@ import type { SavedSearches } from '../storage/saved-searches';
 import type { LogTransfer } from './log-transfer';
 import { manageServers } from './servers';
 import { openSource } from './source-navigation';
+import type { AgentLogAccess } from './agent-access';
 
 interface MessageServices {
   store: LogStore; config: Settings; runner: ProcessRunner; transfer: LogTransfer; searches: SavedSearches;
   snapshot(request: Extract<ViewRequest, { type: 'snapshot'; }>): Snapshot;
   clear(): void; stop(serverId?: string): void;
   showGuide(section: 'guide' | 'whatsNew'): void;
+  agentAccess: AgentLogAccess;
+  shareWithAgent(sourceIds?: string[], anchor?: number, sessionIds?: string[], chooseRuns?: boolean): Promise<void>;
+  stopSharing(): void;
+  askCopilot(anchor?: number): Promise<boolean>;
+  toggleTerminalCapture(enabled: boolean): Promise<void>;
 }
 export async function handleMessage(services: MessageServices, send: (message: HostMessage) => void, value: unknown): Promise<void> {
   const msg = parseViewRequest(value);
@@ -37,6 +43,16 @@ export async function handleMessage(services: MessageServices, send: (message: H
     case 'exportForAI': await transfer.exportForAI(msg); return;
     case 'copyFiltered': await transfer.copyFiltered(msg); return;
     case 'exportContext': await transfer.exportContext(msg.ids); return;
+    case 'shareWithAgent': await services.shareWithAgent(msg.sourceIds, msg.anchor, msg.sessionIds, msg.chooseRuns); return;
+    case 'stopSharing': services.stopSharing(); return;
+    case 'askCopilot': await services.askCopilot(msg.anchor); return;
+    case 'shareEvent': {
+      const event = store.find(msg.id);
+      if (event?.serverId) await services.shareWithAgent([event.serverId], msg.id);
+      else void vscode.window.showWarningMessage('This event is no longer available to share.');
+      return;
+    }
+    case 'toggleTerminalCapture': await services.toggleTerminalCapture(msg.enabled); return;
     case 'showGuide': services.showGuide(msg.section ?? 'guide'); return;
     case 'import': await transfer.importLogs(); return;
     case 'details': case 'copy': {

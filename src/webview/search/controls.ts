@@ -18,7 +18,7 @@ export function createSearch(elements: Elements, state: ViewerState, api: Webvie
   // A checkbox per level (any combination, Kayak-filter style) rather than a
   // single "at least X" choice, so e.g. Info + Error but not Warn is possible.
 
-  const LEVEL_LABELS: Record<string, string> = { trace: 'Trace', debug: 'Debug', info: 'Info', warn: 'Warn', error: 'Error', fatal: 'Fatal' };
+  const LEVEL_LABELS: Record<string, string> = { trace: 'Trace', debug: 'Debug', info: 'Info', warn: 'Warn', error: 'Error', fatal: 'Fatal', unclassified: 'Unclassified' };
 
   function tokens(query: string) {
     return queryTokens(query.trim()).map(value => value.toLowerCase() === 'or' ? 'OR' : value);

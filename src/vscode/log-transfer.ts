@@ -132,6 +132,7 @@ export class LogTransfer {
     for (const uri of uris) {
       // Keep surrounding context from crossing between independently imported files.
       const sessionId = randomBytes(8).toString('hex');
+      const label = `Imported · ${path.basename(uri.path)}`;
       try {
         // Native files stream in bounded chunks. Other VS Code filesystem
         // providers expose only readFile, so release their buffer after this file.
@@ -140,7 +141,7 @@ export class LogTransfer {
         const format = path.extname(uri.path).slice(1).toLowerCase();
         const limit = this.config.get('maxLineLength', 65536);
         for await (const record of importRecords(chunks, format, limit)) {
-          this.ingestion.accept(record.raw, 'import', { serverId: 'imported', server: 'Imported', sessionId, truncated: record.truncated });
+          this.ingestion.accept(record.raw, 'import', { serverId: `imported-${sessionId}`, server: label, sessionId, truncated: record.truncated });
           imported++;
           if (imported % 500 === 0) { this.state.notify(); await yieldToHost(); }
         }

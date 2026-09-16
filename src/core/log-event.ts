@@ -15,7 +15,8 @@ export function parseLogLine(line: string, stream: string, id: number, receivedA
   const severity = readValue(object, 'level', 'severity', 'log.level', 'severityText', 'SeverityText');
   const severityNumber = readValue(object, 'severityNumber', 'SeverityNumber');
   const level = severity === undefined && typeof severityNumber === 'number' && severityNumber >= 1 && severityNumber <= 24
-    ? LEVELS[Math.floor((severityNumber - 1) / 4)] : normalizeLevel(severity as string | number | undefined, stream);
+    ? LEVELS[Math.floor((severityNumber - 1) / 4)] : normalizeLevel(severity as string | number | undefined, stream,
+      stream === 'terminal' ? terminalLevel(trimmed) : undefined);
   const message = getMessage(object, value, trimmed);
   const timestampInfo = getTimestamp(object, receivedAt);
   const fields = object ? extractFields(object) : {};
@@ -38,7 +39,7 @@ function readValue(object: JsonObject | undefined, ...names: string[]): unknown 
   return undefined;
 }
 
-export function normalizeLevel(level: string | number | undefined, stream: string): string {
+export function normalizeLevel(level: string | number | undefined, stream: string, terminalFallback?: string): string {
   if (typeof level === 'number') {
     const byCode: Record<number, string> = { 10: 'trace', 20: 'debug', 30: 'info', 40: 'warn', 50: 'error', 60: 'fatal' };
     return byCode[level] ?? (stream === 'stderr' ? 'error' : 'info');
@@ -47,7 +48,7 @@ export function normalizeLevel(level: string | number | undefined, stream: strin
   if (LEVELS.includes(normalized)) return normalized;
   if (normalized === 'warning') return 'warn';
   if (normalized === 'critical') return 'fatal';
-  return stream === 'stderr' ? 'error' : 'info';
+  return terminalFallback ?? (stream === 'stderr' ? 'error' : 'info');
 }
 
 function getMessage(object: JsonObject | undefined, value: unknown, fallback: string): string {
@@ -76,6 +77,13 @@ function getTimestamp(object: JsonObject | undefined, receivedAt: Date): { text:
 
 function formatTime(date: Date): string {
   return `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}:${String(date.getSeconds()).padStart(2, '0')}.${String(date.getMilliseconds()).padStart(3, '0')}`;
+}
+
+function terminalLevel(text: string): string {
+  const match = text.match(/^\s*(?:\[[^\]]+\]\s*)?(?:\d{4}-\d\d?-\d\d?(?:[T ][^ ]+)?\s+)?(?:\[[ ]*)?(TRACE|DEBUG|INFO|WARN(?:ING)?|ERROR|FATAL)(?:\s*\]|\b)/i);
+  if (!match) return 'unclassified';
+  const value = match[1].toLowerCase();
+  return value === 'warning' ? 'warn' : value;
 }
 
 export function stripAnsi(value: string): string {

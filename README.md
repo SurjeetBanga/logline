@@ -2,13 +2,15 @@
 
 **Live tail for JSON logs, right inside VS Code.** Run your server, filter the noise, and inspect an error without leaving the editor. Logline turns structured logs into a searchable table in the bottom **Logs** panel and keeps plain-text output alongside them.
 
+Logline can also capture commands you run in supported VS Code terminals. Enable **Enable terminal capture** once in the Logs panel, run commands normally, and their output becomes searchable without wrapping the command. Choose **Share logs with agent** to make retained Logline sources and new runs in this VS Code window available to Copilot. The first use asks for confirmation and explains that redaction may not remove every sensitive value; later uses enable sharing immediately. The toolbar shows **Sharing logs · Stop**, with the sharing scope below it. Continue in your existing Copilot agent chat and ask it to check the logs. Use **More actions → Choose specific runs to share…** to limit access, or click **Stop** on the sharing button to revoke it. Sharing is held in memory and ends when logs are cleared or the window or workspace changes.
+
 ![Logline demo: follow incoming logs, filter errors with search chips and cell actions, inspect a stack trace and surrounding context, then analyze the results.](media/demo.gif)
 
 *The actual Logline viewer using [synthetic sample logs](samples/demo-logs.jsonl).*
 
 ## Get started
 
-1. Open your project in **VS Code 1.90+** with Logline installed. Logline requires a trusted workspace and does not support virtual workspaces.
+1. Open your project in **VS Code 1.99+** with Logline installed. Logline requires a trusted workspace and does not support virtual workspaces.
 2. Open the Command Palette (`Cmd+Shift+P` on macOS, `Ctrl+Shift+P` on Windows/Linux) and run **Logline: Run Command**.
 3. Enter your server command, such as `npm run dev`. Its stdout and stderr appear in the **Logs** panel.
 4. Type `level:error` in the search box and press **Enter**. Click an event's message to inspect it; choose **Resume** to follow live output again.
@@ -21,16 +23,16 @@ Open **Help** in the toolbar for the offline visual guide, or run **Logline: Wha
 
 | Workflow | Features |
 | --- | --- |
-| **Capture** | Run several servers at once, save commands with **Manage servers**, filter by server, and capture VS Code tasks. |
+| **Capture** | Capture supported terminal commands, run several servers at once, save commands with **Manage servers**, filter by source or run, and capture VS Code tasks. |
 | **Search** | Field/value autocomplete, editable filter chips, right-click **Include value** / **Exclude value**, any combination of log levels, and up to 50 saved searches. |
-| **Inspect** | Expand JSON, read structured exceptions and nested causes, open stack-frame source locations, and view up to 25 surrounding events on each side from the same session. |
+| **Inspect** | Expand JSON, read structured exceptions and nested causes, open stack-frame source locations, share an event’s exact run, and view up to 25 surrounding events on each side from the same run. |
 | **Arrange** | Auto-detected fields, custom and nested columns, sorting, drag-to-reorder, and resizable column widths. |
 | **Analyze** | Event rate, errors, latency, status codes, the top 10 log patterns, and normalized error groups for the current filter. |
-| **Share** | Export filtered JSONL, JSON, CSV, or Markdown context for AI tools. Exports and **Copy results** redact common credentials by default. |
+| **Share** | Export filtered JSONL, JSON, CSV, or Markdown context for AI tools, or share retained sources (including new runs) or specific command runs with Copilot for read-only live investigation. Exports and **Copy results** redact common credentials by default; agent tools always redact them. |
 
 **Live** follows the newest events. Turn it off to browse retained history in pages of up to 1,000 rows. Expanding an event holds your place while collection continues; changing filters, sorting, paging, or columns returns inspection to **Browse**. Choose **Live** or **Resume** to return to the newest rows.
 
-**New in 1.7.0:** visual quick reference, editable/removable search chips, and keyboard-friendly cell filters. See the [changelog](CHANGELOG.md) for the full release history.
+**New in 1.8.0:** terminal capture, source/run filters, an Unclassified level for plain text, and explicit redacted Copilot sharing with revocable read-only tools. See the [changelog](CHANGELOG.md) for the full release history.
 
 ## Find the logs you need
 
@@ -50,7 +52,7 @@ Type a term and press **Enter** to apply it. Click a chip to edit it, or its **�
 
 Right-click a cell to include or exclude its value without typing a query. Keyboard users can focus a cell and press **Shift+F10**. Server and level selections stay active.
 
-Common aliases work across log formats, including `level`/`severity`, `message`/`msg`, `status`/`statusCode`, and `durationMs`/`duration`. Logline recognizes Log4j2 JSON with MDC fields, ECS, Pino HTTP, and individual OpenTelemetry log records. Click **Syntax** in the search box for a quick reference.
+Common aliases work across log formats, including `level`/`severity`, `message`/`msg`, `status`/`statusCode`, and `durationMs`/`duration`. Plain-text terminal lines without an explicit leading severity are **Unclassified**. Logline recognizes Log4j2 JSON with MDC fields, ECS, Pino HTTP, and individual OpenTelemetry log records. Click **Syntax** in the search box for a quick reference.
 
 ## Save a server or capture a task
 
@@ -75,6 +77,8 @@ Set `autoStart` to `true` to start when Logline activates. Set `jsonOnly` to `tr
 
 **Already using VS Code tasks?** Run **Logline: Convert VS Code Task to Logline** to create a captured wrapper, including supported dependencies. Logline observes ordinary task lifecycle events automatically; retaining their stdout/stderr requires a captured wrapper. You can also define a task with `"type": "logline"` directly—see [task configuration](docs/usage.md#tasks).
 
+**Working with Copilot?** Share all retained Logline sources, choose specific runs, or share the exact run behind an expanded event. Sharing grants read-only access to redacted results in the current VS Code window; it does not execute commands or send logs into chat automatically. Ask Copilot to use the Logline tools, or run **Logline: Ask Copilot to Investigate Logs** for an editable handoff prompt.
+
 ## Settings and retention
 
 Open **Settings** in the toolbar for all options. A few useful defaults:
@@ -82,12 +86,13 @@ Open **Settings** in the toolbar for all options. A few useful defaults:
 | Setting | Default | Purpose |
 | --- | --- | --- |
 | `logline.source` | `both` | Capture stdout, stderr, or both. |
+| `logline.captureTerminals` | `false` | Capture new commands from supported VS Code terminals. |
 | `logline.columns` | `[]` | Auto-detect columns, or specify preferred fields. |
 | `logline.timezone` | `local` | Show local or UTC timestamps. |
 | `logline.maxEvents` | `50000` | Maximum retained events. |
 | `logline.maxMemoryMb` | `100` | Estimated event-storage budget in MiB. |
 | `logline.persistLogs` | `false` | Write original logs to `.logline/latest.log`. |
-| `logline.redactExports` | `true` | Redact exports and **Copy results**. |
+| `logline.redactExports` | `true` | Redact exports and **Copy results**. Agent sharing is always redacted. |
 
 Older events are discarded when either retention limit is reached. Search, context, and analysis cover retained events only; the memory budget estimates event storage, not total VS Code memory. Add `.logline/` to `.gitignore` if you enable persistence.
 
@@ -111,9 +116,8 @@ Host code lives in `src/` and compiles to `out/`. The webview entry point is `sr
 - [Architecture](ARCHITECTURE.md): modules, state ownership, and testing.
 - [Usage reference](docs/usage.md): detailed feature behavior and configuration.
 - [Changelog](CHANGELOG.md): complete release history.
-- [Code review](REVIEW.md): measured performance and follow-up work.
 
-When releasing, update `CHANGELOG.md`, the affected cards in `media/guide.html`, and user-facing highlights in `src/vscode/guide-content.ts`. Keep highlight section IDs aligned with the guide, then run `npm run check` and `npm run package`.
+When releasing, update `CHANGELOG.md`, the affected cards in `media/guide.html`, user-facing highlights in `src/vscode/guide-content.ts`, and `media/demo.gif`. Keep highlight section IDs aligned with the guide, then run `npm run check` and `npm run package`.
 
 ## License
 
