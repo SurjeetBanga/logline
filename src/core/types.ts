@@ -62,6 +62,8 @@ export interface SessionSummary {
   /** Source metadata used by terminal capture and agent sharing. */
   sourceKind?: 'process' | 'task' | 'terminal' | 'import';
   owned?: boolean;
+  /** Whether the session can be terminated by the Logs view. */
+  canStop?: boolean;
   captureComplete?: boolean;
   /** State of the observation stream for externally owned terminals. */
   captureStatus?: 'streaming' | 'complete' | 'interrupted' | 'unavailable' | 'failed';

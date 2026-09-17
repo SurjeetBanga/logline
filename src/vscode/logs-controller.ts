@@ -89,7 +89,7 @@ export class LogsController {
   handleMessage(send: (message: HostMessage) => void, message: unknown): Promise<void> {
     return handleMessage({
       store: this.store, config: this.config, transfer: this.transfer, searches: this.searches,
-      snapshot: request => this.snapshot(request), clear: () => this.clear(), stop: id => this.stop(id), runner: this.runner,
+      snapshot: request => this.snapshot(request), clear: () => this.clear(), stop: (serverId, sessionId) => this.stop(serverId, sessionId), runner: this.runner,
       showGuide: section => this.guideOpener?.(section), agentAccess: this.agentAccess,
       shareWithAgent: (sourceIds, anchor, sessionIds, chooseRuns) => this.shareWithAgent(sourceIds, anchor, sessionIds, chooseRuns),
       stopSharing: () => this.stopSharing(), askCopilot: anchor => this.askCopilot(anchor),
@@ -208,7 +208,14 @@ export class LogsController {
       return false;
     }
   }
-  stop(serverId?: string): void {
+  stop(serverId?: string, sessionId?: string): void {
+    if (sessionId) {
+      const record = this.registry.records.get(sessionId);
+      if (!record || record.status !== 'running' || record.canStop !== true || (serverId && record.serverId !== serverId)) return;
+      this.runner.stopSessionById(sessionId);
+      this.tasks.stopSessionById(sessionId);
+      return;
+    }
     if (serverId) this.runner.stopServer(serverId); else this.runner.stop();
     this.tasks.stop(serverId);
   }

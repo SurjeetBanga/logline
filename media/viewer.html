@@ -11,12 +11,20 @@
   <header>
     <div class="toolbar">
       <div class="source-controls" role="group" aria-label="Log source and run">
-        <select id="server" aria-label="Source"><option value="">All sources</option></select>
-        <span class="source-divider" aria-hidden="true"></span>
-        <select id="session" aria-label="Command run"><option value="">All runs</option></select>
+        <div class="scope-picker popover-container">
+          <button id="server" type="button" aria-label="Log source and command run" aria-haspopup="dialog" aria-expanded="false" aria-controls="scopeMenu">All sources · All runs</button>
+          <div id="scopeMenu" class="popover scope-menu" role="dialog" aria-label="Log source and command run" hidden>
+            <div class="scope-tabs" role="tablist" aria-label="Filter by">
+              <button id="sourcesTab" type="button" role="tab" aria-selected="true" aria-controls="sourceMenu">Sources</button>
+              <button id="runsTab" type="button" role="tab" aria-selected="false" aria-controls="sessionMenu" tabindex="-1">Runs</button>
+            </div>
+            <div id="sourceMenu" role="tabpanel" aria-labelledby="sourcesTab"></div>
+            <div id="sessionMenu" role="tabpanel" aria-labelledby="runsTab" hidden></div>
+          </div>
+        </div>
       </div>
       <button id="run" title="Run selected source" aria-label="Run selected source"><svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14"><path d="M5 3l7 5-7 5z" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/></svg>Run</button>
-      <button id="captureToggle" title="Capture output from the next supported VS Code terminal command">Enable terminal capture</button>
+      <button id="captureToggle" title="Terminal capture is off. Click to turn it on.">Terminal capture: Off</button>
       <button id="shareAgent" aria-pressed="false" title="Share existing and new captured logs in this window until stopped">Share logs with agent</button>
       <button id="follow" aria-pressed="true">Live</button>
       <div class="toolbar-actions">
@@ -98,7 +106,7 @@
       <thead><tr id="head-row"><th>Time</th><th>Level</th><th title="Click a message to expand it">Message</th><th>Source</th></tr></thead>
       <tbody id="logs"></tbody>
     </table>
-    <p id="empty">Make your terminal output searchable. Enable capture, then run commands normally in a supported VS Code terminal.</p>
+    <p id="empty">Make your terminal output searchable. Turn Terminal capture: On, then run commands normally in a supported VS Code terminal.</p>
   </section>
   <div id="cellFilterMenu" class="cell-filter-menu" role="menu" aria-labelledby="cellFilterLabel" aria-describedby="cellFilterReason" tabindex="-1" hidden>
     <div id="cellFilterLabel" class="cell-filter-label"></div>

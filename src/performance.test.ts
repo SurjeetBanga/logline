@@ -96,6 +96,21 @@ test('clear resets completed import status along with retained logs', () => {
   assert.equal(p.state.command, '');
 });
 
+test('controller routes an individual stop without stopping sibling runs', { timeout: 10000 }, async () => {
+  const p = provider();
+  const firstId = p.runner.run(process.execPath, undefined, { id: 'custom', label: 'First' }, undefined, undefined,
+    ['-e', 'setInterval(() => {}, 1000)'])!;
+  const secondId = p.runner.run(process.execPath, undefined, { id: 'custom', label: 'Second' }, undefined, undefined,
+    ['-e', 'setInterval(() => {}, 1000)'])!;
+  try {
+    await p.handleMessage(() => { }, { type: 'stop', serverId: 'custom', sessionId: firstId });
+    const first = [...p.runner.sessions].find(session => session.record.id === firstId)!;
+    const second = [...p.runner.sessions].find(session => session.record.id === secondId)!;
+    assert.equal(first.stopping, true);
+    assert.equal(second.stopping, false);
+  } finally { await p.dispose(); }
+});
+
 test('snapshot projects selected custom columns and exposes server-scoped payload choices', () => {
   const p = provider();
   p.store.add({ id: 1, level: 'info', serverId: 'api', fields: { service: 'api', logger: 'main', requestId: 'r1', traceId: 't1', method: 'GET', path: '/', custom: 'value' } });

@@ -129,7 +129,7 @@ export class TerminalCapture {
     if (this.ignoredSourceIds.has(id)) return;
     const record: SessionSummary = {
       id: randomBytes(8).toString('hex'), serverId: id, server: label, status: 'running', startedAt: Date.now(), events: 0,
-      sourceKind: 'terminal', owned: false, captureComplete: false, captureStatus: 'streaming', command, cwd,
+      sourceKind: 'terminal', owned: false, canStop: false, captureComplete: false, captureStatus: 'streaming', command, cwd,
       taskState: 'running'
     };
     this.registry.records.set(record.id, record);

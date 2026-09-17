@@ -57,3 +57,19 @@ test('stopping an old session ID leaves a later run alone', { timeout: 10000 }, 
     assert.equal([...runner.sessions][0].stopping, false);
   } finally { await runner.dispose(); }
 });
+
+test('stopping one active session leaves its sibling running', { timeout: 10000 }, async () => {
+  const store = new LogStore(100);
+  const runner = new ProcessRunner({ get: (_key, fallback) => fallback }, new SessionRegistry(), new Ingestion(store, () => { }), new RuntimeState(() => { }));
+  const firstId = runner.run(process.execPath, undefined, { id: 'first', label: 'First' }, undefined, undefined,
+    ['-e', 'setInterval(() => {}, 1000)'])!;
+  const secondId = runner.run(process.execPath, undefined, { id: 'second', label: 'Second' }, undefined, undefined,
+    ['-e', 'setInterval(() => {}, 1000)'])!;
+  try {
+    runner.stopSessionById(firstId);
+    const first = [...runner.sessions].find(session => session.record.id === firstId)!;
+    const second = [...runner.sessions].find(session => session.record.id === secondId)!;
+    assert.equal(first.stopping, true);
+    assert.equal(second.stopping, false);
+  } finally { await runner.dispose(); }
+});

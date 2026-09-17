@@ -10,6 +10,26 @@ function setup() {
   return { store, registry, tasks: new TaskLifecycle(registry, new Ingestion(store, () => { }), new RuntimeState(() => { }), () => false) };
 }
 
+test('stopping one task execution leaves another task running', () => {
+  const provider = setup();
+  const terminated: string[] = [];
+  const execution = (name: string) => ({
+    task: { name, source: 'npm', definition: { type: 'shell' } },
+    terminate() { terminated.push(name); }
+  }) as unknown as import('vscode').TaskExecution;
+  const first = execution('First');
+  const second = execution('Second');
+  provider.tasks.captureTaskStart(first);
+  provider.tasks.captureTaskStart(second);
+  const firstId = provider.tasks.executions.get(first)!.id;
+
+  provider.tasks.stopSessionById(firstId);
+
+  assert.deepEqual(terminated, ['First']);
+  assert.equal(provider.tasks.executions.get(first)!.status, 'stopping');
+  assert.equal(provider.tasks.executions.get(second)!.status, 'running');
+});
+
 test('task lifecycle records names, dependencies, process ids, and exit reasons', () => {
   const provider = setup();
   const execution = {

@@ -14,8 +14,21 @@ export class TaskLifecycle {
   stop(serverId?: string): void {
     for (const [execution, record] of this.executions) {
       if (serverId && record.serverId !== serverId) continue;
-      try { execution.terminate(); } catch { /* task may already have ended */ }
+      this.terminate(execution, record);
     }
+  }
+  stopSessionById(id: string): void {
+    for (const [execution, record] of this.executions) {
+      if (record.id === id) { this.terminate(execution, record); return; }
+    }
+  }
+  private terminate(execution: vscode.TaskExecution, record: SessionSummary): void {
+    if (record.status !== 'running') return;
+    record.status = 'stopping';
+    record.taskState = 'stopping';
+    this.state.status = `Stopping: ${record.taskName}`;
+    this.state.notify();
+    try { execution.terminate(); } catch { /* task may already have ended */ }
   }
   private taskSummary(execution: vscode.TaskExecution): SessionSummary {
     const existing = this.executions.get(execution);
@@ -38,7 +51,7 @@ export class TaskLifecycle {
       taskState: 'running',
       dependencies: deps,
       dependencyState: this.registry.dependencyState(deps, taskScope),
-      source: task.source
+      source: task.source, sourceKind: 'task', canStop: true
     };
     this.executions.set(execution, record);
     this.registry.records.set(record.id, record);
@@ -100,8 +113,10 @@ export class TaskLifecycle {
     const record = this.taskSummary(execution);
     record.exitCode = exitCode;
     record.exitReason = exitCode === undefined ? 'terminated' : `exit code ${exitCode}`;
-    record.taskState = exitCode === undefined || exitCode !== 0 ? 'failed' : 'exited';
-    if (record.taskState === 'failed') record.status = 'failed';
+    const stopping = record.status === 'stopping';
+    record.taskState = stopping ? 'exited' : exitCode === undefined || exitCode !== 0 ? 'failed' : 'exited';
+    if (stopping) record.status = 'exited';
+    else if (record.taskState === 'failed') record.status = 'failed';
     this.registry.refreshDependents(record.taskName, record.taskScope, record.taskLabel);
     this.taskLifecycleEvent(record, `Task process ended: ${record.taskName} (${record.exitReason})`, record.status === 'failed' ? 'error' : 'info', { exitCode });
     this.registry.pruneSessionRegistry();

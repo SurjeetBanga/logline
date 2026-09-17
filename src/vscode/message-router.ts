@@ -15,7 +15,7 @@ import type { AgentLogAccess } from './agent-access';
 interface MessageServices {
   store: LogStore; config: Settings; runner: ProcessRunner; transfer: LogTransfer; searches: SavedSearches;
   snapshot(request: Extract<ViewRequest, { type: 'snapshot'; }>): Snapshot;
-  clear(): void; stop(serverId?: string): void;
+  clear(): void; stop(serverId?: string, sessionId?: string): void;
   showGuide(section: 'guide' | 'whatsNew'): void;
   agentAccess: AgentLogAccess;
   shareWithAgent(sourceIds?: string[], anchor?: number, sessionIds?: string[], chooseRuns?: boolean): Promise<void>;
@@ -65,7 +65,7 @@ export async function handleMessage(services: MessageServices, send: (message: H
       return;
     }
     case 'clear': services.clear(); return;
-    case 'stop': services.stop(msg.serverId); return;
+    case 'stop': services.stop(msg.serverId, msg.sessionId); return;
     case 'config': await vscode.commands.executeCommand('workbench.action.openSettings', '@ext:surjeetbanga.logline'); return;
     case 'manageServers': await manageServers(); return;
     case 'run': {
