@@ -4,6 +4,8 @@ import type { ViewerState } from '../state';
 
 export function createAnalysis(elements: Elements, state: ViewerState) {
   const SVG_NS = 'http://www.w3.org/2000/svg';
+  let formatterKey: string | undefined;
+  let cachedFormatter: Intl.DateTimeFormat | null | undefined;
 
   function svgEl(tag: string, attrs: Record<string, string | number> = {}) {
     const el = document.createElementNS(SVG_NS, tag);
@@ -13,6 +15,9 @@ export function createAnalysis(elements: Elements, state: ViewerState) {
   }
 
   function timeAxisFormatter(spanMs: number | undefined) {
+    const key = `${state.displayTimezone ?? 'local'}:${spanMs !== undefined && spanMs < 3 * 60 * 1000 ? 'seconds' : 'minutes'}`;
+    if (key === formatterKey) return cachedFormatter;
+    formatterKey = key;
     const options: Intl.DateTimeFormatOptions = { hour: '2-digit', minute: '2-digit', hour12: false };
     if (spanMs !== undefined && spanMs < 3 * 60 * 1000)
       options.second = '2-digit';
@@ -21,11 +26,12 @@ export function createAnalysis(elements: Elements, state: ViewerState) {
     else if (state.displayTimezone && state.displayTimezone !== 'local')
       options.timeZone = state.displayTimezone;
     try {
-      return new Intl.DateTimeFormat(undefined, options);
+      cachedFormatter = new Intl.DateTimeFormat(undefined, options);
     }
     catch {
-      return null;
+      cachedFormatter = null;
     }
+    return cachedFormatter;
   }
 
   // Real clock time for a bucket, so the x-axis reads like a timeline instead of an

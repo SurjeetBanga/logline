@@ -3,6 +3,8 @@ import { performance } from 'node:perf_hooks';
 import { LogStore } from '../out/core/log-store.js';
 import { parseLogLine } from '../out/core/log-event.js';
 import { redactEvent } from '../out/core/redaction.js';
+import { AgentLogAccess } from '../out/vscode/agent-access.js';
+import { SessionRegistry } from '../out/capture/session-registry.js';
 
 // Diagnostic microbenchmark, not a timing assertion in the test suite.
 const store = new LogStore(50000, 100 * 1024 * 1024);
@@ -38,4 +40,9 @@ measure('Previous clipboard pipeline: clone/redact all matches, then limit', old
 measure('Bounded clipboard pipeline: page, then clone/redact', boundedSelection);
 measure('Indexed latest page', () => store.page(request));
 measure('Cached filtered page', () => store.page({ query: 'service:api status:200' }));
+measure('Indexed autocomplete', () => store.fieldSuggestions('service:'));
+const access = new AgentLogAccess(store, new SessionRegistry(), () => 50000);
+const share = access.shareAll();
+measure('Agent search page', () => access.search({ shareId: share.shareId, limit: 200 }));
+measure('Agent analysis newest 10,000', () => access.analyze({ shareId: share.shareId }));
 measure('Retained analysis', () => store.analysis());

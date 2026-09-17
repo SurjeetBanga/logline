@@ -72,6 +72,17 @@ test('conversion preserves edits made while its task picker is open', async () =
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
+test('conversion writes a captured process task into tasks.json', async () => {
+  const { root, file } = setup();
+  try {
+    writeFileSync(file, '{"version":"2.0.0","tasks":[]}');
+    await convertTask();
+    const text = readFileSync(file, 'utf8');
+    assert.match(text, /"type": "logline"/);
+    assert.match(text, /node|process/);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
 test('task discovery covers all workspace folders and resolution retains its original scope', async () => {
   const { root } = setup();
   try {
@@ -94,4 +105,20 @@ test('an explicit empty argument array stays in argv mode', () => {
     { dependencyState: () => 'none' } as never, { type: 'logline', command: 'tool', args: [] }, undefined);
   terminal.open();
   assert.deepEqual(actualArgs, []);
+});
+
+test('task provider rejects unsupported definitions and pseudo terminals stop their own session', async () => {
+  const disposables = registerTasks({} as never, {} as never, {} as never);
+  assert.equal(disposables.length, 5);
+  const missingFolder = { uri: { fsPath: path.join(tmpdir(), 'missing-logline-tasks'), toString: () => 'missing' } } as unknown as vscode.WorkspaceFolder;
+  folders = [missingFolder];
+  assert.deepEqual(await provider.provideTasks({} as never), []);
+  assert.equal(await provider.resolveTask({ definition: { type: 'shell', command: 'echo' } } as unknown as vscode.Task, {} as never), undefined);
+  let stopped: string | undefined;
+  const terminal = new LogPseudoTerminal({
+    run: () => 'session-1',
+    stopSessionById: (id: string) => { stopped = id; }
+  } as never, { dependencyState: () => 'none' } as never, { type: 'logline', command: 'tool' }, undefined);
+  terminal.open(); terminal.handleInput(); terminal.close();
+  assert.equal(stopped, 'session-1');
 });

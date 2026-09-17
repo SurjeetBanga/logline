@@ -1,6 +1,7 @@
 import type { LogEvent } from './types';
 
 const LEVELS = ['trace', 'debug', 'info', 'warn', 'error', 'fatal'];
+const LEVEL_BY_CODE: Record<number, string> = { 10: 'trace', 20: 'debug', 30: 'info', 40: 'warn', 50: 'error', 60: 'fatal' };
 const IGNORED_FIELDS = new Set(['level', 'severity', 'message', 'msg', 'event', 'name', 'timestamp', 'time', 'ts', 'datetime', 'timeMillis', 'contextMap']);
 const MAX_FIELDS = 120;
 type JsonObject = Record<string, unknown>;
@@ -41,8 +42,7 @@ function readValue(object: JsonObject | undefined, ...names: string[]): unknown 
 
 export function normalizeLevel(level: string | number | undefined, stream: string, terminalFallback?: string): string {
   if (typeof level === 'number') {
-    const byCode: Record<number, string> = { 10: 'trace', 20: 'debug', 30: 'info', 40: 'warn', 50: 'error', 60: 'fatal' };
-    return byCode[level] ?? (stream === 'stderr' ? 'error' : 'info');
+    return LEVEL_BY_CODE[level] ?? (stream === 'stderr' ? 'error' : 'info');
   }
   const normalized = typeof level === 'string' ? level.toLowerCase() : '';
   if (LEVELS.includes(normalized)) return normalized;
@@ -87,7 +87,7 @@ function terminalLevel(text: string): string {
 }
 
 export function stripAnsi(value: string): string {
-  return value.replace(/\[[0-?]*[ -/]*[@-~]/g, '');
+  return value.includes('\x1b') ? value.replace(/\[[0-?]*[ -/]*[@-~]/g, '') : value;
 }
 
 function isPrimitive(value: unknown): value is string | number | boolean {

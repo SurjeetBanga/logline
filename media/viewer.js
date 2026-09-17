@@ -4,6 +4,8 @@
   // src/webview/analysis/charts.ts
   function createAnalysis(elements, state) {
     const SVG_NS = "http://www.w3.org/2000/svg";
+    let formatterKey;
+    let cachedFormatter;
     function svgEl(tag, attrs = {}) {
       const el = document.createElementNS(SVG_NS, tag);
       for (const [key, value] of Object.entries(attrs))
@@ -11,6 +13,9 @@
       return el;
     }
     function timeAxisFormatter(spanMs) {
+      const key = `${state.displayTimezone ?? "local"}:${spanMs !== void 0 && spanMs < 3 * 60 * 1e3 ? "seconds" : "minutes"}`;
+      if (key === formatterKey) return cachedFormatter;
+      formatterKey = key;
       const options = { hour: "2-digit", minute: "2-digit", hour12: false };
       if (spanMs !== void 0 && spanMs < 3 * 60 * 1e3)
         options.second = "2-digit";
@@ -19,10 +24,11 @@
       else if (state.displayTimezone && state.displayTimezone !== "local")
         options.timeZone = state.displayTimezone;
       try {
-        return new Intl.DateTimeFormat(void 0, options);
+        cachedFormatter = new Intl.DateTimeFormat(void 0, options);
       } catch {
-        return null;
+        cachedFormatter = null;
       }
+      return cachedFormatter;
     }
     function bucketTime(range, bucketCount, index) {
       if (range?.from === void 0 || range?.to === void 0 || !bucketCount)

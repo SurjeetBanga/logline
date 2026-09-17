@@ -9,11 +9,13 @@ const settings = new Map<string, unknown>();
 const warnings: string[] = [];
 let importUris: { scheme: string; path: string; fsPath: string; }[] = [];
 let clipboard = '';
+let configurationListener: ((event: { affectsConfiguration: (key: string) => boolean }) => void) | undefined;
 const mock = {
+  ConfigurationTarget: { Workspace: 1 },
   env: { clipboard: { writeText: async (text: string) => { clipboard = text; } } },
   workspace: {
     getConfiguration: () => ({ get: (key: string, fallback: unknown) => settings.get(key) ?? fallback }),
-    onDidChangeConfiguration: () => ({ dispose() { } }),
+    onDidChangeConfiguration: (listener: (event: { affectsConfiguration: (key: string) => boolean }) => void) => { configurationListener = listener; return { dispose() { configurationListener = undefined; } }; },
     fs: { readFile: () => { throw new Error('Native imports must stream instead of reading the whole file'); } }
   },
   window: {
@@ -171,5 +173,26 @@ test('clipboard and AI exports only read raw data for the latest 1,000 matching 
   await p.transfer.exportForAI(request);
   assert.match(markdown, /Events: 2000 \(latest 1000 included\)/);
   assert.ok(!markdown.includes('secret'));
+  await p.dispose();
+});
+
+test('controller applies configuration changes, refreshes sharing redaction, and shuts down idempotently', async () => {
+  const p = provider();
+  settings.set('maxEvents', 1000);
+  settings.set('redactionFields', ['customer']);
+  p.store.add({ id: 1, serverId: 'api', sessionId: 'run', level: 'info', message: 'customer=secret' });
+  const share = p.agentAccess.shareAll();
+  p.persistence.persistedBytes = 42;
+  const updates: unknown[] = [];
+  const subscription = p.notifications.subscribe(message => updates.push(message));
+  const changed = new Set(['logline', 'logline.maxEvents', 'logline.persistLogs', 'logline.redactionFields', 'logline.captureTerminals', 'logline.servers']);
+  configurationListener!({ affectsConfiguration: key => changed.has(key) });
+  assert.equal(p.store.maxRows, 1000);
+  assert.equal(p.persistence.persistedBytes, undefined);
+  assert.equal(p.terminalCapture.isEnabled, false);
+  assert.ok(updates.some(message => (message as any).type === 'serversChanged'));
+  assert.doesNotMatch(JSON.stringify(p.agentAccess.search({ shareId: share.shareId! })), /secret/);
+  subscription.dispose();
+  await p.dispose();
   await p.dispose();
 });

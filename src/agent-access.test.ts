@@ -78,6 +78,36 @@ test('agent search stays bounded for large retained stores and returns a cursor'
   assert.ok(result.nextCursor);
 });
 
+test('agent pagination merges sources newest-first with opaque per-source cursors', () => {
+  const store = new LogStore();
+  for (const [id, source] of [[1, 'api'], [2, 'web'], [3, 'api'], [4, 'web'], [5, 'api'], [6, 'web']] as const)
+    store.add({ id, serverId: source, sessionId: source, level: 'info', message: String(id) });
+  const access = new AgentLogAccess(store, new SessionRegistry(), () => 6);
+  const share = access.shareAll();
+  const first = access.search({ shareId: share.shareId!, limit: 2 });
+  const second = access.search({ shareId: share.shareId!, limit: 2, cursor: first.nextCursor });
+  const third = access.search({ shareId: share.shareId!, limit: 2, cursor: second.nextCursor });
+  assert.deepEqual(first.events.map(event => event.id), [6, 5]);
+  assert.deepEqual(second.events.map(event => event.id), [4, 3]);
+  assert.deepEqual(third.events.map(event => event.id), [2, 1]);
+  assert.equal(first.matched, 6);
+  assert.equal(third.hasMore, false);
+});
+
+test('agent session filters use indexed counts and analyze only the newest 10,000 matches', () => {
+  const store = new LogStore(20_000, 100 * 1024 * 1024);
+  for (let id = 1; id <= 12_000; id++) {
+    store.add({ id, serverId: id % 2 ? 'api' : 'web', sessionId: id % 3 ? 'run-a' : 'run-b', level: 'info', message: `event ${id}` });
+  }
+  const access = new AgentLogAccess(store, new SessionRegistry(), () => 12_000);
+  const share = access.shareAll();
+  const filtered = access.search({ shareId: share.shareId!, sessionIds: ['run-b'], limit: 200 });
+  assert.ok(filtered.events.every(event => event.sessionId === 'run-b'));
+  assert.equal(filtered.matched, 4_000);
+  const analysis = access.analyze({ shareId: share.shareId! }) as { coverage: { matched: number; analyzed: number; limited: boolean } };
+  assert.deepEqual(analysis.coverage, { matched: 12_000, analyzed: 10_000, limited: true });
+});
+
 test('agent redaction applies configured fields to metadata and payloads', () => {
   const store = new LogStore();
   store.add({ id: 1, serverId: 'api', sessionId: 'run', server: 'customer=acme-secret', level: 'info', message: 'customer=acme-secret', raw: '{"customer":"acme-secret"}' });

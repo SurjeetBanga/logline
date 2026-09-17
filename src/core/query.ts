@@ -35,6 +35,14 @@ export interface Token {
   search?: RegExp;
   /** Whether the value is shaped like a range or comparison, so ordinary terms skip the numeric coercion. */
   compare?: boolean;
+  /** Precomputed numeric comparison, when the token has one. */
+  numericComparison?: { operator: '>' | '>=' | '<' | '<='; target: number };
+  /** Precomputed numeric range, when the token has one. */
+  numericRange?: [number, number];
+  /** Precomputed timestamp range, in epoch milliseconds. */
+  timestampRange?: [number, number];
+  /** Precomputed duration for `last:` filters. */
+  relativeMs?: number;
 }
 export type TokenGroup = Token[];
 export type ParsedQuery = TokenGroup[];
@@ -95,8 +103,23 @@ function parseToken(token: string): Token {
   if (field === undefined && regex === undefined && value && !value.includes(' ')) {
     try { search = new RegExp(value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i'); } catch { search = undefined; }
   }
-  const compare = !quoted && (/^(>=|<=|>|<)\s*-?\d+(?:\.\d+)?$/.test(value) || /^\[.*\s+to\s+.*\]$/.test(value));
-  return { negate, field, canonical, value, regex, search, compare };
+  const comparison = !quoted && value.match(/^(>=|<=|>|<)\s*(-?\d+(?:\.\d+)?)$/);
+  const numericComparison = comparison ? {
+    operator: comparison[1] as '>' | '>=' | '<' | '<=', target: Number(comparison[2])
+  } : undefined;
+  const range = !quoted && value.match(/^\[(-?\d+(?:\.\d+)?)\s+to\s+(-?\d+(?:\.\d+)?)\]$/);
+  const numericRange = range ? [Number(range[1]), Number(range[2])] as [number, number] : undefined;
+  const compare = !quoted && (numericComparison !== undefined || numericRange !== undefined || /^\[.*\s+to\s+.*\]$/.test(value));
+  const timestampRange = (canonical === 'timestamp' || canonical === 'time') && !quoted
+    ? value.match(/^\[([^\s]+)\s+to\s+([^\]]+)\]$/i)
+    : null;
+  const parsedTimestampRange = timestampRange
+    ? [Date.parse(timestampRange[1]), Date.parse(timestampRange[2])] as [number, number]
+    : undefined;
+  const last = canonical === 'last' ? value.match(/^(\d+)(s|m|h|d)$/) : null;
+  const relativeMs = last ? Number(last[1]) * ({ s: 1000, m: 60000, h: 3600000, d: 86400000 } as Record<string, number>)[last[2]] : undefined;
+  return { negate, field, canonical, value, regex, search, compare, numericComparison, numericRange,
+    timestampRange: parsedTimestampRange, relativeMs };
 }
 
 /**
@@ -135,14 +158,12 @@ function isSafeRegex(source: string): boolean {
   return groups.length === 0 && !escaped && !inClass;
 }
 
-export function matchesQuery(event: LogEvent, input: string | ParsedQuery): boolean {
+export function matchesQuery(event: LogEvent, input: string | ParsedQuery, queryNow?: number): boolean {
   const groups = Array.isArray(input) ? input : parseQuery(input);
   if (!groups.length) return true;
   return groups.some(group => group.every(token => {
     if (token.canonical === 'last') {
-      const match = token.value.match(/^(\d+)(s|m|h|d)$/);
-      const units: Record<string, number> = { s: 1000, m: 60000, h: 3600000, d: 86400000 };
-      const matched = match ? (event.timestampMs ?? 0) >= Date.now() - Number(match[1]) * units[match[2]] : false;
+      const matched = token.relativeMs !== undefined && (event.timestampMs ?? 0) >= (queryNow ?? Date.now()) - token.relativeMs;
       return token.negate ? !matched : matched;
     }
     if (token.canonical === 'exists') {
@@ -150,9 +171,8 @@ export function matchesQuery(event: LogEvent, input: string | ParsedQuery): bool
       return token.negate ? !present : present;
     }
     if (token.canonical === 'timestamp' || token.canonical === 'time') {
-      const range = token.compare ? token.value.match(/^\[([^\s]+)\s+TO\s+([^\]]+)\]$/i) : null;
       let matched: boolean;
-      if (range) matched = (event.timestampMs ?? 0) >= Date.parse(range[1]) && (event.timestampMs ?? 0) <= Date.parse(range[2]);
+      if (token.timestampRange) matched = (event.timestampMs ?? 0) >= token.timestampRange[0] && (event.timestampMs ?? 0) <= token.timestampRange[1];
       else matched = (event.timestamp ?? '').toLowerCase().includes(token.value);
       return token.negate ? !matched : matched;
     }
@@ -173,13 +193,15 @@ export function matchesQuery(event: LogEvent, input: string | ParsedQuery): bool
       // Global and sticky expressions carry a cursor between calls.
       if (token.regex) token.regex.lastIndex = 0;
       matched = token.regex ? token.regex.test(actual) : false;
-    } else if (token.field && isNumeric && /^(>=|<=|>|<)\s*-?\d+(?:\.\d+)?$/.test(token.value)) {
-      const operator = token.value.match(/^(>=|<=|>|<)/)![1];
-      const target = Number(token.value.slice(operator.length));
+    } else if (token.field && isNumeric && token.numericComparison) {
+      const { operator, target } = token.numericComparison;
       matched = operator === '>' ? numeric > target : operator === '>=' ? numeric >= target : operator === '<' ? numeric < target : numeric <= target;
-    } else if (token.field && isNumeric && /^\[.*\s+to\s+.*\]$/.test(token.value)) {
-      const range = token.value.slice(1, -1).split(/\s+to\s+/);
-      matched = numeric >= Number(range[0]) && numeric <= Number(range[1]);
+    } else if (token.field && isNumeric && token.numericRange) {
+      matched = numeric >= token.numericRange[0] && numeric <= token.numericRange[1];
+    } else if (token.field && isNumeric && token.compare) {
+      // Preserve the old behavior for malformed numeric ranges: a numeric
+      // field must not fall back to a substring match for a comparison token.
+      matched = false;
     }
     if (matched === undefined) {
       if (token.canonical === 'status' && /^\dxx$/.test(token.value)) matched = actual.startsWith(token.value[0]);

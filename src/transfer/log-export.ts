@@ -1,6 +1,6 @@
 import type { LogEvent } from '../core/types';
 import { setImmediate as yieldToHost } from 'node:timers/promises';
-import { redactEvent, type RedactionOptions } from '../core/redaction';
+import { createRedactor, type RedactionOptions } from '../core/redaction';
 
 export const CSV_BASE_COLUMNS = ['id', 'timestamp', 'timestampMs', 'level', 'message', 'stream', 'server', 'serverId', 'sessionId', 'raw'];
 export const CSV_FIELD_LIMIT = 200;
@@ -42,14 +42,15 @@ function* exportParts(events: readonly LogEvent[], format: ExportFormat, transfo
     if (fields.size >= CSV_FIELD_LIMIT) break outer;
   }
   const columns = [...CSV_BASE_COLUMNS, ...[...fields].sort().map(key => `field:${key}`)];
-  yield columns.map(csvCell).join(',') + '\n';
+  const descriptors: ({ column: string; field: string } | { column: string; key: keyof LogEvent })[] = columns.map(column => column.startsWith('field:')
+    ? { column, field: column.slice('field:'.length) }
+    : { column, key: column as keyof LogEvent });
+  yield descriptors.map(descriptor => csvCell(descriptor.column)).join(',') + '\n';
   for (const original of events) {
     const event = transform(original);
-    yield columns.map(column => {
-      const key = column.slice('field:'.length);
-      return column.startsWith('field:') ? csvCell(event.fields && Object.hasOwn(event.fields, key) ? event.fields[key] : undefined)
-        : csvCell(event[column as keyof LogEvent]);
-    }).join(',') + '\n';
+    yield descriptors.map(descriptor => 'field' in descriptor
+      ? csvCell(event.fields && Object.hasOwn(event.fields, descriptor.field) ? event.fields[descriptor.field] : undefined)
+      : csvCell(event[descriptor.key])).join(',') + '\n';
   }
 }
 
@@ -60,9 +61,10 @@ export function serializeExport(events: readonly LogEvent[], format: ExportForma
 /** One bounded batch plus one record; yield even when records are very small. */
 export async function* exportChunks(events: readonly LogEvent[], format: ExportFormat, options: RedactionOptions = {},
   cancelled = () => false): AsyncGenerator<Uint8Array> {
+  const redactor = createRedactor(options);
   const transform = (event: LogEvent) => {
     if (cancelled()) throw new Error('Export cancelled.');
-    return redactEvent(event, options);
+    return redactor.event(event);
   };
   let parts: Buffer[] = [];
   let bytes = 0;

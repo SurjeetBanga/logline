@@ -73,3 +73,23 @@ test('stopping one active session leaves its sibling running', { timeout: 10000 
     assert.equal(second.stopping, false);
   } finally { await runner.dispose(); }
 });
+
+test('process runner records spawn errors, rejects duplicate saved servers, and shuts down when idle', { timeout: 10000 }, async () => {
+  const registry = new SessionRegistry();
+  const state = new RuntimeState(() => { });
+  const runner = new ProcessRunner({ get: (_key, fallback) => fallback }, registry, new Ingestion(new LogStore(), () => { }), state);
+  let errorExit!: (code: number) => void;
+  const done = new Promise<number>(resolve => { errorExit = resolve; });
+  const id = runner.run('/definitely/not/a/real/logline-command', undefined, { id: 'broken', label: 'Broken' }, undefined, undefined, [], errorExit);
+  assert.ok(id);
+  const record = registry.records.get(id!);
+  await done;
+  assert.equal(record?.status, 'failed');
+  assert.match(record?.error ?? '', /ENOENT|not found/i);
+  const running = runner.run(process.execPath, undefined, { id: 'single', label: 'Single' }, undefined, undefined, ['-e', 'setInterval(() => {}, 1000)']);
+  assert.ok(running);
+  assert.equal(runner.run(process.execPath, undefined, { id: 'single', label: 'Single' }, undefined, undefined, []), undefined);
+  runner.stopSessionById('missing');
+  await runner.dispose();
+  await runner.dispose();
+});

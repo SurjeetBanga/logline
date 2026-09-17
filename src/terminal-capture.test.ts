@@ -137,3 +137,20 @@ test('terminal capture prunes completed session history', async () => {
   assert.ok(h.registry.records.size <= 100);
   h.capture.dispose();
 });
+
+test('terminal capture ignores disabled/ignored terminals and records unavailable streams', async () => {
+  const terminal = { name: 'Ignored terminal' };
+  const h = harness(false, 100000, [terminal]);
+  const execution = { commandLine: { value: 'ignored' }, async *read() { yield 'ignored\n'; } };
+  h.capture.ignoreTerminal(terminal);
+  h.start({ terminal, execution });
+  assert.equal(h.registry.records.size, 0);
+  h.capture.resetTerminalIgnore(terminal);
+  h.capture.setEnabled(true);
+  const unavailable = { commandLine: { value: 'unavailable' }, read: () => undefined };
+  h.start({ terminal, execution: unavailable });
+  assert.equal([...h.registry.records.values()][0].captureStatus, 'unavailable');
+  assert.equal(h.capture.status().state, 'attention');
+  h.end({ terminal, execution: {} as never, exitCode: 1 });
+  h.capture.dispose(); h.capture.dispose();
+});

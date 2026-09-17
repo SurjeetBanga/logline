@@ -76,6 +76,28 @@ test('case-insensitive server selection exposes fields from every matching ident
   assert.ok(!store.columnFields('Api').includes('unrelated'));
 });
 
+test('server and session counts stay correct across wrapping, resize, mixed case ids, and clear', () => {
+  const store = new LogStore(5);
+  store.add({ id: 1, serverId: 'API', sessionId: 'one', level: 'info' });
+  store.add({ id: 2, serverId: 'api', sessionId: 'one', level: 'info' });
+  store.add({ id: 3, serverId: 'api', sessionId: 'two', level: 'info' });
+  store.add({ id: 4, serverId: 'worker', sessionId: 'w', level: 'info' });
+  store.add({ id: 5, serverId: 'api', sessionId: 'two', level: 'info' });
+  assert.equal(store.sessionEventCount('API', 'one'), 1);
+  store.add({ id: 6, serverId: 'worker', sessionId: 'w2', level: 'info' });
+  assert.equal(store.sessionEventCount('api', 'one'), 1);
+  assert.equal(store.sessionEventCount('api', 'two'), 2);
+  assert.deepEqual(store.sessionIds('api').sort(), ['one', 'two']);
+  assert.deepEqual(store.all({ serverId: 'Api' }).map(event => event.id), [2, 3, 5]);
+  assert.deepEqual(store.exportEvents({ serverId: 'Api', sessionIds: ['two'] }).map(event => event.id), [3, 5]);
+  store.resize(2, store.maxBytes);
+  assert.equal(store.sessionEventCount('api', 'two'), 1);
+  assert.equal(store.sessionEventCount('worker', 'w2'), 1);
+  store.clear();
+  assert.equal(store.sessionEventCount('api', 'two'), 0);
+  assert.deepEqual(store.sessionIds(), []);
+});
+
 test('server indexes release evicted records under the memory budget', () => {
   const store = new LogStore(5000, 8192);
   for (let id = 1; id <= 3000; id++) {
