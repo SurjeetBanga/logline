@@ -2,7 +2,7 @@
 
 **Live tail for JSON logs, right inside VS Code.** Run your server, filter the noise, and inspect an error without leaving the editor. Logline turns structured logs into a searchable table in the bottom **Logs** panel and keeps plain-text output alongside them.
 
-Logline can also capture commands you run in supported VS Code terminals. Enable **Enable terminal capture** once in the Logs panel, run commands normally, and their output becomes searchable without wrapping the command. Choose **Share logs with agent** to make retained Logline sources and new runs in this VS Code window available to Copilot. The first use asks for confirmation and explains that redaction may not remove every sensitive value; later uses enable sharing immediately. The toolbar shows **Sharing logs · Stop**, with the sharing scope below it. Continue in your existing Copilot agent chat and ask it to check the logs. Use **More actions → Choose specific runs to share…** to limit access, or click **Stop** on the sharing button to revoke it. Sharing is held in memory and ends when logs are cleared or the window or workspace changes.
+Logline can also capture commands you run in supported VS Code terminals. Enable **Enable terminal capture** once in the Logs panel, run the next command normally, and its output becomes searchable without wrapping the command. Commands already in progress cannot be backfilled. Completed terminal runs remain available while their logs are retained; empty stale terminal metadata is removed automatically. Choose **Share logs with agent** to make retained Logline sources and new runs in this VS Code window available to Copilot. The first use asks for confirmation and explains that redaction may not remove every sensitive value; later uses enable sharing immediately. The toolbar shows **Sharing logs · Stop**, with the sharing scope below it. Continue in your existing Copilot agent chat and ask it to check the logs. Use **More actions → Choose specific runs to share…** to limit access, or click **Stop** on the sharing button to revoke it. Sharing is held in memory and ends when logs are cleared or the window or workspace changes.
 
 ![Logline demo: follow incoming logs, filter errors with search chips and cell actions, inspect a stack trace and surrounding context, then analyze the results.](media/demo.gif)
 
@@ -86,7 +86,7 @@ Open **Settings** in the toolbar for all options. A few useful defaults:
 | Setting | Default | Purpose |
 | --- | --- | --- |
 | `logline.source` | `both` | Capture stdout, stderr, or both. |
-| `logline.captureTerminals` | `false` | Capture new commands from supported VS Code terminals. |
+| `logline.captureTerminals` | `false` | Capture the next commands from supported VS Code terminals; output from commands already in progress cannot be recovered. |
 | `logline.columns` | `[]` | Auto-detect columns, or specify preferred fields. |
 | `logline.timezone` | `local` | Show local or UTC timestamps. |
 | `logline.maxEvents` | `50000` | Maximum retained events. |

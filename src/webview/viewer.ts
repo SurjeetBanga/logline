@@ -126,7 +126,7 @@ export function createViewer(api: WebviewApi) {
       : data.captureStatus?.state === 'attention' ? 'Capture needs attention'
         : data.captureTerminals ? 'Terminal capture ready' : 'Enable terminal capture';
     elements.captureToggle.setAttribute('aria-pressed', String(data.captureTerminals));
-    elements.captureToggle.title = data.captureStatus?.detail || 'Capture output from new supported VS Code terminal commands';
+    elements.captureToggle.title = data.captureStatus?.detail || 'Capture output from the next supported VS Code terminal command';
     const sharing = data.agentSharing?.active;
     agentSharingActive = Boolean(sharing);
     const sharedRuns = sharing ? data.agentSharing.sources.reduce((sum, source) => sum + (source.runs?.length ?? source.sessions), 0) : 0;
@@ -144,6 +144,7 @@ export function createViewer(api: WebviewApi) {
     const activeSessions = Array.isArray(data.sessions) ? data.sessions.filter(session => ['running', 'stopping'].includes(session.status)) : [];
     elements.sessions.textContent = activeSessions.length
       ? `${activeSessions.length} active session${activeSessions.length === 1 ? '' : 's'}` : 'No active sessions';
+    let selectionChanged = false;
     if (data.servers) {
       const signature = JSON.stringify(data.servers.map(server => [server.id, server.label, server.status, server.activeSessions,
       server.taskName, server.taskType, server.dependencies, server.dependencyState, server.exitReason]));
@@ -170,8 +171,14 @@ export function createViewer(api: WebviewApi) {
           server.exitReason ? `Exit: ${server.exitReason}` : undefined].filter(Boolean).join(' · ') || server.status;
         });
         elements.server.replaceChildren(...options);
-        elements.server.value = data.servers.some(server => server.id === state.selectedServer) ? state.selectedServer : '';
-        state.selectedServer = elements.server.value;
+        const selectedServer = data.servers.some(server => server.id === state.selectedServer) ? state.selectedServer : '';
+        if (selectedServer !== state.selectedServer) {
+          state.selectedServer = selectedServer;
+          state.selectedSession = '';
+          sessionSignature = '';
+          selectionChanged = true;
+        }
+        elements.server.value = selectedServer;
       }
     }
     if (data.sessions) {
@@ -190,9 +197,19 @@ export function createViewer(api: WebviewApi) {
           options[index + 1].title = [session.cwd, session.captureStatus ? `Capture: ${session.captureStatus}` : undefined, session.captureReason].filter(Boolean).join(' · ');
         });
         elements.session.replaceChildren(...options);
-        elements.session.value = sessions.some(session => session.id === state.selectedSession) ? state.selectedSession : '';
-        state.selectedSession = elements.session.value;
+        const selectedSession = sessions.some(session => session.id === state.selectedSession) ? state.selectedSession : '';
+        if (selectedSession !== state.selectedSession) {
+          state.selectedSession = selectedSession;
+          selectionChanged = true;
+        }
+        elements.session.value = selectedSession;
       }
+    }
+    if (selectionChanged) {
+      state.filterChanged();
+      saveState();
+      updateCopyResultsControl();
+      bridge.refreshRequested = true;
     }
     const number = (value: number) => value.toLocaleString();
     const budget = Number.isFinite(data.maxBytes) ? (data.maxBytes / 1048576).toFixed(0) : '?';

@@ -71,6 +71,7 @@ export class LogsController {
     });
   }
   snapshot(request: Extract<ViewRequest, { type: 'snapshot'; }>) {
+    this.terminalCapture.pruneStale();
     return buildSnapshot(request, { store: this.store, config: this.config, registry: this.registry, state: this.state,
       ingestion: this.ingestion, persistence: this.persistence, searches: this.searches,
       running: this.runner.sessions.size > 0 || this.tasks.executions.size > 0,
@@ -108,6 +109,7 @@ export class LogsController {
       .finally(() => { this.sharingRequest = undefined; });
   }
   private async configureSharing(sourceIds?: string[], anchor?: number, sessionIds?: string[], chooseRuns = false): Promise<void> {
+    this.terminalCapture.pruneStale();
     const revision = this.agentAccess.status().revision;
     let ids = sourceIds?.filter(Boolean) ?? [];
     let runs = sessionIds?.filter(Boolean) ?? [];

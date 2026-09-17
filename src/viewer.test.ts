@@ -780,6 +780,20 @@ test('Clear ignores an in-flight pre-clear snapshot so it cannot restore Columns
   assert.equal(get('fieldList').children.some(row => row.dataset.field), false);
 });
 
+test('stale source and run selections reset when their metadata disappears', () => {
+  const { app, messages, receive } = viewer();
+  app.state.selectedServer = 'terminal-1';
+  app.state.selectedSession = 'run-1';
+  app.bridge.pending = false;
+  receive({
+    type: 'snapshot', generation: 1, newest: 101, total: 0, retained: 0, discarded: 0, bytes: 0, maxBytes: 10000, truncated: 0,
+    servers: [], sessions: [], columns: [], columnFields: [], fields: [], page: 0, pages: 1, matched: 0
+  });
+  assert.equal(app.state.selectedServer, '');
+  assert.equal(app.state.selectedSession, '');
+  assert.equal(messages.at(-1)?.type, 'snapshot', 'a follow-up snapshot removes the stale host-side filters');
+});
+
 test('automatic columns settle after the first useful schema while later fields remain opt-in', () => {
   const { app, get } = viewer();
   app.state.columnFields = ['service', 'status'];
