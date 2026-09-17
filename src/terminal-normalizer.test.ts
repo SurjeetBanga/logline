@@ -42,3 +42,13 @@ test('terminal normalizer bounds an unterminated escape sequence', () => {
   normalizer.write('recovered\n');
   assert.deepEqual(lines, []);
 });
+
+test('terminal normalizer keeps complete ANSI sequences in long chunks', () => {
+  const lines: { text: string; truncated: boolean }[] = [];
+  const normalizer = new TerminalNormalizer(line => lines.push(line));
+  normalizer.write(`\u001b[32m${'x'.repeat(5000)}\u001b[0m\n`);
+  normalizer.end();
+  assert.equal(lines.length, 1);
+  assert.equal(lines[0].text.length, 5000);
+  assert.equal(lines[0].truncated, false);
+});

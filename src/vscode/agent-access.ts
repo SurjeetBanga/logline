@@ -214,7 +214,8 @@ export class AgentLogAccess {
         this.assertShare(input.shareId);
         const result = this.search({ ...input, before: undefined, limit: 200 });
         const events = result.events.filter(event => event.id > watermark);
-        if (events.length) return { ...result, events, matched: events.length, partial: events.length >= 200 };
+        if (events.length) return { ...result, events, matched: events.length,
+          partial: result.partial || events.length >= 200, hasMore: result.hasMore || events.length >= 200 };
         await new Promise(resolve => setTimeout(resolve, 100));
       }
       return { events: [], matched: 0, newest: this.nextId(), partial: false, hasMore: false, retention: { newest: this.nextId() } };

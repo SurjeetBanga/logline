@@ -55,11 +55,39 @@ export function redactValue(value: unknown, options: RedactionOptions = {}, key?
     [entryKey, redactValue(entryValue, options, entryKey)]));
 }
 
+/**
+ * Parsed JSON payloads are flattened into `fields` with both dotted paths and
+ * convenience aliases. A secret under `credentials.value` can therefore also
+ * appear as a plain `value` key. Redact aliases whose primitive value is the
+ * same as a value found under a sensitive path.
+ */
+function redactFields(fields: Record<string, string | number | boolean>, options: RedactionOptions): Record<string, string | number | boolean> {
+  const replacement = options.replacement ?? DEFAULT_REPLACEMENT;
+  const sensitiveValues = new Set<string | number | boolean>();
+  for (const [key, value] of Object.entries(fields)) {
+    const parts = key.split('.');
+    const sensitivePath = isSensitiveKey(key, options.fields)
+      || parts.slice(0, -1).some((_part, index) => isSensitiveKey(parts.slice(0, index + 1).join('.'), options.fields));
+    if (sensitivePath) sensitiveValues.add(value);
+  }
+  const redacted: Record<string, string | number | boolean> = {};
+  for (const [key, value] of Object.entries(fields)) {
+    const sensitive = isSensitiveKey(key, options.fields) || sensitiveValues.has(value);
+    const safeValue = typeof value === 'string' ? redactText(value, options) : value;
+    if (sensitive) {
+      if (key === '__proto__') Object.defineProperty(redacted, key, { value: replacement, enumerable: true, writable: true, configurable: true });
+      else redacted[key] = replacement;
+    } else if (key === '__proto__') Object.defineProperty(redacted, key, { value: safeValue, enumerable: true, writable: true, configurable: true });
+    else redacted[key] = safeValue;
+  }
+  return redacted;
+}
+
 export function redactEvent(event: LogEvent, options: RedactionOptions = {}): LogEvent {
   if (options.enabled === false) return { ...event };
   const redacted: LogEvent = {
     ...event,
-    fields: event.fields ? redactValue(event.fields, options) as LogEvent['fields'] : event.fields,
+    fields: event.fields ? redactFields(event.fields, options) : event.fields,
     message: event.message === undefined ? event.message : redactText(event.message, options)
   };
   // Metadata is part of the agent response too. A secret in a terminal label,

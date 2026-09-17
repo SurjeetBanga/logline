@@ -52,3 +52,17 @@ test('terminal capture records stream failures as failed capture', async () => {
   assert.match(record.captureReason ?? '', /reader closed/);
   h.capture.dispose();
 });
+
+test('terminal capture prunes completed session history', async () => {
+  const h = harness();
+  const terminal = { name: 'Test terminal' };
+  for (let id = 0; id < 105; id++) {
+    const execution = { commandLine: { value: `echo ${id}` }, async *read() { yield 'line\n'; } };
+    h.start({ terminal, execution });
+    await new Promise(resolve => setImmediate(resolve));
+    h.end({ terminal, execution, exitCode: 0 });
+    await new Promise(resolve => setImmediate(resolve));
+  }
+  assert.ok(h.registry.records.size <= 100);
+  h.capture.dispose();
+});

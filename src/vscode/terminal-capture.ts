@@ -161,6 +161,7 @@ export class TerminalCapture {
       else { record.captureStatus = 'complete'; record.captureComplete = true; }
       if (record.captureStatus !== 'complete') record.captureComplete = false;
       this.active.delete(context);
+      if (context.endSeen) this.registry.pruneSessionRegistry();
       this.state.notify();
     }
   }
@@ -177,6 +178,7 @@ export class TerminalCapture {
     record.taskState = record.status;
     if (record.captureStatus !== 'unavailable' && context.streamFailed && context.accepting) record.captureStatus = 'failed';
     else if (!context.streamDone) record.captureStatus = context.accepting ? 'streaming' : 'interrupted';
+    if (context.streamDone) this.registry.pruneSessionRegistry();
     if (!this.registry.sessionSummaries().some(item => item.sourceKind === 'terminal' && item.status === 'running')) {
       this.state.status = event.exitCode === 0 ? 'Terminal command exited' : `Terminal command failed: ${event.exitCode ?? 'unknown'}`;
     }

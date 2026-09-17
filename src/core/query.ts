@@ -83,7 +83,7 @@ function parseToken(token: string): Token {
   // looks like a regex with an invalid "42" flag suffix.
   const regexMatch = quoted ? null : value.match(/^\/(.+)\/([dgimsuvy]*)$/);
   if (regexMatch) {
-    try { regex = new RegExp(regexMatch[1], regexMatch[2]); } catch { regex = null; }
+    try { regex = isSafeRegex(regexMatch[1]) ? new RegExp(regexMatch[1], regexMatch[2]) : null; } catch { regex = null; }
   }
   // Regex syntax and input are case-sensitive unless the expression uses /i.
   // Lowercasing a pattern also changes escapes such as \D into \d.
@@ -97,6 +97,42 @@ function parseToken(token: string): Token {
   }
   const compare = !quoted && (/^(>=|<=|>|<)\s*-?\d+(?:\.\d+)?$/.test(value) || /^\[.*\s+to\s+.*\]$/.test(value));
   return { negate, field, canonical, value, regex, search, compare };
+}
+
+/**
+ * JavaScript regular expressions can backtrack exponentially and execute on
+ * the extension host thread. Keep the supported subset bounded and reject
+ * constructs that cannot be proven to run in linear time here.
+ */
+function isSafeRegex(source: string): boolean {
+  if (source.length > 128 || /\\(?:[1-9][0-9]*|k<[^>]+>)/.test(source) || /\(\?[=!<]/.test(source)) return false;
+  const groups: { hasQuantifier: boolean }[] = [];
+  let escaped = false;
+  let inClass = false;
+  for (let index = 0; index < source.length; index++) {
+    const char = source[index];
+    if (escaped) { escaped = false; continue; }
+    if (char === '\\') { escaped = true; continue; }
+    if (char === '[') { inClass = true; continue; }
+    if (char === ']' && inClass) { inClass = false; continue; }
+    if (inClass) continue;
+    if (char === '(') { groups.push({ hasQuantifier: false }); continue; }
+    if (char === ')') {
+      const group = groups.pop();
+      if (!group) return false;
+      const next = source[index + 1];
+      if (next === '*' || next === '+' || next === '{') {
+        if (group.hasQuantifier) return false;
+        if (groups.length) groups[groups.length - 1].hasQuantifier = true;
+      } else if (group.hasQuantifier && groups.length) groups[groups.length - 1].hasQuantifier = true;
+      continue;
+    }
+    if (char === '?' && source[index - 1] === '(') continue;
+    if (char === '*' || char === '+' || char === '?' || char === '{') {
+      if (groups.length) groups[groups.length - 1].hasQuantifier = true;
+    }
+  }
+  return groups.length === 0 && !escaped && !inClass;
 }
 
 export function matchesQuery(event: LogEvent, input: string | ParsedQuery): boolean {

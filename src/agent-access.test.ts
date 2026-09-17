@@ -131,6 +131,17 @@ test('all sharing waits for a newly captured source and preserves pagination as 
   assert.deepEqual(access.search({ shareId, cursor: page.nextCursor }).events.map(event => event.id), [1]);
 });
 
+test('agent waits preserve byte truncation metadata', async () => {
+  const store = new LogStore(20, 20 * 1024 * 1024);
+  for (let id = 1; id <= 10; id++) store.add({ id, serverId: 'api', sessionId: 'run', level: 'info', raw: 'x'.repeat(20_000) });
+  const access = new AgentLogAccess(store, new SessionRegistry(), () => 10);
+  const shareId = access.shareAll().shareId!;
+  const result = await access.wait({ shareId }, 0, 100);
+  assert.ok(result.events.length < 10);
+  assert.equal(result.partial, true);
+  assert.equal(result.hasMore, true);
+});
+
 test('narrowing all sharing to a run excludes later runs and cannot be bypassed with sessionId', () => {
   const store = new LogStore();
   store.add({ id: 1, serverId: 'api', sessionId: 'a', level: 'info' });
