@@ -34,7 +34,7 @@ export class SavedSearches {
       return typeof search.id === 'string' && typeof search.name === 'string' && typeof search.query === 'string'
         && (search.serverId === undefined || typeof search.serverId === 'string')
         && (search.levels === undefined || (Array.isArray(search.levels)
-          && search.levels.every(level => ['trace', 'debug', 'info', 'warn', 'error', 'fatal'].includes(level))));
+          && search.levels.every(level => ['trace', 'debug', 'info', 'warn', 'error', 'fatal', 'unclassified'].includes(level))));
     };
     this.savedSearchCache = Array.isArray(value) ? value.filter(valid).slice(0, 50).map(search => ({ ...search,
       name: search.name.slice(0, 80), query: search.query.slice(0, 256),

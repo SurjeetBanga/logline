@@ -25,7 +25,8 @@ export type ViewRequest =
   | { type: 'shareEvent'; id: number; }
   | { type: 'toggleTerminalCapture'; enabled: boolean; }
   | { type: 'showGuide'; section?: 'guide' | 'whatsNew'; }
-  | { type: 'run' | 'stop'; serverId?: string; }
+  | { type: 'run'; serverId?: string; }
+  | { type: 'stop'; serverId?: string; sessionId?: string; }
   | { type: 'import' | 'clear' | 'config' | 'manageServers'; };
 
 export interface Snapshot extends Stats {
@@ -87,7 +88,8 @@ export function parseViewRequest(value: unknown): ViewRequest | undefined {
     case 'shareEvent': { const id = index('id'); return id === undefined ? undefined : { type: msg.type, id }; }
     case 'toggleTerminalCapture': return { type: msg.type, enabled: msg.enabled === true };
     case 'showGuide': return { type: msg.type, section: msg.section === 'whatsNew' ? 'whatsNew' : 'guide' };
-    case 'run': case 'stop': return { type: msg.type, serverId: filter.serverId };
+    case 'run': return { type: msg.type, serverId: filter.serverId };
+    case 'stop': return { type: msg.type, serverId: filter.serverId, sessionId: filter.sessionId };
     case 'import': case 'clear': case 'config': case 'manageServers': return { type: msg.type };
   }
 }

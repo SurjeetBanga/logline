@@ -59,7 +59,7 @@ export class ProcessRunner {
       taskName: server.taskName, taskType: server.taskType, taskState: server.taskName ? 'running' : undefined,
       taskScope: server.taskScope, taskLabel: server.taskLabel,
       dependencies: server.dependencies, dependencyState: server.dependencyState, source: server.source,
-      sourceKind: server.sourceKind ?? (server.taskName ? 'task' : 'process'), owned: true,
+      sourceKind: server.sourceKind ?? (server.taskName ? 'task' : 'process'), owned: true, canStop: true,
       captureComplete: false, command: args ? [command, ...args].join(' ') : command, cwd
     };
     const session: Session = { child, stopping: false, exited: false, server, record };

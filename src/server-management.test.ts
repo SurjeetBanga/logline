@@ -23,3 +23,14 @@ test('editing and deleting duplicate server labels targets only the selected ent
   await manageServers();
   assert.deepEqual(servers, [{ id: 'api', label: 'Server', command: 'api' }, null]);
 });
+
+test('server management adds a unique saved server and leaves cancelled input unchanged', async () => {
+  servers = [{ id: 'api', label: 'API', command: 'npm start' }];
+  picks = [0]; inputs = ['API', 'npm run api'];
+  await manageServers();
+  assert.deepEqual(servers[1], { id: 'api-2', label: 'API', command: 'npm run api' });
+  const before = [...servers];
+  picks = [0]; inputs = ['Cancelled'];
+  await manageServers();
+  assert.deepEqual(servers, before);
+});

@@ -4,6 +4,8 @@
   // src/webview/analysis/charts.ts
   function createAnalysis(elements, state) {
     const SVG_NS = "http://www.w3.org/2000/svg";
+    let formatterKey;
+    let cachedFormatter;
     function svgEl(tag, attrs = {}) {
       const el = document.createElementNS(SVG_NS, tag);
       for (const [key, value] of Object.entries(attrs))
@@ -11,6 +13,9 @@
       return el;
     }
     function timeAxisFormatter(spanMs) {
+      const key = `${state.displayTimezone ?? "local"}:${spanMs !== void 0 && spanMs < 3 * 60 * 1e3 ? "seconds" : "minutes"}`;
+      if (key === formatterKey) return cachedFormatter;
+      formatterKey = key;
       const options = { hour: "2-digit", minute: "2-digit", hour12: false };
       if (spanMs !== void 0 && spanMs < 3 * 60 * 1e3)
         options.second = "2-digit";
@@ -19,10 +24,11 @@
       else if (state.displayTimezone && state.displayTimezone !== "local")
         options.timeZone = state.displayTimezone;
       try {
-        return new Intl.DateTimeFormat(void 0, options);
+        cachedFormatter = new Intl.DateTimeFormat(void 0, options);
       } catch {
-        return null;
+        cachedFormatter = null;
       }
+      return cachedFormatter;
     }
     function bucketTime(range, bucketCount, index) {
       if (range?.from === void 0 || range?.to === void 0 || !bucketCount)
@@ -323,7 +329,11 @@
       levelButton: element("levelButton"),
       levelMenu: element("levelMenu"),
       server: element("server"),
-      session: element("session"),
+      scopeMenu: element("scopeMenu"),
+      sourcesTab: element("sourcesTab"),
+      runsTab: element("runsTab"),
+      sourceMenu: element("sourceMenu"),
+      sessionMenu: element("sessionMenu"),
       follow: element("follow"),
       moreActions: element("moreActions"),
       actionsMenu: element("actionsMenu"),
@@ -574,7 +584,7 @@
           panel.style.bottom = "";
           panel.style.maxHeight = "";
           panel.style.position = "";
-          if (panel.classList.contains("fields-panel") || panel.classList.contains("cheat-sheet") || panel.classList.contains("level-menu") || panel.classList.contains("saved-searches") || panel.classList.contains("actions-menu")) {
+          if (panel.classList.contains("fields-panel") || panel.classList.contains("cheat-sheet") || panel.classList.contains("level-menu") || panel.classList.contains("saved-searches") || panel.classList.contains("actions-menu") || panel.classList.contains("session-menu") || panel.classList.contains("scope-menu")) {
             const trigger = button.getBoundingClientRect();
             const margin2 = 8;
             const spaceBelow2 = window.innerHeight - trigger.bottom - margin2;
@@ -765,7 +775,8 @@
 
   // src/webview/search/controls.ts
   function createSearch(elements, state, api, popovers, actions, scope) {
-    const { filterChanged } = actions;
+    const { filterChanged, updateScopeSelection = () => {
+    } } = actions;
     const MAX_QUERY_LENGTH = 256;
     let appliedQuery = queryTokens(elements.search.value.trim()).map((value) => value.toLowerCase() === "or" ? "OR" : value).join(" ").slice(0, MAX_QUERY_LENGTH);
     let editingIndex;
@@ -1002,6 +1013,7 @@
           state.selectedServer = item.serverId || "";
           state.checkedLevels = new Set(Array.isArray(item.levels) ? item.levels : LEVELS);
           elements.server.value = state.selectedServer;
+          updateScopeSelection();
           buildLevelMenu();
           updateLevelButtonLabel();
           for (const popover of popovers)
@@ -1867,7 +1879,7 @@
     const formatTimestamp = createTimestampFormatter(state);
     const analysis = createAnalysis(elements, state);
     const inspection = createInspection(elements, scrollViewport, api, formatTimestamp, scope);
-    const search = createSearch(elements, state, api, popovers, { filterChanged }, scope);
+    const search = createSearch(elements, state, api, popovers, { filterChanged, updateScopeSelection }, scope);
     const bridge = new SnapshotBridge(api, state, () => search.query());
     const request = (force = false) => bridge.request(force);
     let cellActions;
@@ -1883,6 +1895,9 @@
     );
     let serverSignature = "";
     let sessionSignature = "";
+    let activeScopeTab = "sources";
+    let visibleSources = [];
+    let visibleSessions = [];
     let guideUnread = document.body?.dataset.guideUnread === "true";
     let agentSharingActive = false;
     elements.helpBadge.hidden = !guideUnread;
@@ -1970,9 +1985,9 @@
       elements.command.textContent = data.command;
       elements.command.title = data.command;
       elements.stop.disabled = !data.running;
-      elements.captureToggle.textContent = data.captureStatus?.state === "capturing" ? "Capturing\u2026" : data.captureStatus?.state === "attention" ? "Capture needs attention" : data.captureTerminals ? "Terminal capture ready" : "Enable terminal capture";
+      elements.captureToggle.textContent = data.captureStatus?.state === "capturing" ? "Terminal capture: Capturing\u2026" : data.captureStatus?.state === "attention" ? "Terminal capture: Needs attention" : data.captureTerminals ? "Terminal capture: On" : "Terminal capture: Off";
       elements.captureToggle.setAttribute("aria-pressed", String(data.captureTerminals));
-      elements.captureToggle.title = data.captureStatus?.detail || "Capture output from new supported VS Code terminal commands";
+      elements.captureToggle.title = data.captureStatus?.detail || (data.captureTerminals ? "Terminal capture is on. Click to turn it off." : "Terminal capture is off. Click to turn it on.");
       const sharing = data.agentSharing?.active;
       agentSharingActive = Boolean(sharing);
       const sharedRuns = sharing ? data.agentSharing.sources.reduce((sum, source) => sum + (source.runs?.length ?? source.sessions), 0) : 0;
@@ -1985,6 +2000,7 @@
       elements.stop.textContent = state.selectedServer ? "Stop server" : "Stop all";
       const activeSessions = Array.isArray(data.sessions) ? data.sessions.filter((session) => ["running", "stopping"].includes(session.status)) : [];
       elements.sessions.textContent = activeSessions.length ? `${activeSessions.length} active session${activeSessions.length === 1 ? "" : "s"}` : "No active sessions";
+      let selectionChanged = false;
       if (data.servers) {
         const signature = JSON.stringify(data.servers.map((server) => [
           server.id,
@@ -1999,50 +2015,44 @@
         ]));
         if (signature !== serverSignature) {
           serverSignature = signature;
-          const activeCount = data.servers.reduce((sum, server) => sum + (server.activeSessions || 0), 0);
-          const options = [document.createElement("option"), ...data.servers.map(() => document.createElement("option"))];
-          options[0].textContent = activeCount ? `All sources \xB7 ${activeCount} active` : "All sources";
-          options[0].value = "";
-          data.servers.forEach((server, index) => {
-            const state2 = server.status === "idle" ? "" : ` \xB7 ${server.status}`;
-            const activity = server.activeSessions > 1 ? ` (${server.activeSessions} active)` : "";
-            const task = server.taskName ? `Task: ${server.taskName}` : server.label;
-            const type = server.taskType ? ` (${server.taskType})` : "";
-            const dependency = server.dependencies?.length ? ` \xB7 deps ${server.dependencies.join(", ")} (${server.dependencyState || "unknown"})` : server.dependencyState && server.dependencyState !== "none" ? ` \xB7 deps ${server.dependencyState}` : "";
-            const reason = server.exitReason ? ` \xB7 ${server.exitReason}` : "";
-            options[index + 1].textContent = `${task}${type}${state2}${activity}${dependency}${reason}`;
-            options[index + 1].value = server.id;
-            options[index + 1].title = [
-              server.lastSession ? `Session ${server.lastSession}` : void 0,
-              server.taskName ? `Task ${server.taskName}${server.taskType ? ` (${server.taskType})` : ""}` : void 0,
-              server.dependencyState ? `Dependencies: ${server.dependencies?.join(", ") || "none"} (${server.dependencyState})` : void 0,
-              server.exitReason ? `Exit: ${server.exitReason}` : void 0
-            ].filter(Boolean).join(" \xB7 ") || server.status;
-          });
-          elements.server.replaceChildren(...options);
-          elements.server.value = data.servers.some((server) => server.id === state.selectedServer) ? state.selectedServer : "";
-          state.selectedServer = elements.server.value;
+          visibleSources = data.servers;
+          renderSourceMenu(data.servers);
+          const selectedServer = data.servers.some((server) => server.id === state.selectedServer) ? state.selectedServer : "";
+          if (selectedServer !== state.selectedServer) {
+            state.selectedServer = selectedServer;
+            state.selectedSession = "";
+            sessionSignature = "";
+            selectionChanged = true;
+          }
+          elements.server.value = selectedServer;
+        } else {
+          visibleSources = data.servers;
+          updateSourceSelection();
         }
       }
       if (data.sessions) {
         const sessions = data.sessions.filter((session) => !state.selectedServer || session.serverId === state.selectedServer);
-        const signature = JSON.stringify(sessions.map((session) => [session.id, session.serverId, session.command, session.status, session.startedAt, session.endedAt, session.captureStatus, session.captureReason]));
+        const signature = JSON.stringify(sessions.map((session) => [session.id, session.serverId, session.command, session.status, session.startedAt, session.endedAt, session.captureStatus, session.captureReason, session.canStop]));
         if (signature !== sessionSignature) {
           sessionSignature = signature;
-          const options = [document.createElement("option"), ...sessions.map(() => document.createElement("option"))];
-          options[0].textContent = sessions.length ? `All runs \xB7 ${sessions.length}` : "All runs";
-          options[0].value = "";
-          sessions.forEach((session, index) => {
-            const started = session.startedAt ? new Date(session.startedAt).toLocaleTimeString() : "";
-            const stateText = session.status === "running" ? "running" : session.exitReason || session.status;
-            options[index + 1].textContent = `${session.command || session.id} \xB7 ${started} \xB7 ${stateText}`;
-            options[index + 1].value = session.id;
-            options[index + 1].title = [session.cwd, session.captureStatus ? `Capture: ${session.captureStatus}` : void 0, session.captureReason].filter(Boolean).join(" \xB7 ");
-          });
-          elements.session.replaceChildren(...options);
-          elements.session.value = sessions.some((session) => session.id === state.selectedSession) ? state.selectedSession : "";
-          state.selectedSession = elements.session.value;
+          visibleSessions = sessions;
+          renderRunMenu(sessions);
+        } else {
+          visibleSessions = sessions;
+          updateRunSelection();
         }
+        const selectedSession = sessions.some((session) => session.id === state.selectedSession) ? state.selectedSession : "";
+        if (selectedSession !== state.selectedSession) {
+          state.selectedSession = selectedSession;
+          selectionChanged = true;
+          updateRunSelection();
+        }
+      }
+      if (selectionChanged) {
+        state.filterChanged();
+        saveState();
+        updateCopyResultsControl();
+        bridge.refreshRequested = true;
       }
       const number = (value) => value.toLocaleString();
       const budget = Number.isFinite(data.maxBytes) ? (data.maxBytes / 1048576).toFixed(0) : "?";
@@ -2165,6 +2175,40 @@
     createPopover(elements.searchHelp.closest(".popover-container"), elements.searchHelp, elements.searchHelpPanel);
     createPopover(elements.searchTools.closest(".popover-container"), elements.searchTools, elements.searchToolsPanel);
     createPopover(elements.fieldsButton.closest(".popover-container"), elements.fieldsButton, elements.fieldsPanel);
+    const scopePopover = createPopover(elements.server.closest(".popover-container"), elements.server, elements.scopeMenu);
+    setScopeTab("sources");
+    scope.listen(elements.server, "keydown", (event) => {
+      if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
+      event.preventDefault();
+      scopePopover.open();
+      const panel = activeScopeTab === "sources" ? elements.sourceMenu : elements.sessionMenu;
+      const selector = activeScopeTab === "sources" ? ".source-select" : ".run-select";
+      const choices = [...panel.querySelectorAll(selector)];
+      choices[event.key === "ArrowUp" ? choices.length - 1 : 0]?.focus();
+    });
+    scope.listen(elements.sourcesTab, "click", () => setScopeTab("sources", true));
+    scope.listen(elements.runsTab, "click", () => setScopeTab("runs", true));
+    scope.listen(elements.scopeMenu, "keydown", (event) => {
+      const target = event.target;
+      if (target.classList.contains("scope-tab")) {
+        if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+        event.preventDefault();
+        setScopeTab(event.key === "ArrowLeft" ? "sources" : "runs", true);
+        return;
+      }
+      if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
+      if (!target.classList.contains("source-select") && !target.classList.contains("run-select")) return;
+      const panel = activeScopeTab === "sources" ? elements.sourceMenu : elements.sessionMenu;
+      const selector = activeScopeTab === "sources" ? ".source-select" : ".run-select";
+      const choices = [...panel.querySelectorAll(selector)];
+      const index = choices.indexOf(target);
+      if (index < 0) return;
+      event.preventDefault();
+      choices[(index + (event.key === "ArrowUp" ? -1 : 1) + choices.length) % choices.length]?.focus();
+    });
+    scope.listen(elements.scopeMenu, "focusout", (event) => {
+      if (!elements.scopeMenu.contains(event.relatedTarget)) scopePopover.close();
+    });
     const actionsContainer = elements.moreActions.closest(".popover-container");
     const actionsMenu = createPopover(actionsContainer, elements.moreActions, elements.actionsMenu);
     const actionItems = [elements.shareSpecificRuns, elements.export, elements.import, elements.manage, elements.config, elements.help];
@@ -2228,26 +2272,6 @@
       api.postMessage({ type: "analysis", query: search.query(), levels: state.currentLevels(), serverId: state.selectedServer || void 0, sessionId: state.selectedSession || void 0 });
     });
     scope.listen(elements.analysisClose, "click", () => elements.analysisDialog.close());
-    scope.listen(elements.server, "change", () => {
-      search.clearAutocomplete();
-      state.selectedServer = elements.server.value;
-      state.selectedSession = "";
-      sessionSignature = "";
-      state.page = 0;
-      state.lastRows = void 0;
-      table.resetAutomaticColumns();
-      updateCopyResultsControl();
-      saveState();
-      requestInteraction();
-    });
-    scope.listen(elements.session, "change", () => {
-      state.selectedSession = elements.session.value;
-      state.page = 0;
-      state.lastRows = void 0;
-      state.filterChanged();
-      saveState();
-      requestInteraction();
-    });
     scope.listen(elements.follow, "click", () => {
       if (state.paused || !state.following) {
         state.resume();
@@ -2295,7 +2319,7 @@
     }
     scope.listen(elements.export, "click", () => exportRequest("export"));
     scope.listen(elements.import, "click", () => api.postMessage({ type: "import" }));
-    scope.listen(elements.run, "click", () => api.postMessage({ type: "run", serverId: elements.server.value || void 0 }));
+    scope.listen(elements.run, "click", () => api.postMessage({ type: "run", serverId: state.selectedServer || void 0 }));
     scope.listen(document, "visibilitychange", () => {
       if (!document.hidden)
         request();
@@ -2318,6 +2342,166 @@
         window.removeEventListener("message", onMessage);
       }
     };
+    function formatSource(server) {
+      const stateText = server.status === "idle" ? "" : ` \xB7 ${server.status}`;
+      const activity = server.activeSessions > 1 ? ` (${server.activeSessions} active)` : "";
+      const task = server.taskName ? `Task: ${server.taskName}` : server.label;
+      const type = server.taskType ? ` (${server.taskType})` : "";
+      const dependency = server.dependencies?.length ? ` \xB7 deps ${server.dependencies.join(", ")} (${server.dependencyState || "unknown"})` : server.dependencyState && server.dependencyState !== "none" ? ` \xB7 deps ${server.dependencyState}` : "";
+      const reason = server.exitReason ? ` \xB7 ${server.exitReason}` : "";
+      return {
+        label: `${task}${type}${stateText}${activity}${dependency}${reason}`,
+        title: [
+          server.lastSession ? `Session ${server.lastSession}` : void 0,
+          server.taskName ? `Task ${server.taskName}${server.taskType ? ` (${server.taskType})` : ""}` : void 0,
+          server.dependencyState ? `Dependencies: ${server.dependencies?.join(", ") || "none"} (${server.dependencyState})` : void 0,
+          server.exitReason ? `Exit: ${server.exitReason}` : void 0
+        ].filter(Boolean).join(" \xB7 ") || server.status
+      };
+    }
+    function renderSourceMenu(servers) {
+      const focusedSource = document.activeElement?.dataset.sourceId;
+      const all = document.createElement("button");
+      all.type = "button";
+      all.className = "source-select";
+      all.dataset.sourceId = "";
+      const activeCount = servers.reduce((sum, server) => sum + (server.activeSessions || 0), 0);
+      all.textContent = activeCount ? `All sources \xB7 ${activeCount} active` : "All sources";
+      all.title = "Show logs from every source";
+      scope.listen(all, "click", () => selectSource(""));
+      const options = [all, ...servers.map((server) => {
+        const option = document.createElement("button");
+        option.type = "button";
+        option.className = "source-select";
+        option.dataset.sourceId = server.id;
+        const formatted = formatSource(server);
+        option.textContent = formatted.label;
+        option.title = formatted.title;
+        scope.listen(option, "click", () => selectSource(server.id));
+        return option;
+      })];
+      elements.sourceMenu.replaceChildren(...options);
+      updateSourceSelection();
+      if (focusedSource !== void 0) {
+        const focus = [...elements.sourceMenu.querySelectorAll("[data-source-id]")].find((node) => node.dataset.sourceId === focusedSource);
+        focus?.focus();
+      }
+    }
+    function updateSourceSelection() {
+      for (const choice of elements.sourceMenu.querySelectorAll(".source-select"))
+        choice.setAttribute("aria-selected", String(choice.dataset.sourceId === state.selectedServer));
+      updateScopeSelection();
+    }
+    function updateScopeSelection() {
+      const selectedSource = visibleSources.find((server) => server.id === state.selectedServer);
+      const activeCount = visibleSources.reduce((sum, server) => sum + (server.activeSessions || 0), 0);
+      const sourceLabel = selectedSource?.label || (state.selectedServer || activeCount ? `All sources${activeCount ? ` \xB7 ${activeCount} active` : ""}` : "All sources");
+      const selectedRun = visibleSessions.find((session) => session.id === state.selectedSession);
+      const runLabel = selectedRun?.command || (visibleSessions.length ? `All runs \xB7 ${visibleSessions.length}` : "All runs");
+      elements.server.value = state.selectedServer;
+      elements.server.textContent = `${sourceLabel} \xB7 ${runLabel}`;
+      elements.server.title = [selectedSource?.label || "All sources", selectedRun?.command || "All runs"].join(" \xB7 ");
+    }
+    function setScopeTab(tab, focus = false) {
+      activeScopeTab = tab;
+      elements.sourcesTab.setAttribute("aria-selected", String(tab === "sources"));
+      elements.runsTab.setAttribute("aria-selected", String(tab === "runs"));
+      elements.sourcesTab.tabIndex = tab === "sources" ? 0 : -1;
+      elements.runsTab.tabIndex = tab === "runs" ? 0 : -1;
+      elements.sourceMenu.hidden = tab !== "sources";
+      elements.sessionMenu.hidden = tab !== "runs";
+      if (focus)
+        (tab === "sources" ? elements.sourcesTab : elements.runsTab).focus();
+    }
+    function selectSource(id) {
+      search.clearAutocomplete();
+      state.selectedServer = id;
+      state.selectedSession = "";
+      sessionSignature = "";
+      visibleSessions = [];
+      elements.server.value = id;
+      elements.sessionMenu.replaceChildren();
+      state.page = 0;
+      state.lastRows = void 0;
+      table.resetAutomaticColumns();
+      updateSourceSelection();
+      setScopeTab("sources");
+      saveState();
+      scopePopover.close(true);
+      requestInteraction();
+    }
+    function renderRunMenu(sessions) {
+      const focusedRun = document.activeElement?.dataset.runId;
+      const all = document.createElement("button");
+      all.type = "button";
+      all.className = "run-select";
+      all.dataset.runId = "";
+      all.tabIndex = 0;
+      all.textContent = sessions.length ? `All runs \xB7 ${sessions.length}` : "All runs";
+      scope.listen(all, "click", () => selectRun(""));
+      elements.sessionMenu.replaceChildren(all);
+      for (const session of sessions) {
+        const row = document.createElement("div");
+        row.className = "run-option-row";
+        const select = document.createElement("button");
+        select.type = "button";
+        select.className = "run-select";
+        select.dataset.runId = session.id;
+        select.tabIndex = 0;
+        const started = session.startedAt ? new Date(session.startedAt).toLocaleTimeString() : "";
+        const stateText = session.status === "running" ? "running" : session.exitReason || session.status;
+        select.textContent = `${session.command || session.id} \xB7 ${started} \xB7 ${stateText}`;
+        select.title = [session.cwd, session.captureStatus ? `Capture: ${session.captureStatus}` : void 0, session.captureReason].filter(Boolean).join(" \xB7 ");
+        scope.listen(select, "click", () => selectRun(session.id));
+        row.append(select);
+        if (session.status === "running" || session.status === "stopping") {
+          if (session.canStop === true) {
+            const stop = document.createElement("button");
+            stop.type = "button";
+            stop.className = "run-stop";
+            stop.dataset.runId = session.id;
+            stop.dataset.serverId = session.serverId;
+            stop.textContent = session.status === "stopping" ? "Stopping\u2026" : "Stop";
+            stop.disabled = session.status !== "running";
+            stop.title = stop.disabled ? "This run is stopping." : "Stop this command run";
+            scope.listen(stop, "click", (event) => {
+              event.stopPropagation();
+              if (stop.disabled) return;
+              api.postMessage({ type: "stop", serverId: session.serverId, sessionId: session.id });
+            });
+            row.append(stop);
+          } else {
+            const status = document.createElement("span");
+            status.className = "run-stop run-stop-disabled";
+            status.textContent = session.sourceKind === "terminal" ? "Capture only" : "Unavailable";
+            status.title = session.sourceKind === "terminal" ? "Externally owned terminal commands can be captured but not stopped by Logline." : "This run cannot be stopped from Logline.";
+            row.append(status);
+          }
+        }
+        elements.sessionMenu.append(row);
+      }
+      updateRunSelection();
+      if (focusedRun !== void 0) {
+        const focus = [...elements.sessionMenu.querySelectorAll("[data-run-id]")].find((node) => node.dataset.runId === focusedRun);
+        focus?.focus();
+      }
+    }
+    function updateRunSelection() {
+      for (const choice of elements.sessionMenu.querySelectorAll(".run-select"))
+        choice.setAttribute("aria-selected", String(choice.dataset.runId === state.selectedSession));
+      updateScopeSelection();
+    }
+    function selectRun(id) {
+      state.selectedSession = id;
+      state.page = 0;
+      state.lastRows = void 0;
+      state.filterChanged();
+      saveState();
+      updateRunSelection();
+      setScopeTab("runs");
+      scopePopover.close(true);
+      requestInteraction();
+    }
   }
 
   // src/webview/main.ts

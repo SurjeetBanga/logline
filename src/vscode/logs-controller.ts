@@ -71,6 +71,7 @@ export class LogsController {
     });
   }
   snapshot(request: Extract<ViewRequest, { type: 'snapshot'; }>) {
+    this.terminalCapture.pruneStale();
     return buildSnapshot(request, { store: this.store, config: this.config, registry: this.registry, state: this.state,
       ingestion: this.ingestion, persistence: this.persistence, searches: this.searches,
       running: this.runner.sessions.size > 0 || this.tasks.executions.size > 0,
@@ -88,7 +89,7 @@ export class LogsController {
   handleMessage(send: (message: HostMessage) => void, message: unknown): Promise<void> {
     return handleMessage({
       store: this.store, config: this.config, transfer: this.transfer, searches: this.searches,
-      snapshot: request => this.snapshot(request), clear: () => this.clear(), stop: id => this.stop(id), runner: this.runner,
+      snapshot: request => this.snapshot(request), clear: () => this.clear(), stop: (serverId, sessionId) => this.stop(serverId, sessionId), runner: this.runner,
       showGuide: section => this.guideOpener?.(section), agentAccess: this.agentAccess,
       shareWithAgent: (sourceIds, anchor, sessionIds, chooseRuns) => this.shareWithAgent(sourceIds, anchor, sessionIds, chooseRuns),
       stopSharing: () => this.stopSharing(), askCopilot: anchor => this.askCopilot(anchor),
@@ -108,6 +109,7 @@ export class LogsController {
       .finally(() => { this.sharingRequest = undefined; });
   }
   private async configureSharing(sourceIds?: string[], anchor?: number, sessionIds?: string[], chooseRuns = false): Promise<void> {
+    this.terminalCapture.pruneStale();
     const revision = this.agentAccess.status().revision;
     let ids = sourceIds?.filter(Boolean) ?? [];
     let runs = sessionIds?.filter(Boolean) ?? [];
@@ -206,7 +208,14 @@ export class LogsController {
       return false;
     }
   }
-  stop(serverId?: string): void {
+  stop(serverId?: string, sessionId?: string): void {
+    if (sessionId) {
+      const record = this.registry.records.get(sessionId);
+      if (!record || record.status !== 'running' || record.canStop !== true || (serverId && record.serverId !== serverId)) return;
+      this.runner.stopSessionById(sessionId);
+      this.tasks.stopSessionById(sessionId);
+      return;
+    }
     if (serverId) this.runner.stopServer(serverId); else this.runner.stop();
     this.tasks.stop(serverId);
   }

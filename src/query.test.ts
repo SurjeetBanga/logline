@@ -38,6 +38,12 @@ test('supports regex matching, including invalid patterns', () => {
   assert.equal(matchesQuery(event, 'message:/[/'), false);
 });
 
+test('rejects regexes with catastrophic nested quantifiers', () => {
+  const hostile = { id: 9, level: 'info', message: `${'a'.repeat(30)}!` };
+  assert.equal(matchesQuery(hostile, 'message:/(a+)+$/'), false);
+  assert.equal(matchesQuery(hostile, 'message:/a+!$/'), true);
+});
+
 test('regex preserves uppercase escapes, character classes and explicit case flags', () => {
   const value = { id: 42, level: 'info', message: 'ABC', timestampMs: 1234 };
   assert.equal(matchesQuery(value, String.raw`message:/^\D+$/`), true);

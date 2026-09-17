@@ -6,10 +6,20 @@ const MAX_BYTES = 64 * 1024;
 const textResult = (value: unknown) => {
   let json = JSON.stringify(value);
   if (Buffer.byteLength(json, 'utf8') > MAX_BYTES && value && typeof value === 'object' && Array.isArray((value as any).events)) {
-    const bounded: any = { ...(value as any), events: [...(value as any).events], partial: true, truncated: true };
-    while (bounded.events.length && Buffer.byteLength(JSON.stringify(bounded), 'utf8') > MAX_BYTES) bounded.events.pop();
+    const events = (value as any).events as unknown[];
+    const bounded: any = { ...(value as any), events: [], partial: true, truncated: true };
     bounded.hasMore = true;
-    json = JSON.stringify(bounded);
+    // Find the largest fitting prefix in O(log n) serializations instead of
+    // repeatedly cloning and stringifying the entire shrinking result.
+    let low = 0, high = events.length, best = '';
+    while (low <= high) {
+      const middle = (low + high) >> 1;
+      bounded.events = events.slice(0, middle);
+      const candidate = JSON.stringify(bounded);
+      if (Buffer.byteLength(candidate, 'utf8') <= MAX_BYTES) { best = candidate; low = middle + 1; }
+      else high = middle - 1;
+    }
+    json = best || JSON.stringify({ ...bounded, events: [] });
   }
   const text = Buffer.byteLength(json, 'utf8') <= MAX_BYTES ? json : JSON.stringify({ error: 'RESULT_TOO_LARGE', message: 'Narrow the query or inspect individual events.', partial: true });
   const Result = (vscode as any).LanguageModelToolResult;

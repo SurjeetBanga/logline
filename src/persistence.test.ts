@@ -1,5 +1,8 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import * as os from 'node:os';
+import * as path from 'node:path';
 import { setImmediate as yieldToHost } from 'node:timers/promises';
 import { LogPersistence } from './storage/log-persistence';
 const settings = new Map<string, unknown>();
@@ -70,4 +73,19 @@ test('failed writes are counted and reported without poisoning subsequent batche
   p.persist('recovered'); await p.dispose();
   assert.deepEqual(written, ['recovered\n']);
   assert.equal(p.persistDropped, 3);
+});
+
+test('persistence rolls the bounded workspace file before appending a new batch', async () => {
+  const folder = await mkdtemp(path.join(os.tmpdir(), 'logline-persist-'));
+  try {
+    settings.clear(); settings.set('persistLogs', true); settings.set('maxDiskMb', 0.000001);
+    const p = new LogPersistence({ get: <T>(key: string, fallback: T) => (settings.get(key) ?? fallback) as T }, () => folder, message => warnings.push(message));
+    p.persist('first'); p.flushPersist(); await p.persistChain;
+    p.persist('second'); p.flushPersist(); await p.persistChain;
+    assert.equal(await readFile(path.join(folder, '.logline', 'latest.log'), 'utf8'), 'second\n');
+    assert.equal(await readFile(path.join(folder, '.logline', 'latest.log.1'), 'utf8'), 'first\n');
+    await p.dispose();
+  } finally {
+    await rm(folder, { recursive: true, force: true });
+  }
 });

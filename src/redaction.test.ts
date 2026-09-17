@@ -43,3 +43,14 @@ test('deep JSON never falls back to unredacted structured credentials', () => {
   assert.ok(!result.raw?.includes('deep-secret'));
   assert.ok(result.raw?.includes('[REDACTED]'));
 });
+
+test('redacts flattened aliases of nested sensitive fields', () => {
+  const result = redactEvent({
+    id: 2, level: 'info', isJson: true,
+    raw: '{"credentials":{"value":"nested-secret"}}',
+    fields: { 'credentials.value': 'nested-secret', value: 'nested-secret' }
+  });
+  assert.equal(result.fields?.['credentials.value'], '[REDACTED]');
+  assert.equal(result.fields?.value, '[REDACTED]');
+  assert.doesNotMatch(JSON.stringify(result), /nested-secret/);
+});

@@ -10,8 +10,8 @@ import type { ViewerState } from '../state';
 import { LEVELS } from '../state';
 import type { ViewerActions, WebviewApi } from '../types';
 
-export function createSearch(elements: Elements, state: ViewerState, api: WebviewApi, popovers: Popover[], actions: Pick<ViewerActions, 'filterChanged'>, scope: EventScope) {
-  const { filterChanged } = actions;
+export function createSearch(elements: Elements, state: ViewerState, api: WebviewApi, popovers: Popover[], actions: Pick<ViewerActions, 'filterChanged'> & { updateScopeSelection?: () => void; }, scope: EventScope) {
+  const { filterChanged, updateScopeSelection = () => { } } = actions;
   const MAX_QUERY_LENGTH = 256;
   let appliedQuery = queryTokens(elements.search.value.trim()).map(value => value.toLowerCase() === 'or' ? 'OR' : value).join(' ').slice(0, MAX_QUERY_LENGTH);
   let editingIndex: number | undefined;
@@ -262,6 +262,7 @@ export function createSearch(elements: Elements, state: ViewerState, api: Webvie
         state.selectedServer = item.serverId || '';
         state.checkedLevels = new Set(Array.isArray(item.levels) ? item.levels : LEVELS);
         elements.server.value = state.selectedServer;
+        updateScopeSelection();
         buildLevelMenu();
         updateLevelButtonLabel();
         for (const popover of popovers)

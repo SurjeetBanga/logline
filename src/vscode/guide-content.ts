@@ -17,10 +17,19 @@ export interface GuideRelease {
 
 export const GUIDE_RELEASES: GuideRelease[] = [
   {
+    version: '1.9.0',
+    date: '2026-09-17',
+    highlights: [
+      { title: 'Scope sources and runs together', text: 'Use one accessible picker with Sources and Runs tabs to filter by server, task, terminal, imported source, or one command execution.', section: 'capture' },
+      { title: 'Stop one active run', text: 'The Runs tab offers inline Stop actions for Logline-owned processes and VS Code tasks while externally captured terminal commands stay observe-only.', section: 'capture' },
+      { title: 'Capture terminals more reliably', text: 'Already-open terminals are ready for their next command, completed empty runs are cleaned up, and the toolbar clearly shows Off, On, Capturing…, or Needs attention.', section: 'capture' }
+    ]
+  },
+  {
     version: '1.8.0',
     date: '2026-09-15',
     highlights: [
-      { title: 'Capture the terminal you already use', text: 'Enable Capture once and run commands normally; new shell-integrated terminal output becomes searchable in Logs, with plain text shown as Unclassified when no level is marked.', section: 'capture' },
+      { title: 'Capture the terminal you already use', text: 'Turn Terminal capture: On once and run commands normally; new shell-integrated terminal output becomes searchable in Logs, with plain text shown as Unclassified when no level is marked.', section: 'capture' },
       { title: 'Share logs with agent', text: 'Confirm once to share retained sources and new runs in this window. Results are always redacted, but may still contain sensitive information. Choose specific runs from More actions to limit access.', section: 'share' },
       { title: 'Keep using your existing agent chat', text: 'Sharing logs · Stop makes your sharing state visible. Ask Copilot to check the logs through read-only Logline tools, share an expanded event’s exact run, and click the sharing button again to stop.', section: 'share' }
     ]

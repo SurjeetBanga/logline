@@ -1,4 +1,4 @@
-import type { HostMessage } from '../protocol/messages';
+import type { HostMessage, Snapshot } from '../protocol/messages';
 import { createAnalysis } from './analysis/charts';
 import { SnapshotBridge } from './bridge';
 import { getElements } from './dom';
@@ -24,7 +24,7 @@ export function createViewer(api: WebviewApi) {
   const formatTimestamp = createTimestampFormatter(state);
   const analysis = createAnalysis(elements, state);
   const inspection = createInspection(elements, scrollViewport, api, formatTimestamp, scope);
-  const search = createSearch(elements, state, api, popovers, { filterChanged }, scope);
+  const search = createSearch(elements, state, api, popovers, { filterChanged, updateScopeSelection }, scope);
   const bridge = new SnapshotBridge(api, state, () => search.query());
   const request = (force = false) => bridge.request(force);
   let cellActions: ReturnType<typeof createCellActions> | undefined;
@@ -32,6 +32,9 @@ export function createViewer(api: WebviewApi) {
     { request: requestInteraction, saveState, filterChanged, setFollowing, updateFollowControl, updateModeLabel }, scope, () => cellActions?.rowsChanged());
   let serverSignature = '';
   let sessionSignature = '';
+  let activeScopeTab: 'sources' | 'runs' = 'sources';
+  let visibleSources: Snapshot['servers'] = [];
+  let visibleSessions: Snapshot['sessions'] = [];
   let guideUnread = document.body?.dataset.guideUnread === 'true';
   let agentSharingActive = false;
   elements.helpBadge.hidden = !guideUnread;
@@ -122,11 +125,12 @@ export function createViewer(api: WebviewApi) {
     elements.command.textContent = data.command;
     elements.command.title = data.command;
     elements.stop.disabled = !data.running;
-    elements.captureToggle.textContent = data.captureStatus?.state === 'capturing' ? 'Capturing…'
-      : data.captureStatus?.state === 'attention' ? 'Capture needs attention'
-        : data.captureTerminals ? 'Terminal capture ready' : 'Enable terminal capture';
+    elements.captureToggle.textContent = data.captureStatus?.state === 'capturing' ? 'Terminal capture: Capturing…'
+      : data.captureStatus?.state === 'attention' ? 'Terminal capture: Needs attention'
+        : data.captureTerminals ? 'Terminal capture: On' : 'Terminal capture: Off';
     elements.captureToggle.setAttribute('aria-pressed', String(data.captureTerminals));
-    elements.captureToggle.title = data.captureStatus?.detail || 'Capture output from new supported VS Code terminal commands';
+    elements.captureToggle.title = data.captureStatus?.detail
+      || (data.captureTerminals ? 'Terminal capture is on. Click to turn it off.' : 'Terminal capture is off. Click to turn it on.');
     const sharing = data.agentSharing?.active;
     agentSharingActive = Boolean(sharing);
     const sharedRuns = sharing ? data.agentSharing.sources.reduce((sum, source) => sum + (source.runs?.length ?? source.sessions), 0) : 0;
@@ -144,55 +148,50 @@ export function createViewer(api: WebviewApi) {
     const activeSessions = Array.isArray(data.sessions) ? data.sessions.filter(session => ['running', 'stopping'].includes(session.status)) : [];
     elements.sessions.textContent = activeSessions.length
       ? `${activeSessions.length} active session${activeSessions.length === 1 ? '' : 's'}` : 'No active sessions';
+    let selectionChanged = false;
     if (data.servers) {
       const signature = JSON.stringify(data.servers.map(server => [server.id, server.label, server.status, server.activeSessions,
       server.taskName, server.taskType, server.dependencies, server.dependencyState, server.exitReason]));
       if (signature !== serverSignature) {
         serverSignature = signature;
-        const activeCount = data.servers.reduce((sum, server) => sum + (server.activeSessions || 0), 0);
-        const options = [document.createElement('option'), ...data.servers.map(() => document.createElement('option'))];
-        options[0].textContent = activeCount ? `All sources · ${activeCount} active` : 'All sources';
-        options[0].value = '';
-        data.servers.forEach((server, index) => {
-          const state = server.status === 'idle' ? '' : ` · ${server.status}`;
-          const activity = server.activeSessions > 1 ? ` (${server.activeSessions} active)` : '';
-          const task = server.taskName ? `Task: ${server.taskName}` : server.label;
-          const type = server.taskType ? ` (${server.taskType})` : '';
-          const dependency = server.dependencies?.length
-            ? ` · deps ${server.dependencies.join(', ')} (${server.dependencyState || 'unknown'})`
-            : (server.dependencyState && server.dependencyState !== 'none' ? ` · deps ${server.dependencyState}` : '');
-          const reason = server.exitReason ? ` · ${server.exitReason}` : '';
-          options[index + 1].textContent = `${task}${type}${state}${activity}${dependency}${reason}`;
-          options[index + 1].value = server.id;
-          options[index + 1].title = [server.lastSession ? `Session ${server.lastSession}` : undefined,
-          server.taskName ? `Task ${server.taskName}${server.taskType ? ` (${server.taskType})` : ''}` : undefined,
-          server.dependencyState ? `Dependencies: ${server.dependencies?.join(', ') || 'none'} (${server.dependencyState})` : undefined,
-          server.exitReason ? `Exit: ${server.exitReason}` : undefined].filter(Boolean).join(' · ') || server.status;
-        });
-        elements.server.replaceChildren(...options);
-        elements.server.value = data.servers.some(server => server.id === state.selectedServer) ? state.selectedServer : '';
-        state.selectedServer = elements.server.value;
+        visibleSources = data.servers;
+        renderSourceMenu(data.servers);
+        const selectedServer = data.servers.some(server => server.id === state.selectedServer) ? state.selectedServer : '';
+        if (selectedServer !== state.selectedServer) {
+          state.selectedServer = selectedServer;
+          state.selectedSession = '';
+          sessionSignature = '';
+          selectionChanged = true;
+        }
+        elements.server.value = selectedServer;
+      } else {
+        visibleSources = data.servers;
+        updateSourceSelection();
       }
     }
     if (data.sessions) {
       const sessions = data.sessions.filter(session => !state.selectedServer || session.serverId === state.selectedServer);
-      const signature = JSON.stringify(sessions.map(session => [session.id, session.serverId, session.command, session.status, session.startedAt, session.endedAt, session.captureStatus, session.captureReason]));
+      const signature = JSON.stringify(sessions.map(session => [session.id, session.serverId, session.command, session.status, session.startedAt, session.endedAt, session.captureStatus, session.captureReason, session.canStop]));
       if (signature !== sessionSignature) {
         sessionSignature = signature;
-        const options = [document.createElement('option'), ...sessions.map(() => document.createElement('option'))];
-        options[0].textContent = sessions.length ? `All runs · ${sessions.length}` : 'All runs';
-        options[0].value = '';
-        sessions.forEach((session, index) => {
-          const started = session.startedAt ? new Date(session.startedAt).toLocaleTimeString() : '';
-          const stateText = session.status === 'running' ? 'running' : (session.exitReason || session.status);
-          options[index + 1].textContent = `${session.command || session.id} · ${started} · ${stateText}`;
-          options[index + 1].value = session.id;
-          options[index + 1].title = [session.cwd, session.captureStatus ? `Capture: ${session.captureStatus}` : undefined, session.captureReason].filter(Boolean).join(' · ');
-        });
-        elements.session.replaceChildren(...options);
-        elements.session.value = sessions.some(session => session.id === state.selectedSession) ? state.selectedSession : '';
-        state.selectedSession = elements.session.value;
+        visibleSessions = sessions;
+        renderRunMenu(sessions);
+      } else {
+        visibleSessions = sessions;
+        updateRunSelection();
       }
+      const selectedSession = sessions.some(session => session.id === state.selectedSession) ? state.selectedSession : '';
+      if (selectedSession !== state.selectedSession) {
+        state.selectedSession = selectedSession;
+        selectionChanged = true;
+        updateRunSelection();
+      }
+    }
+    if (selectionChanged) {
+      state.filterChanged();
+      saveState();
+      updateCopyResultsControl();
+      bridge.refreshRequested = true;
     }
     const number = (value: number) => value.toLocaleString();
     const budget = Number.isFinite(data.maxBytes) ? (data.maxBytes / 1048576).toFixed(0) : '?';
@@ -316,6 +315,41 @@ export function createViewer(api: WebviewApi) {
 
   createPopover(elements.fieldsButton.closest<HTMLElement>('.popover-container')!, elements.fieldsButton, elements.fieldsPanel);
 
+  const scopePopover = createPopover(elements.server.closest<HTMLElement>('.popover-container')!, elements.server, elements.scopeMenu);
+  setScopeTab('sources');
+  scope.listen(elements.server, 'keydown', event => {
+    if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return;
+    event.preventDefault();
+    scopePopover.open();
+    const panel = activeScopeTab === 'sources' ? elements.sourceMenu : elements.sessionMenu;
+    const selector = activeScopeTab === 'sources' ? '.source-select' : '.run-select';
+    const choices = [...panel.querySelectorAll<HTMLButtonElement>(selector)];
+    choices[event.key === 'ArrowUp' ? choices.length - 1 : 0]?.focus();
+  });
+  scope.listen(elements.sourcesTab, 'click', () => setScopeTab('sources', true));
+  scope.listen(elements.runsTab, 'click', () => setScopeTab('runs', true));
+  scope.listen(elements.scopeMenu, 'keydown', event => {
+    const target = event.target as HTMLElement;
+    if (target.classList.contains('scope-tab')) {
+      if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
+      event.preventDefault();
+      setScopeTab(event.key === 'ArrowLeft' ? 'sources' : 'runs', true);
+      return;
+    }
+    if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return;
+    if (!target.classList.contains('source-select') && !target.classList.contains('run-select')) return;
+    const panel = activeScopeTab === 'sources' ? elements.sourceMenu : elements.sessionMenu;
+    const selector = activeScopeTab === 'sources' ? '.source-select' : '.run-select';
+    const choices = [...panel.querySelectorAll<HTMLButtonElement>(selector)];
+    const index = choices.indexOf(target as HTMLButtonElement);
+    if (index < 0) return;
+    event.preventDefault();
+    choices[(index + (event.key === 'ArrowUp' ? -1 : 1) + choices.length) % choices.length]?.focus();
+  });
+  scope.listen(elements.scopeMenu, 'focusout', event => {
+    if (!elements.scopeMenu.contains(event.relatedTarget as Node | null)) scopePopover.close();
+  });
+
   const actionsContainer = elements.moreActions.closest<HTMLElement>('.popover-container')!;
   const actionsMenu = createPopover(actionsContainer, elements.moreActions, elements.actionsMenu);
   const actionItems = [elements.shareSpecificRuns, elements.export, elements.import, elements.manage, elements.config, elements.help];
@@ -389,27 +423,6 @@ export function createViewer(api: WebviewApi) {
 
   scope.listen(elements.analysisClose, 'click', () => elements.analysisDialog.close());
 
-  scope.listen(elements.server, 'change', () => {
-    search.clearAutocomplete();
-    state.selectedServer = elements.server.value;
-    state.selectedSession = '';
-    sessionSignature = '';
-    state.page = 0;
-    state.lastRows = undefined;
-    table.resetAutomaticColumns();
-    updateCopyResultsControl();
-    saveState();
-    requestInteraction();
-  });
-  scope.listen(elements.session, 'change', () => {
-    state.selectedSession = elements.session.value;
-    state.page = 0;
-    state.lastRows = undefined;
-    state.filterChanged();
-    saveState();
-    requestInteraction();
-  });
-
   scope.listen(elements.follow, 'click', () => {
     if (state.paused || !state.following) {
       state.resume(); table.resetDetails(); saveState(); table.updateColumns(table.automaticColumns, true);
@@ -457,7 +470,7 @@ export function createViewer(api: WebviewApi) {
 
   scope.listen(elements.import, 'click', () => api.postMessage({ type: 'import' }));
 
-  scope.listen(elements.run, 'click', () => api.postMessage({ type: 'run', serverId: elements.server.value || undefined }));
+  scope.listen(elements.run, 'click', () => api.postMessage({ type: 'run', serverId: state.selectedServer || undefined }));
 
   scope.listen(document, 'visibilitychange', () => {
     if (!document.hidden)
@@ -473,4 +486,174 @@ export function createViewer(api: WebviewApi) {
     state, bridge, table, search, inspection, receive,
     dispose() { scope.dispose(); clearInterval(fallbackTimer); clearTimeout(searchDebounce); clearTimeout(autocompleteDebounce); clearTimeout(copyFeedbackTimer); window.removeEventListener('message', onMessage); }
   };
+
+  function formatSource(server: Snapshot['servers'][number]): { label: string; title: string; } {
+    const stateText = server.status === 'idle' ? '' : ` · ${server.status}`;
+    const activity = server.activeSessions > 1 ? ` (${server.activeSessions} active)` : '';
+    const task = server.taskName ? `Task: ${server.taskName}` : server.label;
+    const type = server.taskType ? ` (${server.taskType})` : '';
+    const dependency = server.dependencies?.length
+      ? ` · deps ${server.dependencies.join(', ')} (${server.dependencyState || 'unknown'})`
+      : (server.dependencyState && server.dependencyState !== 'none' ? ` · deps ${server.dependencyState}` : '');
+    const reason = server.exitReason ? ` · ${server.exitReason}` : '';
+    return {
+      label: `${task}${type}${stateText}${activity}${dependency}${reason}`,
+      title: [server.lastSession ? `Session ${server.lastSession}` : undefined,
+        server.taskName ? `Task ${server.taskName}${server.taskType ? ` (${server.taskType})` : ''}` : undefined,
+        server.dependencyState ? `Dependencies: ${server.dependencies?.join(', ') || 'none'} (${server.dependencyState})` : undefined,
+        server.exitReason ? `Exit: ${server.exitReason}` : undefined].filter(Boolean).join(' · ') || server.status
+    };
+  }
+
+  function renderSourceMenu(servers: Snapshot['servers']): void {
+    const focusedSource = (document.activeElement as HTMLElement | undefined)?.dataset.sourceId;
+    const all = document.createElement('button');
+    all.type = 'button';
+    all.className = 'source-select';
+    all.dataset.sourceId = '';
+    const activeCount = servers.reduce((sum, server) => sum + (server.activeSessions || 0), 0);
+    all.textContent = activeCount ? `All sources · ${activeCount} active` : 'All sources';
+    all.title = 'Show logs from every source';
+    scope.listen(all, 'click', () => selectSource(''));
+    const options = [all, ...servers.map(server => {
+      const option = document.createElement('button');
+      option.type = 'button';
+      option.className = 'source-select';
+      option.dataset.sourceId = server.id;
+      const formatted = formatSource(server);
+      option.textContent = formatted.label;
+      option.title = formatted.title;
+      scope.listen(option, 'click', () => selectSource(server.id));
+      return option;
+    })];
+    elements.sourceMenu.replaceChildren(...options);
+    updateSourceSelection();
+    if (focusedSource !== undefined) {
+      const focus = [...elements.sourceMenu.querySelectorAll<HTMLElement>('[data-source-id]')].find(node => node.dataset.sourceId === focusedSource);
+      focus?.focus();
+    }
+  }
+
+  function updateSourceSelection(): void {
+    for (const choice of elements.sourceMenu.querySelectorAll<HTMLButtonElement>('.source-select'))
+      choice.setAttribute('aria-selected', String(choice.dataset.sourceId === state.selectedServer));
+    updateScopeSelection();
+  }
+
+  function updateScopeSelection(): void {
+    const selectedSource = visibleSources.find(server => server.id === state.selectedServer);
+    const activeCount = visibleSources.reduce((sum, server) => sum + (server.activeSessions || 0), 0);
+    const sourceLabel = selectedSource?.label || (state.selectedServer || activeCount ? `All sources${activeCount ? ` · ${activeCount} active` : ''}` : 'All sources');
+    const selectedRun = visibleSessions.find(session => session.id === state.selectedSession);
+    const runLabel = selectedRun?.command || (visibleSessions.length ? `All runs · ${visibleSessions.length}` : 'All runs');
+    elements.server.value = state.selectedServer;
+    elements.server.textContent = `${sourceLabel} · ${runLabel}`;
+    elements.server.title = [selectedSource?.label || 'All sources', selectedRun?.command || 'All runs'].join(' · ');
+  }
+
+  function setScopeTab(tab: 'sources' | 'runs', focus = false): void {
+    activeScopeTab = tab;
+    elements.sourcesTab.setAttribute('aria-selected', String(tab === 'sources'));
+    elements.runsTab.setAttribute('aria-selected', String(tab === 'runs'));
+    elements.sourcesTab.tabIndex = tab === 'sources' ? 0 : -1;
+    elements.runsTab.tabIndex = tab === 'runs' ? 0 : -1;
+    elements.sourceMenu.hidden = tab !== 'sources';
+    elements.sessionMenu.hidden = tab !== 'runs';
+    if (focus)
+      (tab === 'sources' ? elements.sourcesTab : elements.runsTab).focus();
+  }
+
+  function selectSource(id: string): void {
+    search.clearAutocomplete();
+    state.selectedServer = id;
+    state.selectedSession = '';
+    sessionSignature = '';
+    visibleSessions = [];
+    elements.server.value = id;
+    elements.sessionMenu.replaceChildren();
+    state.page = 0;
+    state.lastRows = undefined;
+    table.resetAutomaticColumns();
+    updateSourceSelection();
+    setScopeTab('sources');
+    saveState();
+    scopePopover.close(true);
+    requestInteraction();
+  }
+
+  function renderRunMenu(sessions: Snapshot['sessions']): void {
+    const focusedRun = (document.activeElement as HTMLElement | undefined)?.dataset.runId;
+    const all = document.createElement('button');
+    all.type = 'button';
+    all.className = 'run-select';
+    all.dataset.runId = '';
+    all.tabIndex = 0;
+    all.textContent = sessions.length ? `All runs · ${sessions.length}` : 'All runs';
+    scope.listen(all, 'click', () => selectRun(''));
+    elements.sessionMenu.replaceChildren(all);
+    for (const session of sessions) {
+      const row = document.createElement('div');
+      row.className = 'run-option-row';
+      const select = document.createElement('button');
+      select.type = 'button';
+      select.className = 'run-select';
+      select.dataset.runId = session.id;
+      select.tabIndex = 0;
+      const started = session.startedAt ? new Date(session.startedAt).toLocaleTimeString() : '';
+      const stateText = session.status === 'running' ? 'running' : (session.exitReason || session.status);
+      select.textContent = `${session.command || session.id} · ${started} · ${stateText}`;
+      select.title = [session.cwd, session.captureStatus ? `Capture: ${session.captureStatus}` : undefined, session.captureReason].filter(Boolean).join(' · ');
+      scope.listen(select, 'click', () => selectRun(session.id));
+      row.append(select);
+      if (session.status === 'running' || session.status === 'stopping') {
+        if (session.canStop === true) {
+          const stop = document.createElement('button');
+          stop.type = 'button';
+          stop.className = 'run-stop';
+          stop.dataset.runId = session.id;
+          stop.dataset.serverId = session.serverId;
+          stop.textContent = session.status === 'stopping' ? 'Stopping…' : 'Stop';
+          stop.disabled = session.status !== 'running';
+          stop.title = stop.disabled ? 'This run is stopping.' : 'Stop this command run';
+          scope.listen(stop, 'click', event => {
+            event.stopPropagation();
+            if (stop.disabled) return;
+            api.postMessage({ type: 'stop', serverId: session.serverId, sessionId: session.id });
+          });
+          row.append(stop);
+        } else {
+          const status = document.createElement('span');
+          status.className = 'run-stop run-stop-disabled';
+          status.textContent = session.sourceKind === 'terminal' ? 'Capture only' : 'Unavailable';
+          status.title = session.sourceKind === 'terminal'
+            ? 'Externally owned terminal commands can be captured but not stopped by Logline.' : 'This run cannot be stopped from Logline.';
+          row.append(status);
+        }
+      }
+      elements.sessionMenu.append(row);
+    }
+    updateRunSelection();
+    if (focusedRun !== undefined) {
+      const focus = [...elements.sessionMenu.querySelectorAll<HTMLElement>('[data-run-id]')].find(node => node.dataset.runId === focusedRun);
+      focus?.focus();
+    }
+  }
+
+  function updateRunSelection(): void {
+    for (const choice of elements.sessionMenu.querySelectorAll<HTMLButtonElement>('.run-select'))
+      choice.setAttribute('aria-selected', String(choice.dataset.runId === state.selectedSession));
+    updateScopeSelection();
+  }
+
+  function selectRun(id: string): void {
+    state.selectedSession = id;
+    state.page = 0;
+    state.lastRows = undefined;
+    state.filterChanged();
+    saveState();
+    updateRunSelection();
+    setScopeTab('runs');
+    scopePopover.close(true);
+    requestInteraction();
+  }
 }

@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { writeFile } from 'node:fs/promises';
+import { readFile, writeFile } from 'node:fs/promises';
 import * as vscode from 'vscode';
 
 /** Run inside a temporary VS Code Extension Development Host. */
@@ -11,9 +11,11 @@ export async function run(): Promise<void> {
     await extension.activate();
     assert.equal(extension.isActive, true);
     const commands = await vscode.commands.getCommands();
-    for (const command of ['showLogs', 'runCommand', 'stopCommand', 'export', 'import', 'exportForAI', 'convertTask', 'captureTask', 'showGuide', 'showWhatsNew']) {
+    for (const command of ['showLogs', 'runCommand', 'stopCommand', 'export', 'import', 'exportForAI', 'convertTask', 'captureTask', 'showGuide', 'showWhatsNew',
+      'enableTerminalCapture', 'disableTerminalCapture', 'manageTerminalCapture', 'shareWithAgent', 'shareSpecificRuns', 'stopSharing', 'askCopilot']) {
       assert.ok(commands.includes(`logline.${command}`), `${command} is registered`);
     }
+    await vscode.workspace.getConfiguration('logline').update('persistLogs', true, vscode.ConfigurationTarget.Workspace);
     await vscode.commands.executeCommand('logline.showLogs');
     const task = (await vscode.tasks.fetchTasks({ type: 'logline' })).find(task => task.name === 'Logline smoke');
     assert.ok(task, 'task provider discovers JSONC configuration');
@@ -27,8 +29,17 @@ export async function run(): Promise<void> {
       await vscode.tasks.executeTask(task);
       await ended;
     } finally { clearTimeout(timer); subscription?.dispose(); }
+    const persisted = `${vscode.workspace.workspaceFolders?.[0].uri.fsPath}/.logline/latest.log`;
+    let captured = '';
+    const deadline = Date.now() + 5000;
+    while (Date.now() < deadline) {
+      try { captured = await readFile(persisted, 'utf8'); } catch { /* persistence flush is asynchronous */ }
+      if (captured.includes('extension smoke')) break;
+      await new Promise(resolve => setTimeout(resolve, 50));
+    }
+    assert.match(captured, /extension smoke/, 'task output is captured in Logline persistence');
     await vscode.commands.executeCommand('logline.stopCommand');
-    await writeFile(result, JSON.stringify({ passed: true, checks: ['activation', 'commands', 'webview focus', 'task discovery', 'captured task completion', 'stop'] }));
+    await writeFile(result, JSON.stringify({ passed: true, checks: ['activation', 'commands', 'webview focus', 'task discovery', 'captured task completion', 'captured task output', 'stop'] }));
   } catch (error) {
     await writeFile(result, JSON.stringify({ passed: false, error: String(error) }));
     throw error;

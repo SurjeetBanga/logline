@@ -37,7 +37,7 @@ export function registerCommands(controller: LogsController, openGuide?: (sectio
       vscode.commands.executeCommand('logline.logs.focus')),
     vscode.commands.registerCommand('logline.enableTerminalCapture', async () => {
       await vscode.workspace.getConfiguration('logline').update('captureTerminals', true, vscode.ConfigurationTarget.Workspace);
-      void vscode.window.showInformationMessage('Logline will capture new commands in supported terminals. Run a command again to capture it.');
+      void vscode.window.showInformationMessage('Logline will capture the next command in a supported terminal. Output from commands already in progress cannot be recovered.');
     }),
     vscode.commands.registerCommand('logline.disableTerminalCapture', async () => {
       await vscode.workspace.getConfiguration('logline').update('captureTerminals', false, vscode.ConfigurationTarget.Workspace);

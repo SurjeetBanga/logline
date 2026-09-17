@@ -46,3 +46,9 @@ test('malformed persisted searches are ignored and loaded entries stay bounded',
   assert.equal(saved[0].createdAt, 0);
   assert.doesNotThrow(() => searches.saveSearch('next', 'query'));
 });
+
+test('persisted searches retain the unclassified level', () => {
+  const values = [{ id: '1', name: 'Plain text', query: '', levels: ['unclassified'], createdAt: 1, lastUsedAt: 1 }];
+  const searches = new SavedSearches({ get: <T>() => values as T, update() { } });
+  assert.deepEqual(searches.savedSearches()[0].levels, ['unclassified']);
+});

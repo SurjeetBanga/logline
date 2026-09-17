@@ -780,6 +780,126 @@ test('Clear ignores an in-flight pre-clear snapshot so it cannot restore Columns
   assert.equal(get('fieldList').children.some(row => row.dataset.field), false);
 });
 
+test('stale source and run selections reset when their metadata disappears', () => {
+  const { app, messages, receive } = viewer();
+  app.state.selectedServer = 'terminal-1';
+  app.state.selectedSession = 'run-1';
+  app.bridge.pending = false;
+  receive({
+    type: 'snapshot', generation: 1, newest: 101, total: 0, retained: 0, discarded: 0, bytes: 0, maxBytes: 10000, truncated: 0,
+    servers: [], sessions: [], columns: [], columnFields: [], fields: [], page: 0, pages: 1, matched: 0
+  });
+  assert.equal(app.state.selectedServer, '');
+  assert.equal(app.state.selectedSession, '');
+  assert.equal(messages.at(-1)?.type, 'snapshot', 'a follow-up snapshot removes the stale host-side filters');
+});
+
+test('the run picker renders one-click stop actions and keeps the menu open', () => {
+  const { get, messages, receive, app } = viewer();
+  app.state.selectedServer = '';
+  get('scopeMenu').hidden = true;
+  get('sessionMenu').hidden = true;
+  receive({
+    type: 'snapshot', generation: 1, newest: 100, total: 0, retained: 0, discarded: 0, bytes: 0, maxBytes: 10000, truncated: 0,
+    columns: [], columnFields: [], fields: [], page: 0, pages: 1, matched: 0,
+    sessions: [
+      { id: 'run-a', serverId: 'api', server: 'API', command: 'npm run api', status: 'running', startedAt: 100, canStop: true },
+      { id: 'run-b', serverId: 'api', server: 'API', command: 'npm run worker', status: 'running', startedAt: 200, canStop: true },
+      { id: 'terminal-a', serverId: 'terminal-1', server: 'Terminal', command: 'npm test', status: 'running', startedAt: 300, sourceKind: 'terminal', canStop: false },
+      { id: 'done', serverId: 'api', server: 'API', command: 'npm run done', status: 'exited', startedAt: 400, canStop: true }
+    ]
+  });
+
+  get('server').listeners.get('click')!({ stopPropagation() { } });
+  get('runsTab').listeners.get('click')!();
+  assert.equal(get('sessionMenu').hidden, false);
+  const rows = get('sessionMenu').children;
+  assert.equal(rows.length, 5);
+  assert.equal(rows[1].children[1].textContent, 'Stop');
+  assert.equal(rows[2].children[1].textContent, 'Stop');
+  assert.equal(rows[3].children[1].textContent, 'Capture only');
+  assert.equal(rows[4].children.length, 1);
+
+  rows[1].children[1].listeners.get('click')!({ stopPropagation() { } });
+  assert.deepEqual(JSON.parse(JSON.stringify(messages.at(-1))), { type: 'stop', serverId: 'api', sessionId: 'run-a' });
+  assert.equal(get('sessionMenu').hidden, false);
+  rows[2].children[1].listeners.get('click')!({ stopPropagation() { } });
+  assert.deepEqual(JSON.parse(JSON.stringify(messages.at(-1))), { type: 'stop', serverId: 'api', sessionId: 'run-b' });
+});
+
+test('the run picker selects a run and supports keyboard navigation', () => {
+  const { get, messages, receive, dom } = viewer();
+  get('scopeMenu').hidden = true;
+  get('sessionMenu').hidden = true;
+  receive({
+    type: 'snapshot', generation: 1, newest: 100, total: 0, retained: 0, discarded: 0, bytes: 0, maxBytes: 10000, truncated: 0,
+    columns: [], columnFields: [], fields: [], page: 0, pages: 1, matched: 0,
+    sessions: [{ id: 'run-a', serverId: 'api', server: 'API', command: 'npm run api', status: 'running', startedAt: 100, canStop: true }]
+  });
+  get('runsTab').listeners.get('click')!();
+  get('server').listeners.get('keydown')!({ key: 'ArrowDown', preventDefault() { } });
+  assert.equal(get('sessionMenu').hidden, false);
+  assert.equal(dom.activeElement, get('sessionMenu').children[0]);
+
+  get('sessionMenu').children[1].children[0].listeners.get('click')!();
+  assert.equal(get('scopeMenu').hidden, true);
+  assert.match(get('server').textContent, /^All sources · npm run api$/);
+  assert.equal(messages.at(-1)?.type, 'snapshot');
+});
+
+test('the combined scope picker switches between source and run tabs', () => {
+  const { get, receive, app } = viewer();
+  app.state.selectedServer = '';
+  get('scopeMenu').hidden = true;
+  receive({
+    type: 'snapshot', generation: 1, newest: 100, total: 0, retained: 0, discarded: 0, bytes: 0, maxBytes: 10000, truncated: 0,
+    columns: [], columnFields: [], fields: [], page: 0, pages: 1, matched: 0,
+    servers: [
+      { id: 'api', label: 'API', status: 'running', activeSessions: 1 },
+      { id: 'worker', label: 'Worker', status: 'idle', activeSessions: 0 }
+    ],
+    sessions: [{ id: 'run-a', serverId: 'api', server: 'API', command: 'npm run api', status: 'running', startedAt: 100, canStop: true }]
+  });
+
+  get('server').listeners.get('click')!({ stopPropagation() { } });
+  assert.equal(get('scopeMenu').hidden, false);
+  assert.equal(get('sourcesTab').attributes['aria-selected'], 'true');
+  assert.equal(get('sourceMenu').children.length, 3);
+
+  get('runsTab').listeners.get('click')!();
+  assert.equal(get('sourcesTab').attributes['aria-selected'], 'false');
+  assert.equal(get('sourceMenu').hidden, true);
+  assert.equal(get('sessionMenu').hidden, false);
+
+  get('sourcesTab').listeners.get('click')!();
+  get('sourceMenu').children[1].listeners.get('click')!();
+  assert.equal(app.state.selectedServer, 'api');
+  assert.equal(app.state.selectedSession, '');
+  assert.equal(get('scopeMenu').hidden, true);
+});
+
+test('the terminal capture toggle exposes explicit state labels', () => {
+  const { get, receive } = viewer();
+  const snapshot = (captureTerminals: boolean, captureStatus: Record<string, unknown>) => receive({
+    type: 'snapshot', generation: 1, newest: 100, total: 100, retained: 100, discarded: 0, bytes: 1000, maxBytes: 10000,
+    truncated: 0, events: [], columns: [], page: 0, pages: 1, matched: 0, captureTerminals, captureStatus
+  });
+  assert.equal(get('captureToggle').textContent, 'Terminal capture: Off');
+
+  snapshot(false, { state: 'off', detail: 'Terminal capture is off', active: 0, failed: 0 });
+  assert.equal(get('captureToggle').attributes['aria-pressed'], 'false');
+
+  snapshot(true, { state: 'waiting', detail: 'Ready for the next supported terminal command', active: 0, failed: 0 });
+  assert.equal(get('captureToggle').textContent, 'Terminal capture: On');
+  assert.equal(get('captureToggle').attributes['aria-pressed'], 'true');
+
+  snapshot(true, { state: 'capturing', detail: 'Capturing terminal command', active: 1, failed: 0 });
+  assert.equal(get('captureToggle').textContent, 'Terminal capture: Capturing…');
+
+  snapshot(true, { state: 'attention', detail: '1 terminal capture failed', active: 0, failed: 1 });
+  assert.equal(get('captureToggle').textContent, 'Terminal capture: Needs attention');
+});
+
 test('automatic columns settle after the first useful schema while later fields remain opt-in', () => {
   const { app, get } = viewer();
   app.state.columnFields = ['service', 'status'];
@@ -885,11 +1005,12 @@ test('Help opens What’s new for unread highlights and the guide after acknowle
 
 
 test('the main sharing button ignores view filters and stops active sharing', () => {
-  const { get, messages, receive } = viewer();
+  const { get, messages, receive, app } = viewer();
+  app.state.selectedServer = 'api';
   get('server').value = 'api';
-  get('server').listeners.get('change')!();
-  get('session').value = 'selected-run';
-  get('session').listeners.get('change')!();
+  // The run picker is a custom popover; sharing still reads the viewer state
+  // independently of the current source/run filters.
+  app.state.selectedSession = 'selected-run';
   get('shareAgent').listeners.get('click')!();
   assert.deepEqual(JSON.parse(JSON.stringify(messages.at(-1))), { type: 'shareWithAgent' });
   receive({ type: 'snapshot', generation: 100, newest: 100, events: [], columns: [], total: 0, retained: 0, discarded: 0, bytes: 0, maxBytes: 10000, truncated: 0, page: 0, pages: 1, matched: 0,

@@ -22,7 +22,7 @@ try {
   const child = spawn(process.env.VSCODE_CLI ?? 'code', [
     '--user-data-dir', path.join(root, 'profile'), '--extensions-dir', path.join(root, 'extensions'),
     '--extensionDevelopmentPath', process.cwd(), '--extensionTestsPath', path.join(process.cwd(), 'out-tests/test/extension-smoke.js'),
-    '--wait', '--disable-extensions', '--disable-workspace-trust', '--skip-welcome', '--skip-release-notes', workspace,
+    '--wait', '--disable-workspace-trust', '--skip-welcome', '--skip-release-notes', workspace,
   ], { env, stdio: 'inherit' });
   const timeout = setTimeout(() => child.kill(), 60000);
   try {

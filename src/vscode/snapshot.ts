@@ -54,7 +54,7 @@ export function buildSnapshot(msg: Extract<ViewRequest, { type: 'snapshot'; }>,
     if (sessionId === '*' || known.has(`${serverId}\0${sessionId}`)) continue;
     const label = store.serverLabel(serverId) ?? serverId;
     sessions.push({ id: sessionId, server: label, serverId, status: 'exited', startedAt: 0,
-      sourceKind: 'import', owned: false, captureComplete: true, command: label });
+      sourceKind: 'import', owned: false, canStop: false, captureComplete: true, command: label });
   }
   return {
     type: 'snapshot',

@@ -25,13 +25,6 @@ export class TerminalNormalizer {
     }
     let text = this.escape + chunk;
     this.escape = '';
-    if (text.length > TerminalNormalizer.maxEscape && text.charCodeAt(0) === 0x1b) {
-      // A malformed control sequence must never become an unbounded side
-      // buffer. Drop it and resume at the first ordinary character.
-      const newline = text.search(/[\r\n]/);
-      if (newline < 0) { this.droppingEscape = true; return; }
-      text = text.slice(newline + 1);
-    }
     if (this.pendingCarriageReturn) {
       if (text.startsWith('\n')) {
         this.pendingCarriageReturn = false;

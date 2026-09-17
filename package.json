@@ -2,7 +2,7 @@
   "name": "logline",
   "displayName": "Logline \u2014 Live Tail for JSON Logs",
   "description": "Capture terminal and server output in a searchable, expandable JSON log viewer with Copilot agent sharing.",
-  "version": "1.8.0",
+  "version": "1.9.0",
   "publisher": "surjeetbanga",
   "license": "MIT",
   "repository": {
@@ -318,7 +318,7 @@
         "logline.captureTerminals": {
           "type": "boolean",
           "default": false,
-          "description": "Capture new commands from supported VS Code terminals so their output can be searched in Logline. Existing commands must be run again after capture starts."
+          "description": "Capture the next commands from supported VS Code terminals so their output can be searched in Logline. Output from commands already in progress cannot be recovered."
         },
         "logline.persistLogs": {
           "type": "boolean",

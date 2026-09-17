@@ -2,6 +2,13 @@
 
 All notable changes to Logline are documented in this file.
 
+## 1.9.0 — 2026-09-17
+
+- Register already-open terminals for future capture, clean up empty completed terminal metadata as retained events disappear, and clarify that commands already in progress cannot be backfilled.
+- Replace the command-run selector with an accessible dropdown that provides one-click stopping for individual Logline-owned processes and VS Code tasks. Externally captured terminal commands remain visible but observe-only.
+- Combine source and run filtering into one accessible dropdown with Sources and Runs tabs.
+- Clarify the terminal capture toggle with explicit On, Off, Capturing…, and Needs attention labels.
+
 ## 1.8.0 — 2026-09-15
 
 - Capture new commands from supported VS Code shell-integrated terminals after enabling **Capture**, with incremental ANSI normalization, progress-line handling, conservative plain-text severity detection, source/run filtering, and an **Unclassified** level.

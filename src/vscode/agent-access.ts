@@ -1,8 +1,8 @@
 import { randomBytes } from 'node:crypto';
 import { extractExceptions } from '../core/exceptions';
 import { formatDetails } from '../core/format-details';
-import { analyzeEvents, findPatterns, groupErrors } from '../core/log-analysis';
-import { redactEvent, redactText, redactValue, type RedactionOptions } from '../core/redaction';
+import { analyzeEvents } from '../core/log-analysis';
+import { createRedactor, type RedactionOptions, type Redactor } from '../core/redaction';
 import type { LogStore, PageOptions } from '../core/log-store';
 import type { AgentRunStatus, AgentShareStatus } from '../core/agent-types';
 import type { SessionRegistry } from '../capture/session-registry';
@@ -18,6 +18,10 @@ export type { AgentRunStatus, AgentShareStatus } from '../core/agent-types';
 export interface AgentSearchInput extends PageOptions { shareId: string; sourceIds?: string[]; sessionIds?: string[]; limit?: number; cursor?: string; }
 export interface AgentSearchResult { events: LogEvent[]; matched: number; nextCursor?: string; newest: number; partial: boolean; hasMore: boolean; retention?: { oldest?: number; newest: number; } }
 
+interface SourceCursor { before: number; }
+interface DecodedCursor { before?: number; sources?: Record<string, SourceCursor>; }
+interface MergedRead { events: LogEvent[]; matched: number; hasMore: boolean; sources: Map<string, SourceCursor>; checkpoints: Map<string, SourceCursor>[]; }
+
 /** In-memory sharing boundary between the log store and agent tools. */
 export class AgentLogAccess {
   private shareId?: string;
@@ -26,36 +30,47 @@ export class AgentLogAccess {
   private shareAllRuns = false;
   private anchor?: number;
   private readonly redaction: RedactionOptions;
+  private redactor: Redactor;
   private activeWait = false;
   constructor(private readonly store: LogStore, private readonly registry: SessionRegistry,
     private readonly nextId: () => number = () => 0, redaction: RedactionOptions = {}) {
     this.redaction = { enabled: true, replacement: '[REDACTED]', ...redaction };
     this.redaction.enabled = true;
+    this.redactor = createRedactor(this.redaction);
   }
   updateRedaction(options: RedactionOptions): void {
     Object.assign(this.redaction, options, { enabled: true });
+    this.redactor = createRedactor(this.redaction);
   }
 
   status(): AgentShareStatus {
     this.refreshAllRuns();
+    const recordsBySource = new Map<string, typeof this.registry.records extends Map<any, infer R> ? R[] : never>();
+    for (const record of this.registry.records.values()) {
+      const records = recordsBySource.get(record.serverId) ?? [];
+      records.push(record);
+      recordsBySource.set(record.serverId, records);
+    }
     const sources = [...this.shared.entries()].map(([id, sessions]) => {
-      const records = [...this.registry.records.values()].filter(record => record.serverId === id && sessions.has(record.id));
+      const records = (recordsBySource.get(id) ?? []).filter(record => sessions.has(record.id));
       const label = records.at(-1)?.server ?? this.store.serverLabel(id) ?? id;
       const runs = [...sessions].filter(sessionId => sessionId !== '*').map(sessionId => {
         const record = this.registry.records.get(sessionId);
-        return { id: sessionId, sourceId: id, label: redactText(record?.command || record?.server || sessionId, this.redaction),
+        return { id: sessionId, sourceId: id, label: this.redactor.text(record?.command || record?.server || sessionId),
           status: record?.status ?? 'exited', startedAt: record?.startedAt, endedAt: record?.endedAt,
           events: this.store.sessionEventCount(id, sessionId), captureStatus: record?.captureStatus,
           captureReason: record?.captureReason };
       });
-      return { id, label: redactText(label, this.redaction), sessions: runs.length, events: runs.reduce((sum, run) => sum + run.events, 0), runs };
+      return { id, label: this.redactor.text(label), sessions: runs.length, events: runs.reduce((sum, run) => sum + run.events, 0), runs };
     });
     return { active: Boolean(this.shareId), shareId: this.shareId, revision: this.revision, scope: this.shareAllRuns ? 'all' : 'selected', sources };
   }
 
   availableSources(): { id: string; label: string; events: number }[] {
     const ids = new Set([...this.store.serverIds(), ...[...this.registry.records.values()].map(record => record.serverId)]);
-    return [...ids].map(id => ({ id, label: redactText(this.store.serverLabel(id) ?? [...this.registry.records.values()].find(record => record.serverId === id)?.server ?? id, this.redaction), events: this.store.serverEventCount(id) }));
+    const labels = new Map<string, string>();
+    for (const record of this.registry.records.values()) if (!labels.has(record.serverId)) labels.set(record.serverId, record.server);
+    return [...ids].map(id => ({ id, label: this.redactor.text(this.store.serverLabel(id) ?? labels.get(id) ?? id), events: this.store.serverEventCount(id) }));
   }
 
   availableRuns(): AgentRunStatus[] {
@@ -63,13 +78,13 @@ export class AgentLogAccess {
     const seen = new Set<string>();
     for (const record of this.registry.records.values()) {
       seen.add(`${record.serverId}\0${record.id}`);
-      runs.push({ id: record.id, sourceId: record.serverId, label: redactText(record.command || record.server || record.id, this.redaction),
+      runs.push({ id: record.id, sourceId: record.serverId, label: this.redactor.text(record.command || record.server || record.id),
         status: record.status, startedAt: record.startedAt, endedAt: record.endedAt,
         events: this.store.sessionEventCount(record.serverId, record.id), captureStatus: record.captureStatus, captureReason: record.captureReason });
     }
     for (const sourceId of this.store.serverIds()) for (const sessionId of this.store.sessionIds(sourceId)) {
       if (sessionId === '*' || seen.has(`${sourceId}\0${sessionId}`)) continue;
-      runs.push({ id: sessionId, sourceId, label: redactText(this.store.serverLabel(sourceId) ?? sessionId, this.redaction), status: 'exited',
+      runs.push({ id: sessionId, sourceId, label: this.redactor.text(this.store.serverLabel(sourceId) ?? sessionId), status: 'exited',
         events: this.store.sessionEventCount(sourceId, sessionId) });
     }
     return runs;
@@ -139,20 +154,13 @@ export class AgentLogAccess {
     const cursorKey = JSON.stringify({ query: input.query ?? '', levels: input.levels ? [...input.levels].sort() : undefined, sourceIds: input.sourceIds ? [...input.sourceIds].sort() : this.shareAllRuns ? 'all' : [...this.shared.keys()].sort(), sessionId: input.sessionId, sessionIds: input.sessionIds ? [...input.sessionIds].sort() : undefined, from: input.from, to: input.to });
     const cursorState = this.decodeCursor(input.cursor, cursorKey);
     const before = cursorState.before ?? (Number.isFinite(input.before) ? input.before! : this.nextId());
-    const all: LogEvent[] = [];
-    for (const sourceId of sources) {
-      const sourceSessions = sessions?.get(sourceId) ?? this.shared.get(sourceId)!;
-      const wantedSessions = input.sessionId ? new Set([...sourceSessions].filter(id => id === input.sessionId)) : sourceSessions;
-      for (const event of this.store.exportEvents({ query: input.query, levels: input.levels, serverId: sourceId, before, sessionId: input.sessionId, from: input.from, to: input.to }))
-        if (wantedSessions.has(event.sessionId ?? '*')) all.push(event);
-    }
-    all.sort((a, b) => b.id - a.id);
-    const offset = cursorState.offset;
+    const newest = this.nextId();
+    const read = this.readMerged(input, sources, sessions, before, cursorState.sources, limit);
     const selected: LogEvent[] = [];
-    const baseBytes = Buffer.byteLength(JSON.stringify({ events: [], matched: all.length, newest: this.nextId(), partial: true, hasMore: true }), 'utf8');
+    const baseBytes = Buffer.byteLength(JSON.stringify({ events: [], matched: read.matched, newest, partial: true, hasMore: true }), 'utf8');
     let bytes = baseBytes;
-    for (let index = offset; index < Math.min(offset + limit, all.length); index++) {
-      let safe = redactEvent(all[index], this.redaction);
+    for (const event of read.events) {
+      let safe = this.redactor.event(event);
       let encoded = JSON.stringify(safe);
       if (bytes + Buffer.byteLength(encoded, 'utf8') + 2 > 60 * 1024) {
         if (!selected.length) { safe = { id: safe.id, level: safe.level, message: '[TRUNCATED]', truncated: true }; encoded = JSON.stringify(safe); }
@@ -160,11 +168,78 @@ export class AgentLogAccess {
       }
       selected.push(safe); bytes += Buffer.byteLength(encoded, 'utf8') + 1;
     }
-    const nextOffset = offset + selected.length;
-    const hasMore = nextOffset < all.length;
-    return { events: selected, matched: all.length, newest: this.nextId(), partial: hasMore, hasMore,
-      retention: { oldest: all.length ? all[0].id : undefined, newest: this.nextId() },
-      nextCursor: hasMore ? this.encodeCursor(nextOffset, before, cursorKey) : undefined };
+    const byteLimited = selected.length < read.events.length;
+    const hasMore = read.hasMore || byteLimited;
+    const cursorSources = byteLimited && selected.length
+      ? read.checkpoints[selected.length - 1]
+      : read.sources;
+    return { events: selected, matched: read.matched, newest, partial: hasMore, hasMore,
+      retention: { oldest: selected.length ? selected[selected.length - 1].id : undefined, newest },
+      nextCursor: hasMore ? this.encodeCursor(cursorSources, before, cursorKey) : undefined };
+  }
+
+  // Each source contributes one bounded page at a time. Pages are merged by
+  // event id, so a multi-source search stays newest-first without materializing
+  // every matching event in the retained store.
+  private readMerged(input: AgentSearchInput, sources: string[], sessions: Map<string, Set<string>> | undefined,
+    before: number, cursorSources: Record<string, SourceCursor> | undefined, limit: number): MergedRead {
+    const states = new Map<string, SourceCursor>();
+    const pages = new Map<string, { events: LogEvent[]; offset: number }>();
+    const load = (sourceId: string, boundary: number) => {
+      const sourceSessions = sessions?.get(sourceId) ?? this.shared.get(sourceId)!;
+      const wantedSessions = input.sessionId
+        ? new Set([...sourceSessions].filter(id => id === input.sessionId))
+        : sourceSessions;
+      const result = this.store.page({ query: input.query, levels: input.levels, serverId: sourceId,
+        before: boundary, sessionIds: [...wantedSessions], from: input.from, to: input.to, full: true });
+      pages.set(sourceId, { events: result.events, offset: 0 });
+      return result.matched;
+    };
+    let matched = 0;
+    for (const sourceId of sources) {
+      const requested = cursorSources?.[sourceId];
+      const boundary = requested?.before ?? before;
+      states.set(sourceId, { before: boundary });
+      // The count is always taken at the fixed snapshot boundary. On a cursor
+      // continuation this may be one extra indexed page read, but keeps the
+      // coverage count exact if older rows were evicted between calls.
+      matched += load(sourceId, before);
+      if (boundary !== before) load(sourceId, boundary);
+    }
+    const seen = new Set<number>();
+    const selectedEvents: LogEvent[] = [];
+    const checkpoints: Map<string, SourceCursor>[] = [];
+    while (selectedEvents.length < limit && pages.size && [...pages.values()].some(page => page.offset < page.events.length)) {
+      let sourceId: string | undefined;
+      let selected: LogEvent | undefined;
+      for (const candidate of sources) {
+        const page = pages.get(candidate)!;
+        const event = page.events[page.events.length - 1 - page.offset];
+        if (event && (!selected || event.id > selected.id)) { selected = event; sourceId = candidate; }
+      }
+      if (!selected || sourceId === undefined) break;
+      const page = pages.get(sourceId)!;
+      page.offset++;
+      const state = states.get(sourceId)!;
+      state.before = selected.id > 0 ? selected.id - 1 : -1;
+      // Duplicate ids are not expected from the normal capture allocator, but
+      // deduplicating here keeps the merged protocol stable for imported data.
+      if (!seen.has(selected.id)) {
+        seen.add(selected.id);
+        selectedEvents.push(selected);
+        checkpoints.push(new Map([...states].map(([id, state]) => [id, { ...state }])));
+      }
+      if (page.offset >= page.events.length) {
+        const oldest = page.events[0];
+        if (oldest && oldest.id > 0) {
+          const nextBoundary = oldest.id - 1;
+          state.before = nextBoundary;
+          load(sourceId, nextBoundary);
+        } else pages.delete(sourceId);
+      }
+    }
+    const hasMore = [...pages.values()].some(page => page.offset < page.events.length);
+    return { events: selectedEvents, matched, hasMore, sources: states, checkpoints };
   }
 
   inspect(shareId: string, id: number, context = 25): { event: LogEvent; details: string; exceptions: ReturnType<typeof extractExceptions>; context: LogEvent[] } {
@@ -172,13 +247,13 @@ export class AgentLogAccess {
     this.assertShare(shareId);
     const event = this.store.find(id);
     if (!event || !this.shared.has(event.serverId ?? '') || !this.shared.get(event.serverId!)!.has(event.sessionId ?? '*')) throw new AgentAccessError('EVENT_UNAVAILABLE', 'That event is not available in the shared runs.');
-    const safe = this.boundEvent(redactEvent(event, this.redaction));
+    const safe = this.boundEvent(this.redactor.event(event));
     const details = (safe.isJson && safe.raw ? formatDetails(safe.raw, 2) : safe.raw ?? safe.message ?? '').slice(0, 16 * 1024);
     const contextResult = this.store.context(id);
     const anchorIndex = contextResult.events.findIndex(item => item.id === id);
     const count = Math.min(25, Math.max(0, context));
     const contextEvents = anchorIndex < 0 ? [] : contextResult.events.slice(Math.max(0, anchorIndex - count), anchorIndex + count + 1);
-    return { event: safe, details: redactText(details, this.redaction), exceptions: extractExceptions(safe), context: contextEvents.map(item => this.boundEvent(redactEvent(item, this.redaction))) };
+    return { event: safe, details: this.redactor.text(details), exceptions: extractExceptions(safe), context: contextEvents.map(item => this.boundEvent(this.redactor.event(item))) };
   }
 
   analyze(input: AgentSearchInput): unknown {
@@ -187,16 +262,14 @@ export class AgentLogAccess {
     this.validate(input);
     const sources = this.sources(input.sourceIds);
     const sessions = this.sessions(input.sessionIds);
-    const events: LogEvent[] = [];
-    for (const serverId of sources) {
-      const wanted = sessions?.get(serverId) ?? this.shared.get(serverId)!;
-      for (const event of this.store.exportEvents({ query: input.query, levels: input.levels, serverId, before: input.before, from: input.from, to: input.to }))
-        if (wanted.has(event.sessionId ?? '*') && (!input.sessionId || input.sessionId === event.sessionId)) events.push(event);
-    }
-    events.sort((a, b) => a.id - b.id);
-    const limited = events.slice(-10000);
-    const analysis = analyzeEvents(limited, { from: input.from, to: input.to });
-    return redactValue({ ...analysis, errorGroups: groupErrors(limited), patterns: findPatterns(limited, { from: input.from, to: input.to }), coverage: { matched: events.length, analyzed: limited.length, limited: events.length > limited.length } }, this.redaction);
+    // Analysis historically considered the whole retained snapshot when no
+    // explicit boundary was supplied; keep that behavior even for callers
+    // constructed without an ingestion sequence callback.
+    const before = Number.isFinite(input.before) ? input.before! : Infinity;
+    const read = this.readMerged(input, sources, sessions, before, undefined, 10000);
+    const chronological = read.events.slice().reverse();
+    const analysis = analyzeEvents(chronological, { from: input.from, to: input.to });
+    return this.redactor.value({ ...analysis, coverage: { matched: read.matched, analyzed: chronological.length, limited: read.matched > chronological.length } });
   }
 
   async wait(input: AgentSearchInput, watermark: number, timeoutMs = 5000, signal?: { aborted?: boolean; isCancellationRequested?: boolean }): Promise<AgentSearchResult> {
@@ -214,7 +287,8 @@ export class AgentLogAccess {
         this.assertShare(input.shareId);
         const result = this.search({ ...input, before: undefined, limit: 200 });
         const events = result.events.filter(event => event.id > watermark);
-        if (events.length) return { ...result, events, matched: events.length, partial: events.length >= 200 };
+        if (events.length) return { ...result, events, matched: events.length,
+          partial: result.partial || events.length >= 200, hasMore: result.hasMore || events.length >= 200 };
         await new Promise(resolve => setTimeout(resolve, 100));
       }
       return { events: [], matched: 0, newest: this.nextId(), partial: false, hasMore: false, retention: { newest: this.nextId() } };
@@ -253,15 +327,28 @@ export class AgentLogAccess {
     if (![...result.values()].some(value => value.size)) throw new AgentAccessError('NOT_SHARED', 'No requested runs are shared with the agent.');
     return result;
   }
-  private encodeCursor(offset: number, before: number, key: string): string { return Buffer.from(JSON.stringify({ id: this.shareId, revision: this.revision, offset, before, key })).toString('base64url'); }
+  private encodeCursor(sources: Map<string, SourceCursor>, before: number, key: string): string {
+    return Buffer.from(JSON.stringify({ id: this.shareId, revision: this.revision, before, key,
+      sources: Object.fromEntries(sources) })).toString('base64url');
+  }
   private boundEvent(event: LogEvent): LogEvent {
     const bound = { ...event };
     if (bound.raw && bound.raw.length > 16 * 1024) { bound.raw = bound.raw.slice(0, 16 * 1024); bound.truncated = true; }
     if (bound.message && bound.message.length > 8 * 1024) { bound.message = bound.message.slice(0, 8 * 1024); bound.truncated = true; }
     return bound;
   }
-  private decodeCursor(cursor: string | undefined, key: string): { offset: number; before?: number } {
-    if (!cursor) return { offset: 0 };
-    try { const value = JSON.parse(Buffer.from(cursor, 'base64url').toString()); if (value.id !== this.shareId || value.revision !== this.revision || value.key !== key) throw new Error(); return { offset: Number.isSafeInteger(value.offset) && value.offset >= 0 ? value.offset : 0, before: Number.isSafeInteger(value.before) ? value.before : undefined }; } catch { throw new AgentAccessError('SHARE_CHANGED', 'The search cursor is no longer valid.'); }
+  private decodeCursor(cursor: string | undefined, key: string): DecodedCursor {
+    if (!cursor) return {};
+    try {
+      const value = JSON.parse(Buffer.from(cursor, 'base64url').toString());
+      if (value.id !== this.shareId || value.revision !== this.revision || value.key !== key
+        || !Number.isSafeInteger(value.before) || value.before < 0 || !value.sources || typeof value.sources !== 'object') throw new Error();
+      const sources: Record<string, SourceCursor> = {};
+      for (const [sourceId, state] of Object.entries(value.sources as Record<string, unknown>)) {
+        if (!state || typeof state !== 'object' || !Number.isSafeInteger((state as any).before) || (state as any).before < -1) throw new Error();
+        sources[sourceId] = { before: (state as any).before };
+      }
+      return { before: value.before, sources };
+    } catch { throw new AgentAccessError('SHARE_CHANGED', 'The search cursor is no longer valid.'); }
   }
 }
