@@ -2,6 +2,10 @@
 
 All notable changes to Logline are documented in this file.
 
+## 1.9.1 — 2026-09-17
+
+- Refresh the demo with a short walkthrough of live capture, source and run scoping, stopping an active run, filtering, and event inspection.
+
 ## 1.9.0 — 2026-09-17
 
 - Register already-open terminals for future capture, clean up empty completed terminal metadata as retained events disappear, and clarify that commands already in progress cannot be backfilled.

@@ -2,7 +2,7 @@
   "name": "logline",
   "displayName": "Logline \u2014 Live Tail for JSON Logs",
   "description": "Capture terminal and server output in a searchable, expandable JSON log viewer with Copilot agent sharing.",
-  "version": "1.9.0",
+  "version": "1.9.1",
   "publisher": "surjeetbanga",
   "license": "MIT",
   "repository": {
