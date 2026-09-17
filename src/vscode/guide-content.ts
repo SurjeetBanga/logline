@@ -17,6 +17,15 @@ export interface GuideRelease {
 
 export const GUIDE_RELEASES: GuideRelease[] = [
   {
+    version: '1.9.0',
+    date: '2026-09-17',
+    highlights: [
+      { title: 'Scope sources and runs together', text: 'Use one accessible picker with Sources and Runs tabs to filter by server, task, terminal, imported source, or one command execution.', section: 'capture' },
+      { title: 'Stop one active run', text: 'The Runs tab offers inline Stop actions for Logline-owned processes and VS Code tasks while externally captured terminal commands stay observe-only.', section: 'capture' },
+      { title: 'Capture terminals more reliably', text: 'Already-open terminals are ready for their next command, completed empty runs are cleaned up, and the toolbar clearly shows Off, On, Capturing…, or Needs attention.', section: 'capture' }
+    ]
+  },
+  {
     version: '1.8.0',
     date: '2026-09-15',
     highlights: [

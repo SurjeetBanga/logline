@@ -32,7 +32,7 @@ Open **Help** in the toolbar for the offline visual guide, or run **Logline: Wha
 
 **Live** follows the newest events. Turn it off to browse retained history in pages of up to 1,000 rows. Expanding an event holds your place while collection continues; changing filters, sorting, paging, or columns returns inspection to **Browse**. Choose **Live** or **Resume** to return to the newest rows.
 
-**New in 1.8.0:** terminal capture, source/run filters, an Unclassified level for plain text, and explicit redacted Copilot sharing with revocable read-only tools. See the [changelog](CHANGELOG.md) for the full release history.
+**New in 1.9.0:** a combined Sources/Runs picker with one-click stopping for Logline-owned processes and tasks, reliable capture for already-open terminals, automatic cleanup of stale terminal metadata, and clearer capture state labels. See the [changelog](CHANGELOG.md) for the full release history.
 
 ## Find the logs you need
 

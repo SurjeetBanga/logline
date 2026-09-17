@@ -2,7 +2,7 @@
 
 All notable changes to Logline are documented in this file.
 
-## Unreleased
+## 1.9.0 — 2026-09-17
 
 - Register already-open terminals for future capture, clean up empty completed terminal metadata as retained events disappear, and clarify that commands already in progress cannot be backfilled.
 - Replace the command-run selector with an accessible dropdown that provides one-click stopping for individual Logline-owned processes and VS Code tasks. Externally captured terminal commands remain visible but observe-only.
