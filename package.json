@@ -446,5 +446,8 @@
     "@vscode/vsce": "^3.6.0",
     "esbuild": "^0.28.2",
     "typescript": "^5.9.3"
+  },
+  "dependencies": {
+    "re2-wasm": "^1.0.2"
   }
 }

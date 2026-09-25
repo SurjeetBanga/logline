@@ -95,3 +95,11 @@ test('message router enforces workspace trust for run and ignores malformed requ
   assert.equal(calls.filter(call => call.name === 'warning').length, 2);
   (mockVscode.workspace as any).isTrusted = trusted;
 });
+
+test('message router correlates snapshot failures to the requesting view', async () => {
+  const service = services();
+  service.snapshot = () => { throw new Error('snapshot unavailable'); };
+  const sent: unknown[] = [];
+  await handleMessage(service as any, message => sent.push(message), { type: 'snapshot', requestId: 7 });
+  assert.deepEqual(sent, [{ type: 'snapshotError', requestId: 7, message: 'snapshot unavailable' }]);
+});

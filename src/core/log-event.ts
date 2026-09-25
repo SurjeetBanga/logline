@@ -1,4 +1,5 @@
 import type { LogEvent } from './types';
+import { terminalLevel } from './terminal-level';
 
 const LEVELS = ['trace', 'debug', 'info', 'warn', 'error', 'fatal'];
 const LEVEL_BY_CODE: Record<number, string> = { 10: 'trace', 20: 'debug', 30: 'info', 40: 'warn', 50: 'error', 60: 'fatal' };
@@ -77,13 +78,6 @@ function getTimestamp(object: JsonObject | undefined, receivedAt: Date): { text:
 
 function formatTime(date: Date): string {
   return `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}:${String(date.getSeconds()).padStart(2, '0')}.${String(date.getMilliseconds()).padStart(3, '0')}`;
-}
-
-function terminalLevel(text: string): string {
-  const match = text.match(/^\s*(?:\[[^\]]+\]\s*)?(?:\d{4}-\d\d?-\d\d?(?:[T ][^ ]+)?\s+)?(?:\[[ ]*)?(TRACE|DEBUG|INFO|WARN(?:ING)?|ERROR|FATAL)(?:\s*\]|\b)/i);
-  if (!match) return 'unclassified';
-  const value = match[1].toLowerCase();
-  return value === 'warning' ? 'warn' : value;
 }
 
 export function stripAnsi(value: string): string {

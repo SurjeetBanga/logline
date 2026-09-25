@@ -227,7 +227,7 @@ export class LogsController {
     this.configSubscription.dispose();
     for (const subscription of this.sharingSubscriptions) subscription.dispose();
     this.notifications.dispose();
-    this.tasks.stop();
+    this.tasks.disposeObservation();
     this.terminalCapture.dispose();
     // Closing streams may emit a final partial line; flush persistence afterwards.
     await this.runner.dispose();

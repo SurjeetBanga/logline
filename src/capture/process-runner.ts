@@ -16,10 +16,14 @@ export class ProcessRunner {
   stop(): void { for (const session of this.sessions) this.stopSession(session); }
   stopServer(id: string): void { for (const session of this.sessions) if (session.server.id === id) this.stopSession(session); }
   async dispose(): Promise<void> {
-    const closed = [...this.sessions].map(session => new Promise<void>(resolve => session.child.once('close', () => resolve())));
+    const sessions = [...this.sessions];
+    const closed = sessions.map(session => new Promise<void>(resolve => session.child.once('close', () => resolve())));
     this.stop();
     // Keep the escalation timers alive until every child has actually closed.
     await Promise.all(closed);
+    // A process can close while a descendant keeps the detached process group
+    // alive. Force the original group down before clearing escalation timers.
+    await Promise.all(sessions.map(session => this.killProcessTree(session.child.pid, 'SIGKILL')));
     for (const timer of this.timers) clearTimeout(timer);
     this.timers.clear();
   }
@@ -44,7 +48,6 @@ export class ProcessRunner {
         }
       }
     }
-    this.state.generation++;
     this.state.command = args ? [command, ...args].join(' ') : command;
     this.state.status = 'Running';
     this.state.notify();
@@ -136,26 +139,40 @@ export class ProcessRunner {
     session.record.status = 'stopping';
     this.state.status = 'Stopping…';
     this.state.notify();
-    const kill = (signal: NodeJS.Signals) => {
-      if (session.exited) return;
-      try {
-        if (!session.child.pid) return;
-        if (process.platform === 'win32') {
-          // Node signals are emulated on Windows and only reach the immediate
-          // child, leaving any Gradle/Java descendants (and the ports they
-          // hold) running. taskkill /T walks the whole process tree instead.
-          execFile('taskkill', ['/PID', String(session.child.pid), '/T', '/F'], () => { });
-        } else {
-          process.kill(-session.child.pid, signal);
-        }
-      } catch (error) {
+    const kill = (signal: NodeJS.Signals, force = false) => {
+      if (session.exited && !force) return;
+      void this.killProcessTree(session.child.pid, signal).catch(error => {
         const code = (error as NodeJS.ErrnoException).code;
         if (code !== 'ESRCH') { this.state.status = `Could not stop: ${(error as Error).message}`; this.state.notify(); }
-      }
+      });
     };
     kill('SIGTERM');
-    const timer = setTimeout(() => { kill('SIGKILL'); this.timers.delete(timer); }, 2000);
+    const timer = setTimeout(() => { kill('SIGKILL', true); this.timers.delete(timer); }, 2000);
     timer.unref();
     this.timers.add(timer);
+  }
+
+  private killProcessTree(pid: number | undefined, signal: NodeJS.Signals): Promise<void> {
+    if (!pid) return Promise.resolve();
+    if (process.platform === 'win32') {
+      // Node signals are emulated on Windows and only reach the immediate
+      // child, leaving descendants (and their ports) running. taskkill /T
+      // walks the whole process tree instead.
+      return new Promise(resolve => execFile('taskkill', ['/PID', String(pid), '/T', '/F'], error => {
+        if (error && (error as NodeJS.ErrnoException).code !== 'ESRCH') {
+          this.state.status = `Could not stop process tree: ${error.message}`;
+          this.state.notify();
+        }
+        resolve();
+      }));
+    } else {
+      try { process.kill(-pid, signal); }
+      catch (error) {
+        // The group may have exited between the child close event and the
+        // escalation/disposal pass. That is a successful termination state.
+        if ((error as NodeJS.ErrnoException).code !== 'ESRCH') return Promise.reject(error);
+      }
+      return Promise.resolve();
+    }
   }
 }

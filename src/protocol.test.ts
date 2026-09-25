@@ -34,5 +34,7 @@ test('message boundary preserves an empty level selection and normalizes paginat
   assert.equal(request.statsOnly, false);
   assert.equal(request.query, undefined);
   assert.equal(request.sortDirection, 'asc');
+  const requestWithId = parseViewRequest({ type: 'snapshot', requestId: 9 });
+  assert.equal(requestWithId?.type === 'snapshot' ? requestWithId.requestId : undefined, 9);
   assert.deepEqual(parseViewRequest({ type: 'exportContext', ids: [1, '2', -3, 4.5, 5] }), { type: 'exportContext', ids: [1, 5] });
 });

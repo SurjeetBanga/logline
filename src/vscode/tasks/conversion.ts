@@ -2,7 +2,7 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import * as path from 'node:path';
 import * as vscode from 'vscode';
 import { parseJsonc } from '../../core/jsonc';
-import { dependencyNames, dependencyNamesFromValue, taskDefinitionLabel, taskToLoglineDefinition, type LoglineTaskDefinition } from './definition';
+import { dependencyNames, dependencyNamesFromValue, taskConversionError, taskDefinitionLabel, taskToLoglineDefinition, type LoglineTaskDefinition } from './definition';
 import { appendTasksToJsonc } from './jsonc-edit';
 
 export async function convertTask(): Promise<void> {
@@ -20,6 +20,7 @@ export async function convertTask(): Promise<void> {
   // Merge dependsOn refs from every folder's tasks.json, since a picked
   // task's dependency can be declared in a different folder than its own.
   const rawDependencyByRef = new Map<string, string[]>();
+  const scopeKey = (scope: string | undefined, name: string) => `${scope ?? ''}\0${name}`;
   for (const workspaceFolder of folders) {
     const file = path.join(workspaceFolder.uri.fsPath, '.vscode', 'tasks.json');
     let document: { version?: string; tasks?: unknown[]; } = { version: '2.0.0', tasks: [] };
@@ -41,7 +42,7 @@ export async function convertTask(): Promise<void> {
       const value = raw as Record<string, unknown>;
       const deps = dependencyNamesFromValue(value.dependsOn);
       if (!deps.length) continue;
-      for (const key of ['label', 'task', 'script']) if (typeof value[key] === 'string') rawDependencyByRef.set(value[key] as string, deps);
+      for (const key of ['label', 'task', 'script']) if (typeof value[key] === 'string') rawDependencyByRef.set(scopeKey(workspaceFolder.uri.toString(), value[key] as string), deps);
     }
   }
   let tasks: vscode.Task[];
@@ -50,12 +51,16 @@ export async function convertTask(): Promise<void> {
     vscode.window.showErrorMessage(`Could not read VS Code tasks: ${(error as Error).message}`);
     return;
   }
-  const candidates = tasks.filter(task => task.definition?.type !== 'logline' && taskToLoglineDefinition(task));
+  const candidates = tasks.filter(task => task.definition?.type !== 'logline' && (taskToLoglineDefinition(task) || taskConversionError(task)));
   if (!candidates.length) { vscode.window.showInformationMessage('No shell, process, node-terminal, or launch pre-task was found.'); return; }
   const picked = await vscode.window.showQuickPick(candidates.map(task => ({
     label: taskDefinitionLabel(task), description: `${task.source} · ${task.definition.type}`, task
   })), { title: 'Convert VS Code task to Logline' });
   if (!picked) return;
+  if (!taskToLoglineDefinition(picked.task)) {
+    vscode.window.showErrorMessage(taskConversionError(picked.task) ?? 'This task cannot be converted without changing its behavior.');
+    return;
+  }
   const scopeFolder = typeof picked.task.scope === 'object' ? picked.task.scope : undefined;
   const targetFolder = (scopeFolder && folders.find(f => f.uri.toString() === scopeFolder.uri.toString())) ?? folders[0];
   const { file, document, sourceText, error } = parsedByFolder.get(targetFolder.uri.toString())!;
@@ -63,21 +68,24 @@ export async function convertTask(): Promise<void> {
     vscode.window.showErrorMessage(`Could not read ${file}: ${error} Fix the file before converting a task.`);
     return;
   }
-  const byName = new Map<string, vscode.Task>();
-  const ambiguousNames = new Set<string>();
-  // A name shared by two different tasks can't be resolved unambiguously,
-  // so drop it entirely rather than let whichever task registered last win.
+  const byScopedName = new Map<string, vscode.Task>();
+  const ambiguousScopedNames = new Set<string>();
+  // Resolve dependency names in their originating workspace folder. A name
+  // shared by two tasks in that folder is ambiguous and must remain a raw
+  // reference instead of silently selecting whichever task was registered last.
   const registerName = (key: string, task: vscode.Task) => {
-    const existing = byName.get(key);
-    if (existing && existing !== task) { ambiguousNames.add(key); return; }
-    byName.set(key, task);
+    const scope = typeof task.scope === 'object' ? task.scope.uri.toString() : undefined;
+    const scoped = scopeKey(scope, key);
+    const existing = byScopedName.get(scoped);
+    if (existing && existing !== task) { ambiguousScopedNames.add(scoped); return; }
+    byScopedName.set(scoped, task);
   };
   for (const task of tasks) {
     registerName(task.name, task);
     const definition = task.definition as Record<string, unknown>;
     for (const key of ['label', 'task', 'script']) if (typeof definition[key] === 'string') registerName(definition[key] as string, task);
   }
-  for (const key of ambiguousNames) byName.delete(key);
+  for (const key of ambiguousScopedNames) byScopedName.delete(key);
   const generated: LoglineTaskDefinition[] = [];
   const generatedByLabel = new Map<string, LoglineTaskDefinition>();
   const convert = (task: vscode.Task): LoglineTaskDefinition | undefined => {
@@ -90,11 +98,16 @@ export async function convertTask(): Promise<void> {
     // emitted once and cannot recurse forever.
     generatedByLabel.set(label, definition);
     generated.push(definition);
-    const dependencies = dependencyNames(task).length ? dependencyNames(task) : (rawDependencyByRef.get(task.name) ?? []);
+    const taskScope = typeof task.scope === 'object' ? task.scope.uri.toString() : undefined;
+    const dependencies = dependencyNames(task).length ? dependencyNames(task) : (rawDependencyByRef.get(scopeKey(taskScope, task.name)) ?? []);
     if (dependencies.length) {
       definition.dependsOn = dependencies.map(name => {
-        const dependency = byName.get(name);
-        const converted = dependency ? convert(dependency) : undefined;
+        const dependency = byScopedName.get(scopeKey(taskScope, name));
+        // A dependency in another workspace folder is intentionally retained
+        // by name. Moving its command into the picked task's tasks.json would
+        // change its cwd and can make VS Code resolve the wrong task.
+        const converted = dependency && (typeof dependency.scope === 'object' ? dependency.scope.uri.toString() : undefined) === taskScope
+          ? convert(dependency) : undefined;
         return converted?.label ?? name;
       });
       if (definition.dependsOn.length === 1) definition.dependsOn = definition.dependsOn[0];
@@ -123,7 +136,11 @@ export async function convertTask(): Promise<void> {
     if (currentText !== sourceText) throw new Error('tasks.json changed during conversion. Run the command again.');
     mkdirSync(path.dirname(file), { recursive: true });
     const preserved = sourceText && appendTasksToJsonc(sourceText, additions);
-    writeFileSync(file, preserved ?? (JSON.stringify(document, null, 2) + '\n'), 'utf8');
+    const nextText = preserved ?? (JSON.stringify(document, null, 2) + '\n');
+    const reparsed = parseJsonc(nextText) as { tasks?: unknown[] };
+    if (!reparsed || typeof reparsed !== 'object' || !Array.isArray(reparsed.tasks))
+      throw new Error('The generated tasks.json is not a valid tasks document.');
+    writeFileSync(file, nextText, 'utf8');
   } catch (error) {
     vscode.window.showErrorMessage(`Could not write ${path.relative(targetFolder.uri.fsPath, file)}: ${(error as Error).message}`);
     return;

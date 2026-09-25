@@ -615,6 +615,18 @@ test('opening a live row freezes its result set while a snapshot is in flight', 
   assert.equal(app.table.events[0].id, 42, 'the selected row remains available until Live is resumed');
 });
 
+test('snapshot errors release the bridge and keep the next refresh possible', () => {
+  const { app, receive, messages, get } = viewer();
+  app.bridge.request();
+  const requestId = messages.at(-1)?.requestId;
+  assert.equal(app.bridge.pending, true);
+  receive({ type: 'snapshotError', requestId, message: 'temporary host failure' });
+  assert.equal(app.bridge.pending, false);
+  assert.equal(get('status').textContent, 'Snapshot failed: temporary host failure');
+  app.bridge.request();
+  assert.equal(messages.at(-1)?.type, 'snapshot');
+});
+
 test('explicit paging, filtering, sorting and column selection leave inspection in Browse', () => {
   for (const action of ['page', 'filter', 'sort', 'columns']) {
     const { app, get, receive, messages } = viewer();
@@ -707,7 +719,7 @@ test('Columns exposes additional payload fields and requests their values when s
   const checkbox = custom.children[0] as Element & { checked: boolean; };
   assert.equal(checkbox.checked, false);
   checkbox.checked = true; checkbox.listeners.get('change')!();
-  assert.deepEqual(JSON.parse(JSON.stringify(messages.at(-1)?.columns)), ['custom.jobId']);
+  assert.deepEqual(JSON.parse(JSON.stringify(messages.at(-1)?.columns)), ['service', 'custom.jobId']);
   assert.equal(app.table.currentColumns.includes("custom.jobId"), true);
   const updated = get('fieldList').children.find(row => row.dataset.field === 'custom.jobId')!.children[0] as Element & { checked: boolean; };
   assert.equal(updated.checked, true);

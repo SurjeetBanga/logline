@@ -43,7 +43,25 @@ export class TerminalNormalizer {
         if (next === '[') {
           let found = -1;
           for (let j = i + 2; j < text.length; j++) if (/[\x40-\x7e]/.test(text[j])) { found = j; break; }
-          if (found < 0) { this.escape = text.slice(i).slice(0, TerminalNormalizer.maxEscape); break; }
+          if (found < 0) {
+            const rest = text.slice(i);
+            const newline = rest.search(/[\r\n]/);
+            // A control sequence that crosses a line boundary without a
+            // terminator is malformed. Resynchronise at that boundary so it
+            // cannot hide every later line until the byte cap is reached.
+            if (newline >= 0) {
+              this.escape = '';
+              if (plain) { this.append(plain); plain = ''; }
+              this.emit();
+              i += newline;
+              continue;
+            }
+            if (rest.length >= TerminalNormalizer.maxEscape) {
+              this.escape = '';
+              this.droppingEscape = true;
+            } else this.escape = rest;
+            break;
+          }
           const sequence = text.slice(i, found + 1);
           if (/\x1b\[\?(?:1049|1047|47)h/.test(sequence)) this.alternateScreen = true;
           if (/\x1b\[\?(?:1049|1047|47)l/.test(sequence)) this.alternateScreen = false;
@@ -58,7 +76,22 @@ export class TerminalNormalizer {
             if (text.charCodeAt(j) === 7) { found = j; break; }
             if (text.charCodeAt(j) === 0x1b && text[j + 1] === '\\') { found = j; endLength = 2; break; }
           }
-          if (found < 0) { this.escape = text.slice(i).slice(0, TerminalNormalizer.maxEscape); break; }
+          if (found < 0) {
+            const rest = text.slice(i);
+            const newline = rest.search(/[\r\n]/);
+            if (newline >= 0) {
+              this.escape = '';
+              if (plain) { this.append(plain); plain = ''; }
+              this.emit();
+              i += newline;
+              continue;
+            }
+            if (rest.length >= TerminalNormalizer.maxEscape) {
+              this.escape = '';
+              this.droppingEscape = true;
+            } else this.escape = rest;
+            break;
+          }
           i = found + endLength - 1;
           continue;
         }
@@ -109,10 +142,4 @@ export class TerminalNormalizer {
   }
 }
 
-/** Conservative severity parsing for unstructured terminal lines. */
-export function terminalLevel(text: string): string {
-  const match = text.match(/^\s*(?:\[[^\]]+\]\s*)?(?:\d{4}-\d\d?-\d\d?(?:[T ][^ ]+)?\s+)?(?:\[[ ]*)?(TRACE|DEBUG|INFO|WARN(?:ING)?|ERROR|FATAL)(?:\s*\]|\b)/i);
-  if (!match) return 'unclassified';
-  const value = match[1].toLowerCase();
-  return value === 'warning' ? 'warn' : value;
-}
+export { terminalLevel } from '../core/terminal-level';

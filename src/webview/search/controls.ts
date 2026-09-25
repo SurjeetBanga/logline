@@ -1,5 +1,6 @@
 import type { HostMessage } from '../../protocol/messages';
 import { completeQuery } from '../../core/query-completion';
+import { queryError } from '../../core/query-validation';
 import { queryTokens } from '../../core/query-tokens';
 import type { SavedSearch } from '../../storage/saved-searches';
 import type { Elements } from '../dom';
@@ -130,7 +131,10 @@ export function createSearch(elements: Elements, state: ViewerState, api: Webvie
   function query() { return appliedQuery; }
 
   function setQuery(value: string, notify = false) {
-    appliedQuery = tokens(value).join(' ').slice(0, MAX_QUERY_LENGTH);
+    const normalized = tokens(value).join(' ').slice(0, MAX_QUERY_LENGTH);
+    const regexError = queryError(normalized);
+    if (regexError) { setError(regexError); return false; }
+    appliedQuery = normalized;
     editingIndex = undefined;
     // Keep the serialized value until focus moves into the editor. This makes
     // the state inspectable to assistive tooling and lets the native input
@@ -140,6 +144,7 @@ export function createSearch(elements: Elements, state: ViewerState, api: Webvie
     clearAutocomplete();
     renderChips();
     if (notify) filterChanged();
+    return true;
   }
 
   function beginEdit(index: number) {
@@ -173,7 +178,7 @@ export function createSearch(elements: Elements, state: ViewerState, api: Webvie
       setError(`Filters cannot exceed ${MAX_QUERY_LENGTH} characters.`);
       return false;
     }
-    setQuery(normalized, true);
+    if (!setQuery(normalized, true)) return false;
     elements.search.value = '';
     return true;
   }
@@ -260,6 +265,9 @@ export function createSearch(elements: Elements, state: ViewerState, api: Webvie
       scope.listen(button, 'click', () => {
         setQuery(item.query || '');
         state.selectedServer = item.serverId || '';
+        // Saved searches do not encode a run scope. Do not silently retain a
+        // previously selected run while restoring one.
+        state.selectedSession = '';
         state.checkedLevels = new Set(Array.isArray(item.levels) ? item.levels : LEVELS);
         elements.server.value = state.selectedServer;
         updateScopeSelection();

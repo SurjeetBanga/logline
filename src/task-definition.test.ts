@@ -18,6 +18,11 @@ test('process and shell task executions become captured Logline definitions', ()
   } as unknown as import('vscode').Task)!;
   assert.equal(shell.shell, true);
   assert.equal(shell.command, 'npm run watch -- --verbose');
+  const customShell = taskToLoglineDefinition({
+    name: 'Custom shell', source: 'shell', definition: { type: 'shell' },
+    execution: { command: 'echo', args: ['hello'], options: { executable: '/bin/zsh' } }
+  } as unknown as import('vscode').Task)!;
+  assert.equal(customShell.shell, '/bin/zsh');
 });
 
 test('a shell command/args pair is rejoined into one quoted command line', () => {
@@ -56,6 +61,14 @@ test('appendTasksToJsonc ignores a commented-out tasks property and nested array
   const result = appendTasksToJsonc(text, [{ label: 'New' }])!;
   const parsed = parseJsonc(result) as { tasks: { label: string; }[]; };
   assert.deepEqual(parsed.tasks.map(task => task.label), ['Existing', 'New']);
+});
+
+test('appendTasksToJsonc ignores braces inside string values while locating root tasks', () => {
+  const text = '{"description":"value with { braces }", "config":{"tasks":[{"label":"nested"}]}, "tasks":[]}';
+  const result = appendTasksToJsonc(text, [{ label: 'root' }])!;
+  const parsed = parseJsonc(result) as { tasks: { label: string }[]; config: { tasks: { label: string }[] } };
+  assert.deepEqual(parsed.tasks.map(task => task.label), ['root']);
+  assert.deepEqual(parsed.config.tasks.map(task => task.label), ['nested']);
 });
 
 test('appendTasksToJsonc returns undefined when there is no tasks array to preserve', () => {

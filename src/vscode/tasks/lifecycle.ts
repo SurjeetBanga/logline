@@ -9,6 +9,7 @@ import { dependencyNames, taskDefinitionLabel } from './definition';
 
 export class TaskLifecycle {
   readonly executions = new Map<vscode.TaskExecution, SessionSummary>();
+  private observing = true;
   constructor(private readonly registry: SessionRegistry, private readonly ingestion: Ingestion,
     private readonly state: RuntimeState, private readonly hasProcesses: () => boolean) { }
   stop(serverId?: string): void {
@@ -30,6 +31,9 @@ export class TaskLifecycle {
     this.state.notify();
     try { execution.terminate(); } catch { /* task may already have ended */ }
   }
+  /** Release VS Code task observation during extension shutdown. Ordinary tasks
+   * belong to the editor and must keep running after Logline deactivates. */
+  disposeObservation(): void { this.observing = false; this.executions.clear(); }
   private taskSummary(execution: vscode.TaskExecution): SessionSummary {
     const existing = this.executions.get(execution);
     if (existing) return existing;
@@ -51,7 +55,7 @@ export class TaskLifecycle {
       taskState: 'running',
       dependencies: deps,
       dependencyState: this.registry.dependencyState(deps, taskScope),
-      source: task.source, sourceKind: 'task', canStop: true
+      source: task.source, sourceKind: 'task', owned: false, canStop: true
     };
     this.executions.set(execution, record);
     this.registry.records.set(record.id, record);
@@ -86,11 +90,11 @@ export class TaskLifecycle {
     };
     record.events++;
     this.ingestion.commit(event, true);
-    this.state.generation++;
     this.state.notify();
   }
 
   captureTaskStart(execution: vscode.TaskExecution): void {
+    if (!this.observing) return;
     // A Logline CustomExecution is already represented by the real process
     // session created in run(); recording it again would duplicate the task.
     if (execution.task.definition?.type === 'logline') return;
@@ -101,6 +105,7 @@ export class TaskLifecycle {
   }
 
   captureTaskProcessStart(execution: vscode.TaskExecution, processId: number): void {
+    if (!this.observing) return;
     if (execution.task.definition?.type === 'logline') return;
     const record = this.taskSummary(execution);
     record.pid = processId;
@@ -109,6 +114,7 @@ export class TaskLifecycle {
   }
 
   captureTaskProcessEnd(execution: vscode.TaskExecution, exitCode: number | undefined): void {
+    if (!this.observing) return;
     if (execution.task.definition?.type === 'logline') return;
     const record = this.taskSummary(execution);
     record.exitCode = exitCode;
@@ -123,6 +129,7 @@ export class TaskLifecycle {
   }
 
   captureTaskEnd(execution: vscode.TaskExecution): void {
+    if (!this.observing) return;
     if (execution.task.definition?.type === 'logline') return;
     const record = this.taskSummary(execution);
     record.endedAt = Date.now();
