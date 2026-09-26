@@ -37,6 +37,18 @@ test('redacts JSON raw details and fields in an event', () => {
   assert.doesNotMatch(redacted.raw!, /test-key|test-password/);
 });
 
+test('redacts quoted keys, incomplete JSON, and JSON embedded in messages', () => {
+  assert.equal(redactText('{"token":"secret"'), '{"token":"[REDACTED]"');
+  assert.equal(redactText('message="payload {\\"apiKey\\":\\"secret\\"}"'), 'message="payload {\\"apiKey\\":\\"[REDACTED]\\"}"');
+});
+
+test('redaction stays linear on long ordinary text', () => {
+  const text = 'safe '.repeat(20_000);
+  const started = Date.now();
+  assert.equal(redactText(text), text);
+  assert.ok(Date.now() - started < 500, 'ordinary redaction should not backtrack');
+});
+
 test('deep JSON never falls back to unredacted structured credentials', () => {
   const raw = '{"nested":'.repeat(10000) + '{"password":"deep-secret"}' + '}'.repeat(10000);
   const result = redactEvent({ id: 1, level: 'info', isJson: true, raw });
@@ -53,4 +65,9 @@ test('redacts flattened aliases of nested sensitive fields', () => {
   assert.equal(result.fields?.['credentials.value'], '[REDACTED]');
   assert.equal(result.fields?.value, '[REDACTED]');
   assert.doesNotMatch(JSON.stringify(result), /nested-secret/);
+});
+
+test('redacts task dependency labels in event metadata', () => {
+  const result = redactEvent({ id: 3, level: 'info', dependencies: ['safe', 'token=dependency-secret'] });
+  assert.deepEqual(result.dependencies, ['safe', 'token=[REDACTED]']);
 });

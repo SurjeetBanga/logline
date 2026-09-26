@@ -28,7 +28,12 @@ export async function handleMessage(services: MessageServices, send: (message: H
   if (!msg) return;
   const { store, config, transfer, searches } = services;
   switch (msg.type) {
-    case 'snapshot': send(services.snapshot(msg)); return;
+    case 'snapshot':
+      try { send({ ...services.snapshot(msg), requestId: msg.requestId }); }
+      catch (error) {
+        send({ type: 'snapshotError', requestId: msg.requestId, message: error instanceof Error ? error.message : String(error) });
+      }
+      return;
     case 'context': send({ type: 'context', id: msg.id, ...store.context(msg.id) }); return;
     case 'openSource': await openSource(store, msg); return;
     case 'saveSearch': {

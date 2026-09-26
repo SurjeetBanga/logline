@@ -30,6 +30,17 @@ test('stopping one task execution leaves another task running', () => {
   assert.equal(provider.tasks.executions.get(second)!.status, 'running');
 });
 
+test('disposing task observation does not terminate or re-register external tasks', () => {
+  const provider = setup();
+  const execution = { task: { name: 'External', source: 'npm', definition: { type: 'shell' } }, terminate() { throw new Error('must not terminate'); } } as unknown as import('vscode').TaskExecution;
+  provider.tasks.captureTaskStart(execution);
+  assert.equal(provider.tasks.executions.get(execution)?.owned, false);
+  provider.tasks.disposeObservation();
+  provider.tasks.captureTaskEnd(execution);
+  assert.equal(provider.tasks.executions.size, 0);
+  assert.equal([...provider.registry.records.values()].some(record => record.taskName === 'External' && record.status === 'running'), true);
+});
+
 test('task lifecycle records names, dependencies, process ids, and exit reasons', () => {
   const provider = setup();
   const execution = {

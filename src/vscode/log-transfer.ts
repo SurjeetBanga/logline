@@ -6,7 +6,7 @@ import * as vscode from 'vscode';
 import type { Ingestion } from '../capture/ingestion';
 import type { RuntimeState } from '../capture/runtime-state';
 import type { LogStore } from '../core/log-store';
-import { redactEvent, type RedactionOptions } from '../core/redaction';
+import { createRedactor, type RedactionOptions } from '../core/redaction';
 import type { Settings } from '../core/settings';
 import type { LogEvent } from '../core/types';
 import { exportChunks, exportQuery, serializeExport, type ExportFormat, type ExportRequest } from '../transfer/log-export';
@@ -62,8 +62,8 @@ export class LogTransfer {
     // Reuse indexed/cached paging, then fetch full records only for that page.
     // Clipboard and AI exports must not clone or redact all retained history.
     const page = this.store.page(request);
-    const options = this.redactionOptions();
-    return { matched: page.matched, events: page.events.map(row => redactEvent(this.store.find(row.id)!, options)) };
+    const redactor = createRedactor(this.redactionOptions());
+    return { matched: page.matched, events: page.events.map(row => redactor.event(this.store.find(row.id)!)) };
   }
 
   async exportLogs(request: ExportRequest = {}): Promise<void> {
@@ -109,8 +109,9 @@ export class LogTransfer {
   }
 
   async exportContext(ids: number[]): Promise<void> {
+    const redactor = createRedactor(this.redactionOptions());
     const events = ids.map(id => this.store.find(id)).filter((event): event is LogEvent => event !== undefined)
-      .map(event => redactEvent(event, this.redactionOptions()));
+      .map(event => redactor.event(event));
     const format = await this.chooseExportFormat();
     if (!format) return;
     if (format === 'md') {
@@ -150,7 +151,6 @@ export class LogTransfer {
       }
     }
     if (imported) {
-      this.state.generation++;
       this.state.status = `Imported ${imported.toLocaleString()} events`;
       this.state.notify();
     }

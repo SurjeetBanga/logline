@@ -121,6 +121,15 @@ test('search, level filtering, history pages and frozen boundaries', () => {
   assert.equal(store.page({ before: 100 }).events.at(-1)!.id, 100);
 });
 
+test('reversePage returns newest matches without materializing the full result set', () => {
+  const store = new LogStore(1000, 10 * 1024 * 1024);
+  for (let id = 1; id <= 500; id++) store.add({ id, serverId: id % 2 ? 'api' : 'web', level: id % 3 ? 'info' : 'error', message: `event ${id}` });
+  const page = store.reversePage({ serverId: 'api', levels: ['error'] }, 3);
+  assert.deepEqual(page.events.map(event => event.id), [495, 489, 483]);
+  assert.equal(page.matched, 83);
+  assert.equal(page.hasMore, true);
+});
+
 test('line reader handles split UTF-8, CRLF and a final unterminated line', () => {
   const output: { line: string; truncated: boolean; }[] = [];
   const reader = new LineReader((line, truncated) => output.push({ line, truncated }));

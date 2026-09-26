@@ -7,7 +7,7 @@ export interface LoglineTaskDefinition extends vscode.TaskDefinition {
   args?: unknown[];
   options?: { cwd?: string; env?: Record<string, string>; };
   /** Run the command through the user's shell. Defaults to argv mode when args are present. */
-  shell?: boolean;
+  shell?: boolean | string;
   /** Drop non-JSON output for this task only. */
   jsonOnly?: boolean;
   /** Stable id used to group this task's events in the Logs selector. */
@@ -75,11 +75,26 @@ export function taskToLoglineDefinition(task: vscode.Task): LoglineTaskDefinitio
     return { ...base, command: execution.process, args: [...execution.args], shell: false };
   }
   const shell = execution as vscode.ShellExecution;
-  if (shell.commandLine !== undefined) return { ...base, command: shell.commandLine, shell: true };
+  const shellOptions = shell.options;
+  const executable = shellOptions?.executable;
+  const shellArgs = shellOptions?.shellArgs;
+  // Node's spawn API accepts a shell executable but has no equivalent for
+  // VS Code's extra shellArgs. Refuse that conversion instead of silently
+  // changing how the task parses its command line.
+  if (shellArgs?.length) return undefined;
+  if (shell.commandLine !== undefined) return { ...base, command: shell.commandLine, shell: executable ? String(executable) : true };
   if (shell.command === undefined) return { ...base, command: '', shell: true };
   const command = shellValue(shell.command);
   const args = (shell.args ?? []).map(shellValue);
-  return { ...base, command: [command, ...args].map(quoteShell).join(' '), shell: true };
+  return { ...base, command: [command, ...args].map(quoteShell).join(' '), shell: executable ? String(executable) : true };
+}
+
+export function taskConversionError(task: vscode.Task): string | undefined {
+  const execution = task.execution;
+  if (!execution || !('process' in execution || 'command' in execution || 'commandLine' in execution)) return 'This task does not expose a command that Logline can capture.';
+  if ('process' in execution) return undefined;
+  const shellArgs = (execution as vscode.ShellExecution).options?.shellArgs;
+  return shellArgs?.length ? 'This shell task uses shellArgs; conversion was skipped because Logline cannot preserve those quoting options.' : undefined;
 }
 
 export function dependencyNames(task: vscode.Task): string[] {

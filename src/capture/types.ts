@@ -5,7 +5,7 @@ export interface SessionServer {
   id: string;
   label: string;
   jsonOnly?: boolean;
-  shell?: boolean;
+  shell?: boolean | string;
   taskName?: string;
   taskType?: string;
   dependencies?: string[];

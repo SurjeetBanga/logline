@@ -2,26 +2,38 @@ export function appendTasksToJsonc(text: string, additions: unknown[]): string |
   let open = -1;
   // Find the real property token first. A regex can accidentally match a
   // commented example such as // "tasks": [], which would edit the comment.
+  let objectDepth = 0;
+  let arrayDepth = 0;
+  let scanLineComment = false;
+  let scanBlockComment = false;
   for (let i = 0; i < text.length; i++) {
     const char = text[i];
     const next = text[i + 1];
-    if (char === '/' && next === '/') { i = text.indexOf('\n', i + 2); if (i < 0) break; continue; }
-    if (char === '/' && next === '*') { const end = text.indexOf('*/', i + 2); if (end < 0) break; i = end + 1; continue; }
-    if (char !== '"') continue;
-    const start = i++;
-    let escaped = false;
-    for (; i < text.length; i++) {
-      if (escaped) { escaped = false; continue; }
-      if (text[i] === '\\') { escaped = true; continue; }
-      if (text[i] === '"') break;
+    if (scanLineComment) { if (char === '\n') scanLineComment = false; continue; }
+    if (scanBlockComment) { if (char === '*' && next === '/') { scanBlockComment = false; i++; } continue; }
+    if (char === '/' && next === '/') { scanLineComment = true; i++; continue; }
+    if (char === '/' && next === '*') { scanBlockComment = true; i++; continue; }
+    if (char === '"') {
+      const start = i++;
+      let escaped = false;
+      for (; i < text.length; i++) {
+        if (escaped) { escaped = false; continue; }
+        if (text[i] === '\\') { escaped = true; continue; }
+        if (text[i] === '"') break;
+      }
+      if (objectDepth !== 1 || arrayDepth !== 0 || text.slice(start + 1, i) !== 'tasks') continue;
+      let value = i + 1;
+      while (/\s/.test(text[value] ?? '')) value++;
+      if (text[value] !== ':') continue;
+      value++;
+      while (/\s/.test(text[value] ?? '')) value++;
+      if (text[value] === '[') { open = value; break; }
+      continue;
     }
-    if (text.slice(start + 1, i) !== 'tasks') continue;
-    let value = i + 1;
-    while (/\s/.test(text[value] ?? '')) value++;
-    if (text[value] !== ':') continue;
-    value++;
-    while (/\s/.test(text[value] ?? '')) value++;
-    if (text[value] === '[') { open = value; break; }
+    if (char === '{') { objectDepth++; continue; }
+    if (char === '}') { objectDepth--; continue; }
+    if (char === '[') { arrayDepth++; continue; }
+    if (char === ']') { arrayDepth--; continue; }
   }
   if (open < 0) return undefined;
   let depth = 0;

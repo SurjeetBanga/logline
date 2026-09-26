@@ -25,11 +25,11 @@ export function createViewer(api: WebviewApi) {
   const analysis = createAnalysis(elements, state);
   const inspection = createInspection(elements, scrollViewport, api, formatTimestamp, scope);
   const search = createSearch(elements, state, api, popovers, { filterChanged, updateScopeSelection }, scope);
-  const bridge = new SnapshotBridge(api, state, () => search.query());
   const request = (force = false) => bridge.request(force);
   let cellActions: ReturnType<typeof createCellActions> | undefined;
   const table = createTable(elements, scrollViewport, state, api, formatTimestamp,
     { request: requestInteraction, saveState, filterChanged, setFollowing, updateFollowControl, updateModeLabel }, scope, () => cellActions?.rowsChanged());
+  const bridge = new SnapshotBridge(api, state, () => search.query(), () => table.currentColumns);
   let serverSignature = '';
   let sessionSignature = '';
   let activeScopeTab: 'sources' | 'runs' = 'sources';
@@ -92,16 +92,23 @@ export function createViewer(api: WebviewApi) {
       search.renderSearchState(data.searches);
       return;
     }
+    if (data.type === 'snapshotError') {
+      if (bridge.failed(data.requestId)) {
+        elements.status.textContent = `Snapshot failed: ${data.message}`;
+        bridge.flush();
+      }
+      return;
+    }
     if (data.type !== 'snapshot')
       return;
     if (data.guideStatus) updateGuideStatus(data.guideStatus);
-    bridge.received();
+    bridge.received(data.requestId);
     if (data.generation < minimumSnapshotGeneration) {
       bridge.flush();
       return;
     }
     minimumSnapshotGeneration = 0;
-    if (state.generation !== undefined && state.generation !== data.generation) {
+    if (state.generation !== undefined && state.generation !== data.generation && !state.paused) {
       state.before = undefined;
       state.page = 0;
       state.lastRows = undefined;

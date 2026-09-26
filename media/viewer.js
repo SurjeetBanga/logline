@@ -242,17 +242,21 @@
 
   // src/webview/bridge.ts
   var SnapshotBridge = class {
-    constructor(api, state, query) {
+    constructor(api, state, query, columns = () => this.state.extraColumns) {
       this.api = api;
       this.state = state;
       this.query = query;
+      this.columns = columns;
     }
     api;
     state;
     query;
+    columns;
     pending = false;
     refreshRequested = false;
     updateRequested = false;
+    nextRequestId = 0;
+    pendingRequestId;
     request(force = false) {
       if (document.hidden) return;
       if (this.pending) {
@@ -261,9 +265,12 @@
         return;
       }
       this.pending = true;
+      const requestId = ++this.nextRequestId;
+      this.pendingRequestId = requestId;
       const state = this.state;
       this.api.postMessage({
         type: "snapshot",
+        requestId,
         query: this.query(),
         serverId: state.selectedServer || void 0,
         sessionId: state.selectedSession || void 0,
@@ -272,12 +279,20 @@
         before: state.before,
         sort: state.selectedSort || void 0,
         sortDirection: state.selectedSortDirection,
-        columns: state.extraColumns,
+        columns: this.columns(),
         statsOnly: state.paused && !force
       });
     }
-    received() {
+    received(requestId) {
+      if (requestId !== void 0 && requestId !== this.pendingRequestId) return;
       this.pending = false;
+      this.pendingRequestId = void 0;
+    }
+    failed(requestId) {
+      if (requestId !== void 0 && requestId !== this.pendingRequestId) return false;
+      this.pending = false;
+      this.pendingRequestId = void 0;
+      return true;
     }
     flush() {
       if (!this.refreshRequested && !this.updateRequested) return;
@@ -670,6 +685,27 @@
     return input.match(/(?:"(?:\\.|[^"\\])*"?|\[[^\]"\r\n]*\]|[^\s"\[]|\[)+/g) ?? [];
   }
 
+  // src/core/query-validation.ts
+  function queryError(input = "") {
+    for (const token of queryTokens(input)) {
+      if (token === "OR" || token.toLowerCase() === "or") continue;
+      const value = token.startsWith("-") ? token.slice(1) : token;
+      const match = value.match(/^@?[A-Za-z_][A-Za-z0-9_.]*:(\/.*\/([A-Za-z]*))$/) ?? value.match(/^(\/.*\/([A-Za-z]*))$/);
+      if (!match) continue;
+      const pattern = match[1].slice(1, match[1].lastIndexOf("/"));
+      const flags = match[2];
+      const unsupported = [...new Set(flags.split("").filter((flag) => !"gimsuy".includes(flag)))];
+      if (unsupported.length) return `Unsupported regular expression flag${unsupported.length === 1 ? "" : "s"}: ${unsupported.join(", ")}`;
+      if (/\(\?[=!<]|\\(?:[1-9]|k<)/.test(pattern)) return "Unsupported regular expression syntax. RE2 does not allow lookaround or backreferences.";
+      try {
+        new RegExp(pattern, flags.includes("u") ? flags : `${flags}u`);
+      } catch {
+        return "Unsupported or invalid regular expression syntax.";
+      }
+    }
+    return void 0;
+  }
+
   // src/webview/state.ts
   var LEVELS = ["trace", "debug", "info", "warn", "error", "fatal", "unclassified"];
   var ViewerState = class {
@@ -899,13 +935,20 @@
       return appliedQuery;
     }
     function setQuery(value, notify = false) {
-      appliedQuery = tokens(value).join(" ").slice(0, MAX_QUERY_LENGTH);
+      const normalized = tokens(value).join(" ").slice(0, MAX_QUERY_LENGTH);
+      const regexError = queryError(normalized);
+      if (regexError) {
+        setError(regexError);
+        return false;
+      }
+      appliedQuery = normalized;
       editingIndex = void 0;
       elements.search.value = appliedQuery;
       setError();
       clearAutocomplete();
       renderChips();
       if (notify) filterChanged();
+      return true;
     }
     function beginEdit(index) {
       editingIndex = index;
@@ -935,6 +978,11 @@
       const normalized = cleanQuery(next).join(" ");
       if (normalized.length > MAX_QUERY_LENGTH) {
         setError(`Filters cannot exceed ${MAX_QUERY_LENGTH} characters.`);
+        return false;
+      }
+      const regexError = queryError(normalized);
+      if (regexError) {
+        setError(regexError);
         return false;
       }
       setQuery(normalized, true);
@@ -1011,6 +1059,7 @@
         scope.listen(button, "click", () => {
           setQuery(item.query || "");
           state.selectedServer = item.serverId || "";
+          state.selectedSession = "";
           state.checkedLevels = new Set(Array.isArray(item.levels) ? item.levels : LEVELS);
           elements.server.value = state.selectedServer;
           updateScopeSelection();
@@ -1880,7 +1929,6 @@
     const analysis = createAnalysis(elements, state);
     const inspection = createInspection(elements, scrollViewport, api, formatTimestamp, scope);
     const search = createSearch(elements, state, api, popovers, { filterChanged, updateScopeSelection }, scope);
-    const bridge = new SnapshotBridge(api, state, () => search.query());
     const request = (force = false) => bridge.request(force);
     let cellActions;
     const table = createTable(
@@ -1893,6 +1941,7 @@
       scope,
       () => cellActions?.rowsChanged()
     );
+    const bridge = new SnapshotBridge(api, state, () => search.query(), () => table.currentColumns);
     let serverSignature = "";
     let sessionSignature = "";
     let activeScopeTab = "sources";
@@ -1952,16 +2001,23 @@
         search.renderSearchState(data.searches);
         return;
       }
+      if (data.type === "snapshotError") {
+        if (bridge.failed(data.requestId)) {
+          elements.status.textContent = `Snapshot failed: ${data.message}`;
+          bridge.flush();
+        }
+        return;
+      }
       if (data.type !== "snapshot")
         return;
       if (data.guideStatus) updateGuideStatus(data.guideStatus);
-      bridge.received();
+      bridge.received(data.requestId);
       if (data.generation < minimumSnapshotGeneration) {
         bridge.flush();
         return;
       }
       minimumSnapshotGeneration = 0;
-      if (state.generation !== void 0 && state.generation !== data.generation) {
+      if (state.generation !== void 0 && state.generation !== data.generation && !state.paused) {
         state.before = void 0;
         state.page = 0;
         state.lastRows = void 0;

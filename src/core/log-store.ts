@@ -317,6 +317,8 @@ export class LogStore {
     const levelMatches = (eventLevel: string) => !levelSet || levelSet.has(eventLevel);
     query = query.slice(0, 256);
     const parsedQuery: ParsedQuery = parseQuery(query);
+    const invalidQuery = parsedQuery.flat().find(token => token.regexError)?.regexError;
+    if (invalidQuery) throw new Error(invalidQuery);
     const canUseIndex = !sort && sessionId === undefined && sessionIds === undefined
       && from === undefined && to === undefined && !levelSet;
     if (!parsedQuery.length && canUseIndex) {
@@ -368,6 +370,27 @@ export class LogStore {
     const end = matched - page * PAGE_SIZE;
     const events = (matches.slice(start + Math.max(0, end - PAGE_SIZE), start + end) as LogEvent[]).map(full ? identity : pickFields);
     return { events, page, pages, matched, ...this.stats() };
+  }
+
+  /** Read a bounded newest-first page without building a complete match array. */
+  reversePage({ query = '', serverId, levels, before = Infinity, sessionId, sessionIds, from, to }: PageOptions = {}, limit = 1000): { events: LogEvent[]; matched: number; hasMore: boolean } {
+    if (!Number.isFinite(before)) before = Infinity;
+    const levelSet = levels ? new Set(levels) : undefined;
+    query = query.slice(0, 256);
+    const parsedQuery: ParsedQuery = parseQuery(query);
+    const invalidQuery = parsedQuery.flat().find(token => token.regexError)?.regexError;
+    if (invalidQuery) throw new Error(invalidQuery);
+    const test = this.filterFor({ before, sessionId, sessionIds, from, to, serverId,
+      levelMatches: (level: string) => !levelSet || levelSet.has(level), parsedQuery });
+    const events: LogEvent[] = [];
+    let matched = 0;
+    const bounded = Math.max(1, Math.min(1000, Math.floor(limit)));
+    for (const event of this.iterateEventsReverse(serverId)) {
+      if (!test(event)) continue;
+      matched++;
+      if (events.length < bounded) events.push(event);
+    }
+    return { events, matched, hasMore: matched > events.length };
   }
 
   // Unfiltered pages only read their own rows. A frozen boundary is found
@@ -449,7 +472,10 @@ export class LogStore {
   private scan({ query = '', serverId, levels, before = Infinity, sessionId, sessionIds, from, to }: PageOptions = {}): LogEvent[] {
     if (!Number.isFinite(before)) before = Infinity;
     const levelSet = levels ? new Set(levels) : undefined;
-    const parsedQuery: ParsedQuery = parseQuery(query.slice(0, 256));
+    query = query.slice(0, 256);
+    const parsedQuery: ParsedQuery = parseQuery(query);
+    const invalidQuery = parsedQuery.flat().find(token => token.regexError)?.regexError;
+    if (invalidQuery) throw new Error(invalidQuery);
     const test = this.filterFor({
       before, sessionId, sessionIds, from, to, serverId,
       levelMatches: (level: string) => !levelSet || levelSet.has(level), parsedQuery
@@ -487,6 +513,29 @@ export class LogStore {
       }
       if (selected < 0) return;
       yield indexes[selected].items[offsets[selected]++]!.event;
+    }
+  }
+
+  private *iterateEventsReverse(serverId?: string): Generator<LogEvent> {
+    if (serverId === undefined) {
+      for (let i = this.size - 1; i >= 0; i--) yield this.slots[(this.head + i) % this.maxRows]!.event;
+      return;
+    }
+    const wanted = serverId.toLowerCase();
+    const indexes = [...this.serverIndex]
+      .filter(([key]) => key.toLowerCase() === wanted)
+      .map(([, index]) => index);
+    const offsets = indexes.map(index => index.items.length - 1);
+    while (true) {
+      let selected = -1;
+      let selectedId = -1;
+      for (let i = 0; i < indexes.length; i++) {
+        const index = indexes[i];
+        const slot = offsets[i] >= index.start ? index.items[offsets[i]] : undefined;
+        if (slot && slot.event.id > selectedId) { selected = i; selectedId = slot.event.id; }
+      }
+      if (selected < 0) return;
+      yield indexes[selected].items[offsets[selected]--]!.event;
     }
   }
 

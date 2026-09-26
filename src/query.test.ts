@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { parseLogLine } from './core/log-event';
-import { matchesQuery, parseQuery } from './core/query';
+import { matchesQuery, parseQuery, queryError } from './core/query';
 import type { LogEvent } from './core/types';
 
 const event: LogEvent = { id: 1, level: 'error', message: 'Database timeout', raw: '{"service":"api","status":503}', fields: { service: 'api', status: 503, requestId: 'abc-123' } };
@@ -36,6 +36,12 @@ test('supports regex matching, including invalid patterns', () => {
   assert.equal(matchesQuery(event, 'message:/time.?out/i'), true);
   assert.equal(matchesQuery(event, 'message:/nomatch/'), false);
   assert.equal(matchesQuery(event, 'message:/[/'), false);
+});
+
+test('reports unsupported regex flags and keeps route values literal', () => {
+  assert.match(queryError('message:/error/v')!, /Unsupported regular expression flag/);
+  assert.match(queryError(String.raw`message:/(a)\1/`)!, /Unsupported|invalid regular expression syntax/);
+  assert.equal(queryError('path:/users/42'), undefined);
 });
 
 test('rejects regexes with catastrophic nested quantifiers', () => {

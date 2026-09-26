@@ -8,7 +8,7 @@ import type { AgentShareStatus } from '../core/agent-types';
 
 export interface Filter { query?: string; serverId?: string; sessionId?: string; levels?: string[]; }
 export type ViewRequest =
-  | ({ type: 'snapshot'; columns?: string[]; statsOnly?: boolean; } & PageOptions)
+  | ({ type: 'snapshot'; columns?: string[]; statsOnly?: boolean; requestId?: number; } & PageOptions)
   | ({ type: 'analysis'; sessionId?: string; from?: number; to?: number; } & Filter)
   | ({ type: 'export' | 'exportForAI'; } & Filter)
   | ({ type: 'copyFiltered'; } & Filter)
@@ -30,7 +30,7 @@ export type ViewRequest =
   | { type: 'import' | 'clear' | 'config' | 'manageServers'; };
 
 export interface Snapshot extends Stats {
-  type: 'snapshot'; events?: LogEvent[]; page?: number; pages?: number; matched?: number;
+  type: 'snapshot'; requestId?: number; events?: LogEvent[]; page?: number; pages?: number; matched?: number;
   columns: string[]; columnFields: string[]; fields: string[];
   status: string; command: string; running: boolean;
   servers: ServerSummary[]; sessions: ReturnType<SessionRegistry['sessionSummaries']>;
@@ -43,6 +43,7 @@ export interface Snapshot extends Stats {
 }
 export interface GuideStatus { version: string; unread: boolean; }
 export type HostMessage = Snapshot
+  | { type: 'snapshotError'; requestId?: number; message: string; }
   | { type: 'update' | 'serversChanged'; }
   | ({ type: 'guideStatus' } & GuideStatus)
   | { type: 'context'; id: number; events: LogEvent[]; server?: string; missing: boolean; }
@@ -65,7 +66,8 @@ export function parseViewRequest(value: unknown): ViewRequest | undefined {
   switch (msg.type) {
     case 'snapshot': return {
       type: msg.type, ...filter, page: index('page'), before: number('before'),
-      sort: string('sort'), sortDirection: msg.sortDirection === 'desc' ? 'desc' : 'asc', columns: strings('columns'), statsOnly: msg.statsOnly === true
+      sort: string('sort'), sortDirection: msg.sortDirection === 'desc' ? 'desc' : 'asc', columns: strings('columns'), statsOnly: msg.statsOnly === true,
+      requestId: index('requestId')
     };
     case 'analysis': return { type: msg.type, ...filter, from: number('from'), to: number('to') };
     case 'export': case 'exportForAI': case 'copyFiltered': return { type: msg.type, ...filter };

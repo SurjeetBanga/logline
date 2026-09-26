@@ -43,6 +43,13 @@ test('terminal normalizer bounds an unterminated escape sequence', () => {
   assert.deepEqual(lines, []);
 });
 
+test('terminal normalizer resynchronises after a malformed escape at a line boundary', () => {
+  const lines: string[] = [];
+  const normalizer = new TerminalNormalizer(line => lines.push(line.text));
+  normalizer.write('\u001b]bad OSC without terminator\nrecovered\n');
+  assert.deepEqual(lines, ['recovered']);
+});
+
 test('terminal normalizer keeps complete ANSI sequences in long chunks', () => {
   const lines: { text: string; truncated: boolean }[] = [];
   const normalizer = new TerminalNormalizer(line => lines.push(line));

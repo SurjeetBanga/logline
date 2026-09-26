@@ -1,5 +1,6 @@
 import type { LogEvent } from './types';
 import { queryTokens } from './query-tokens';
+import { RE2 } from 're2-wasm';
 
 // Names that mean the same thing across logging libraries. A field filter tries
 // the name exactly as typed first and only then the rest of its group, so
@@ -30,7 +31,8 @@ export interface Token {
   field?: string;
   canonical?: string;
   value: string;
-  regex?: RegExp | null;
+  regex?: RE2 | null;
+  regexError?: string;
   /** Case-insensitive matcher for a free-text term, compiled once at parse time. */
   search?: RegExp;
   /** Whether the value is shaped like a range or comparison, so ordinary terms skip the numeric coercion. */
@@ -85,13 +87,21 @@ function parseToken(token: string): Token {
     try { value = JSON.parse(value); } catch { value = value.slice(1, -1); }
   }
   // Compiled once here, at parse time, rather than once per event in matchesQuery.
-  let regex: RegExp | null | undefined;
+  let regex: RE2 | null | undefined;
   // Only treat slash-delimited input as a regex when the suffix is made of
   // JavaScript regex flags. A literal route such as path:/users/42 otherwise
   // looks like a regex with an invalid "42" flag suffix.
-  const regexMatch = quoted ? null : value.match(/^\/(.+)\/([dgimsuvy]*)$/);
+  const regexMatch = quoted ? null : value.match(/^\/(.+)\/([A-Za-z]*)$/);
+  let regexError: string | undefined;
   if (regexMatch) {
-    try { regex = isSafeRegex(regexMatch[1]) ? new RegExp(regexMatch[1], regexMatch[2]) : null; } catch { regex = null; }
+    const unsupported = [...new Set(regexMatch[2].split('').filter(flag => !'gimsuy'.includes(flag)))];
+    if (unsupported.length) regexError = `Unsupported regular expression flag${unsupported.length === 1 ? '' : 's'}: ${unsupported.join(', ')}`;
+    try {
+      if (!regexError) {
+        const flags = regexMatch[2].includes('u') ? regexMatch[2] : `${regexMatch[2]}u`;
+        regex = new RE2(regexMatch[1], flags);
+      } else regex = null;
+    } catch { regex = null; regexError = 'Unsupported or invalid regular expression syntax.'; }
   }
   // Regex syntax and input are case-sensitive unless the expression uses /i.
   // Lowercasing a pattern also changes escapes such as \D into \d.
@@ -118,44 +128,14 @@ function parseToken(token: string): Token {
     : undefined;
   const last = canonical === 'last' ? value.match(/^(\d+)(s|m|h|d)$/) : null;
   const relativeMs = last ? Number(last[1]) * ({ s: 1000, m: 60000, h: 3600000, d: 86400000 } as Record<string, number>)[last[2]] : undefined;
-  return { negate, field, canonical, value, regex, search, compare, numericComparison, numericRange,
+  return { negate, field, canonical, value, regex, regexError, search, compare, numericComparison, numericRange,
     timestampRange: parsedTimestampRange, relativeMs };
 }
 
-/**
- * JavaScript regular expressions can backtrack exponentially and execute on
- * the extension host thread. Keep the supported subset bounded and reject
- * constructs that cannot be proven to run in linear time here.
- */
-function isSafeRegex(source: string): boolean {
-  if (source.length > 128 || /\\(?:[1-9][0-9]*|k<[^>]+>)/.test(source) || /\(\?[=!<]/.test(source)) return false;
-  const groups: { hasQuantifier: boolean }[] = [];
-  let escaped = false;
-  let inClass = false;
-  for (let index = 0; index < source.length; index++) {
-    const char = source[index];
-    if (escaped) { escaped = false; continue; }
-    if (char === '\\') { escaped = true; continue; }
-    if (char === '[') { inClass = true; continue; }
-    if (char === ']' && inClass) { inClass = false; continue; }
-    if (inClass) continue;
-    if (char === '(') { groups.push({ hasQuantifier: false }); continue; }
-    if (char === ')') {
-      const group = groups.pop();
-      if (!group) return false;
-      const next = source[index + 1];
-      if (next === '*' || next === '+' || next === '{') {
-        if (group.hasQuantifier) return false;
-        if (groups.length) groups[groups.length - 1].hasQuantifier = true;
-      } else if (group.hasQuantifier && groups.length) groups[groups.length - 1].hasQuantifier = true;
-      continue;
-    }
-    if (char === '?' && source[index - 1] === '(') continue;
-    if (char === '*' || char === '+' || char === '?' || char === '{') {
-      if (groups.length) groups[groups.length - 1].hasQuantifier = true;
-    }
-  }
-  return groups.length === 0 && !escaped && !inClass;
+/** Return a user-facing parse error for a query before it reaches the store. */
+export function queryError(input = ''): string | undefined {
+  for (const group of parseQuery(input)) for (const token of group) if (token.regexError) return token.regexError;
+  return undefined;
 }
 
 export function matchesQuery(event: LogEvent, input: string | ParsedQuery, queryNow?: number): boolean {

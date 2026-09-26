@@ -3,6 +3,7 @@ export class RuntimeState {
   static readonly readyStatus = 'Ready — run a server command to begin';
   status = RuntimeState.readyStatus;
   command = '';
+  /** Changes only when the retained history boundary is reset. */
   generation = 0;
   constructor(readonly notify: () => void) { }
   invalidate(): void { this.generation++; this.notify(); }

@@ -7,6 +7,7 @@ export interface AgentRunStatus {
   startedAt?: number;
   endedAt?: number;
   events: number;
+  dependencies?: string[];
   captureStatus?: string;
   captureReason?: string;
 }
