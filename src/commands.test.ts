@@ -18,7 +18,8 @@ const mock = {
     showInformationMessage: (message: string) => calls.push({ name: 'info', value: message }),
     showInputBox: async () => input,
     showWorkspaceFolderPick: async () => undefined,
-    showQuickPick: async () => undefined
+    showQuickPick: async () => undefined,
+    showOpenDialog: async () => [{ scheme: 'file', fsPath: '/workspace/app.log' }]
   },
   commands: {
     registerCommand: (name: string, handler: (...args: any[]) => any) => { handlers.set(name, handler); return { dispose() { handlers.delete(name); } }; },
@@ -38,16 +39,18 @@ test('commands register the complete action surface and honor trust/focus/config
     shareWithAgent: (...args: unknown[]) => calls.push({ name: 'share', value: args }),
     stopSharing: () => calls.push({ name: 'stopSharing' }),
     askCopilot: async () => { calls.push({ name: 'copilot' }); return true; },
-    terminalCapture: { availableTerminals: () => [], toggleSource: () => undefined }
+    terminalCapture: { availableTerminals: () => [], toggleSource: () => undefined },
+    files: { follow: async (file: string) => { calls.push({ name: 'follow', value: file }); return 'run'; } }
   } as any;
   const guideCalls: string[] = [];
   const registrations = registerCommands(controller, section => guideCalls.push(section));
-  assert.equal(handlers.size, 17);
+  assert.equal(handlers.size, 18);
   await handlers.get('logline.runCommand')!();
   for (const name of ['logline.stopCommand', 'logline.export', 'logline.import', 'logline.exportForAI', 'logline.convertTask',
     'logline.captureTask', 'logline.showGuide', 'logline.showWhatsNew', 'logline.showLogs', 'logline.enableTerminalCapture',
     'logline.disableTerminalCapture', 'logline.shareWithAgent', 'logline.shareSpecificRuns', 'logline.stopSharing',
-    'logline.askCopilot', 'logline.manageTerminalCapture']) await handlers.get(name)!();
+    'logline.askCopilot', 'logline.manageTerminalCapture', 'logline.followFile']) await handlers.get(name)!();
+  assert.ok(calls.some(call => call.name === 'follow' && call.value === '/workspace/app.log'));
   assert.equal(ran[0][0], 'node server.js');
   assert.deepEqual(guideCalls, ['guide', 'whatsNew']);
   assert.ok(calls.some(call => call.name === 'command' && call.value === 'logline.logs.focus'));

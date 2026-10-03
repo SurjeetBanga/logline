@@ -624,7 +624,7 @@ export function createViewer(api: WebviewApi) {
           stop.dataset.serverId = session.serverId;
           stop.textContent = session.status === 'stopping' ? 'Stopping…' : 'Stop';
           stop.disabled = session.status !== 'running';
-          stop.title = stop.disabled ? 'This run is stopping.' : 'Stop this command run';
+          stop.title = stop.disabled ? 'This run is stopping.' : session.sourceKind === 'file' ? 'Stop following this file' : 'Stop this command run';
           scope.listen(stop, 'click', event => {
             event.stopPropagation();
             if (stop.disabled) return;

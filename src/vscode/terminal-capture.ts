@@ -3,6 +3,7 @@ import { randomBytes } from 'node:crypto';
 import type { Settings } from '../core/settings';
 import type { SessionSummary } from '../core/types';
 import type { Ingestion } from '../capture/ingestion';
+import { StackJoiner } from '../capture/stack-joiner';
 import { TerminalNormalizer } from '../capture/terminal-normalizer';
 import type { RuntimeState } from '../capture/runtime-state';
 import type { SessionRegistry } from '../capture/session-registry';
@@ -16,6 +17,7 @@ type CaptureContext = {
   record: SessionSummary;
   terminalId: string;
   accepting: boolean;
+  joiner?: StackJoiner;
   streamDone: boolean;
   streamFailed: boolean;
   endSeen: boolean;
@@ -72,6 +74,8 @@ export class TerminalCapture {
     return { state: 'waiting', detail: 'Ready for the next supported terminal command', active, failed };
   }
   setEnabled(value: boolean): void {
+    // Lines already received belong to the capture; release any held trace first.
+    if (!value) for (const context of this.active) context.joiner?.flush();
     this.enabled = value;
     if (!value) {
       for (const context of this.active) this.interrupt(context, 'Capture disabled while the command was running.');
@@ -111,6 +115,7 @@ export class TerminalCapture {
   }
 
   dispose(): void {
+    for (const context of this.active) context.joiner?.flush();
     this.disposed = true;
     for (const context of this.active) this.interrupt(context, 'Logline was disposed before the stream ended.');
     for (const disposable of this.disposables) disposable.dispose();
@@ -152,15 +157,20 @@ export class TerminalCapture {
       this.state.notify();
       return;
     }
-    const normalizer = new TerminalNormalizer(({ text, truncated }) => {
+    const limit = this.config.get('maxLineLength', 65536);
+    const ingest = (text: string, truncated: boolean) => {
       if (!context.accepting || this.disposed || !this.enabled) return;
       const accepted = this.ingestion.accept(text, 'terminal', { serverId: id, server: label, sessionId: record.id, truncated, persist: this.config.get('persistLogs', false) });
       if (accepted) { record.events++; this.state.notify(); }
-    }, this.config.get('maxLineLength', 65536));
-    void this.consume(stream, normalizer, record);
+    };
+    const joiner = context.joiner = this.config.get('joinStackTraces', true) ? new StackJoiner(ingest, limit) : undefined;
+    const normalizer = new TerminalNormalizer(({ text, truncated }) => {
+      if (joiner) joiner.write(text, truncated); else ingest(text, truncated);
+    }, limit);
+    void this.consume(stream, normalizer, record, joiner);
   }
 
-  private async consume(stream: AsyncIterable<string>, normalizer: TerminalNormalizer, record: SessionSummary): Promise<void> {
+  private async consume(stream: AsyncIterable<string>, normalizer: TerminalNormalizer, record: SessionSummary, joiner?: StackJoiner): Promise<void> {
     const context = [...this.active].find(item => item.record === record);
     if (!context) return;
     try {
@@ -179,6 +189,7 @@ export class TerminalCapture {
       record.error = record.captureReason;
     } finally {
       normalizer.end();
+      joiner?.end();
       context.streamDone = true;
       if (context.streamFailed && context.accepting) record.captureStatus = 'failed';
       else if (!context.accepting || this.disposed) record.captureStatus = 'interrupted';
@@ -233,6 +244,7 @@ export class TerminalCapture {
 
   private interrupt(context: CaptureContext, reason: string): void {
     if (!context.accepting) return;
+    context.joiner?.flush();
     context.accepting = false;
     context.record.captureStatus = 'interrupted';
     context.record.captureComplete = false;

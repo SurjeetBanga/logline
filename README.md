@@ -23,9 +23,9 @@ Open **Help** in the toolbar for the offline visual guide, or run **Logline: Wha
 
 | Workflow | Features |
 | --- | --- |
-| **Capture** | Capture supported terminal commands, run several servers at once, save commands with **Manage servers**, filter by source or run, and capture VS Code tasks. |
+| **Capture** | Capture supported terminal commands, run several servers at once, follow log files on disk like `tail -F`, save commands with **Manage servers**, filter by source or run, and capture VS Code tasks. |
 | **Search** | Field/value autocomplete, editable filter chips, right-click **Include value** / **Exclude value**, any combination of log levels, and up to 50 saved searches. |
-| **Inspect** | Expand JSON, read structured exceptions and nested causes, open stack-frame source locations, share an event’s exact run, and view up to 25 surrounding events on each side from the same run. |
+| **Inspect** | Expand JSON, read structured exceptions and nested causes, see multi-line plain-text stack traces as one event, open stack-frame source locations, share an event’s exact run, and view up to 25 surrounding events on each side from the same run. |
 | **Arrange** | Auto-detected fields, custom and nested columns, sorting, drag-to-reorder, and resizable column widths. |
 | **Analyze** | Event rate, errors, latency, status codes, the top 10 log patterns, and normalized error groups for the current filter. |
 | **Share** | Export filtered JSONL, JSON, CSV, or Markdown context for AI tools, or share retained sources (including new runs) or specific command runs with Copilot for read-only live investigation. Exports and **Copy results** redact common credentials by default; agent tools always redact them. |
@@ -52,7 +52,7 @@ Type a term and press **Enter** to apply it. Click a chip to edit it, or its **�
 
 Right-click a cell to include or exclude its value without typing a query. Keyboard users can focus a cell and press **Shift+F10**. Server and level selections stay active.
 
-Common aliases work across log formats, including `level`/`severity`, `message`/`msg`, `status`/`statusCode`, and `durationMs`/`duration`. Plain-text terminal lines without an explicit leading severity are **Unclassified**. Logline recognizes Log4j2 JSON with MDC fields, ECS, Pino HTTP, and individual OpenTelemetry log records. Click **Syntax** in the search box for a quick reference.
+Plain-text [logfmt](https://brandur.org/logfmt) lines (`level=warn msg="slow query" durationMs=212`) are parsed into searchable fields too. Common aliases work across log formats, including `level`/`severity`, `message`/`msg`, `status`/`statusCode`, and `durationMs`/`duration`. Plain-text terminal lines without an explicit leading severity are **Unclassified**. Logline recognizes Log4j2 JSON with MDC fields, ECS, Pino HTTP, and individual OpenTelemetry log records. Click **Syntax** in the search box for a quick reference.
 
 ## Save a server or capture a task
 

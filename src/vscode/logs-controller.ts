@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import { FileFollower } from '../capture/file-follower';
 import { Ingestion } from '../capture/ingestion';
 import { ProcessRunner } from '../capture/process-runner';
 import { RuntimeState } from '../capture/runtime-state';
@@ -32,6 +33,7 @@ export class LogsController {
   readonly runner = new ProcessRunner(this.config, this.registry, this.ingestion, this.state);
   readonly tasks = new TaskLifecycle(this.registry, this.ingestion, this.state, () => this.runner.sessions.size > 0);
   readonly terminalCapture = new TerminalCapture(this.config, this.ingestion, this.registry, this.state);
+  readonly files = new FileFollower(this.config, this.registry, this.ingestion, this.state);
   readonly agentAccess = new AgentLogAccess(this.store, this.registry, () => this.ingestion.sequence, {
     fields: this.config.get<string[]>('redactionFields', []),
     replacement: this.config.get('redactionReplacement', '[REDACTED]')
@@ -74,7 +76,7 @@ export class LogsController {
     this.terminalCapture.pruneStale();
     return buildSnapshot(request, { store: this.store, config: this.config, registry: this.registry, state: this.state,
       ingestion: this.ingestion, persistence: this.persistence, searches: this.searches,
-      running: this.runner.sessions.size > 0 || this.tasks.executions.size > 0,
+      running: this.isRunning(),
       agentAccess: this.agentAccess,
       guideStatus: this.guideStatus(), terminalCapture: this.terminalCapture });
   }
@@ -102,7 +104,10 @@ export class LogsController {
     this.registry.clearCompleted();
     // A clear must also remove a completed import's status. Active capture is
     // intentionally retained, so keep its truthful running state instead.
-    this.state.reset(this.runner.sessions.size > 0 || this.tasks.executions.size > 0);
+    this.state.reset(this.isRunning());
+  }
+  private isRunning(): boolean {
+    return this.runner.sessions.size > 0 || this.tasks.executions.size > 0 || this.files.active > 0;
   }
   shareWithAgent(sourceIds?: string[], anchor?: number, sessionIds?: string[], chooseRuns = false): Promise<void> {
     return this.sharingRequest ??= this.configureSharing(sourceIds, anchor, sessionIds, chooseRuns)
@@ -214,9 +219,10 @@ export class LogsController {
       if (!record || record.status !== 'running' || record.canStop !== true || (serverId && record.serverId !== serverId)) return;
       this.runner.stopSessionById(sessionId);
       this.tasks.stopSessionById(sessionId);
+      this.files.stopSessionById(sessionId);
       return;
     }
-    if (serverId) this.runner.stopServer(serverId); else this.runner.stop();
+    if (serverId) { this.runner.stopServer(serverId); this.files.stopServer(serverId); } else { this.runner.stop(); this.files.stop(); }
     this.tasks.stop(serverId);
   }
   dispose(): Promise<void> {
@@ -229,6 +235,7 @@ export class LogsController {
     this.notifications.dispose();
     this.tasks.disposeObservation();
     this.terminalCapture.dispose();
+    await this.files.dispose();
     // Closing streams may emit a final partial line; flush persistence afterwards.
     await this.runner.dispose();
     await this.persistence.dispose();

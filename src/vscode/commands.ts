@@ -24,6 +24,24 @@ export function registerCommands(controller: LogsController, openGuide?: (sectio
       controller.runner.run(command.trim(), folder?.uri.fsPath, { id: 'custom', label: command.trim() });
       await vscode.commands.executeCommand('logline.logs.focus');
     }),
+    vscode.commands.registerCommand('logline.followFile', async () => {
+      if (!vscode.workspace.isTrusted) {
+        vscode.window.showWarningMessage('Trust this workspace before following a log file.');
+        return;
+      }
+      const uris = await vscode.window.showOpenDialog({
+        canSelectMany: true, canSelectFiles: true, canSelectFolders: false, openLabel: 'Follow',
+        defaultUri: vscode.workspace.workspaceFolders?.[0]?.uri,
+        filters: { Logs: ['log', 'txt', 'jsonl', 'ndjson', 'out'], 'All files': ['*'] }
+      });
+      const files = uris?.filter(uri => uri.scheme === 'file') ?? [];
+      if (uris?.length && !files.length) {
+        vscode.window.showWarningMessage('Logline can only follow files on the local filesystem.');
+        return;
+      }
+      for (const uri of files) await controller.files.follow(uri.fsPath);
+      if (files.length) await vscode.commands.executeCommand('logline.logs.focus');
+    }),
     vscode.commands.registerCommand('logline.stopCommand', () => controller.stop()),
     vscode.commands.registerCommand('logline.export', () => controller.transfer.exportLogs()),
     vscode.commands.registerCommand('logline.import', () => controller.transfer.importLogs()),
