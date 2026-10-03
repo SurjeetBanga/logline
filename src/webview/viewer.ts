@@ -108,7 +108,8 @@ export function createViewer(api: WebviewApi) {
       return;
     }
     minimumSnapshotGeneration = 0;
-    if (state.generation !== undefined && state.generation !== data.generation && !state.paused) {
+    const generationChanged = state.generation !== undefined && state.generation !== data.generation;
+    if (generationChanged && !state.paused) {
       state.before = undefined;
       state.page = 0;
       state.lastRows = undefined;
@@ -120,7 +121,9 @@ export function createViewer(api: WebviewApi) {
       table.renderRows([]);
       bridge.refreshRequested = true;
     }
-    state.generation = data.generation;
+    // While a row is open the reset is deferred, so keep the old generation
+    // until then; the first snapshot after inspection ends applies it.
+    if (!generationChanged || !state.paused) state.generation = data.generation;
     if (data.timezone && data.timezone !== state.displayTimezone) {
       state.displayTimezone = data.timezone;
       state.lastRows = undefined;

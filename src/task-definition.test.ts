@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
 import { parseJsonc } from './core/jsonc';
-import { taskToLoglineDefinition } from './vscode/tasks/definition';
+import { taskConversionError, taskToLoglineDefinition } from './vscode/tasks/definition';
 import { appendTasksToJsonc } from './vscode/tasks/jsonc-edit';
 
 test('process and shell task executions become captured Logline definitions', () => {
@@ -82,4 +83,18 @@ test('task insertion preserves multiple trailing comments and inserts commas bef
     assert.deepEqual((parseJsonc(result) as { tasks: { label: string }[] }).tasks.map(task => task.label), ['Existing', 'New']);
     assert.ok(result.includes('// first\n // second\n /* third */'));
   }
+});
+
+test('only shell tasks refused for shellArgs report a conversion error', () => {
+  const task = (execution: unknown) => ({ name: 'T', source: 'test', definition: { type: 'custom' }, execution } as unknown as import('vscode').Task);
+  assert.equal(taskConversionError(task(undefined)), undefined, 'custom or dependency-only tasks are not candidates');
+  assert.equal(taskConversionError(task({ process: 'node', args: [] })), undefined);
+  assert.equal(taskConversionError(task({ commandLine: 'npm test' })), undefined);
+  assert.match(taskConversionError(task({ commandLine: 'npm test', options: { shellArgs: ['-c'] } }))!, /shellArgs/);
+});
+
+test('the tasks.json schema accepts the shell executable a conversion can emit', () => {
+  const manifest = JSON.parse(readFileSync('package.json', 'utf8'));
+  const loglineTask = manifest.contributes.taskDefinitions.find((definition: { type: string }) => definition.type === 'logline');
+  assert.deepEqual(loglineTask.properties.shell.type, ['boolean', 'string']);
 });

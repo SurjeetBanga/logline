@@ -23,7 +23,11 @@ export class ProcessRunner {
     await Promise.all(closed);
     // A process can close while a descendant keeps the detached process group
     // alive. Force the original group down before clearing escalation timers.
-    await Promise.all(sessions.map(session => this.killProcessTree(session.child.pid, 'SIGKILL')));
+    // Windows has no process groups: taskkill /T /F already took the whole
+    // tree down, and repeating it against an exited PID can hit a reused one.
+    if (process.platform !== 'win32') {
+      await Promise.all(sessions.map(session => this.killProcessTree(session.child.pid, 'SIGKILL').catch(() => undefined)));
+    }
     for (const timer of this.timers) clearTimeout(timer);
     this.timers.clear();
   }
@@ -140,7 +144,9 @@ export class ProcessRunner {
     this.state.status = 'Stopping…';
     this.state.notify();
     const kill = (signal: NodeJS.Signals, force = false) => {
-      if (session.exited && !force) return;
+      // After exit, only a POSIX process group can still hold descendants; a
+      // Windows PID may already belong to an unrelated process.
+      if (session.exited && (!force || process.platform === 'win32')) return;
       void this.killProcessTree(session.child.pid, signal).catch(error => {
         const code = (error as NodeJS.ErrnoException).code;
         if (code !== 'ESRCH') { this.state.status = `Could not stop: ${(error as Error).message}`; this.state.notify(); }

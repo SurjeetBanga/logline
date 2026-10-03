@@ -263,7 +263,9 @@ export function createSearch(elements: Elements, state: ViewerState, api: Webvie
       button.textContent = label;
       button.title = item.query || item.serverId || '';
       scope.listen(button, 'click', () => {
-        setQuery(item.query || '');
+        // A saved query that no longer validates is reported by setQuery.
+        // Leave every other filter as is rather than restoring half a search.
+        if (!setQuery(item.query || '')) return;
         state.selectedServer = item.serverId || '';
         // Saved searches do not encode a run scope. Do not silently retain a
         // previously selected run while restoring one.

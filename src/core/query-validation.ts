@@ -6,7 +6,7 @@ export function queryError(input = ''): string | undefined {
   for (const token of queryTokens(input)) {
     if (token === 'OR' || token.toLowerCase() === 'or') continue;
     const value = token.startsWith('-') ? token.slice(1) : token;
-    const match = value.match(/^@?[A-Za-z_][A-Za-z0-9_.]*:(\/.*\/([A-Za-z]*))$/) ?? value.match(/^(\/.*\/([A-Za-z]*))$/);
+    const match = value.match(/^@?[A-Za-z_][A-Za-z0-9_.]*:(\/.*\/([dgimsuvy]*))$/) ?? value.match(/^(\/.*\/([dgimsuvy]*))$/);
     if (!match) continue;
     const pattern = match[1].slice(1, match[1].lastIndexOf('/'));
     const flags = match[2];

@@ -50,6 +50,14 @@ test('terminal normalizer resynchronises after a malformed escape at a line boun
   assert.deepEqual(lines, ['recovered']);
 });
 
+test('terminal normalizer ends the line before an oversized malformed escape', () => {
+  const lines: string[] = [];
+  const normalizer = new TerminalNormalizer(line => lines.push(line.text));
+  normalizer.write(`before\u001b[${'1;'.repeat(4096)}`);
+  normalizer.write('still escape\nafter\n');
+  assert.deepEqual(lines, ['before', 'after']);
+});
+
 test('terminal normalizer keeps complete ANSI sequences in long chunks', () => {
   const lines: { text: string; truncated: boolean }[] = [];
   const normalizer = new TerminalNormalizer(line => lines.push(line));
