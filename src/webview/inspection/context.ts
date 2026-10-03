@@ -6,7 +6,8 @@ import { EventScope } from '../event-scope';
 import type { WebviewApi } from '../types';
 import { buildEventDetails } from './details';
 
-export function createInspection(elements: Elements, scrollViewport: HTMLElement, api: WebviewApi, formatTimestamp: (event: LogEvent) => string | undefined, scope: EventScope) {
+export function createInspection(elements: Elements, scrollViewport: HTMLElement, api: WebviewApi, formatTimestamp: (event: LogEvent) => string | undefined, scope: EventScope,
+  showTrace?: (traceId: string) => void) {
   let contextAnchor: number | undefined;
   let contextSelected: number | undefined;
   let contextScrollTop = 0;
@@ -62,6 +63,12 @@ export function createInspection(elements: Elements, scrollViewport: HTMLElement
     const copy = (event.target as HTMLElement).closest<HTMLElement>('.copy-button');
     if (copy) {
       api.postMessage({ type: 'copy', id: Number(copy.dataset.id) });
+      return true;
+    }
+    const trace = (event.target as HTMLElement).closest<HTMLElement>('.trace-button');
+    if (trace?.dataset.traceId) {
+      if (elements.contextDialog.open) elements.contextDialog.close();
+      showTrace?.(trace.dataset.traceId);
       return true;
     }
     const site = (event.target as HTMLElement).closest<HTMLElement>('.log-site-button');

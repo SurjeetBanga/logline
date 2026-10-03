@@ -7,6 +7,8 @@ import type { LogStore, PageOptions } from '../core/log-store';
 import type { AgentRunStatus, AgentShareStatus } from '../core/agent-types';
 import type { SessionRegistry } from '../capture/session-registry';
 import type { LogEvent, SessionSummary } from '../core/types';
+import { getField } from '../core/query';
+import { buildTrace, type SpanStore, type TraceView } from '../core/traces';
 
 export type AgentErrorCode = 'NOT_SHARED' | 'SHARE_CHANGED' | 'INVALID_INPUT' | 'EVENT_UNAVAILABLE' | 'CANCELLED' | 'BUSY';
 export class AgentAccessError extends Error {
@@ -32,7 +34,7 @@ export class AgentLogAccess {
   private redactor: Redactor;
   private activeWait?: symbol;
   constructor(private readonly store: LogStore, private readonly registry: SessionRegistry,
-    private readonly nextId: () => number = () => 0, redaction: RedactionOptions = {}) {
+    private readonly nextId: () => number = () => 0, redaction: RedactionOptions = {}, private readonly spans?: SpanStore) {
     this.redaction = { enabled: true, replacement: '[REDACTED]', ...redaction };
     this.redaction.enabled = true;
     this.redactor = createRedactor(this.redaction);
@@ -250,6 +252,29 @@ export class AgentLogAccess {
     const count = Math.min(25, Math.max(0, context));
     const contextEvents = anchorIndex < 0 ? [] : contextResult.events.slice(Math.max(0, anchorIndex - count), anchorIndex + count + 1);
     return { event: safe, details: this.redactor.text(details), exceptions: extractExceptions(safe), context: contextEvents.map(item => this.boundEvent(this.redactor.event(item))) };
+  }
+
+  /**
+   * One trace across shared sources: spans from shared OpenTelemetry
+   * services and retained logs from shared runs, redacted and bounded.
+   */
+  trace(shareId: string, traceId: string): TraceView & { coverage: { spans: number; logs: number; limited: boolean } } {
+    if (typeof shareId !== 'string' || typeof traceId !== 'string' || !/^[A-Za-z0-9_-]{1,128}$/.test(traceId)) throw new AgentAccessError('INVALID_INPUT', 'shareId and a trace id of letters, digits, - or _ are required.');
+    this.assertShare(shareId);
+    const id = traceId.toLowerCase();
+    const sources = this.sources();
+    const read = this.readMerged({ shareId, query: `traceId:${JSON.stringify(id)}` }, sources, undefined, this.nextId(), this.nextId(), 200);
+    const spans = (this.spans?.trace(id) ?? []).filter(span => this.shared.has(`otel:${span.service}`)).map(span => ({ ...span, name: this.redactor.text(span.name), attributes: this.redactor.value(span.attributes) as typeof span.attributes,
+      status: { ...span.status, message: span.status.message === undefined ? undefined : this.redactor.text(span.status.message) } }));
+    const logs = read.events.slice().reverse()
+      .filter(event => String(getField(event, 'traceId') ?? '').toLowerCase() === id && !(spans.length && getField(event, 'kind') === 'span'))
+      .map(event => {
+        const spanId = getField(event, 'spanId');
+        return { id: event.id, level: event.level, message: this.redactor.text(event.message ?? '').slice(0, 1024), timeMs: event.timestampMs,
+          spanId: typeof spanId === 'string' ? spanId.toLowerCase() : undefined, server: event.server };
+      });
+    const view = buildTrace(id, spans, logs, 300);
+    return { ...view, coverage: { spans: spans.length, logs: logs.length, limited: read.hasMore || view.omitted > 0 } };
   }
 
   analyze(input: AgentSearchInput): unknown {

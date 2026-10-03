@@ -44,7 +44,7 @@ test('commands register the complete action surface and honor trust/focus/config
   } as any;
   const guideCalls: string[] = [];
   const registrations = registerCommands(controller, section => guideCalls.push(section));
-  assert.equal(handlers.size, 18);
+  assert.equal(handlers.size, 21);
   await handlers.get('logline.runCommand')!();
   for (const name of ['logline.stopCommand', 'logline.export', 'logline.import', 'logline.exportForAI', 'logline.convertTask',
     'logline.captureTask', 'logline.showGuide', 'logline.showWhatsNew', 'logline.showLogs', 'logline.enableTerminalCapture',

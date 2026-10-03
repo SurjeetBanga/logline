@@ -9,6 +9,7 @@ import type { GuideStatus, Snapshot, ViewRequest } from '../protocol/messages';
 import type { LogPersistence } from '../storage/log-persistence';
 import type { SavedSearches } from '../storage/saved-searches';
 import type { AgentLogAccess } from './agent-access';
+import type { ReceiverStatus } from '../capture/otlp-receiver';
 
 function pickColumns(event: LogEvent, columns: string[]): LogEvent['fields'] {
   const fields = event.fields;
@@ -28,9 +29,10 @@ export interface SnapshotSources {
   store: LogStore; config: Settings; registry: SessionRegistry; state: RuntimeState;
   ingestion: Ingestion; persistence: LogPersistence; searches: SavedSearches; running: boolean;
   guideStatus: GuideStatus; agentAccess: AgentLogAccess; terminalCapture?: { status(): { state: 'off' | 'waiting' | 'capturing' | 'attention'; detail: string; active: number; failed: number } };
+  otlp?: { status(): ReceiverStatus };
 }
 export function buildSnapshot(msg: Extract<ViewRequest, { type: 'snapshot'; }>,
-  { store, config, registry, state, ingestion, persistence, searches, running, guideStatus, agentAccess, terminalCapture }: SnapshotSources): Snapshot {
+  { store, config, registry, state, ingestion, persistence, searches, running, guideStatus, agentAccess, terminalCapture, otlp }: SnapshotSources): Snapshot {
   const options = { query: msg.query, serverId: msg.serverId, sessionId: msg.sessionId, levels: msg.levels,
     page: msg.page, before: msg.before, sort: msg.sort, sortDirection: msg.sortDirection };
   const configured = config.get<string[]>('columns', []);
@@ -68,7 +70,7 @@ export function buildSnapshot(msg: Extract<ViewRequest, { type: 'snapshot'; }>,
     newest: ingestion.sequence, generation: state.generation,
     persistDropped: persistence.persistDropped,
     timezone: config.get('timezone', 'local'), guideStatus, agentSharing: agentAccess.status(),
-    captureTerminals: config.get('captureTerminals', false), captureStatus: terminalCapture?.status()
+    captureTerminals: config.get('captureTerminals', false), captureStatus: terminalCapture?.status(), otlp: otlp?.status()
   };
 
 }

@@ -36,6 +36,7 @@
             <div class="menu-separator" role="separator"></div>
             <button id="export" type="button" role="menuitem" tabindex="-1" title="Export filtered logs as JSON Lines, JSON, CSV, or AI context (Markdown)">Export logs…</button>
             <button id="import" type="button" role="menuitem" tabindex="-1">Import logs…</button>
+            <button id="otlpToggle" type="button" role="menuitem" tabindex="-1" title="Receive OpenTelemetry logs and traces from instrumented apps on this machine">Start OpenTelemetry receiver</button>
             <div class="menu-separator" role="separator"></div>
             <button id="manage" type="button" role="menuitem" tabindex="-1">Manage servers…</button>
             <button id="config" type="button" role="menuitem" tabindex="-1">Settings</button>
@@ -125,6 +126,13 @@
       <table aria-label="Surrounding log events"><thead><tr><th>Time</th><th>Level</th><th>Message</th><th>Source</th></tr></thead><tbody id="contextLogs"></tbody></table>
     </div>
     <div id="contextDetails" aria-live="polite"></div>
+  </dialog>
+  <dialog id="traceDialog" aria-labelledby="traceTitle">
+    <div class="context-header"><strong id="traceTitle">Trace</strong><span><button id="traceFilter" title="Show every retained event with this trace id">Filter logs by trace</button><button id="traceClose" autofocus>Back to results</button></span></div>
+    <p id="traceStatus" role="status">Loading…</p>
+    <div class="trace-scroll">
+      <table class="trace-table" aria-label="Spans and logs in this trace"><thead><tr><th>Operation</th><th>Service</th><th>Timeline</th><th>Duration</th></tr></thead><tbody id="traceRows"></tbody></table>
+    </div>
   </dialog>
   <dialog id="analysisDialog" aria-labelledby="analysisTitle">
     <div class="context-header"><strong id="analysisTitle">Search analysis</strong><button id="analysisClose" autofocus>Close</button></div>

@@ -1075,3 +1075,72 @@ test('specific run sharing remains available through More actions', () => {
   assert.deepEqual(JSON.parse(JSON.stringify(messages.at(-1))), { type: 'shareWithAgent', chooseRuns: true });
   assert.equal(get('actionsMenu').hidden, true);
 });
+
+test('event details link to the log statement and the trace', () => {
+  const { get, renderDetails, messages } = viewer();
+  const details = renderDetails(42, 'raw', [], { site: 'src/auth.ts:18', traceId: 'abc123' });
+  const site = details.querySelector('.log-site-button')!;
+  const trace = details.querySelector('.trace-button')!;
+  assert.equal(site.textContent, 'Open log statement · src/auth.ts:18');
+  assert.equal(trace.dataset.traceId, 'abc123');
+  const click = (target: Element, selector: string) => get('contextDetails').listeners.get('click')!({ target: { closest: (wanted: string) => wanted === selector ? target : undefined } });
+  click(site, '.log-site-button');
+  assert.deepEqual(JSON.parse(JSON.stringify(messages.at(-1))), { type: 'openLogSite', id: 42 });
+  click(trace, '.trace-button');
+  assert.equal(get('traceDialog').open, true);
+  assert.deepEqual(JSON.parse(JSON.stringify(messages.at(-1))), { type: 'trace', traceId: 'abc123' });
+  assert.equal(renderDetails(42, 'raw', []).querySelector('.trace-button'), undefined);
+});
+
+test('the trace dialog renders a waterfall with logs and opens their context', () => {
+  const { get, app, receive, messages } = viewer();
+  app.traceView.show('ABC123');
+  assert.equal(get('traceStatus').textContent, 'Loading…');
+  const span = (spanId: string, depth: number, extra: Record<string, unknown> = {}) => ({ spanId, name: `op ${spanId}`, service: 'api', kind: 'server', offsetMs: depth * 10, durationMs: 40, depth, error: false, critical: depth === 0, attributes: { 'http.route': '/x' }, events: [], ...extra });
+  receive({ type: 'trace', trace: { traceId: 'other', spans: [], logs: [], services: [], durationMs: 0, errors: 0, omitted: 0 } });
+  assert.equal(get('traceStatus').textContent, 'Loading…', 'responses for another trace are ignored');
+  receive({ type: 'trace', trace: {
+    traceId: 'abc123', durationMs: 50, services: ['api', 'db'], errors: 1, omitted: 0,
+    spans: [span('a', 0), span('b', 1, { error: true, service: 'db', statusMessage: 'timeout' })],
+    logs: [{ id: 7, level: 'warn', message: 'slow query', offsetMs: 12, spanId: 'b', server: 'OTel · db' }, { id: 8, level: 'info', message: 'stdout line', offsetMs: 30 }]
+  } });
+  assert.match(get('traceStatus').textContent, /^2 services · 2 spans · 50 ms · 1 error · 2 logs/);
+  const rows = get('traceRows').children;
+  assert.deepEqual(rows.map(row => row.className), ['trace-span trace-critical', 'trace-span trace-error', 'trace-log', 'trace-section', 'trace-log']);
+  assert.equal(rows[1].children[0].children[0].textContent, '⚠ op b');
+  assert.equal(rows[1].children[2].children[0].children[0].style.left, '20%');
+  assert.equal(rows[1].children[2].children[0].children[0].style.width, '80%');
+  assert.match(rows[1].children[0].attributes.title ?? (rows[1].children[0] as any).title, /Error: timeout/);
+  const log = rows[2].children[0].children[0];
+  get('traceRows').listeners.get('click')!({ target: { closest: (selector: string) => selector === '.trace-log-button' ? log : undefined } });
+  assert.equal(get('traceDialog').open, false);
+  assert.equal(get('contextDialog').open, true);
+  assert.deepEqual(JSON.parse(JSON.stringify(messages.at(-1))), { type: 'context', id: 7 });
+});
+
+test('a trace without spans explains how to collect them, and Filter logs by trace applies a query', () => {
+  const { get, app, receive, messages } = viewer();
+  app.traceView.show('abc123');
+  receive({ type: 'trace', trace: { traceId: 'abc123', durationMs: 0, services: [], errors: 0, omitted: 0, spans: [], logs: [] } });
+  assert.match(get('traceStatus').textContent, /Turn on the OpenTelemetry receiver/);
+  get('traceFilter').listeners.get('click')!();
+  assert.equal(get('traceDialog').open, false);
+  assert.equal(app.search.query(), 'traceId:abc123');
+  assert.equal(messages.at(-1)?.type, 'snapshot');
+});
+
+test('snapshots apply editor requests once and reflect the OpenTelemetry receiver', () => {
+  const { get, app, receive, messages } = viewer();
+  const snapshot = (extra: Record<string, unknown>) => receive({
+    type: 'snapshot', generation: 1, newest: 100, status: 'Running', command: '', running: false, total: 0, retained: 0, discarded: 0, bytes: 0,
+    maxBytes: 1, truncated: 0, events: [], columns: [], page: 0, pages: 1, matched: 0, ...extra
+  });
+  snapshot({ applyQuery: 'message:/user.*logged\\s+in/', otlp: { running: true, endpoint: 'http://127.0.0.1:4318' } });
+  assert.equal(app.search.query(), 'message:/user.*logged\\s+in/');
+  assert.equal(get('otlpToggle').textContent, 'Stop OpenTelemetry receiver');
+  get('otlpToggle').listeners.get('click')!();
+  assert.deepEqual(JSON.parse(JSON.stringify(messages.at(-1))), { type: 'toggleOtlp', enabled: false });
+  snapshot({ openTrace: 'abc123', otlp: { running: false } });
+  assert.equal(get('traceDialog').open, true);
+  assert.equal(get('otlpToggle').textContent, 'Start OpenTelemetry receiver');
+});

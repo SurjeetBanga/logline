@@ -38,7 +38,7 @@ test('activation registers the provider, command/task surfaces, autostart, and i
   const context = { extensionUri: { fsPath: process.cwd() }, subscriptions: [], globalState: { get: (_key: string, fallback: unknown) => fallback, update: async () => undefined } } as any;
   const result = activate(context);
   assert.ok(result.provider);
-  assert.equal(registeredCommands.length, 18);
+  assert.equal(registeredCommands.length, 21);
   assert.ok(context.subscriptions.length >= 20);
   await deactivate();
   await deactivate();

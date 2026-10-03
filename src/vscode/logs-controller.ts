@@ -1,5 +1,9 @@
 import * as vscode from 'vscode';
 import { DebugCapture } from '../capture/debug-capture';
+import { OtlpReceiver } from '../capture/otlp-receiver';
+import { missingOtelVariables, otelDefaults } from '../core/otel-environment';
+import { buildTrace, SpanStore, type TraceView } from '../core/traces';
+import type { Session } from '../capture/types';
 import { FileFollower } from '../capture/file-follower';
 import { Ingestion } from '../capture/ingestion';
 import { ProcessRunner } from '../capture/process-runner';
@@ -42,15 +46,18 @@ export class LogsController {
   readonly terminalCapture = new TerminalCapture(this.config, this.ingestion, this.registry, this.state);
   readonly files = new FileFollower(this.config, this.registry, this.ingestion, this.state);
   readonly debug = new DebugCapture(this.config, this.registry, this.ingestion, this.state, () => this.terminalCapture.isEnabled);
+  readonly spans = new SpanStore();
+  readonly otlp = new OtlpReceiver(this.config, this.registry, this.ingestion, this.state, this.spans);
   readonly agentAccess = new AgentLogAccess(this.store, this.registry, () => this.ingestion.sequence, {
     fields: this.config.get<string[]>('redactionFields', []),
     replacement: this.config.get('redactionReplacement', '[REDACTED]')
-  });
+  }, this.spans);
   readonly logSites = new LogSiteIndex();
   readonly siteTracker = new LogSiteTracker(this.logSites);
   /** Editor integration for log statements; attached at activation. */
   lens?: LogLens;
   private pendingQuery?: string;
+  private pendingTrace?: string;
   readonly transfer = new LogTransfer(this.store, this.config, this.ingestion, this.state);
   readonly searches: SavedSearches;
   private readonly globalState: Pick<vscode.ExtensionContext, 'globalState'>['globalState'];
@@ -59,9 +66,15 @@ export class LogsController {
   private disposing?: Promise<void>;
   private sharingRequest?: Promise<void>;
   private guideOpener?: (section: 'guide' | 'whatsNew') => void;
+  private readonly terminalEnvironment?: vscode.EnvironmentVariableCollection;
 
-  constructor(context: Pick<vscode.ExtensionContext, 'globalState'>) {
+  constructor(context: Pick<vscode.ExtensionContext, 'globalState'> & Partial<Pick<vscode.ExtensionContext, 'environmentVariableCollection'>>) {
     this.globalState = context.globalState;
+    this.terminalEnvironment = context.environmentVariableCollection;
+    this.runner.environment = (server, env) => {
+      const defaults = this.otelVariables(serviceName(server));
+      return defaults ? missingOtelVariables(env, defaults) : {};
+    };
     this.searches = new SavedSearches(context.globalState);
     const workspaceApi = vscode.workspace as typeof vscode.workspace & { onDidChangeWorkspaceFolders?: typeof vscode.workspace.onDidChangeWorkspaceFolders; onDidGrantWorkspaceTrust?: typeof vscode.workspace.onDidGrantWorkspaceTrust; };
     this.sharingSubscriptions = [];
@@ -83,20 +96,24 @@ export class LogsController {
       });
       if (event.affectsConfiguration('logline.captureTerminals')) this.terminalCapture.setEnabled(this.config.get('captureTerminals', false));
       if (event.affectsConfiguration('logline.servers')) this.notifications.send({ type: 'serversChanged' });
+      if (event.affectsConfiguration('logline.otlp')) void this.syncOtlp();
     });
+    // Leave the terminal environment as found until the receiver is running.
+    this.terminalEnvironment?.clear();
+    if (this.config.get('otlp.enabled', false)) void this.syncOtlp();
   }
   snapshot(request: Extract<ViewRequest, { type: 'snapshot'; }>) {
     this.terminalCapture.pruneStale();
-    const applyQuery = this.pendingQuery;
-    this.pendingQuery = undefined;
-    return { ...this.buildSnapshot(request), ...(applyQuery !== undefined ? { applyQuery } : {}) };
+    const { pendingQuery: applyQuery, pendingTrace: openTrace } = this;
+    this.pendingQuery = this.pendingTrace = undefined;
+    return { ...this.buildSnapshot(request), ...(applyQuery !== undefined ? { applyQuery } : {}), ...(openTrace ? { openTrace } : {}) };
   }
   private buildSnapshot(request: Extract<ViewRequest, { type: 'snapshot'; }>) {
     return buildSnapshot(request, { store: this.store, config: this.config, registry: this.registry, state: this.state,
       ingestion: this.ingestion, persistence: this.persistence, searches: this.searches,
       running: this.isRunning(),
       agentAccess: this.agentAccess,
-      guideStatus: this.guideStatus(), terminalCapture: this.terminalCapture });
+      guideStatus: this.guideStatus(), terminalCapture: this.terminalCapture, otlp: this.otlp });
   }
   guideStatus() {
     return getGuideStatus(this.globalState.get<string>(GUIDE_STATE_KEY));
@@ -114,12 +131,19 @@ export class LogsController {
       shareWithAgent: (sourceIds, anchor, sessionIds, chooseRuns) => this.shareWithAgent(sourceIds, anchor, sessionIds, chooseRuns),
       stopSharing: () => this.stopSharing(), askCopilot: anchor => this.askCopilot(anchor),
       toggleTerminalCapture: enabled => this.toggleTerminalCapture(enabled),
-      detailLinks: event => this.detailLinks(event), openLogSite: id => this.openLogSite(id)
+      detailLinks: event => this.detailLinks(event), openLogSite: id => this.openLogSite(id),
+      traceView: traceId => this.traceView(traceId), toggleOtlp: enabled => this.toggleOtlp(enabled)
     }, send, message);
   }
   /** Filter the Logs panel from the editor. The next snapshot carries the query, so a panel that is still loading applies it too. */
   async showQuery(query: string): Promise<void> {
     this.pendingQuery = query;
+    await vscode.commands.executeCommand('logline.logs.focus');
+    this.notifications.send({ type: 'update' });
+  }
+  /** Open a trace in the Logs panel, delivered with the next snapshot like showQuery. */
+  async showTrace(traceId: string): Promise<void> {
+    this.pendingTrace = traceId;
     await vscode.commands.executeCommand('logline.logs.focus');
     this.notifications.send({ type: 'update' });
   }
@@ -147,6 +171,7 @@ export class LogsController {
   clear(): void {
     this.agentAccess.revoke();
     this.store.clear();
+    this.spans.clear();
     this.registry.clearCompleted();
     // A clear must also remove a completed import's status. Active capture is
     // intentionally retained, so keep its truthful running state instead.
@@ -237,6 +262,55 @@ export class LogsController {
     });
   }
   stopSharing(): void { this.agentAccess.revoke(); this.notifications.send({ type: 'update' }); }
+  /** OpenTelemetry variables for a new process, or undefined when the receiver should not be targeted. */
+  otelVariables(service?: string): Record<string, string> | undefined {
+    if (!this.otlp.running || !this.otlp.endpoint || !this.config.get('otlp.injectEnvironment', true)) return undefined;
+    return otelDefaults(this.otlp.endpoint, service);
+  }
+  /** Start, restart, or stop the receiver to match settings, then update the terminal environment. */
+  async syncOtlp(): Promise<void> {
+    if (this.disposing) return;
+    const enabled = this.config.get('otlp.enabled', false);
+    const port = this.config.get('otlp.port', 4318);
+    const portChanged = this.otlp.running && this.otlp.endpoint !== undefined && !this.otlp.error && !this.otlp.endpoint.endsWith(`:${port}`);
+    if (!enabled || portChanged) await this.otlp.stop();
+    if (enabled && !this.disposing) await this.otlp.start(port);
+    if (this.disposing) { await this.otlp.stop(); return; }
+    this.updateTerminalEnvironment();
+    this.notifications.send({ type: 'update' });
+  }
+  async toggleOtlp(enabled: boolean): Promise<void> {
+    const target = vscode.workspace.workspaceFolders?.length ? vscode.ConfigurationTarget.Workspace : vscode.ConfigurationTarget.Global;
+    await vscode.workspace.getConfiguration('logline').update('otlp.enabled', enabled, target);
+    this.config.refresh();
+    await this.syncOtlp();
+    if (enabled && this.otlp.running) {
+      void vscode.window.showInformationMessage(`Logline is receiving OpenTelemetry on ${this.otlp.endpoint}. Servers, tasks, debug sessions, and new terminals started from now on send telemetry here.`);
+    } else if (enabled && this.otlp.error) void vscode.window.showWarningMessage(`Logline: ${this.otlp.error}`);
+  }
+  private updateTerminalEnvironment(): void {
+    const collection = this.terminalEnvironment;
+    if (!collection) return;
+    collection.clear();
+    const defaults = this.otelVariables();
+    if (!defaults) return;
+    for (const [name, value] of Object.entries(missingOtelVariables(process.env, defaults))) collection.replace(name, value);
+    collection.description = `Sends OpenTelemetry data from new terminals to Logline at ${this.otlp.endpoint}`;
+  }
+  /** Spans and retained logs that share a trace id. */
+  traceView(traceId: string): TraceView {
+    const id = traceId.toLowerCase();
+    const spans = this.spans.trace(id);
+    const read = this.store.reversePage({ query: `traceId:${JSON.stringify(id)}` }, 500);
+    const logs = read.events.reverse()
+      .filter(event => String(getField(event, 'traceId') ?? '').toLowerCase() === id && !(spans.length && getField(event, 'kind') === 'span'))
+      .map(event => {
+        const spanId = getField(event, 'spanId');
+        return { id: event.id, level: event.level, message: event.message ?? '', timeMs: event.timestampMs,
+          spanId: typeof spanId === 'string' ? spanId.toLowerCase() : undefined, server: event.server };
+      });
+    return buildTrace(id, spans, logs);
+  }
   async toggleTerminalCapture(enabled: boolean): Promise<void> {
     await vscode.workspace.getConfiguration('logline').update('captureTerminals', enabled, vscode.ConfigurationTarget.Workspace);
     this.terminalCapture.setEnabled(enabled);
@@ -285,9 +359,17 @@ export class LogsController {
     this.tasks.disposeObservation();
     this.terminalCapture.dispose();
     this.debug.dispose();
+    this.terminalEnvironment?.clear();
+    await this.otlp.stop();
     await this.files.dispose();
     // Closing streams may emit a final partial line; flush persistence afterwards.
     await this.runner.dispose();
     await this.persistence.dispose();
   }
+}
+
+// Saved servers and tasks name their service; ad-hoc commands leave it to the app.
+function serviceName(server: Session['server']): string | undefined {
+  if (server.id === 'custom') return undefined;
+  return (server.taskName ?? server.label).trim().slice(0, 100) || undefined;
 }

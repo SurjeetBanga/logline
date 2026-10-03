@@ -14,6 +14,14 @@ export function buildEventDetails(id: number, text: string | undefined, exceptio
   share.textContent = 'Share source with Agent';
   share.dataset.id = String(id);
   container.append(share);
+  if (links.traceId) {
+    const trace = document.createElement('button');
+    trace.className = 'trace-button';
+    trace.textContent = 'Show trace';
+    trace.title = 'Show every span and log in this request across services';
+    trace.dataset.traceId = links.traceId;
+    container.append(trace);
+  }
   if (links.site) {
     const site = document.createElement('button');
     site.className = 'log-site-button';

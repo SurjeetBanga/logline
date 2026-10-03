@@ -5,6 +5,8 @@ import type { PageOptions, Stats, SuggestedValue } from '../core/log-store';
 import type { LogEvent } from '../core/types';
 import type { SavedSearch } from '../storage/saved-searches';
 import type { AgentShareStatus } from '../core/agent-types';
+import type { TraceView } from '../core/traces';
+import type { ReceiverStatus } from '../capture/otlp-receiver';
 
 export interface Filter { query?: string; serverId?: string; sessionId?: string; levels?: string[]; }
 export type ViewRequest =
@@ -19,6 +21,8 @@ export type ViewRequest =
   | { type: 'details' | 'copy'; id: number; target?: 'main' | 'context'; }
   | { type: 'openSource'; id: number; block: number; line: number; }
   | { type: 'openLogSite'; id: number; }
+  | { type: 'trace'; traceId: string; }
+  | { type: 'toggleOtlp'; enabled: boolean; }
   | { type: 'exportContext'; ids: number[]; }
   | { type: 'shareWithAgent'; sourceIds?: string[]; sessionIds?: string[]; anchor?: number; chooseRuns?: boolean; }
   | { type: 'stopSharing'; }
@@ -43,6 +47,9 @@ export interface Snapshot extends Stats {
   captureStatus?: { state: 'off' | 'waiting' | 'capturing' | 'attention'; detail: string; active: number; failed: number };
   /** A filter requested from the editor, such as a log statement's CodeLens, applied once. */
   applyQuery?: string;
+  /** A trace requested from the editor, opened once. */
+  openTrace?: string;
+  otlp?: ReceiverStatus;
 }
 /** Links offered with an expanded event, resolved by the host. */
 export interface DetailLinks {
@@ -59,7 +66,8 @@ export type HostMessage = Snapshot
   | ({ type: 'details'; id: number; text: string; target: 'main' | 'context'; exceptions: ExceptionBlock[]; } & DetailLinks)
   | { type: 'searches'; searches: { saved: SavedSearch[]; }; saved?: SavedSearch; }
   | { type: 'autocomplete'; input: string; serverId?: string; fields: string[]; values: SuggestedValue[]; }
-  | { type: 'analysis'; analysis: AnalysisResult; };
+  | { type: 'analysis'; analysis: AnalysisResult; }
+  | { type: 'trace'; trace: TraceView; };
   // Sharing status is also included in snapshots so the webview can render a
   // durable indicator after a notification-driven refresh.
 
@@ -93,6 +101,11 @@ export function parseViewRequest(value: unknown): ViewRequest | undefined {
       return { type: msg.type, id, block, line };
     }
     case 'openLogSite': { const id = index('id'); return id === undefined ? undefined : { type: msg.type, id }; }
+    case 'trace': {
+      const traceId = string('traceId');
+      return traceId && /^[A-Za-z0-9_-]{1,128}$/.test(traceId) ? { type: msg.type, traceId } : undefined;
+    }
+    case 'toggleOtlp': return { type: msg.type, enabled: msg.enabled === true };
     case 'exportContext': return Array.isArray(msg.ids) ? { type: msg.type, ids: msg.ids.filter((id): id is number => Number.isSafeInteger(id) && id >= 0) } : undefined;
     case 'shareWithAgent': return { type: msg.type, sourceIds: strings('sourceIds'), sessionIds: strings('sessionIds'), anchor: index('anchor'), chooseRuns: msg.chooseRuns === true };
     case 'stopSharing': return { type: msg.type };

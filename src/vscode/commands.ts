@@ -65,6 +65,15 @@ export function registerCommands(controller: LogsController, openGuide?: (sectio
     vscode.commands.registerCommand('logline.shareSpecificRuns', () => controller.shareWithAgent(undefined, undefined, undefined, true)),
     vscode.commands.registerCommand('logline.stopSharing', () => controller.stopSharing()),
     vscode.commands.registerCommand('logline.askCopilot', () => controller.askCopilot()),
+    vscode.commands.registerCommand('logline.startOtlpReceiver', () => controller.toggleOtlp(true)),
+    vscode.commands.registerCommand('logline.stopOtlpReceiver', () => controller.toggleOtlp(false)),
+    vscode.commands.registerCommand('logline.showTrace', async (value?: unknown) => {
+      const traceId = typeof value === 'string' ? value : await vscode.window.showInputBox({
+        title: 'Show trace', prompt: 'Trace id (32 hex characters)', ignoreFocusOut: true,
+        validateInput: input => /^[A-Za-z0-9_-]{1,128}$/.test(input.trim()) ? undefined : 'Enter a trace id of letters, digits, - or _.'
+      });
+      if (traceId?.trim() && /^[A-Za-z0-9_-]{1,128}$/.test(traceId.trim())) await controller.showTrace(traceId.trim());
+    }),
     vscode.commands.registerCommand('logline.manageTerminalCapture', async () => {
       const terminals = controller.terminalCapture.availableTerminals();
       const choice = await vscode.window.showQuickPick(terminals.map(item => ({
