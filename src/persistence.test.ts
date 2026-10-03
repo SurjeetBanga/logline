@@ -84,6 +84,7 @@ test('persistence rolls the bounded workspace file before appending a new batch'
     p.persist('second'); p.flushPersist(); await p.persistChain;
     assert.equal(await readFile(path.join(folder, '.logline', 'latest.log'), 'utf8'), 'second\n');
     assert.equal(await readFile(path.join(folder, '.logline', 'latest.log.1'), 'utf8'), 'first\n');
+    assert.equal(await readFile(path.join(folder, '.logline', '.gitignore'), 'utf8'), '*\n', 'unredacted logs stay out of git');
     await p.dispose();
   } finally {
     await rm(folder, { recursive: true, force: true });

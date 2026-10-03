@@ -21,7 +21,7 @@ export function decodeRequest(signal: OtlpSignal, json: boolean, body: Uint8Arra
   return signal === 'logs' ? { logs: readLogs(request) } : { spans: readSpans(request) };
 }
 
-interface Pending { resolve(value: Decoded): void; reject(error: Error): void; }
+interface Pending { worker: Worker; resolve(value: Decoded): void; reject(error: Error): void; }
 
 /**
  * Decodes request bodies above a size threshold on a worker thread, so a
@@ -43,7 +43,7 @@ export class OtlpDecoder {
     // A private copy can be transferred instead of cloned.
     const copy = new Uint8Array(body);
     return new Promise<Decoded>((resolve, reject) => {
-      this.pending.set(id, { resolve, reject });
+      this.pending.set(id, { worker, resolve, reject });
       worker.postMessage({ id, signal, json, body: copy }, [copy.buffer]);
     });
   }
@@ -66,15 +66,19 @@ export class OtlpDecoder {
       if (message.result) pending.resolve(message.result);
       else pending.reject(message.malformed ? new MalformedRequest(message.error) : new Error(message.error));
     });
-    // A crashed worker fails its requests; the next large request starts a new one.
-    const failed = (error: Error) => { if (this.worker === worker) this.worker = undefined; this.failAll(error); };
+    // A crashed worker fails its own requests; the next large request starts
+    // a new one. Its exit can follow after a replacement took new requests.
+    const failed = (error: Error) => { if (this.worker === worker) this.worker = undefined; this.failAll(error, worker); };
     worker.on('error', failed);
     worker.on('exit', code => failed(new Error(`The OpenTelemetry decoder exited with code ${code}.`)));
     return this.worker = worker;
   }
 
-  private failAll(error: Error): void {
-    for (const pending of this.pending.values()) pending.reject(error);
-    this.pending.clear();
+  private failAll(error: Error, worker?: Worker): void {
+    for (const [id, pending] of this.pending) {
+      if (worker && pending.worker !== worker) continue;
+      this.pending.delete(id);
+      pending.reject(error);
+    }
   }
 }

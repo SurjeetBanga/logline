@@ -11,7 +11,8 @@ function spanBytes(span: Span): number {
 
 /** Spans grouped by trace, bounded by count and approximate size; the oldest received spans go first. */
 export class SpanStore {
-  private readonly traces = new Map<string, Span[]>();
+  // Span ids per trace make duplicate checks constant time in traces with many spans.
+  private readonly traces = new Map<string, { spans: Span[]; ids: Set<string> }>();
   private queue: ({ span: Span; bytes: number } | undefined)[] = [];
   private head = 0;
   private count = 0;
@@ -24,13 +25,14 @@ export class SpanStore {
   get size(): number { return this.count; }
 
   add(span: Span): boolean {
-    const spans = this.traces.get(span.traceId) ?? [];
+    let trace = this.traces.get(span.traceId);
     // Exporters retry failed batches, which can resend spans already stored.
-    if (spans.some(existing => existing.spanId === span.spanId)) return false;
+    if (trace?.ids.has(span.spanId)) return false;
     const bytes = spanBytes(span);
     if (bytes > this.maxBytes) return false;
-    spans.push(span);
-    this.traces.set(span.traceId, spans);
+    if (!trace) { trace = { spans: [], ids: new Set() }; this.traces.set(span.traceId, trace); }
+    trace.spans.push(span);
+    trace.ids.add(span.spanId);
     this.queue.push({ span, bytes });
     this.count++;
     this.bytes += bytes;
@@ -39,7 +41,7 @@ export class SpanStore {
     return true;
   }
 
-  trace(traceId: string): readonly Span[] { return this.traces.get(traceId.toLowerCase()) ?? []; }
+  trace(traceId: string): readonly Span[] { return this.traces.get(traceId.toLowerCase())?.spans ?? []; }
 
   clear(): void {
     this.traces.clear();
@@ -58,11 +60,13 @@ export class SpanStore {
     const { span } = entry;
     this.count--;
     this.bytes -= entry.bytes;
-    const spans = this.traces.get(span.traceId);
-    if (!spans) return;
-    const index = spans.indexOf(span);
-    if (index !== -1) spans.splice(index, 1);
-    if (!spans.length) this.traces.delete(span.traceId);
+    const trace = this.traces.get(span.traceId);
+    if (!trace) return;
+    // Spans leave in arrival order, so the evicted span is normally first.
+    const index = trace.spans.indexOf(span);
+    if (index !== -1) trace.spans.splice(index, 1);
+    trace.ids.delete(span.spanId);
+    if (!trace.spans.length) this.traces.delete(span.traceId);
   }
 }
 

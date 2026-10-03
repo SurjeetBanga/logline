@@ -157,3 +157,21 @@ test('reads concatenated messages, format wrappers, and messages after a context
   index.setFile('A.java', extractLogSites('A.java', 'log.warn("Order " + order.getId() + " rejected by " + svc);'));
   assert.equal(index.match(event(1, 'Order 1234 rejected by fraud-check'))?.site.file, 'A.java');
 });
+
+test('attribution stays fast when a message repeats most of a template', () => {
+  const index = new LogSiteIndex();
+  index.setFile('b.js', extractLogSites('b.js', 'log.info(`a ${a} a ${b} a ${c} a ${d} a ${f} a ${g} epsilonzz ${e} zeta`)'));
+  const message = ('epsilonzz ' + 'a b c d '.repeat(100)).slice(0, 512);
+  const started = Date.now();
+  assert.equal(index.match(event(1, message)), undefined);
+  assert.ok(Date.now() - started < 1000, 'no backtracking blow-up');
+  assert.equal(index.match(event(2, 'a 1 a 2 a 3 a 4 a 5 a   6 epsilonzz 7 zeta'))?.site.line, 1);
+});
+
+test('indexing a minified single-line file stays linear', () => {
+  const text = 'var a=1;' + 'x.log(y);'.repeat(50000) + 'x.info("minified message here"); // x.info("commented out here")';
+  const started = Date.now();
+  const sites = extractLogSites('bundle.min.js', text);
+  assert.ok(Date.now() - started < 1000, 'comment detection scans each line once');
+  assert.deepEqual(sites.map(site => site.template), ['minified message here']);
+});

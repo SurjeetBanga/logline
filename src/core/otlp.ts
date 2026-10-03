@@ -33,6 +33,8 @@ export interface Span {
   /** OTLP StatusCode: 0 unset, 1 ok, 2 error. */
   status: { code: number; message?: string };
   scope?: string;
+  /** The receiver run that accepted the span, so sharing a run shares only its spans. */
+  sessionId?: string;
 }
 
 const MAX_ATTRIBUTES = 128;
@@ -95,12 +97,18 @@ export function normalizeId(value: unknown, bytes: number): string | undefined {
   return /^0+$/.test(id) ? undefined : id;
 }
 
-/** Unix nanoseconds (string or number) to fractional milliseconds. */
+// The largest time a JavaScript Date can represent.
+const MAX_TIME_MS = 8.64e15;
+
+/** Unix nanoseconds (string or number) to fractional milliseconds; undefined outside the range a Date can hold. */
 export function nanosToMs(value: unknown): number | undefined {
-  if (typeof value === 'number' && Number.isFinite(value) && value > 0) return value / 1e6;
-  if (typeof value !== 'string' || !/^\d{1,20}$/.test(value)) return undefined;
-  const nanos = BigInt(value);
-  return nanos > 0n ? Number(nanos / 1000n) / 1000 : undefined;
+  let ms: number | undefined;
+  if (typeof value === 'number' && Number.isFinite(value) && value > 0) ms = value / 1e6;
+  else if (typeof value === 'string' && /^\d{1,20}$/.test(value)) {
+    const nanos = BigInt(value);
+    if (nanos > 0n) ms = Number(nanos / 1000n) / 1000;
+  }
+  return ms !== undefined && ms <= MAX_TIME_MS ? ms : undefined;
 }
 
 function serviceOf(resource: Attributes): string {

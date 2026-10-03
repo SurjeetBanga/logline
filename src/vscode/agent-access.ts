@@ -7,6 +7,7 @@ import type { LogStore, PageOptions } from '../core/log-store';
 import type { AgentRunStatus, AgentShareStatus } from '../core/agent-types';
 import type { SessionRegistry } from '../capture/session-registry';
 import type { LogEvent, SessionSummary } from '../core/types';
+import type { Span } from '../core/otlp';
 import { buildTrace, traceLogs, type SpanStore, type TraceView } from '../core/traces';
 
 export type AgentErrorCode = 'NOT_SHARED' | 'SHARE_CHANGED' | 'INVALID_INPUT' | 'EVENT_UNAVAILABLE' | 'CANCELLED' | 'BUSY';
@@ -263,9 +264,17 @@ export class AgentLogAccess {
     const id = traceId.toLowerCase();
     const sources = this.sources();
     const read = this.readMerged({ shareId, query: `traceId:${JSON.stringify(id)}` }, sources, undefined, this.nextId(), this.nextId(), 200);
-    const spans = (this.spans?.trace(id) ?? []).filter(span => this.shared.has(`otel:${span.service}`)).map(span => ({ ...span, name: this.redactor.text(span.name), attributes: this.redactor.value(span.attributes) as typeof span.attributes,
+    // Spans belong to the receiver run that accepted them; sharing selected
+    // runs shares only those runs' spans.
+    const sharedSpan = (span: Span) => {
+      const runs = this.shared.get(`otel:${span.service}`);
+      return Boolean(runs) && (this.shareAllRuns || span.sessionId === undefined || runs!.has(span.sessionId));
+    };
+    const spans = (this.spans?.trace(id) ?? []).filter(sharedSpan).map(span => ({ ...span, name: this.redactor.text(span.name), attributes: this.redactor.value(span.attributes) as typeof span.attributes,
+      events: span.events.map(event => ({ ...event, name: this.redactor.text(event.name), attributes: this.redactor.value(event.attributes) as typeof event.attributes })),
       status: { ...span.status, message: span.status.message === undefined ? undefined : this.redactor.text(span.status.message) } }));
-    const logs = traceLogs(read.events, id, spans.length > 0, event => this.redactor.text(event.message ?? '').slice(0, 1024));
+    const logs = traceLogs(read.events, id, spans.length > 0, event => this.redactor.text(event.message ?? '').slice(0, 1024))
+      .map(log => log.server === undefined ? log : { ...log, server: this.redactor.text(log.server) });
     const view = buildTrace(id, spans, logs, 300);
     return { ...view, coverage: { spans: spans.length, logs: logs.length, limited: read.hasMore || view.omitted > 0 } };
   }

@@ -6,7 +6,10 @@ import { SessionRegistry } from './capture/session-registry';
 import { SpanStore } from './core/traces';
 import { parseLogLine } from './core/log-event';
 import { withVscode } from './test/vscode-mock';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
+import { tmpdir } from 'node:os';
+import * as path from 'node:path';
 import { OtlpReceiver } from './capture/otlp-receiver';
 import { Ingestion } from './capture/ingestion';
 import { RuntimeState } from './capture/runtime-state';
@@ -33,18 +36,24 @@ test('agent traces include only spans and logs from shared sources, redacted', a
   const spans = new SpanStore();
   const add = (id: number, line: string, serverId: string) => store.add({ ...parseLogLine(line, 'otlp', id, new Date()), serverId, server: serverId, sessionId: `${serverId}-run` });
   add(1, `{"msg":"charging card token=sk_live_abcdefghijklmnop","traceId":"${TRACE}","spanId":"1111111111111111"}`, 'otel:api');
+  store.add({ ...parseLogLine(`{"msg":"labelled","traceId":"${TRACE}"}`, 'otlp', 3, new Date()), serverId: 'otel:api', server: 'api password=hunter2', sessionId: 'otel:api-run' });
   add(2, `{"msg":"private","traceId":"${TRACE}"}`, 'otel:secret');
   for (const [service, id] of [['api', '1111111111111111'], ['secret', '2222222222222222']]) spans.add({
     traceId: TRACE, spanId: id, name: `${service} op`, kind: 2, startMs: 0, endMs: 5, service, events: [], status: { code: 0 },
     attributes: { 'http.request.header.authorization': 'Bearer abc.def.ghi', password: 'hunter2' }
   });
-  const access = new AgentLogAccess(store, registry, () => 3, {}, spans);
+  const access = new AgentLogAccess(store, registry, () => 4, {}, spans);
   const share = access.share(['otel:api']);
   const trace = access.trace(share.shareId!, TRACE.toUpperCase());
   assert.deepEqual(trace.spans.map(span => span.service), ['api']);
-  assert.deepEqual(trace.logs.map(log => log.id), [1]);
+  assert.deepEqual(trace.logs.map(log => log.id), [1, 3]);
   assert.doesNotMatch(JSON.stringify(trace), /hunter2|sk_live_abcdefghijklmnop/);
   assert.throws(() => access.trace(share.shareId!, '../x'), /INVALID_INPUT|trace id/);
+  // Spans accepted by a run that was not selected stay private.
+  spans.add({ traceId: TRACE, spanId: '3333333333333333', name: 'old run op', kind: 2, startMs: 1, endMs: 2, service: 'api', events: [], status: { code: 0 }, attributes: {}, sessionId: 'old-run' });
+  spans.add({ traceId: TRACE, spanId: '4444444444444444', name: 'own run op', kind: 2, startMs: 1, endMs: 2, service: 'api', events: [], status: { code: 0 }, attributes: {}, sessionId: 'otel:api-run' });
+  const scoped = access.trace(share.shareId!, TRACE);
+  assert.deepEqual(scoped.spans.map(span => span.name).sort(), ['api op', 'own run op']);
   access.revoke();
   assert.throws(() => access.trace(share.shareId!, TRACE), /No Logline logs are shared/);
 });
@@ -113,21 +122,32 @@ test('the controller runs the receiver from settings and points new processes at
 });
 
 test('debug launch configurations receive OpenTelemetry variables while the receiver runs', () => {
-  let provider: { resolveDebugConfiguration(folder: unknown, configuration: Record<string, unknown>): Record<string, unknown> } | undefined;
+  let provider: { resolveDebugConfigurationWithSubstitutedVariables(folder: unknown, configuration: Record<string, unknown>): Record<string, unknown> } | undefined;
   delete require.cache[require.resolve('./vscode/otel-integration')];
-  const { OtelIntegration } = withVscode({ debug: { registerDebugConfigurationProvider: (_type: string, value: typeof provider) => { provider = value; return { dispose() { } }; } } },
+  const { OtelIntegration, envFileVariables } = withVscode({ debug: { registerDebugConfigurationProvider: (_type: string, value: typeof provider) => { provider = value; return { dispose() { } }; } } },
     () => require('./vscode/otel-integration') as typeof import('./vscode/otel-integration'));
   const receiver = { running: true, endpoint: 'http://127.0.0.1:4318' };
   const integration = new OtelIntegration({ get: <T>(_key: string, fallback: T) => fallback, refresh() { } }, receiver as never, () => { });
   assert.equal(integration.registerDebugEnvironment().length, 1);
-  const launch = provider!.resolveDebugConfiguration(undefined, { type: 'node', request: 'launch', env: { FOO: 'bar' } });
+  const launch = provider!.resolveDebugConfigurationWithSubstitutedVariables(undefined, { type: 'node', request: 'launch', env: { FOO: 'bar' } });
   if (!process.env.OTEL_EXPORTER_OTLP_ENDPOINT) assert.equal((launch.env as Record<string, string>).OTEL_EXPORTER_OTLP_ENDPOINT, 'http://127.0.0.1:4318');
   assert.equal((launch.env as Record<string, string>).FOO, 'bar');
-  const own = provider!.resolveDebugConfiguration(undefined, { type: 'python', request: 'launch', env: { OTEL_EXPORTER_OTLP_ENDPOINT: 'http://mine' } });
+  const own = provider!.resolveDebugConfigurationWithSubstitutedVariables(undefined, { type: 'python', request: 'launch', env: { OTEL_EXPORTER_OTLP_ENDPOINT: 'http://mine' } });
   assert.deepEqual(own.env, { OTEL_EXPORTER_OTLP_ENDPOINT: 'http://mine' });
-  assert.equal(provider!.resolveDebugConfiguration(undefined, { type: 'node', request: 'attach' }).env, undefined);
+  assert.equal(provider!.resolveDebugConfigurationWithSubstitutedVariables(undefined, { type: 'node', request: 'attach' }).env, undefined);
+  // An exporter configured in the env file is kept: env would override it.
+  const folder = mkdtempSync(path.join(tmpdir(), 'logline-envfile-'));
+  try {
+    writeFileSync(path.join(folder, 'app.env'), 'export OTEL_EXPORTER_OTLP_ENDPOINT="http://collector:4318"\n');
+    const fromFile = provider!.resolveDebugConfigurationWithSubstitutedVariables({ uri: { fsPath: folder } }, { type: 'node', request: 'launch', envFile: 'app.env' });
+    assert.equal(fromFile.env, undefined);
+    writeFileSync(path.join(folder, '.env'), 'OTEL_TRACES_EXPORTER=console # local\n');
+    assert.deepEqual(envFileVariables({ type: 'debugpy' }, folder), { OTEL_TRACES_EXPORTER: 'console' });
+    assert.equal(provider!.resolveDebugConfigurationWithSubstitutedVariables({ uri: { fsPath: folder } }, { type: 'debugpy', request: 'launch' }).env, undefined);
+    assert.deepEqual(envFileVariables({ type: 'node' }, folder), {}, 'only Python reads .env without envFile');
+  } finally { rmSync(folder, { recursive: true, force: true }); }
   receiver.running = false;
-  assert.equal(provider!.resolveDebugConfiguration(undefined, { type: 'node', request: 'launch' }).env, undefined);
+  assert.equal(provider!.resolveDebugConfigurationWithSubstitutedVariables(undefined, { type: 'node', request: 'launch' }).env, undefined);
 });
 
 test('changing the port restarts a receiver that fell back to another port', async t => {

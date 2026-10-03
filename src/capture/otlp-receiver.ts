@@ -96,11 +96,12 @@ export class OtlpReceiver {
     const rows = this.config.get<string>('otlp.showSpans', 'entry') as SpanRows;
     let accepted = 0;
     for (const span of spans) {
-      if (!this.spans.add(span)) continue;
-      accepted++;
       // Every sending service is a source, even without rows, so sharing it
       // with an agent also shares its spans.
       const record = this.record(span.service);
+      span.sessionId = record.id;
+      if (!this.spans.add(span)) continue;
+      accepted++;
       if (rows === 'none' || (rows === 'entry' && !isEntrySpan(span))) continue;
       if (this.ingestion.accept(spanLine(span), 'otlp', { serverId: record.serverId, server: record.server, sessionId: record.id, persist: true })) record.events++;
     }

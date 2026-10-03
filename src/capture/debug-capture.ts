@@ -34,7 +34,10 @@ export interface DapOutputBody {
 interface Stream {
   reader: LineReader;
   joiner?: StackJoiner<Location>;
+  /** Location for the next completed line: where its first chunk was output. */
   location?: Location;
+  /** Location of the output event being read, for the lines that start in it. */
+  current?: Location;
 }
 
 interface Capture {
@@ -81,7 +84,10 @@ export class DebugCapture {
     if (!name) return;
     if (!capture.record) this.createRecord(capture);
     const stream = this.stream(capture, name);
-    stream.location = locationOf(body);
+    // Each output event is one logging call, so its lines share its location;
+    // a line continued from an earlier event keeps where it started.
+    stream.current = locationOf(body);
+    if (!stream.reader.pending && !stream.reader.truncated) stream.location = stream.current;
     stream.reader.consume(body.output);
   }
 
@@ -144,7 +150,9 @@ export class DebugCapture {
     const created: Stream = {
       joiner,
       reader: new LineReader((line, truncated) => {
-        if (joiner) joiner.write(line, truncated, created.location); else ingest(line, truncated, created.location);
+        const location = created.location;
+        created.location = created.current;
+        if (joiner) joiner.write(line, truncated, location); else ingest(line, truncated, location);
       }, limit)
     };
     capture.streams.set(name, created);

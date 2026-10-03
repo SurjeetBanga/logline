@@ -1,4 +1,4 @@
-import { appendFile, mkdir, rename, stat } from 'node:fs/promises';
+import { appendFile, mkdir, rename, stat, writeFile } from 'node:fs/promises';
 import * as path from 'node:path';
 import type { Settings } from '../core/settings';
 
@@ -67,6 +67,10 @@ export class LogPersistence {
     if (!folder) throw new Error('No workspace folder is available.');
     const file = path.join(folder, '.logline', 'latest.log');
     await mkdir(path.dirname(file), { recursive: true });
+    // Persisted logs are unredacted; keep them out of version control.
+    await writeFile(path.join(path.dirname(file), '.gitignore'), '*\n', { flag: 'wx' }).catch(error => {
+      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
+    });
     const max = this.config.get('maxDiskMb', 1000) * 1024 * 1024;
     // Roll to latest.log.1 rather than discarding history outright.
     if (this.persistedBytes === undefined) {
