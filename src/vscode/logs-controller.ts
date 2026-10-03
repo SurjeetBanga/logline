@@ -26,6 +26,7 @@ import { getField } from '../core/query';
 import type { LogEvent } from '../core/types';
 import type { DetailLinks } from '../protocol/messages';
 import type { LogBreakpoints } from './log-breakpoints';
+import type { LogDoctor } from './log-doctor';
 import type { LogLens } from './log-lens';
 import { openSourceLocation } from './source-navigation';
 
@@ -58,6 +59,8 @@ export class LogsController {
   lens?: LogLens;
   /** Debugger breakpoints driven by logs; attached at activation. */
   breakpoints?: LogBreakpoints;
+  /** Diagnostics on log statements; attached at activation with log lenses. */
+  doctor?: LogDoctor;
   private pendingQuery?: string;
   private pendingTrace?: string;
   readonly transfer = new LogTransfer(this.store, this.config, this.ingestion, this.state);
@@ -298,6 +301,15 @@ export class LogsController {
       await vscode.env.clipboard.writeText(prompt);
       void vscode.window.showWarningMessage('Copilot chat is unavailable. The investigation prompt was copied to your clipboard.');
       return false;
+    }
+  }
+  /** Open Copilot chat with a prompt, or copy the prompt when chat is unavailable. */
+  async openChat(prompt: string): Promise<void> {
+    try {
+      await vscode.commands.executeCommand('workbench.action.chat.open', { query: prompt, isPartialQuery: true, mode: 'agent' });
+    } catch {
+      await vscode.env.clipboard.writeText(prompt);
+      void vscode.window.showWarningMessage('Copilot chat is unavailable. The prompt was copied to your clipboard.');
     }
   }
   stop(serverId?: string, sessionId?: string): void {
