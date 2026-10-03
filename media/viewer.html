@@ -99,8 +99,9 @@
         </div>
       </div>
       <button id="analyze" type="button" class="toolbar-divider" title="Analyze the logs matching your current filter">Analyze</button>
+      <button id="traces" type="button" title="Requests across services, from OpenTelemetry spans and logs with a trace id"><svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14"><path d="M2 3.5h7M4 7.5h8M7 11.5h7" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>Traces<span id="traceCount" class="count-badge" hidden></span></button>
     </div>
-    <div class="session"><span id="status">Ready</span><span id="sessions" aria-live="polite"></span><span id="shareScope" aria-live="polite" hidden></span><code id="command"></code></div>
+    <div class="session"><button id="otlpStatus" class="otlp-chip" type="button" hidden></button><span id="status">Ready</span><span id="sessions" aria-live="polite"></span><span id="shareScope" aria-live="polite" hidden></span><code id="command"></code></div>
   </header>
   <section class="table-scroll" aria-label="Log events">
     <table id="eventsTable">
@@ -129,10 +130,17 @@
     <div id="contextDetails" aria-live="polite"></div>
   </dialog>
   <dialog id="traceDialog" aria-labelledby="traceTitle">
-    <div class="context-header"><strong id="traceTitle">Trace</strong><span><button id="traceFilter" title="Show every retained event with this trace id">Filter logs by trace</button><button id="traceClose" autofocus>Back to results</button></span></div>
+    <div class="context-header"><strong id="traceTitle">Trace</strong><span><button id="traceBack" hidden>All traces</button><button id="traceFilter" title="Show every retained event with this trace id">Filter logs by trace</button><button id="traceClose" autofocus>Back to results</button></span></div>
     <p id="traceStatus" role="status">Loading…</p>
     <div class="trace-scroll">
       <table class="trace-table" aria-label="Spans and logs in this trace"><thead><tr><th>Operation</th><th>Service</th><th>Timeline</th><th>Duration</th></tr></thead><tbody id="traceRows"></tbody></table>
+    </div>
+  </dialog>
+  <dialog id="tracesDialog" aria-labelledby="tracesTitle">
+    <div class="context-header"><strong id="tracesTitle">Traces</strong><span><label class="traces-filter"><input id="tracesErrorsOnly" type="checkbox"> Errors only</label><button id="tracesStartReceiver" hidden title="Receive spans from instrumented apps on this machine">Start OpenTelemetry receiver</button><button id="tracesClose" autofocus>Back to results</button></span></div>
+    <p id="tracesStatus" role="status">Loading…</p>
+    <div class="trace-scroll">
+      <table class="trace-table traces-table" aria-label="Recent traces"><thead><tr><th>Started</th><th>Operation</th><th>Services</th><th>Duration</th><th>Spans and logs</th></tr></thead><tbody id="tracesRows"></tbody></table>
     </div>
   </dialog>
   <dialog id="analysisDialog" aria-labelledby="analysisTitle">

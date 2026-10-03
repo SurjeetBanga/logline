@@ -339,3 +339,34 @@ footer { padding: 8px 14px; font-size: 12px; flex: none; }
 .cell-filter-reason { margin: 4px 8px; max-width: 320px; white-space: normal; color: var(--vscode-descriptionForeground, #aaa); }
 .cell-filter-menu button:disabled { opacity: .5; cursor: default; }
 .cell-filter-menu button:focus-visible, td[data-column]:focus-visible { outline: 1px solid var(--vscode-focusBorder, #007fd4); outline-offset: -2px; }
+
+/* Traces: list of recent requests, row shortcut, and receiver status. */
+#traces svg, #run svg { vertical-align: -2px; margin-right: 5px; }
+.count-badge { display: inline-block; min-width: 14px; margin-left: 6px; padding: 0 5px; border-radius: 8px; background: var(--vscode-badge-background, #4d4d4d); color: var(--vscode-badge-foreground, #fff); font-size: 10px; line-height: 15px; text-align: center; }
+.count-badge[hidden] { display: none; }
+.row-trace-button { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 18px; padding: 0; border: 1px solid transparent; border-radius: 3px; background: transparent; color: var(--vscode-charts-blue, #3794ff); opacity: .75; }
+.row-trace-button:hover, .row-trace-button:focus-visible { opacity: 1; border-color: var(--vscode-focusBorder, #007fd4); background: var(--vscode-toolbar-hoverBackground, rgba(90, 93, 94, .31)); }
+.otlp-chip { padding: 0 8px; border: 1px solid var(--vscode-charts-green, #89d185); border-radius: 10px; background: transparent; color: var(--vscode-charts-green, #89d185); font-size: 11px; line-height: 17px; }
+.otlp-chip::before { content: ''; display: inline-block; width: 6px; height: 6px; margin-right: 6px; border-radius: 50%; background: currentColor; vertical-align: 1px; }
+.otlp-chip[hidden] { display: none; }
+#tracesDialog { width: min(1100px, 96vw); max-width: 96vw; height: 82vh; max-height: 82vh; padding: 14px; color: inherit; background: var(--vscode-editor-background, #1e1e1e); border: 1px solid var(--vscode-panel-border, #555); border-radius: 6px; }
+#tracesDialog[open] { display: flex; flex-direction: column; }
+#tracesDialog::backdrop { background: rgba(0, 0, 0, .5); }
+#tracesStatus { color: var(--vscode-descriptionForeground, #aaa); font-size: 12px; margin: 8px 0; }
+.traces-filter { display: inline-flex; align-items: center; gap: 4px; margin-right: 10px; color: var(--vscode-descriptionForeground, #aaa); font-size: 12px; }
+.traces-table th:nth-child(1) { width: 104px; }
+.traces-table th:nth-child(2) { width: 30%; }
+.traces-table th:nth-child(3) { width: auto; }
+.traces-table th:nth-child(4) { width: 22%; text-align: left; }
+.traces-table th:nth-child(5) { width: 130px; }
+.traces-row { cursor: pointer; }
+.traces-row:hover, .traces-row:focus-visible { background: var(--vscode-list-hoverBackground, rgba(90, 93, 94, .31)); outline: none; }
+.traces-row:focus-visible { box-shadow: inset 0 0 0 1px var(--vscode-focusBorder, #007fd4); }
+.traces-services { overflow: hidden; white-space: nowrap; }
+.service-chip { display: inline-block; margin-right: 4px; padding: 0 6px; border-radius: 9px; background: var(--vscode-editorWidget-background, rgba(128, 128, 128, .18)); font-size: 11px; line-height: 17px; }
+.traces-duration { display: flex; align-items: center; gap: 8px; }
+.traces-duration .trace-track { flex: 1; }
+.traces-duration-label, .traces-counts { color: var(--vscode-descriptionForeground, #aaa); font-variant-numeric: tabular-nums; white-space: nowrap; font-size: 12px; }
+@media (max-width: 640px) {
+  .traces-table th:nth-child(3), .traces-services, .traces-table th:nth-child(5), .traces-counts { width: 0; padding: 0; overflow: hidden; font-size: 0; }
+}

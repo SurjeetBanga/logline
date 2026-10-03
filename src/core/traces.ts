@@ -43,6 +43,13 @@ export class SpanStore {
 
   trace(traceId: string): readonly Span[] { return this.traces.get(traceId.toLowerCase())?.spans ?? []; }
 
+  /** Every retained trace with its spans. */
+  *entries(): IterableIterator<[string, readonly Span[]]> {
+    for (const [traceId, trace] of this.traces) yield [traceId, trace.spans];
+  }
+
+  get traceCount(): number { return this.traces.size; }
+
   clear(): void {
     this.traces.clear();
     this.queue = [];
@@ -182,4 +189,78 @@ export function buildTrace(traceId: string, spans: readonly Span[], logs: TraceL
     spans: rows, errors: spans.filter(span => span.status.code === 2).length, omitted: Math.max(0, visited.size - rows.length),
     logs: logs.map(({ timeMs, ...log }) => ({ ...log, offsetMs: timeMs === undefined || startMs === undefined ? undefined : timeMs - startMs }))
   };
+}
+
+/** One row of the trace list: a request across services, from its spans or its logs. */
+export interface TraceSummary {
+  traceId: string;
+  /** The root operation, or the first log message when the trace has no spans. */
+  name: string;
+  /** The service of the root span, or the source of the first log. */
+  service?: string;
+  services: string[];
+  startMs?: number;
+  durationMs: number;
+  spans: number;
+  logs: number;
+  errors: number;
+}
+
+/**
+ * Recent traces, newest first: every retained trace with spans, plus trace
+ * ids that only appear in logs (JSON logs that carry a trace id).
+ *
+ * @param events Retained events that have a trace id, in any order.
+ */
+export function summarizeTraces(traces: Iterable<[string, readonly Span[]]>, events: readonly LogEvent[], limit = 200): TraceSummary[] {
+  const summaries = new Map<string, TraceSummary>();
+  for (const [traceId, spans] of traces) {
+    if (!spans.length) continue;
+    let root: Span | undefined;
+    let start = Infinity, end = -Infinity, errors = 0;
+    const ids = new Set(spans.map(span => span.spanId));
+    for (const span of spans) {
+      if (span.startMs < start) start = span.startMs;
+      if (span.endMs > end) end = span.endMs;
+      if (span.status.code === 2) errors++;
+      const isRoot = !span.parentSpanId || !ids.has(span.parentSpanId);
+      if (isRoot && (!root || span.startMs < root.startMs)) root = span;
+    }
+    summaries.set(traceId, {
+      traceId, name: root?.name ?? spans[0].name, service: root?.service, services: [...new Set(spans.map(span => span.service))].sort(),
+      startMs: start, durationMs: Math.round((end - start) * 1000) / 1000, spans: spans.length, logs: 0, errors
+    });
+  }
+  const logOnly = new Map<string, { first: LogEvent; start: number; end: number; services: Set<string> }>();
+  for (const event of events) {
+    const value = getField(event, 'traceId');
+    if (typeof value !== 'string' || !value || getField(event, 'kind') === 'span') continue;
+    const traceId = value.toLowerCase();
+    const known = summaries.get(traceId);
+    const failed = event.level === 'error' || event.level === 'fatal';
+    // Errors of a trace with spans come from span status; its logs are only counted.
+    if (known?.spans) { known.logs++; continue; }
+    const time = event.timestampMs ?? NaN;
+    const entry = logOnly.get(traceId);
+    if (!entry) {
+      logOnly.set(traceId, { first: event, start: time, end: time, services: new Set(event.server ? [event.server] : []) });
+      summaries.set(traceId, { traceId, name: event.message ?? '', service: event.server, services: [], startMs: undefined, durationMs: 0, spans: 0, logs: 1, errors: failed ? 1 : 0 });
+      continue;
+    }
+    const summary = summaries.get(traceId)!;
+    summary.logs++;
+    if (failed) summary.errors++;
+    if (event.server) entry.services.add(event.server);
+    if (time < entry.start || Number.isNaN(entry.start)) entry.start = time;
+    if (time > entry.end || Number.isNaN(entry.end)) entry.end = time;
+    if (event.id < entry.first.id) { entry.first = event; summary.name = event.message ?? ''; summary.service = event.server; }
+  }
+  for (const [traceId, entry] of logOnly) {
+    const summary = summaries.get(traceId)!;
+    summary.services = [...entry.services].sort();
+    if (Number.isFinite(entry.start)) { summary.startMs = entry.start; summary.durationMs = Math.max(0, entry.end - entry.start); }
+  }
+  return [...summaries.values()]
+    .sort((a, b) => (b.startMs ?? -Infinity) - (a.startMs ?? -Infinity) || a.traceId.localeCompare(b.traceId))
+    .slice(0, limit);
 }

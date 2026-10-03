@@ -5,6 +5,7 @@ import { getElements } from './dom';
 import { EventScope } from './event-scope';
 import { createInspection } from './inspection/context';
 import { createTraceView } from './inspection/trace';
+import { createTraceList } from './inspection/traces';
 import { createPopovers } from './popovers';
 import { createSearch } from './search/controls';
 import { ViewerState } from './state';
@@ -28,7 +29,12 @@ export function createViewer(api: WebviewApi) {
   const search = createSearch(elements, state, api, popovers, { filterChanged, updateScopeSelection }, scope);
   const request = (force = false) => bridge.request(force);
   const traceView = createTraceView(elements, api, scope, {
-    showContext: id => inspection.showContext(id), applyQuery: query => search.setQuery(query, true)
+    showContext: id => inspection.showContext(id), applyQuery: query => search.setQuery(query, true), showList: () => traceList.show()
+  });
+  const traceList = createTraceList(elements, api, scope, {
+    showTrace: traceId => traceView.show(traceId, true),
+    formatTime: ms => formatTimestamp({ id: 0, level: '', timestampMs: ms }) ?? '',
+    startReceiver: () => api.postMessage({ type: 'toggleOtlp', enabled: true })
   });
   let otlpRunning = false;
   let cellActions: ReturnType<typeof createCellActions> | undefined;
@@ -77,6 +83,7 @@ export function createViewer(api: WebviewApi) {
     }
     if (data.type === 'context') { inspection.receiveContext(data); return; }
     if (data.type === 'trace') { traceView.receive(data.trace); return; }
+    if (data.type === 'traces') { traceList.receive(data.traces); return; }
     if (data.type === 'details') {
       if (data.target === 'context') inspection.receiveDetails(data); else table.receiveDetails(data);
       return;
@@ -113,6 +120,17 @@ export function createViewer(api: WebviewApi) {
     if (data.applyQuery !== undefined && data.applyQuery !== search.query()) search.setQuery(data.applyQuery, true);
     if (data.openTrace) traceView.show(data.openTrace);
     otlpRunning = data.otlp?.running === true;
+    // The receiver's state stays visible while it runs, and leads to the traces it collected.
+    elements.otlpStatus.hidden = !otlpRunning;
+    if (otlpRunning) {
+      elements.otlpStatus.textContent = `OpenTelemetry ${data.otlp?.endpoint?.replace(/^https?:\/\//, '') ?? ''}`.trim();
+      elements.otlpStatus.title = `Receiving OpenTelemetry logs and traces on ${data.otlp?.endpoint ?? 'localhost'}. Click to see traces.`;
+    }
+    elements.traceCount.hidden = !data.traceCount;
+    elements.traceCount.textContent = data.traceCount ? data.traceCount.toLocaleString() : '';
+    elements.traces.title = data.traceCount
+      ? `${data.traceCount.toLocaleString()} traces received from OpenTelemetry. Show requests across services.`
+      : 'Requests across services, from OpenTelemetry spans and logs with a trace id';
     elements.otlpToggle.textContent = otlpRunning ? 'Stop OpenTelemetry receiver' : 'Start OpenTelemetry receiver';
     elements.otlpToggle.title = otlpRunning
       ? `Receiving OpenTelemetry on ${data.otlp?.endpoint ?? 'localhost'}${data.otlp?.error ? ` (${data.otlp.error})` : ''}`
@@ -145,7 +163,8 @@ export function createViewer(api: WebviewApi) {
     state.newest = data.newest;
     if (!state.following && state.before === undefined)
       state.before = state.newest;
-    elements.status.textContent = data.status;
+    // The OpenTelemetry chip already shows where the receiver listens.
+    elements.status.textContent = otlpRunning && data.status.startsWith('OpenTelemetry receiver on') ? 'Ready' : data.status;
     elements.command.textContent = data.command;
     elements.command.title = data.command;
     elements.stop.disabled = !data.running;
@@ -299,6 +318,11 @@ export function createViewer(api: WebviewApi) {
   scope.listen(elements.logs, 'click', event => {
     if (inspection.handleDetailAction(event))
       return;
+    const trace = (event.target as HTMLElement).closest<HTMLElement>('.row-trace-button');
+    if (trace?.dataset.traceId) {
+      traceView.show(trace.dataset.traceId);
+      return;
+    }
     const button = (event.target as HTMLElement).closest<HTMLElement>('.message-button');
     if (!button)
       return;
@@ -488,6 +512,7 @@ export function createViewer(api: WebviewApi) {
 
   scope.listen(elements.manage, 'click', () => api.postMessage({ type: 'manageServers' }));
   scope.listen(elements.otlpToggle, 'click', () => api.postMessage({ type: 'toggleOtlp', enabled: !otlpRunning }));
+  scope.listen(elements.otlpStatus, 'click', () => traceList.show());
 
   function exportRequest(type: 'export' | 'exportForAI') {
     api.postMessage({ type, query: search.query(), levels: state.currentLevels(), serverId: state.selectedServer || undefined, sessionId: state.selectedSession || undefined });
@@ -511,7 +536,7 @@ export function createViewer(api: WebviewApi) {
 
   request();
   return {
-    state, bridge, table, search, inspection, traceView, receive,
+    state, bridge, table, search, inspection, traceView, traceList, receive,
     dispose() { scope.dispose(); clearInterval(fallbackTimer); clearTimeout(searchDebounce); clearTimeout(autocompleteDebounce); clearTimeout(copyFeedbackTimer); window.removeEventListener('message', onMessage); }
   };
 

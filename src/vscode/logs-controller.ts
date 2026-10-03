@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import { DebugCapture } from '../capture/debug-capture';
 import { OtlpReceiver } from '../capture/otlp-receiver';
-import { buildTrace, SpanStore, traceLogs, type TraceView } from '../core/traces';
+import { buildTrace, SpanStore, summarizeTraces, traceLogs, type TraceSummary, type TraceView } from '../core/traces';
 import { OtelIntegration } from './otel-integration';
 import { FileFollower } from '../capture/file-follower';
 import { Ingestion } from '../capture/ingestion';
@@ -115,7 +115,7 @@ export class LogsController {
       ingestion: this.ingestion, persistence: this.persistence, searches: this.searches,
       running: this.isRunning(),
       agentAccess: this.agentAccess,
-      guideStatus: this.guideStatus(), terminalCapture: this.terminalCapture, otlp: this.otlp });
+      guideStatus: this.guideStatus(), terminalCapture: this.terminalCapture, otlp: this.otlp, spans: this.spans });
   }
   guideStatus() {
     return getGuideStatus(this.globalState.get<string>(GUIDE_STATE_KEY));
@@ -134,7 +134,7 @@ export class LogsController {
       stopSharing: () => this.stopSharing(), askCopilot: anchor => this.askCopilot(anchor),
       toggleTerminalCapture: enabled => this.toggleTerminalCapture(enabled),
       detailLinks: event => this.detailLinks(event), openLogSite: id => this.openLogSite(id),
-      traceView: traceId => this.traceView(traceId), toggleOtlp: enabled => this.toggleOtlp(enabled),
+      traceView: traceId => this.traceView(traceId), traceList: () => this.traceList(), toggleOtlp: enabled => this.toggleOtlp(enabled),
       breakOnEvent: id => this.breakOnEvent(id), breakOnQuery: (query, levels) => this.breakOnQuery(query, levels)
     }, send, message);
   }
@@ -280,6 +280,11 @@ export class LogsController {
     const spans = this.spans.trace(id);
     const read = this.store.reversePage({ query: `traceId:${JSON.stringify(id)}` }, 500);
     return buildTrace(id, spans, traceLogs(read.events, id, spans.length > 0));
+  }
+  /** Recent traces from spans and from logs that carry a trace id. */
+  traceList(): TraceSummary[] {
+    const events = this.store.reversePage({ query: 'exists:traceId' }, 5000).events;
+    return summarizeTraces(this.spans.entries(), events);
   }
   async toggleTerminalCapture(enabled: boolean): Promise<void> {
     await vscode.workspace.getConfiguration('logline').update('captureTerminals', enabled, vscode.ConfigurationTarget.Workspace);

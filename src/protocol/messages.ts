@@ -5,7 +5,7 @@ import type { PageOptions, Stats, SuggestedValue } from '../core/log-store';
 import type { LogEvent } from '../core/types';
 import type { SavedSearch } from '../storage/saved-searches';
 import type { AgentShareStatus } from '../core/agent-types';
-import type { TraceView } from '../core/traces';
+import type { TraceSummary, TraceView } from '../core/traces';
 import type { ReceiverStatus } from '../capture/otlp-receiver';
 
 export interface Filter { query?: string; serverId?: string; sessionId?: string; levels?: string[]; }
@@ -23,6 +23,7 @@ export type ViewRequest =
   | { type: 'openLogSite' | 'breakOnEvent'; id: number; }
   | ({ type: 'breakOnQuery'; } & Filter)
   | { type: 'trace'; traceId: string; }
+  | { type: 'traces'; }
   | { type: 'toggleOtlp'; enabled: boolean; }
   | { type: 'exportContext'; ids: number[]; }
   | { type: 'shareWithAgent'; sourceIds?: string[]; sessionIds?: string[]; anchor?: number; chooseRuns?: boolean; }
@@ -36,7 +37,7 @@ export type ViewRequest =
   | { type: 'import' | 'clear' | 'config' | 'manageServers'; };
 
 export interface Snapshot extends Stats {
-  type: 'snapshot'; requestId?: number; events?: LogEvent[]; page?: number; pages?: number; matched?: number;
+  type: 'snapshot'; requestId?: number; events?: RowEvent[]; page?: number; pages?: number; matched?: number;
   columns: string[]; columnFields: string[]; fields: string[];
   status: string; command: string; running: boolean;
   servers: ServerSummary[]; sessions: ReturnType<SessionRegistry['sessionSummaries']>;
@@ -51,7 +52,11 @@ export interface Snapshot extends Stats {
   /** A trace requested from the editor, opened once. */
   openTrace?: string;
   otlp?: ReceiverStatus;
+  /** Traces with spans currently retained. */
+  traceCount?: number;
 }
+/** A table row: the event with its displayed fields, plus its trace id for the row's trace button. */
+export type RowEvent = LogEvent & { traceId?: string };
 /** Links offered with an expanded event, resolved by the host. */
 export interface DetailLinks {
   /** The log statement that produced the event, as `path:line`. */
@@ -68,7 +73,8 @@ export type HostMessage = Snapshot
   | { type: 'searches'; searches: { saved: SavedSearch[]; }; saved?: SavedSearch; }
   | { type: 'autocomplete'; input: string; serverId?: string; fields: string[]; values: SuggestedValue[]; }
   | { type: 'analysis'; analysis: AnalysisResult; }
-  | { type: 'trace'; trace: TraceView; };
+  | { type: 'trace'; trace: TraceView; }
+  | { type: 'traces'; traces: TraceSummary[]; };
   // Sharing status is also included in snapshots so the webview can render a
   // durable indicator after a notification-driven refresh.
 
@@ -103,6 +109,7 @@ export function parseViewRequest(value: unknown): ViewRequest | undefined {
     }
     case 'openLogSite': case 'breakOnEvent': { const id = index('id'); return id === undefined ? undefined : { type: msg.type, id }; }
     case 'breakOnQuery': return { type: msg.type, query: filter.query, levels: filter.levels };
+    case 'traces': return { type: msg.type };
     case 'trace': {
       const traceId = string('traceId');
       return traceId && /^[A-Za-z0-9_-]{1,128}$/.test(traceId) ? { type: msg.type, traceId } : undefined;

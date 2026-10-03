@@ -12,11 +12,13 @@ export function formatDuration(ms: number): string {
 
 /** The trace waterfall dialog: spans across services with their logs interleaved. */
 export function createTraceView(elements: Elements, api: WebviewApi, scope: EventScope,
-  actions: { showContext(id: number): void; applyQuery(query: string): void }) {
+  actions: { showContext(id: number): void; applyQuery(query: string): void; showList(): void }) {
   let current: string | undefined;
 
-  function show(traceId: string) {
+  /** @param fromList Opened from the Traces list, which the dialog offers to return to. */
+  function show(traceId: string, fromList = false) {
     current = traceId.toLowerCase();
+    elements.traceBack.hidden = !fromList;
     elements.traceTitle.textContent = `Trace ${current.length > 12 ? `${current.slice(0, 8)}…${current.slice(-4)}` : current}`;
     elements.traceTitle.title = current;
     elements.traceStatus.textContent = 'Loading…';
@@ -26,6 +28,7 @@ export function createTraceView(elements: Elements, api: WebviewApi, scope: Even
   }
 
   scope.listen(elements.traceClose, 'click', () => elements.traceDialog.close());
+  scope.listen(elements.traceBack, 'click', () => { elements.traceDialog.close(); actions.showList(); });
   scope.listen(elements.traceDialog, 'close', () => { current = undefined; elements.traceRows.replaceChildren(); });
   scope.listen(elements.traceFilter, 'click', () => {
     if (!current) return;
@@ -137,6 +140,6 @@ function logRow(log: TraceLog, total: number, depth: number): HTMLTableRowElemen
   button.append(level, document.createTextNode(` ${log.message}`));
   name.append(button);
   row.append(name, cell(log.server ?? '', 'trace-service'),
-    timeline(log.offsetMs ?? 0, undefined, total, 'trace-log-mark'), cell(log.offsetMs === undefined ? '' : `+${formatDuration(log.offsetMs)}`, 'trace-duration'));
+    timeline(log.offsetMs ?? 0, undefined, total, 'trace-log-mark'), cell(log.offsetMs === undefined ? '' : `${log.offsetMs < 0 ? '−' : '+'}${formatDuration(Math.abs(log.offsetMs))}`, 'trace-duration'));
   return row;
 }
