@@ -214,8 +214,11 @@
             "type": "array"
           },
           "shell": {
-            "type": "boolean",
-            "description": "Run through the user's shell. Defaults to argv mode when args are supplied."
+            "type": [
+              "boolean",
+              "string"
+            ],
+            "description": "Run through the user's shell (true) or a specific shell executable (path). Defaults to argv mode when args are supplied."
           },
           "jsonOnly": {
             "type": "boolean",

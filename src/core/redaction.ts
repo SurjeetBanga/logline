@@ -33,11 +33,14 @@ function redactAssignments(text: string, replacement: string, sensitive: (key: s
   let output = '';
   let cursor = 0;
   let index = 0;
+  // End of the bare token most recently measured. Rescanned values are
+  // suffixes of that token, so reuse it to keep the scan linear.
+  let bareEnd = 0;
   while (index < text.length) {
     const start = index;
     let key: string | undefined;
     let keyEnd = index;
-    if (text[index] === '"' || text[index] === "'") {
+    if ((text[index] === '"' || text[index] === "'") && !isKeyCharacter(text[index - 1])) {
       const quote = text[index++];
       const keyStart = index;
       let escaped = false;
@@ -55,10 +58,13 @@ function redactAssignments(text: string, replacement: string, sensitive: (key: s
       index++;
       continue;
     }
-    if (key === undefined) break;
+    // An apostrophe or a quoted phrase in prose is not a key. Resume just past
+    // the opening quote so assignments inside or after it are still scanned.
+    const quotedKey = text[start] === '"' || text[start] === "'";
+    if (key === undefined) { index = start + 1; continue; }
     let separatorEnd = keyEnd;
     while (/\s/.test(text[separatorEnd] ?? '')) separatorEnd++;
-    if (text[separatorEnd] !== ':' && text[separatorEnd] !== '=') { index = Math.max(index, keyEnd); continue; }
+    if (text[separatorEnd] !== ':' && text[separatorEnd] !== '=') { index = quotedKey ? start + 1 : Math.max(index, keyEnd); continue; }
     separatorEnd++;
     while (/\s/.test(text[separatorEnd] ?? '')) separatorEnd++;
     const valueStart = separatorEnd;
@@ -74,15 +80,22 @@ function redactAssignments(text: string, replacement: string, sensitive: (key: s
         else if (char === quote) break;
       }
     } else {
+      valueEnd = Math.max(valueStart, bareEnd);
       while (valueEnd < text.length && !/[\s,;\]}]/.test(text[valueEnd])) valueEnd++;
+      bareEnd = valueEnd;
       // Authorization headers commonly use a two-token scheme, for example
       // `Bearer eyJ...`; consume the credential as one value so the scanner
       // cannot leave the recognizable token behind.
-      const scheme = text.slice(valueStart, valueEnd).toLowerCase();
+      const scheme = valueEnd - valueStart <= 6 ? text.slice(valueStart, valueEnd).toLowerCase() : '';
       if (scheme === 'bearer' || scheme === 'basic') {
         while (/\s/.test(text[valueEnd] ?? '')) valueEnd++;
         while (valueEnd < text.length && !/[\s,;\]}]/.test(text[valueEnd])) valueEnd++;
+        bareEnd = valueEnd;
       }
+      // A bare assignment inside a quoted phrase (`"failed password=x"`) ends
+      // at the phrase's closing quote; keep that quote outside the value.
+      const last = text[valueEnd - 1];
+      if (valueEnd - valueStart > 1 && (last === '"' || last === "'")) valueEnd--;
     }
     if (valueEnd === valueStart) { index = Math.max(index, keyEnd); continue; }
     if (!sensitive(key)) {
@@ -101,7 +114,9 @@ function redactAssignments(text: string, replacement: string, sensitive: (key: s
           }
         }
       }
-      index = valueEnd;
+      // An unquoted value such as a URL can carry its own assignments
+      // (`?access_token=...`), so rescan it rather than skipping it whole.
+      index = quote ? valueEnd : valueStart;
       continue;
     }
     output += text.slice(cursor, valueStart);

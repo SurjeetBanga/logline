@@ -89,9 +89,10 @@ function parseToken(token: string): Token {
   // Compiled once here, at parse time, rather than once per event in matchesQuery.
   let regex: RE2 | null | undefined;
   // Only treat slash-delimited input as a regex when the suffix is made of
-  // JavaScript regex flags. A literal route such as path:/users/42 otherwise
-  // looks like a regex with an invalid "42" flag suffix.
-  const regexMatch = quoted ? null : value.match(/^\/(.+)\/([A-Za-z]*)$/);
+  // JavaScript regex flags. A literal route such as path:/api/users otherwise
+  // looks like a regex with an invalid "users" flag suffix. Valid JavaScript
+  // flags that RE2 lacks (d, v) are still reported as unsupported.
+  const regexMatch = quoted ? null : value.match(/^\/(.+)\/([dgimsuvy]*)$/);
   let regexError: string | undefined;
   if (regexMatch) {
     const unsupported = [...new Set(regexMatch[2].split('').filter(flag => !'gimsuy'.includes(flag)))];

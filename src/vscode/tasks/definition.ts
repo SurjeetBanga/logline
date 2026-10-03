@@ -91,8 +91,9 @@ export function taskToLoglineDefinition(task: vscode.Task): LoglineTaskDefinitio
 
 export function taskConversionError(task: vscode.Task): string | undefined {
   const execution = task.execution;
-  if (!execution || !('process' in execution || 'command' in execution || 'commandLine' in execution)) return 'This task does not expose a command that Logline can capture.';
-  if ('process' in execution) return undefined;
+  // Only explain refusals for tasks that otherwise look convertible; tasks with
+  // no command (custom or dependency-only tasks) are not conversion candidates.
+  if (!execution || 'process' in execution || !('command' in execution || 'commandLine' in execution)) return undefined;
   const shellArgs = (execution as vscode.ShellExecution).options?.shellArgs;
   return shellArgs?.length ? 'This shell task uses shellArgs; conversion was skipped because Logline cannot preserve those quoting options.' : undefined;
 }

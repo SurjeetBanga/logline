@@ -42,6 +42,26 @@ test('redacts quoted keys, incomplete JSON, and JSON embedded in messages', () =
   assert.equal(redactText('message="payload {\\"apiKey\\":\\"secret\\"}"'), 'message="payload {\\"apiKey\\":\\"[REDACTED]\\"}"');
 });
 
+test('apostrophes and quoted phrases do not stop redaction', () => {
+  assert.equal(redactText("Don't log password=hunter2"), "Don't log password=[REDACTED]");
+  assert.equal(redactText('error "failed password=hunter2" occurred'), 'error "failed password=[REDACTED]" occurred');
+  assert.equal(redactText("it's 'quoted' then token=abc"), "it's 'quoted' then token=[REDACTED]");
+});
+
+test('redacts secrets inside unquoted non-sensitive values such as URLs', () => {
+  assert.equal(redactText('redirect=https://x/cb?access_token=abc123&state=ok'),
+    'redirect=https://x/cb?access_token=[REDACTED]');
+  assert.equal(redactText('url=https://x/cb?a=1&token=abc next=fine'),
+    'url=https://x/cb?a=1&token=[REDACTED] next=fine');
+});
+
+test('redaction stays linear on long chained assignments', () => {
+  const text = 'a='.repeat(50_000);
+  const started = Date.now();
+  assert.equal(redactText(text), text);
+  assert.ok(Date.now() - started < 500, 'rescanning nested values should not be quadratic');
+});
+
 test('redaction stays linear on long ordinary text', () => {
   const text = 'safe '.repeat(20_000);
   const started = Date.now();

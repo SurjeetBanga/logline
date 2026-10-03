@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { parseLogLine } from './core/log-event';
 import { matchesQuery, parseQuery, queryError } from './core/query';
+import { queryError as webviewQueryError } from './core/query-validation';
 import type { LogEvent } from './core/types';
 
 const event: LogEvent = { id: 1, level: 'error', message: 'Database timeout', raw: '{"service":"api","status":503}', fields: { service: 'api', status: 503, requestId: 'abc-123' } };
@@ -42,6 +43,11 @@ test('reports unsupported regex flags and keeps route values literal', () => {
   assert.match(queryError('message:/error/v')!, /Unsupported regular expression flag/);
   assert.match(queryError(String.raw`message:/(a)\1/`)!, /Unsupported|invalid regular expression syntax/);
   assert.equal(queryError('path:/users/42'), undefined);
+  assert.equal(queryError('path:/api/users'), undefined);
+  assert.equal(queryError('/api/users'), undefined);
+  assert.equal(webviewQueryError('path:/api/users'), undefined);
+  assert.match(webviewQueryError('message:/error/v')!, /Unsupported regular expression flag/);
+  assert.equal(matchesQuery({ id: 2, level: 'info', message: 'GET', fields: { path: '/api/users' } }, 'path:/api/users'), true);
 });
 
 test('rejects regexes with catastrophic nested quantifiers', () => {

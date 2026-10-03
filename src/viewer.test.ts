@@ -233,6 +233,16 @@ test('saved searches restore visible filter controls and expose useful empty sta
   assert.equal(get('searchToolsPanel').hidden, true);
 });
 
+test('an invalid saved search leaves the current filters untouched', () => {
+  const { app, get, receive } = viewer();
+  const before = { query: app.search.query(), server: app.state.selectedServer, levels: [...app.state.checkedLevels] };
+  receive({ type: 'searches', searches: { saved: [{ id: 's1', name: 'Bad', query: 'message:/error/v', levels: ['warn'], serverId: 'worker' }] } });
+  get('savedSearchList').children[0].querySelector('.search-item')!.listeners.get('click')!();
+  assert.equal(app.search.query(), before.query);
+  assert.equal(app.state.selectedServer, before.server);
+  assert.deepEqual([...app.state.checkedLevels], before.levels);
+});
+
 test('toolbar popovers escape the horizontal search scroller', () => {
   const { get } = viewer();
   get('levelMenu').className = 'level-menu';
@@ -613,6 +623,24 @@ test('opening a live row freezes its result set while a snapshot is in flight', 
   });
   assert.equal(app.state.selected, 42);
   assert.equal(app.table.events[0].id, 42, 'the selected row remains available until Live is resumed');
+});
+
+test('a history reset during inspection is applied once inspection ends', () => {
+  const { app, receive } = viewer();
+  const snapshot = (generation: number, id: number) => receive({
+    type: 'snapshot', generation, newest: id, total: 1, retained: 1, discarded: 0, bytes: 100, maxBytes: 10000,
+    columns: [], events: [{ id, level: 'info', message: `line ${id}` }], page: 0, pages: 1, matched: 1
+  });
+  snapshot(1, 42);
+  app.table.toggleExpand(42);
+  snapshot(2, 7);
+  assert.equal(app.state.selected, 42, 'inspection stays open across the reset');
+  assert.equal(app.state.generation, 1, 'the reset is deferred rather than forgotten');
+  app.state.resume();
+  app.state.page = 3;
+  snapshot(2, 7);
+  assert.equal(app.state.generation, 2);
+  assert.equal(app.state.page, 0, 'the deferred reset clears paging once inspection ends');
 });
 
 test('snapshot errors release the bridge and keep the next refresh possible', () => {

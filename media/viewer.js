@@ -690,7 +690,7 @@
     for (const token of queryTokens(input)) {
       if (token === "OR" || token.toLowerCase() === "or") continue;
       const value = token.startsWith("-") ? token.slice(1) : token;
-      const match = value.match(/^@?[A-Za-z_][A-Za-z0-9_.]*:(\/.*\/([A-Za-z]*))$/) ?? value.match(/^(\/.*\/([A-Za-z]*))$/);
+      const match = value.match(/^@?[A-Za-z_][A-Za-z0-9_.]*:(\/.*\/([dgimsuvy]*))$/) ?? value.match(/^(\/.*\/([dgimsuvy]*))$/);
       if (!match) continue;
       const pattern = match[1].slice(1, match[1].lastIndexOf("/"));
       const flags = match[2];
@@ -980,12 +980,7 @@
         setError(`Filters cannot exceed ${MAX_QUERY_LENGTH} characters.`);
         return false;
       }
-      const regexError = queryError(normalized);
-      if (regexError) {
-        setError(regexError);
-        return false;
-      }
-      setQuery(normalized, true);
+      if (!setQuery(normalized, true)) return false;
       elements.search.value = "";
       return true;
     }
@@ -1057,7 +1052,7 @@
         button.textContent = label;
         button.title = item.query || item.serverId || "";
         scope.listen(button, "click", () => {
-          setQuery(item.query || "");
+          if (!setQuery(item.query || "")) return;
           state.selectedServer = item.serverId || "";
           state.selectedSession = "";
           state.checkedLevels = new Set(Array.isArray(item.levels) ? item.levels : LEVELS);
@@ -2017,7 +2012,8 @@
         return;
       }
       minimumSnapshotGeneration = 0;
-      if (state.generation !== void 0 && state.generation !== data.generation && !state.paused) {
+      const generationChanged = state.generation !== void 0 && state.generation !== data.generation;
+      if (generationChanged && !state.paused) {
         state.before = void 0;
         state.page = 0;
         state.lastRows = void 0;
@@ -2029,7 +2025,7 @@
         table.renderRows([]);
         bridge.refreshRequested = true;
       }
-      state.generation = data.generation;
+      if (!generationChanged || !state.paused) state.generation = data.generation;
       if (data.timezone && data.timezone !== state.displayTimezone) {
         state.displayTimezone = data.timezone;
         state.lastRows = void 0;

@@ -21,6 +21,9 @@ export class TerminalNormalizer {
       const newline = chunk.search(/[\r\n]/);
       if (newline < 0) return;
       this.droppingEscape = false;
+      // Resynchronise exactly as an in-chunk malformed escape does: the
+      // boundary still ends the line that preceded the escape.
+      this.emit();
       chunk = chunk.slice(newline + 1);
     }
     let text = this.escape + chunk;
