@@ -435,7 +435,7 @@
   "scripts": {
     "compile": "node scripts/build.mjs",
     "watch": "node scripts/build.mjs --watch",
-    "check": "npm run compile && npm test",
+    "check": "npm run compile && npm run typecheck && npm test",
     "vscode:prepublish": "npm run compile",
     "package": "vsce package",
     "typecheck": "tsc --noEmit && tsc -p tsconfig.webview.json && tsc -p tsconfig.test.json --noEmit",
