@@ -32,6 +32,8 @@ const commands = new Map<string, (...args: unknown[]) => unknown>();
 const files = new Map<string, string>([
   ['/w/src/auth.ts', 'export function login(id: string) {\n  logger.info(`user ${id} logged in`);\n  logger.error("login failed for user");\n  logger.debug("session refreshed ok");\n}\n']
 ]);
+// Files the initial workspace scan does not return, as if beyond its file limit.
+const unscanned = new Map<string, string>([['/w/deep/pkg/worker.go', 'package main\n\nfunc run() {\n\tlog.Printf("ok")\n}\n']]);
 const opened: { path: string; line: number }[] = [];
 let configured = 'codelens+gutter';
 let decorations: Range[] = [];
@@ -55,8 +57,12 @@ const mock = {
     onDidChangeConfiguration: () => ({ dispose() { } }),
     onDidChangeTextDocument: () => ({ dispose() { } }),
     createFileSystemWatcher: () => ({ onDidChange: () => ({ dispose() { } }), onDidCreate: () => ({ dispose() { } }), onDidDelete: () => ({ dispose() { } }), dispose() { } }),
-    findFiles: async () => [...files.keys()].map(path => Uri.file(path)),
-    fs: { stat: async (uri: Uri) => ({ size: files.get(uri.path)!.length }), readFile: async (uri: Uri) => new TextEncoder().encode(files.get(uri.path)) },
+    findFiles: async (glob: string) => glob.includes('{') ? [...files.keys()].map(path => Uri.file(path))
+      : [...files.keys(), ...unscanned.keys()].filter(path => path.endsWith('/' + glob.slice(3))).map(path => Uri.file(path)),
+    fs: {
+      stat: async (uri: Uri) => ({ size: (files.get(uri.path) ?? unscanned.get(uri.path))!.length }),
+      readFile: async (uri: Uri) => new TextEncoder().encode(files.get(uri.path) ?? unscanned.get(uri.path))
+    },
     openTextDocument: async (uri: Uri) => ({ uri, lineCount: 6 })
   }
 };
@@ -149,5 +155,18 @@ test('lens counts drop events evicted from retention', async () => {
   assert.deepEqual(titles(), ['$(pulse) 2 hits', '$(pulse) 1 hit · 1 error'], 'new events count right away');
   h.lens.refresh(later + 12000);
   assert.deepEqual(titles(), ['$(pulse) 1 hit', '$(pulse) 1 hit · 1 error'], 'the evicted event no longer counts');
+  h.lens.dispose();
+});
+
+test('files that events report are indexed on demand beyond the workspace scan', async () => {
+  const h = await harness();
+  assert.equal(h.index.sitesIn('deep/pkg/worker.go').length, 0);
+  h.store.add({ id: 1, level: 'info', message: 'ok', location: { file: '/build/src/deep/pkg/worker.go', line: 4 } });
+  h.lens.refresh(Date.now() + 5000);
+  for (let i = 0; i < 20 && !h.index.sitesIn('deep/pkg/worker.go').length; i++) await new Promise(resolve => setImmediate(resolve));
+  assert.equal(h.index.sitesIn('deep/pkg/worker.go').length, 1);
+  h.lens.refresh(Date.now() + 10000);
+  const lenses = h.lens.provideCodeLenses({ uri: Uri.file('/w/deep/pkg/worker.go'), lineCount: 6 } as never) as unknown as CodeLens[];
+  assert.match(lenses[0].command.title, /1 hit/, 'the short "ok" statement matches by its reported location');
   h.lens.dispose();
 });

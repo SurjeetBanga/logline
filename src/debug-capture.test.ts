@@ -143,3 +143,20 @@ test('the tracker adapter is inert when the debug API is unavailable', () => {
   const loaded = withVscode({}, () => require('./vscode/debug-capture') as typeof import('./vscode/debug-capture'));
   assert.deepEqual(loaded.registerDebugCapture(harness().capture), []);
 });
+
+test('completed debug runs are forgotten once none of their events are retained', () => {
+  const h = harness({ joinStackTraces: false });
+  h.capture.start(session());
+  h.capture.output('s1', { category: 'stdout', output: 'x\n' });
+  const [record] = h.registry.records.values();
+  const retained = () => h.store.sessionEventCount(record.serverId, record.id);
+  h.registry.pruneEmptyCompleted(['debug'], (serverId, id) => h.store.sessionEventCount(serverId, id));
+  assert.equal(h.registry.records.size, 1, 'a running session is kept');
+  h.capture.end('s1');
+  h.registry.pruneEmptyCompleted(['debug'], (serverId, id) => h.store.sessionEventCount(serverId, id));
+  assert.equal(h.registry.records.size, 1, 'a completed run with retained events is kept');
+  h.store.clear();
+  assert.equal(retained(), 0);
+  h.registry.pruneEmptyCompleted(['debug'], (serverId, id) => h.store.sessionEventCount(serverId, id));
+  assert.equal(h.registry.records.size, 0);
+});

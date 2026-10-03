@@ -93,7 +93,7 @@ Open **Settings** in the toolbar for all options. A few useful defaults:
 | `logline.source` | `both` | Capture stdout, stderr, or both. |
 | `logline.captureTerminals` | `false` | Capture the next commands from supported VS Code terminals; output from commands already in progress cannot be recovered. |
 | `logline.captureDebugSessions` | `true` | Capture program output from debug sessions. |
-| `logline.otlp.enabled` | `false` | Run the local OpenTelemetry receiver on `127.0.0.1:4318`. |
+| `logline.otlp.enabled` | `false` | Start the local OpenTelemetry receiver on `127.0.0.1:4318` automatically. |
 | `logline.logLenses` | `codelens` | Show log statement activity in the editor (`off`, `codelens`, `codelens+gutter`). |
 | `logline.columns` | `[]` | Auto-detect columns, or specify preferred fields. |
 | `logline.timezone` | `local` | Show local or UTC timestamps. |

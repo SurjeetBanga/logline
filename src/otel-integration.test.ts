@@ -100,6 +100,13 @@ test('the controller runs the receiver from settings and points new processes at
 
   await controller.toggleOtlp(false);
   assert.equal(controller.otlp.running, false);
+  assert.equal(settings['otlp.enabled'], true, 'Stop affects this window only and leaves shared settings alone');
+  await controller.otel.sync();
+  assert.equal(controller.otlp.running, false, 'the window keeps the stopped state across re-syncs');
+  controller.otel.settingChanged();
+  await controller.otel.sync();
+  assert.equal(controller.otlp.running, true, 'changing the setting takes over again');
+  await controller.toggleOtlp(false);
   assert.equal(environment.size, 0, 'the terminal environment is restored');
   assert.equal(controller.otel.variables(), undefined);
   assert.ok(changeListener);

@@ -92,12 +92,14 @@ export class LogsController {
       });
       if (event.affectsConfiguration('logline.captureTerminals')) this.terminalCapture.setEnabled(this.config.get('captureTerminals', false));
       if (event.affectsConfiguration('logline.servers')) this.notifications.send({ type: 'serversChanged' });
+      if (event.affectsConfiguration('logline.otlp.enabled')) this.otel.settingChanged();
       if (event.affectsConfiguration('logline.otlp')) void this.otel.sync();
     });
     if (this.config.get('otlp.enabled', false)) void this.otel.sync();
   }
   snapshot(request: Extract<ViewRequest, { type: 'snapshot'; }>) {
     this.terminalCapture.pruneStale();
+    this.registry.pruneEmptyCompleted(['debug', 'otel'], (serverId, id) => this.store.sessionEventCount(serverId, id));
     const { pendingQuery: applyQuery, pendingTrace: openTrace } = this;
     this.pendingQuery = this.pendingTrace = undefined;
     return { ...this.buildSnapshot(request), ...(applyQuery !== undefined ? { applyQuery } : {}), ...(openTrace ? { openTrace } : {}) };

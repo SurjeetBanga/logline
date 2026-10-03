@@ -138,3 +138,22 @@ test('matches templates whose longest word touches a placeholder', () => {
   assert.equal(index.match(event(1, 'cache_miss_user42 while loading'))?.site.line, 1);
   assert.equal(index.match(event(2, 'retrying3times')), undefined, 'no word with real boundaries means location-only matching');
 });
+
+test('reads concatenated messages, format wrappers, and messages after a context argument', () => {
+  const cases: [string, string, string][] = [
+    ['A.java', 'log.warn("Order " + order.getId() + " rejected by " + svc);', 'Order … rejected by …'],
+    ['a.ts', 'logger.info(user.name + " signed in from " + req.ip)', '… signed in from …'],
+    ['a.py', 'print("Total: " + str(total) + " items")', 'Total: … items'],
+    ['a.ts', 'logger.info({ userId, plan: getPlan(user) }, "subscription renewed")', 'subscription renewed'],
+    ['A.java', 'log.info(AUDIT, "Password changed for {}", user)', 'Password changed for …'],
+    ['A.java', 'LOG.error(String.format("Job %s failed after %d tries", job, n))', 'Job … failed after … tries'],
+    ['a.go', 'log.Println(fmt.Sprintf("worker %d stopped", id))', 'worker … stopped'],
+    ['A.cs', 'Console.WriteLine(string.Format("Saved {0} rows", count));', 'Saved … rows'],
+    ['a.ts', 'console.log("a " + "b" + "c")', 'a bc']
+  ];
+  for (const [file, source, template] of cases) assert.equal(extractLogSites(file, source)[0]?.template, template, source);
+  assert.deepEqual(extractLogSites('a.ts', 'logger.info(user)\nlogger.info(a, b)\nconsole.log(x + y)'), []);
+  const index = new LogSiteIndex();
+  index.setFile('A.java', extractLogSites('A.java', 'log.warn("Order " + order.getId() + " rejected by " + svc);'));
+  assert.equal(index.match(event(1, 'Order 1234 rejected by fraud-check'))?.site.file, 'A.java');
+});

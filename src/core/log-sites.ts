@@ -53,7 +53,7 @@ export function extractLogSites(file: string, text: string): LogSite[] {
   CALL.lastIndex = 0;
   for (let match = CALL.exec(text); match && sites.length < MAX_SITES_PER_FILE; match = CALL.exec(text)) {
     if (inComment(text, match.index, lineStarts[lineOf(lineStarts, match.index).line - 1])) continue;
-    const literal = readStringLiteral(text, match.index + match[0].length);
+    const literal = readMessage(text, match.index + match[0].length);
     if (!literal) continue;
     const method = (match[2] ?? match[3] ?? match[4]).replace(/(?:f|w|ln)$/, '').toLowerCase();
     // Plain `print(` and `.log(` carry no severity; method names like Errorf do.
@@ -95,7 +95,7 @@ function lineOf(starts: number[], offset: number): { line: number; column: numbe
 // Reads one string literal, including common prefixes: f"", r"", $"", @"",
 // $@"", template literals, and Python triple quotes. Concatenation and
 // variables as the first argument are not followed.
-function readStringLiteral(text: string, start: number): { value: string; interpolated: boolean } | undefined {
+function readStringLiteral(text: string, start: number): { value: string; interpolated: boolean; end: number } | undefined {
   let index = start;
   const prefix = text.slice(index, index + 3).match(/^(?:[fFrRbBuU]{1,2}|\$@|@\$|\$|@)?/)![0];
   index += prefix.length;
@@ -110,7 +110,7 @@ function readStringLiteral(text: string, start: number): { value: string; interp
   const limit = Math.min(text.length, index + 2000);
   while (index < limit) {
     if (text.startsWith(close, index)) {
-      return { value, interpolated: quote === '`' || /[fF$]/.test(prefix) };
+      return { value, interpolated: quote === '`' || /[fF$]/.test(prefix), end: index + close.length };
     }
     const char = text[index];
     if (char === '\n' && !multiline) return undefined;
@@ -126,10 +126,69 @@ function readStringLiteral(text: string, start: number): { value: string; interp
   return undefined;
 }
 
+// Stands for an expression concatenated into a message; a placeholder like any other.
+const EXPRESSION = '\0';
+// Calls whose own first argument is the message format.
+const WRAPPER = /^(?:String\.format|String\.Format|string\.Format|MessageFormat\.format|fmt\.Sprintf|fmt\.Errorf|util\.format|sprintf|format!)\s*\(\s*/;
+
+/**
+ * The message a logging call logs: its first argument, or the second when
+ * the first is a context object or marker (`logger.info({ id }, "msg")`).
+ * An argument may wrap a format call and concatenate literals with
+ * expressions (`"Order " + id + " rejected"`); it needs at least one literal.
+ */
+function readMessage(text: string, start: number): { value: string; interpolated: boolean } | undefined {
+  const first = readArgument(text, start);
+  if (first.message) return first.message;
+  if (text[first.end] !== ',') return undefined;
+  return readArgument(text, skipSpace(text, first.end + 1)).message;
+}
+
+function readArgument(text: string, start: number): { message?: { value: string; interpolated: boolean }; end: number } {
+  let index = start;
+  const wrapper = text.slice(index, index + 40).match(WRAPPER);
+  if (wrapper) index += wrapper[0].length;
+  let value = '', interpolated = false, literals = 0;
+  for (let term = 0; term < 32; term++) {
+    const literal = readStringLiteral(text, index);
+    if (literal) { value += literal.value; interpolated ||= literal.interpolated; literals++; index = literal.end; }
+    else {
+      const end = skipExpression(text, index);
+      if (end === index) break;
+      value += EXPRESSION;
+      index = end;
+    }
+    index = skipSpace(text, index);
+    if (text[index] !== '+' || text[index + 1] === '+' || text[index + 1] === '=') break;
+    index = skipSpace(text, index + 1);
+  }
+  return { message: literals ? { value, interpolated } : undefined, end: index };
+}
+
+const skipSpace = (text: string, index: number) => { while (index < text.length && /\s/.test(text[index])) index++; return index; };
+
+// Skips one operand of a concatenation (a name, call, member access or
+// bracketed expression), stopping at a top-level `+`, `,` or `)`.
+function skipExpression(text: string, start: number): number {
+  let depth = 0;
+  const limit = Math.min(text.length, start + 300);
+  for (let index = start; index < limit; index++) {
+    const char = text[index];
+    if (char === '"' || char === "'" || char === '`') {
+      const literal = readStringLiteral(text, index);
+      if (!literal) return start;
+      index = literal.end - 1;
+    } else if (char === '(' || char === '[' || char === '{') depth++;
+    else if (char === ')' || char === ']' || char === '}') { if (depth === 0) return index; depth--; }
+    else if (depth === 0 && (char === '+' || char === ',' || char === ';')) return index;
+  }
+  return start;
+}
+
 // Placeholders become empty strings between literal parts. Braces count as
 // placeholders in every language (f-strings, C# interpolation and message
 // templates, SLF4J and Rust `{}`), as do printf verbs.
-const PLACEHOLDER = /\$\{[^}]*\}|#\{[^}]*\}|\{\{|\}\}|\{[^{}]*\}|%%|%(?:\([^)]*\))?[-+ #0]*(?:\d+|\*)?(?:\.\d+)?[sdifoOjJvqxXeEgGtTpcbuUw]/g;
+const PLACEHOLDER = /\0|\$\{[^}]*\}|#\{[^}]*\}|\{\{|\}\}|\{[^{}]*\}|%%|%(?:\([^)]*\))?[-+ #0]*(?:\d+|\*)?(?:\.\d+)?[sdifoOjJvqxXeEgGtTpcbuUw]/g;
 
 function splitTemplate(value: string, interpolated: boolean, dollar: boolean): string[] {
   const parts: string[] = [''];
@@ -203,6 +262,8 @@ export class LogSiteIndex {
   private byBasename?: Map<string, LogSite[]>;
   private byWord?: Map<string, Compiled[]>;
   private readonly messageCache = new Map<string, Compiled | null>();
+  // Reported locations with no indexed statement, for the editor to index on demand.
+  private readonly unresolved = new Set<string>();
 
   setFile(file: string, sites: LogSite[]): void {
     const previous = this.files.get(file);
@@ -228,6 +289,7 @@ export class LogSiteIndex {
     if (location) {
       const site = this.atLocation(location.file, location.line);
       if (site) return { site, exact: true };
+      if (this.unresolved.size < 256) this.unresolved.add(location.file);
     }
     const message = event.message;
     if (!message) return undefined;
@@ -238,6 +300,13 @@ export class LogSiteIndex {
       this.messageCache.set(message, compiled);
     }
     return compiled ? { site: compiled.site, exact: false } : undefined;
+  }
+
+  /** Reported file paths that matched no indexed statement since the last call. */
+  takeUnresolved(): string[] {
+    const files = [...this.unresolved];
+    this.unresolved.clear();
+    return files;
   }
 
   /** The site at or just above a reported line in a file matching the reported path's suffix. */

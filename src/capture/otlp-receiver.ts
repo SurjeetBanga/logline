@@ -2,8 +2,8 @@ import { randomBytes } from 'node:crypto';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { gunzip, inflate } from 'node:zlib';
-import { decodeLogsRequest, decodeTraceRequest, ProtoError } from '../core/otlp-proto';
-import { isEntrySpan, logLine, readLogs, readSpans, spanLine } from '../core/otlp';
+import { isEntrySpan, logLine, readLogs, readSpans, spanLine, type OtlpLog, type Span } from '../core/otlp';
+import { MalformedRequest, OtlpDecoder } from './otlp-decoder';
 import type { Settings } from '../core/settings';
 import type { SpanStore } from '../core/traces';
 import type { SessionSummary } from '../core/types';
@@ -13,6 +13,9 @@ import type { SessionRegistry } from './session-registry';
 
 const MAX_BODY = 16 * 1024 * 1024;
 const MAX_DECODED = 64 * 1024 * 1024;
+// Records added per turn of the event loop, so a large export arrives in
+// steps the Logs panel and editor stay responsive through.
+const CHUNK = 500;
 export type SpanRows = 'none' | 'entry' | 'all';
 
 export interface ReceiverStatus { running: boolean; endpoint?: string; error?: string; }
@@ -29,13 +32,17 @@ export class OtlpReceiver {
   private server?: Server;
   private readonly records = new Map<string, SessionSummary>();
   private starting?: Promise<ReceiverStatus>;
+  private readonly decoder: OtlpDecoder;
   endpoint?: string;
   error?: string;
   /** The port asked for at the last start, which can differ from the one in use after a fallback. */
   requestedPort?: number;
 
   constructor(private readonly config: Settings, private readonly registry: SessionRegistry,
-    private readonly ingestion: Ingestion, private readonly state: RuntimeState, private readonly spans: SpanStore) { }
+    private readonly ingestion: Ingestion, private readonly state: RuntimeState, private readonly spans: SpanStore,
+    decodeThreshold?: number) {
+    this.decoder = new OtlpDecoder(decodeThreshold);
+  }
 
   get running(): boolean { return Boolean(this.server?.listening); }
   status(): ReceiverStatus { return { running: this.running, endpoint: this.endpoint, error: this.error }; }
@@ -57,6 +64,7 @@ export class OtlpReceiver {
       record.status = 'exited'; record.endedAt = Date.now(); record.captureComplete = true; record.exitReason = 'receiver stopped';
     }
     this.records.clear();
+    this.decoder.dispose();
     if (server) {
       const closed = new Promise<void>(resolve => server.close(() => resolve()));
       // Exporters keep connections alive; close them so shutdown does not wait on idle sockets.
@@ -68,29 +76,33 @@ export class OtlpReceiver {
   }
 
   /** Accept a decoded OTLP logs request; returns the number of records ingested. */
-  acceptLogs(request: unknown): number {
+  acceptLogs(request: unknown): number { return this.ingestLogs(readLogs(request)); }
+
+  /** Accept a decoded OTLP traces request; returns the number of new spans. */
+  acceptSpans(request: unknown): number { return this.ingestSpans(readSpans(request)); }
+
+  private ingestLogs(logs: readonly OtlpLog[]): number {
     let accepted = 0;
-    for (const log of readLogs(request)) {
+    for (const log of logs) {
       const record = this.record(log.service);
-      const event = this.ingestion.accept(logLine(log), 'otlp', { serverId: record.serverId, server: record.server, sessionId: record.id });
+      const event = this.ingestion.accept(logLine(log), 'otlp', { serverId: record.serverId, server: record.server, sessionId: record.id, persist: true });
       if (event) { record.events++; accepted++; }
     }
     if (accepted) this.state.notify();
     return accepted;
   }
 
-  /** Accept a decoded OTLP traces request; returns the number of new spans. */
-  acceptSpans(request: unknown): number {
+  private ingestSpans(spans: readonly Span[]): number {
     const rows = this.config.get<string>('otlp.showSpans', 'entry') as SpanRows;
     let accepted = 0;
-    for (const span of readSpans(request)) {
+    for (const span of spans) {
       if (!this.spans.add(span)) continue;
       accepted++;
       // Every sending service is a source, even without rows, so sharing it
       // with an agent also shares its spans.
       const record = this.record(span.service);
       if (rows === 'none' || (rows === 'entry' && !isEntrySpan(span))) continue;
-      if (this.ingestion.accept(spanLine(span), 'otlp', { serverId: record.serverId, server: record.server, sessionId: record.id })) record.events++;
+      if (this.ingestion.accept(spanLine(span), 'otlp', { serverId: record.serverId, server: record.server, sessionId: record.id, persist: true })) record.events++;
     }
     if (accepted) this.state.notify();
     return accepted;
@@ -159,14 +171,15 @@ export class OtlpReceiver {
       const body = await this.readBody(request);
       // Metrics are accepted and dropped so exporters configured for every signal do not log errors.
       if (path !== '/v1/metrics') {
-        let decoded: unknown;
-        try {
-          decoded = json ? JSON.parse(body.toString('utf8'))
-            : path === '/v1/logs' ? decodeLogsRequest(body) : decodeTraceRequest(body);
-        } catch (error) {
-          throw new HttpError(400, error instanceof ProtoError || error instanceof SyntaxError ? `Malformed request: ${error.message}` : 'Malformed request.');
+        const decoded = await this.decoder.decode(path === '/v1/logs' ? 'logs' : 'traces', json, body).catch(error => {
+          throw error instanceof MalformedRequest ? new HttpError(400, error.message) : error;
+        });
+        const items: readonly (OtlpLog | Span)[] = 'logs' in decoded ? decoded.logs : decoded.spans;
+        for (let start = 0; start < items.length && this.running; start += CHUNK) {
+          if (start) await new Promise(resolve => setImmediate(resolve));
+          const chunk = items.slice(start, start + CHUNK);
+          if ('logs' in decoded) this.ingestLogs(chunk as OtlpLog[]); else this.ingestSpans(chunk as Span[]);
         }
-        if (path === '/v1/logs') this.acceptLogs(decoded); else this.acceptSpans(decoded);
       }
       // An empty ExportServiceResponse means full success in either encoding.
       reply(200, json ? '{}' : Buffer.alloc(0), json ? 'application/json' : 'application/x-protobuf');

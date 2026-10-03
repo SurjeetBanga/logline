@@ -382,7 +382,7 @@
         "logline.otlp.enabled": {
           "type": "boolean",
           "default": false,
-          "description": "Run a local OpenTelemetry (OTLP/HTTP) receiver so instrumented apps send logs and traces to Logline. It listens on 127.0.0.1 only and accepts application/json and application/x-protobuf."
+          "description": "Start the local OpenTelemetry (OTLP/HTTP) receiver automatically, so instrumented apps send logs and traces to Logline. It listens on 127.0.0.1 only and accepts application/json and application/x-protobuf. The Start/Stop OpenTelemetry Receiver commands change only the current window."
         },
         "logline.otlp.port": {
           "type": "integer",
@@ -417,6 +417,13 @@
           ],
           "default": "codelens",
           "description": "Connect log statements in source code to captured events. Logline indexes logging calls in up to 5,000 workspace source files and attributes each event by the code location it reports or by its message text."
+        },
+        "logline.logLensMaxFiles": {
+          "type": "integer",
+          "default": 5000,
+          "minimum": 100,
+          "maximum": 50000,
+          "description": "Maximum number of workspace source files scanned for log statements when log lenses start. Files that events report as their origin are indexed on demand beyond this limit."
         },
         "logline.captureTerminals": {
           "type": "boolean",

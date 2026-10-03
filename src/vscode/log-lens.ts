@@ -19,7 +19,6 @@ export interface LensSources {
 
 const GLOB = `**/*.{${LOG_SITE_EXTENSIONS.join(',')}}`;
 const EXCLUDE = '**/{node_modules,.git,out,dist,build,target,vendor,.venv,venv,__pycache__,coverage,.next,bin,obj}/**';
-const MAX_FILES = 5000;
 const MAX_FILE_BYTES = 512 * 1024;
 // Indexing a workspace changes the index many times a second; recounting
 // waits for it to settle. Evictions only lower counts, so they are folded in
@@ -70,6 +69,8 @@ export class LogLens implements vscode.CodeLensProvider, vscode.HoverProvider, v
   private recountedAt = 0;
   private scan = 0;
   private disposed = false;
+  // Basenames already looked up on demand, so each is searched for once.
+  private readonly located = new Set<string>();
 
   constructor(private readonly sources: LensSources, private readonly extensionUri: vscode.Uri) {
     const selector = LOG_SITE_EXTENSIONS.map(extension => ({ scheme: 'file', pattern: `**/*.${extension}` }));
@@ -120,6 +121,30 @@ export class LogLens implements vscode.CodeLensProvider, vscode.HoverProvider, v
       if (evicted) this.schedule(EVICTION_RECOUNT_MS - (now - this.recountedAt));
     }
     if (changed) { this.changeEmitter.fire(); this.decorate(); }
+    const unresolved = index.takeUnresolved();
+    if (unresolved.length) void this.indexReported(unresolved);
+  }
+
+  /**
+   * Index files that events report as their origin but the workspace scan
+   * did not reach, such as files beyond the file limit in a large repository.
+   */
+  private async indexReported(files: string[]): Promise<void> {
+    const scan = this.scan;
+    for (const reported of files) {
+      const path = reported.replace(/\\/g, '/');
+      const name = path.slice(path.lastIndexOf('/') + 1);
+      if (!name || this.located.has(name) || this.located.size >= 1000 || !this.indexableName(name)) continue;
+      this.located.add(name);
+      const escaped = name.replace(/[[\]{}*?]/g, char => `[${char}]`);
+      const uris = await vscode.workspace.findFiles(`**/${escaped}`, EXCLUDE, 20).then(found => found, () => []);
+      if (scan !== this.scan || !this.enabled) return;
+      // Keep files whose path agrees with the reported one as far as both go.
+      const tail = path.split('/').filter(Boolean).slice(-3).join('/');
+      for (const uri of uris) {
+        if (uri.path.endsWith('/' + tail) || tail.endsWith(this.fileId(uri))) await this.indexFromDisk(uri);
+      }
+    }
   }
 
   provideCodeLenses(document: vscode.TextDocument): vscode.CodeLens[] {
@@ -253,7 +278,7 @@ export class LogLens implements vscode.CodeLensProvider, vscode.HoverProvider, v
     this.clockTimer = setInterval(() => { if (this.sources.tracker.stats.size) this.changeEmitter.fire(); }, 15000);
     this.clockTimer.unref?.();
     void (async () => {
-      const uris = await vscode.workspace.findFiles(GLOB, EXCLUDE, MAX_FILES);
+      const uris = await vscode.workspace.findFiles(GLOB, EXCLUDE, Math.max(100, Math.min(50000, this.sources.config.get('logLensMaxFiles', 5000))));
       for (let start = 0; start < uris.length; start += 50) {
         if (scan !== this.scan || this.disposed) return;
         await Promise.all(uris.slice(start, start + 50).map(uri => this.indexFromDisk(uri)));
@@ -271,11 +296,13 @@ export class LogLens implements vscode.CodeLensProvider, vscode.HoverProvider, v
     clearTimeout(this.refreshTimer);
     this.refreshTimer = undefined;
     this.uris.clear();
+    this.located.clear();
   }
 
-  private indexable(uri: vscode.Uri): boolean {
-    const extension = uri.path.slice(uri.path.lastIndexOf('.') + 1).toLowerCase();
-    return LOG_SITE_EXTENSIONS.includes(extension);
+  private indexable(uri: vscode.Uri): boolean { return this.indexableName(uri.path); }
+
+  private indexableName(name: string): boolean {
+    return LOG_SITE_EXTENSIONS.includes(name.slice(name.lastIndexOf('.') + 1).toLowerCase());
   }
 
   // Lens positions follow edits before the file is saved.

@@ -12,6 +12,8 @@ type Config = Settings & { refresh(): void };
  */
 export class OtelIntegration {
   private disposed = false;
+  /** Set by the Start/Stop commands for this window; the setting only decides whether it starts automatically. */
+  private override?: boolean;
 
   constructor(private readonly config: Config, readonly receiver: OtlpReceiver, private readonly changed: () => void,
     private readonly terminalEnvironment?: vscode.EnvironmentVariableCollection) {
@@ -39,7 +41,7 @@ export class OtelIntegration {
   /** Start, restart, or stop the receiver to match settings, then update the terminal environment. */
   async sync(): Promise<void> {
     if (this.disposed) return;
-    const enabled = this.config.get('otlp.enabled', false);
+    const enabled = this.override ?? this.config.get('otlp.enabled', false);
     const port = this.config.get('otlp.port', 4318);
     if (!enabled || (this.receiver.running && this.receiver.requestedPort !== port)) await this.receiver.stop();
     if (enabled && !this.disposed) await this.receiver.start(port);
@@ -48,15 +50,17 @@ export class OtelIntegration {
     this.changed();
   }
 
+  /** Start or stop the receiver for this window without changing settings, which may be shared with a team. */
   async toggle(enabled: boolean): Promise<void> {
-    const target = vscode.workspace.workspaceFolders?.length ? vscode.ConfigurationTarget.Workspace : vscode.ConfigurationTarget.Global;
-    await vscode.workspace.getConfiguration('logline').update('otlp.enabled', enabled, target);
-    this.config.refresh();
+    this.override = enabled;
     await this.sync();
     if (enabled && this.receiver.running) {
       void vscode.window.showInformationMessage(`Logline is receiving OpenTelemetry on ${this.receiver.endpoint}. Servers, tasks, debug sessions, and new terminals started from now on send telemetry here.`);
     } else if (enabled && this.receiver.error) void vscode.window.showWarningMessage(`Logline: ${this.receiver.error}`);
   }
+
+  /** A changed `logline.otlp.enabled` setting takes over from the Start/Stop commands. */
+  settingChanged(): void { this.override = undefined; }
 
   /**
    * Add the variables to every launch configuration while the receiver

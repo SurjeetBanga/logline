@@ -3,9 +3,11 @@ export interface Settings { get<T>(key: string, fallback: T): T; }
 
 const LIMITS: Record<string, [number, number]> = {
   indentation: [1, 8], maxEvents: [1000, 1000000], maxMemoryMb: [10, 2048],
-  refreshIntervalMs: [100, 5000], maxLineLength: [1024, 1048576], maxDiskMb: [10, 10240]
+  refreshIntervalMs: [100, 5000], maxLineLength: [1024, 1048576], maxDiskMb: [10, 10240],
+  'otlp.port': [0, 65535], logLensMaxFiles: [100, 50000]
 };
-const INTEGERS = new Set(['indentation', 'maxEvents', 'refreshIntervalMs', 'maxLineLength']);
+const INTEGERS = new Set(['indentation', 'maxEvents', 'refreshIntervalMs', 'maxLineLength', 'otlp.port', 'logLensMaxFiles']);
+const CHOICES: Record<string, string[]> = { logLenses: ['off', 'codelens', 'codelens+gutter'], 'otlp.showSpans': ['none', 'entry', 'all'] };
 
 /** Normalize settings once at the host boundary; never mutate the source value. */
 export function normalizeSetting(key: string, value: unknown, fallback: unknown): unknown {
@@ -16,6 +18,7 @@ export function normalizeSetting(key: string, value: unknown, fallback: unknown)
   }
   if (key === 'source') return ['both', 'stdout', 'stderr'].includes(value as string) ? value : fallback;
   if (key === 'timezone') return ['local', 'utc'].includes(value as string) ? value : fallback;
+  if (Object.hasOwn(CHOICES, key)) return CHOICES[key].includes(value as string) ? value : fallback;
   if (key === 'servers') return normalizeServers(value);
   if (key === 'columns' || key === 'redactionFields') {
     if (!Array.isArray(value)) return fallback;

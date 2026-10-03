@@ -43,6 +43,14 @@ export class SessionRegistry {
     }
   }
 
+  /** Forget completed runs of the given kinds once none of their events are retained. */
+  pruneEmptyCompleted(kinds: readonly string[], retained: (serverId: string, sessionId: string) => number): void {
+    for (const [id, record] of this.records) {
+      if (!kinds.includes(record.sourceKind ?? '') || record.status === 'running' || record.status === 'stopping') continue;
+      if (retained(record.serverId, record.id) === 0) this.records.delete(id);
+    }
+  }
+
   pruneSessionRegistry(): void {
     const completed = [...this.records.values()]
       .filter(record => record.status === 'exited' || record.status === 'failed')
