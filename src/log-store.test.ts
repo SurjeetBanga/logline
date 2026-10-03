@@ -673,3 +673,41 @@ test('history paging and nearby context read bounded portions of retained histor
   assert.deepEqual(store.context(45000).events.map(event => event.id), Array.from({ length: 51 }, (_, i) => 44975 + i));
   assert.ok(reads < 100, `context read ${reads} entries`);
 });
+
+test('sorted pages merge streamed events and drop evicted ones without a full re-sort', () => {
+  const store = new LogStore(200);
+  const reference = new LogStore(200);
+  const add = (id: number) => {
+    const event = { id, level: id % 3 ? 'info' : 'error', message: `m${id}`, fields: { durationMs: (id * 37) % 50, service: `svc-${id % 4}` } };
+    store.add(event);
+    reference.add({ ...event, fields: { ...event.fields } });
+  };
+  for (let id = 1; id <= 150; id++) add(id);
+  for (const [sort, sortDirection] of [['durationMs', 'desc'], ['service', 'asc']] as const) {
+    for (let round = 0; round < 12; round++) {
+      const options = { sort, sortDirection, query: 'level:info' };
+      const ids = (pages: ReturnType<LogStore['page']>) => pages.events.map(event => event.id);
+      const cached = store.page(options);
+      // A fresh store has no cache, so it always sorts from scratch.
+      const fresh = new LogStore(200);
+      for (const event of reference.all()) fresh.add(event);
+      assert.deepEqual(ids(cached), ids(fresh.page(options)));
+      assert.equal(cached.matched, fresh.page(options).matched);
+      for (let i = 0; i < 25; i++) add(150 + round * 25 + i + (sort === 'service' ? 1000 : 0));
+    }
+  }
+});
+
+test('fieldSuggestions value counts refresh when events arrive or are evicted', () => {
+  const store = new LogStore(3);
+  store.add({ id: 1, level: 'info', message: 'x', fields: { service: 'api' } });
+  store.add({ id: 2, level: 'info', message: 'x', fields: { service: 'api' } });
+  assert.deepEqual(store.fieldSuggestions('service:a').values, [{ value: 'api', count: 2 }]);
+  assert.deepEqual(store.fieldSuggestions('service:ap').values, [{ value: 'api', count: 2 }]);
+  store.add({ id: 3, level: 'info', message: 'x', fields: { service: 'auth' } });
+  assert.deepEqual(store.fieldSuggestions('service:a').values, [{ value: 'api', count: 2 }, { value: 'auth', count: 1 }]);
+  store.add({ id: 4, level: 'info', message: 'x', fields: { service: 'auth' } });
+  assert.deepEqual(store.fieldSuggestions('service:a').values, [{ value: 'auth', count: 2 }, { value: 'api', count: 1 }]);
+  store.clear();
+  assert.deepEqual(store.fieldSuggestions('service:a').values, []);
+});

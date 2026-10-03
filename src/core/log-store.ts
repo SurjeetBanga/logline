@@ -1,4 +1,4 @@
-import { fieldValue, sortEvents } from './event-order';
+import { fieldValue, mergeSortedEvents, sortEvents } from './event-order';
 import { analyzeEvents, findPatterns, groupErrors, type AnalysisResult, type ErrorGroup, type LogPattern } from './log-analysis';
 import { canonicalField, matchesQuery, parseQuery, type ParsedQuery } from './query';
 import type { LogEvent } from './types';
@@ -115,6 +115,17 @@ interface PageCache {
   lastId: number;
 }
 
+// One sorted view, kept between refreshes like PageCache. New matches are
+// merged in rather than re-sorting every retained event on each tick. `stale`
+// counts evictions since the last read; the evicted entries are filtered out
+// lazily, and the cache is dropped if they would pin too many released events.
+interface SortedCache {
+  key: string;
+  events: LogEvent[];
+  lastId: number;
+  stale: number;
+}
+
 export interface PageResult extends Stats {
   events: LogEvent[];
   page: number;
@@ -145,7 +156,8 @@ export class LogStore {
   private fieldNamesCache?: string[];
   serverIndex!: Map<string, ServerIndex>;
   private pageCache: PageCache | undefined;
-  private sortedCache?: { key: string; events: LogEvent[]; };
+  private sortedCache?: SortedCache;
+  private suggestionCache?: { key: string; counts: Map<string, number>; };
 
   constructor(maxRows = 100000, maxBytes = 100 * 1024 * 1024) {
     this.maxRows = maxRows;
@@ -167,6 +179,7 @@ export class LogStore {
     this.serverIndex = new Map();
     this.pageCache = undefined;
     this.sortedCache = undefined;
+    this.suggestionCache = undefined;
   }
 
   private evictOldest(): void {
@@ -186,7 +199,8 @@ export class LogStore {
     // Release cached event references immediately, even while the viewer is hidden.
     const cache = this.pageCache;
     if (cache?.matches[cache.start]?.id === evicted.event.id) cache.matches[cache.start++] = undefined;
-    this.sortedCache = undefined;
+    const sorted = this.sortedCache;
+    if (sorted && ++sorted.stale * 4 > sorted.events.length) this.sortedCache = undefined;
     if (serverId !== undefined) {
       const sessionKey = evicted.event.sessionId ?? '*';
       const sessionCount = index?.sessions.get(sessionKey);
@@ -204,7 +218,6 @@ export class LogStore {
   }
 
   private insertSlot(slot: Slot): void {
-    this.sortedCache = undefined;
     this.slots[(this.head + this.size) % this.maxRows] = slot;
     const serverId = slot.event.serverId;
     let index: ServerIndex | undefined;
@@ -353,9 +366,21 @@ export class LogStore {
     const matched = matches.length - start;
     if (sort) {
       const sortKey = JSON.stringify([key, sort, sortDirection]);
-      const sorted = !relative && this.sortedCache?.key === sortKey ? this.sortedCache.events
-        : sortEvents(matches.slice(start) as LogEvent[], sort, sortDirection);
-      this.sortedCache = relative ? undefined : { key: sortKey, events: sorted };
+      const cached = !relative && this.sortedCache?.key === sortKey ? this.sortedCache : undefined;
+      let sorted: LogEvent[];
+      if (cached) {
+        // Evictions only ever remove the oldest ids, and new matches only ever
+        // append to the end of `matches`, so both ends are cheap to reconcile.
+        const oldestId = this.size ? this.slots[this.head]!.event.id : Infinity;
+        const retained = cached.stale ? cached.events.filter(event => event.id >= oldestId) : cached.events;
+        let first = matches.length;
+        while (first > start && matches[first - 1]!.id > cached.lastId) first--;
+        sorted = first < matches.length
+          ? mergeSortedEvents(retained, matches.slice(first) as LogEvent[], sort, sortDirection)
+          : retained;
+      } else sorted = sortEvents(matches.slice(start) as LogEvent[], sort, sortDirection);
+      const lastId = matches.length > start ? matches[matches.length - 1]!.id : -1;
+      this.sortedCache = relative ? undefined : { key: sortKey, events: sorted, lastId, stale: 0 };
       const sortedPages = Math.max(1, Math.ceil(sorted.length / PAGE_SIZE));
       page = Math.max(0, Math.min(sortedPages - 1, Number.isInteger(page) ? page : 0));
       return {
@@ -556,18 +581,27 @@ export class LogStore {
     const wantedServer = serverId?.toLowerCase();
     for (const key of this.columnKeys(serverId)) fields.add(key);
     if (target.field) {
-      const count = (event: LogEvent) => {
-        const value = fieldValue(event, target.field!);
-        if (value !== undefined && String(value).toLowerCase().startsWith(valuePrefix)) {
-          const text = String(value); values.set(text, (values.get(text) ?? 0) + 1);
+      // Every keystroke after `field:` asks for the same field, so count each
+      // distinct value once per retained set and filter the counts by prefix.
+      // `total` and `discarded` change on every add and eviction, and events
+      // are never mutated after insertion, so together they version the ring.
+      const key = JSON.stringify([target.field, wantedServer ?? null, this.total, this.discarded]);
+      let counts = this.suggestionCache?.key === key ? this.suggestionCache.counts : undefined;
+      if (!counts) {
+        const tally = counts = new Map<string, number>();
+        const count = (event: LogEvent) => {
+          const value = fieldValue(event, target.field!);
+          if (value !== undefined) { const text = String(value); tally.set(text, (tally.get(text) ?? 0) + 1); }
+        };
+        if (wantedServer === undefined) {
+          for (let i = 0; i < this.size; i++) count(this.slots[(this.head + i) % this.maxRows]!.event);
+        } else for (const [id, index] of this.serverIndex) {
+          if (id.toLowerCase() !== wantedServer) continue;
+          for (let i = index.start; i < index.items.length; i++) count(index.items[i]!.event);
         }
-      };
-      if (wantedServer === undefined) {
-        for (let i = 0; i < this.size; i++) count(this.slots[(this.head + i) % this.maxRows]!.event);
-      } else for (const [id, index] of this.serverIndex) {
-        if (id.toLowerCase() !== wantedServer) continue;
-        for (let i = index.start; i < index.items.length; i++) count(index.items[i]!.event);
+        this.suggestionCache = { key, counts };
       }
+      for (const [text, total] of counts) if (text.toLowerCase().startsWith(valuePrefix)) values.set(text, total);
     }
     return {
       fields: [...fields].filter(field => field.toLowerCase().startsWith(fieldPrefix)).sort().slice(0, 40),
