@@ -194,7 +194,9 @@ export function createViewer(api: WebviewApi) {
       }
     }
     if (data.sessions) {
-      const sessions = data.sessions.filter(session => !state.selectedServer || session.serverId === state.selectedServer);
+      // A container source (`<source>::<service>`) shares the runs of the source that printed it.
+      const sessions = data.sessions.filter(session => !state.selectedServer || session.serverId === state.selectedServer
+        || state.selectedServer.startsWith(`${session.serverId}::`));
       const signature = JSON.stringify(sessions.map(session => [session.id, session.serverId, session.command, session.status, session.startedAt, session.endedAt, session.captureStatus, session.captureReason, session.canStop]));
       if (signature !== sessionSignature) {
         sessionSignature = signature;

@@ -3,7 +3,8 @@ import { randomBytes } from 'node:crypto';
 import type { Settings } from '../core/settings';
 import type { SessionSummary } from '../core/types';
 import type { Ingestion } from '../capture/ingestion';
-import { StackJoiner } from '../capture/stack-joiner';
+import { LinePipeline, linePipelineOptions } from '../capture/line-pipeline';
+import type { ContainerTag } from '../core/container-prefix';
 import { TerminalNormalizer } from '../capture/terminal-normalizer';
 import type { RuntimeState } from '../capture/runtime-state';
 import type { SessionRegistry } from '../capture/session-registry';
@@ -17,7 +18,7 @@ type CaptureContext = {
   record: SessionSummary;
   terminalId: string;
   accepting: boolean;
-  joiner?: StackJoiner;
+  joiner?: LinePipeline;
   streamDone: boolean;
   streamFailed: boolean;
   endSeen: boolean;
@@ -158,19 +159,17 @@ export class TerminalCapture {
       return;
     }
     const limit = this.config.get('maxLineLength', 65536);
-    const ingest = (text: string, truncated: boolean) => {
+    const ingest = (text: string, truncated: boolean, container?: ContainerTag) => {
       if (!context.accepting || this.disposed || !this.enabled) return;
-      const accepted = this.ingestion.accept(text, 'terminal', { serverId: id, server: label, sessionId: record.id, truncated, persist: this.config.get('persistLogs', false) });
+      const accepted = this.ingestion.accept(text, 'terminal', { serverId: id, server: label, sessionId: record.id, truncated, persist: this.config.get('persistLogs', false), container });
       if (accepted) { record.events++; this.state.notify(); }
     };
-    const joiner = context.joiner = this.config.get('joinStackTraces', true) ? new StackJoiner(ingest, limit) : undefined;
-    const normalizer = new TerminalNormalizer(({ text, truncated }) => {
-      if (joiner) joiner.write(text, truncated); else ingest(text, truncated);
-    }, limit);
+    const joiner = context.joiner = new LinePipeline(ingest, linePipelineOptions(this.config, limit));
+    const normalizer = new TerminalNormalizer(({ text, truncated }) => joiner.write(text, truncated), limit);
     void this.consume(stream, normalizer, record, joiner);
   }
 
-  private async consume(stream: AsyncIterable<string>, normalizer: TerminalNormalizer, record: SessionSummary, joiner?: StackJoiner): Promise<void> {
+  private async consume(stream: AsyncIterable<string>, normalizer: TerminalNormalizer, record: SessionSummary, joiner?: LinePipeline): Promise<void> {
     const context = [...this.active].find(item => item.record === record);
     if (!context) return;
     try {

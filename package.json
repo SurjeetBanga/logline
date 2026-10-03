@@ -86,6 +86,11 @@
         "category": "Logline"
       },
       {
+        "command": "logline.followCompose",
+        "title": "Follow Docker Compose Project",
+        "category": "Logline"
+      },
+      {
         "command": "logline.stopCommand",
         "title": "Stop Active Command",
         "category": "Logline"
@@ -373,6 +378,16 @@
           "type": "boolean",
           "default": true,
           "description": "Join plain-text stack trace lines (Java and Node `at` frames, `Caused by:`, Python tracebacks) onto the line before them, so each trace becomes one searchable event. Applies to new captures and plain-text imports."
+        },
+        "logline.containerPrefixes": {
+          "type": "string",
+          "enum": ["auto", "off"],
+          "enumDescriptions": [
+            "Split Docker Compose (`api-1  | …`) and `kubectl logs --prefix` (`[pod/…/…] …`) prefixes, so each service becomes its own source and its JSON or logfmt payload is parsed.",
+            "Keep container prefixes as part of the message."
+          ],
+          "default": "auto",
+          "description": "Recognize container log prefixes in captured and imported plain-text output. Docker timestamps printed with `--timestamps` are used when the payload has none. Applies to new captures and imports."
         },
         "logline.captureDebugSessions": {
           "type": "boolean",

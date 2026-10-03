@@ -7,7 +7,7 @@ const LIMITS: Record<string, [number, number]> = {
   'otlp.port': [0, 65535], logLensMaxFiles: [100, 50000]
 };
 const INTEGERS = new Set(['indentation', 'maxEvents', 'refreshIntervalMs', 'maxLineLength', 'otlp.port', 'logLensMaxFiles']);
-const CHOICES: Record<string, string[]> = { logLenses: ['off', 'codelens', 'codelens+gutter'], 'otlp.showSpans': ['none', 'entry', 'all'] };
+const CHOICES: Record<string, string[]> = { containerPrefixes: ['auto', 'off'], logLenses: ['off', 'codelens', 'codelens+gutter'], 'otlp.showSpans': ['none', 'entry', 'all'] };
 
 /** Normalize settings once at the host boundary; never mutate the source value. */
 export function normalizeSetting(key: string, value: unknown, fallback: unknown): unknown {

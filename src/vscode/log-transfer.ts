@@ -12,7 +12,8 @@ import type { LogEvent } from '../core/types';
 import { exportChunks, exportQuery, serializeExport, type ExportFormat, type ExportRequest } from '../transfer/log-export';
 import { writeExportFile } from '../storage/export-file';
 import { importRecords } from '../transfer/log-import';
-import { StackJoiner } from '../capture/stack-joiner';
+import { LinePipeline, linePipelineOptions } from '../capture/line-pipeline';
+import type { ContainerTag } from '../core/container-prefix';
 
 export class LogTransfer {
   constructor(private readonly store: LogStore, private readonly config: Settings,
@@ -143,15 +144,14 @@ export class LogTransfer {
         const format = path.extname(uri.path).slice(1).toLowerCase();
         const limit = this.config.get('maxLineLength', 65536);
         let pending = 0;
-        const ingest = (raw: string, truncated: boolean) => {
-          this.ingestion.accept(raw, 'import', { serverId: `imported-${sessionId}`, server: label, sessionId, truncated });
+        const ingest = (raw: string, truncated: boolean, container?: ContainerTag) => {
+          this.ingestion.accept(raw, 'import', { serverId: `imported-${sessionId}`, server: label, sessionId, truncated, container });
           imported++;
           pending++;
         };
-        // Only line-based text files carry stack traces as separate lines;
-        // JSON and CSV records already frame multi-line values themselves.
-        const joiner = format !== 'json' && format !== 'csv' && this.config.get('joinStackTraces', true)
-          ? new StackJoiner(ingest, limit, 0) : undefined;
+        // Only line-based text files carry stack traces and container
+        // prefixes as separate lines; JSON and CSV records frame themselves.
+        const joiner = format !== 'json' && format !== 'csv' ? new LinePipeline(ingest, linePipelineOptions(this.config, limit, 0)) : undefined;
         try {
           for await (const record of importRecords(chunks, format, limit)) {
             if (joiner) joiner.write(record.raw, record.truncated); else ingest(record.raw, record.truncated);
