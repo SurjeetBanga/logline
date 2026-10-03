@@ -7,7 +7,7 @@ import { openSourceLocation } from './source-navigation';
 export type LensMode = 'off' | 'codelens' | 'codelens+gutter';
 
 export interface LensSources {
-  store: Pick<LogStore, 'eventsAfter'>;
+  store: Pick<LogStore, 'eventsAfter' | 'discarded'>;
   config: Settings;
   index: LogSiteIndex;
   tracker: LogSiteTracker;
@@ -21,6 +21,11 @@ const GLOB = `**/*.{${LOG_SITE_EXTENSIONS.join(',')}}`;
 const EXCLUDE = '**/{node_modules,.git,out,dist,build,target,vendor,.venv,venv,__pycache__,coverage,.next,bin,obj}/**';
 const MAX_FILES = 5000;
 const MAX_FILE_BYTES = 512 * 1024;
+// Indexing a workspace changes the index many times a second; recounting
+// waits for it to settle. Evictions only lower counts, so they are folded in
+// at most this often.
+const INDEX_SETTLE_MS = 1000;
+const EVICTION_RECOUNT_MS = 10000;
 
 export function lensMode(config: Settings): LensMode {
   const value = config.get<string>('logLenses', 'codelens');
@@ -60,6 +65,9 @@ export class LogLens implements vscode.CodeLensProvider, vscode.HoverProvider, v
   private refreshTimer?: ReturnType<typeof setTimeout>;
   private clockTimer?: ReturnType<typeof setInterval>;
   private generation?: number;
+  private discarded = 0;
+  private indexedAt = 0;
+  private recountedAt = 0;
   private scan = 0;
   private disposed = false;
 
@@ -79,24 +87,38 @@ export class LogLens implements vscode.CodeLensProvider, vscode.HoverProvider, v
   get enabled(): boolean { return this.mode !== 'off'; }
 
   /** Count newly captured events; coalesced to the panel refresh interval. */
-  schedule(): void {
+  schedule(delay = this.sources.config.get('refreshIntervalMs', 500)): void {
     if (!this.enabled || this.refreshTimer || this.disposed) return;
-    this.refreshTimer = setTimeout(() => { this.refreshTimer = undefined; this.refresh(); }, this.sources.config.get('refreshIntervalMs', 500));
+    this.refreshTimer = setTimeout(() => { this.refreshTimer = undefined; this.refresh(); }, delay);
     this.refreshTimer.unref?.();
   }
 
-  refresh(): void {
+  /**
+   * Bring counts up to date. New events are counted incrementally; clearing
+   * logs, re-indexing source, or evicting old events recounts the retained
+   * events, so counts match what the Logs panel can show.
+   */
+  refresh(now = Date.now()): void {
     if (!this.enabled) return;
     const { tracker, index, store } = this.sources;
     const generation = this.sources.generation();
-    let changed = false;
-    // Clearing logs or re-indexing source recounts every retained event.
-    if (generation !== this.generation || tracker.indexVersion !== index.version) {
+    const cleared = generation !== this.generation;
+    const reindexed = tracker.indexVersion !== index.version;
+    if (reindexed && !cleared && now - this.indexedAt < INDEX_SETTLE_MS) { this.schedule(INDEX_SETTLE_MS); return; }
+    const evicted = store.discarded !== this.discarded;
+    const recount = cleared || reindexed || (evicted && now - this.recountedAt >= EVICTION_RECOUNT_MS);
+    let changed: boolean;
+    if (recount) {
       const hadStats = tracker.stats.size > 0;
       this.generation = generation;
+      this.discarded = store.discarded;
+      this.recountedAt = now;
       tracker.reset();
       changed = tracker.process(store.eventsAfter(0)) || hadStats;
-    } else changed = tracker.process(store.eventsAfter(tracker.watermark));
+    } else {
+      changed = tracker.process(store.eventsAfter(tracker.watermark));
+      if (evicted) this.schedule(EVICTION_RECOUNT_MS - (now - this.recountedAt));
+    }
     if (changed) { this.changeEmitter.fire(); this.decorate(); }
   }
 
@@ -199,14 +221,18 @@ export class LogLens implements vscode.CodeLensProvider, vscode.HoverProvider, v
     }
   }
 
+  // Multi-root workspaces prefix the folder name, so `src/index.ts` in two
+  // folders stays two files.
   private fileId(uri: vscode.Uri): string {
-    return vscode.workspace.asRelativePath(uri, false).replace(/\\/g, '/');
+    return vscode.workspace.asRelativePath(uri, (vscode.workspace.workspaceFolders?.length ?? 0) > 1).replace(/\\/g, '/');
   }
 
   private index(uri: vscode.Uri, text: string): void {
     const file = this.fileId(uri);
     this.uris.set(file, uri);
+    const version = this.sources.index.version;
     this.sources.index.setFile(file, extractLogSites(file, text));
+    if (this.sources.index.version !== version) this.indexedAt = Date.now();
     this.schedule();
   }
 

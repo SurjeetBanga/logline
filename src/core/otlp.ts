@@ -41,6 +41,7 @@ const MAX_ARRAY = 64;
 const MAX_DEPTH = 6;
 const MAX_EVENTS = 128;
 export const SPAN_KINDS = ['unspecified', 'internal', 'server', 'client', 'producer', 'consumer'];
+const SEVERITY_LEVELS = ['trace', 'debug', 'info', 'warn', 'error', 'fatal'];
 
 type Json = Record<string, unknown>;
 const object = (value: unknown): Json | undefined => value && typeof value === 'object' && !Array.isArray(value) ? value as Json : undefined;
@@ -182,7 +183,11 @@ function withoutService(resource: Attributes): Attributes | undefined {
 /** One JSON log line for a log record, in the shape Logline's JSON parser recognizes. */
 export function logLine(log: OtlpLog): string {
   const line: Json = { timestamp: new Date(log.timeMs).toISOString() };
-  if (log.severityText) line.level = log.severityText;
+  // The severity number is standardized; the text is whatever the logging
+  // library calls the level ("E", "Information", "err"), so it is kept as a field.
+  const level = log.severityNumber !== undefined && log.severityNumber <= 24 ? SEVERITY_LEVELS[Math.floor((log.severityNumber - 1) / 4)] : undefined;
+  line.level = level ?? log.severityText;
+  if (log.severityText && level) line.severityText = log.severityText;
   if (log.severityNumber !== undefined) line.severityNumber = log.severityNumber;
   if (typeof log.body === 'string' || typeof log.body === 'number' || typeof log.body === 'boolean') line.message = String(log.body);
   else {

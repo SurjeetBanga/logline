@@ -15,7 +15,7 @@ Logline can also capture commands you run in supported VS Code terminals. Turn *
 3. Enter your server command, such as `npm run dev`. Its stdout and stderr appear in the **Logs** panel.
 4. Type `level:error` in the search box and press **Enter**. Click an event's message to inspect it; choose **Resume** to follow live output again.
 
-**Debugging with F5?** Output from debug sessions appears in Logs automatically, for every debugger.
+**Debugging with F5?** Whatever the Debug Console shows appears in Logs automatically, for every debugger. For launch configurations that print to the integrated terminal (the Python and Java default), turn on terminal capture.
 
 **Using OpenTelemetry?** Choose **More actions → Start OpenTelemetry receiver**. Instrumented apps you start from Logline, a debug session, or a new terminal send their logs and traces to Logline with no collector and no code changes. Expand an event and choose **Show trace** to see the request across services.
 

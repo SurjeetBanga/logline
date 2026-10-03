@@ -61,9 +61,9 @@ const mock = {
   }
 };
 
-async function harness() {
+async function harness(maxRows = 100000) {
   const loaded = withVscode(mock, () => require('./vscode/log-lens') as typeof import('./vscode/log-lens'));
-  const store = new LogStore();
+  const store = new LogStore(maxRows);
   const index = new LogSiteIndex();
   const tracker = new LogSiteTracker(index);
   const queries: string[] = [];
@@ -84,7 +84,7 @@ test('log lenses count events per statement and filter the Logs panel', async ()
   add(h.store, 2, '{"level":"info","msg":"user 42 logged in"}');
   add(h.store, 3, '{"level":"error","msg":"login failed for user bob"}');
   add(h.store, 4, '{"level":"info","msg":"unrelated"}');
-  h.lens.refresh();
+  h.lens.refresh(Date.now() + 5000);
   const document = { uri: Uri.file('/w/src/auth.ts'), lineCount: 6 };
   const lenses = h.lens.provideCodeLenses(document as never) as unknown as CodeLens[];
   assert.deepEqual(lenses.map(lens => [lens.range.startLine, lens.command.title.replace(/ · last .*$/, '')]), [
@@ -99,10 +99,10 @@ test('log lenses count events per statement and filter the Logs panel', async ()
   assert.equal(h.lens.provideHover(document as never, new Position(3, 4) as never), undefined);
 
   add(h.store, 5, '{"level":"info","msg":"user 43 logged in"}');
-  h.lens.refresh();
+  h.lens.refresh(Date.now() + 5000);
   assert.match((h.lens.provideCodeLenses(document as never) as unknown as CodeLens[])[0].command.title, /3 hits/);
   h.clear();
-  h.lens.refresh();
+  h.lens.refresh(Date.now() + 5000);
   assert.deepEqual(h.lens.provideCodeLenses(document as never), []);
   h.lens.dispose();
 });
@@ -110,7 +110,7 @@ test('log lenses count events per statement and filter the Logs panel', async ()
 test('quiet statements lists log calls without retained events and opens the chosen one', async () => {
   const h = await harness();
   add(h.store, 1, '{"level":"info","msg":"user 41 logged in"}');
-  h.lens.refresh();
+  h.lens.refresh(Date.now() + 5000);
   let offered: string[] = [];
   pick = items => { offered = items.map(item => item.label); return items[1]; };
   await commands.get('logline.showQuietLogStatements')!();
@@ -134,4 +134,20 @@ test('turning lenses off releases the index', async () => {
   assert.deepEqual(h.lens.provideCodeLenses({ uri: Uri.file('/w/src/auth.ts'), lineCount: 6 } as never), []);
   h.lens.dispose();
   configured = 'codelens+gutter';
+});
+
+test('lens counts drop events evicted from retention', async () => {
+  const h = await harness(2);
+  add(h.store, 1, '{"level":"info","msg":"user 41 logged in"}');
+  const later = Date.now() + 5000;
+  h.lens.refresh(later);
+  const document = { uri: Uri.file('/w/src/auth.ts'), lineCount: 6 };
+  add(h.store, 2, '{"level":"info","msg":"user 42 logged in"}');
+  add(h.store, 3, '{"level":"error","msg":"login failed for user bob"}');
+  h.lens.refresh(later + 1000);
+  const titles = () => (h.lens.provideCodeLenses(document as never) as unknown as CodeLens[]).map(lens => lens.command.title.replace(/ · last .*$/, ''));
+  assert.deepEqual(titles(), ['$(pulse) 2 hits', '$(pulse) 1 hit · 1 error'], 'new events count right away');
+  h.lens.refresh(later + 12000);
+  assert.deepEqual(titles(), ['$(pulse) 1 hit', '$(pulse) 1 hit · 1 error'], 'the evicted event no longer counts');
+  h.lens.dispose();
 });

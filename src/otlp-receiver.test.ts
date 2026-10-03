@@ -109,3 +109,10 @@ test('falls back to another port instead of taking one that is in use', async t 
   assert.notEqual(new URL(status.endpoint!).port, String(taken));
   assert.match(status.error!, new RegExp(`Port ${taken} is in use`));
 });
+
+test('services that only send spans are still sources', () => {
+  const h = harness({ 'otlp.showSpans': 'none' });
+  assert.equal(h.receiver.acceptSpans(traces), 2);
+  assert.equal(h.store.all().length, 0);
+  assert.deepEqual([...h.registry.records.values()].map(record => [record.serverId, record.events]), [['otel:checkout', 0]]);
+});

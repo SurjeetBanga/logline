@@ -31,6 +31,8 @@ export class OtlpReceiver {
   private starting?: Promise<ReceiverStatus>;
   endpoint?: string;
   error?: string;
+  /** The port asked for at the last start, which can differ from the one in use after a fallback. */
+  requestedPort?: number;
 
   constructor(private readonly config: Settings, private readonly registry: SessionRegistry,
     private readonly ingestion: Ingestion, private readonly state: RuntimeState, private readonly spans: SpanStore) { }
@@ -49,6 +51,7 @@ export class OtlpReceiver {
     const server = this.server;
     this.server = undefined;
     this.endpoint = undefined;
+    this.requestedPort = undefined;
     for (const record of this.records.values()) {
       if (record.status !== 'running') continue;
       record.status = 'exited'; record.endedAt = Date.now(); record.captureComplete = true; record.exitReason = 'receiver stopped';
@@ -83,8 +86,10 @@ export class OtlpReceiver {
     for (const span of readSpans(request)) {
       if (!this.spans.add(span)) continue;
       accepted++;
-      if (rows === 'none' || (rows === 'entry' && !isEntrySpan(span))) continue;
+      // Every sending service is a source, even without rows, so sharing it
+      // with an agent also shares its spans.
       const record = this.record(span.service);
+      if (rows === 'none' || (rows === 'entry' && !isEntrySpan(span))) continue;
       if (this.ingestion.accept(spanLine(span), 'otlp', { serverId: record.serverId, server: record.server, sessionId: record.id })) record.events++;
     }
     if (accepted) this.state.notify();
@@ -104,6 +109,7 @@ export class OtlpReceiver {
   }
 
   private listen(port: number): Promise<ReceiverStatus> {
+    this.requestedPort = port;
     const attempt = (target: number) => new Promise<Server>((resolve, reject) => {
       const server = createServer((request, response) => { void this.handle(request, response); });
       server.once('error', reject);

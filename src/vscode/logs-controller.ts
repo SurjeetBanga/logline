@@ -1,9 +1,8 @@
 import * as vscode from 'vscode';
 import { DebugCapture } from '../capture/debug-capture';
 import { OtlpReceiver } from '../capture/otlp-receiver';
-import { missingOtelVariables, otelDefaults } from '../core/otel-environment';
-import { buildTrace, SpanStore, type TraceView } from '../core/traces';
-import type { Session } from '../capture/types';
+import { buildTrace, SpanStore, traceLogs, type TraceView } from '../core/traces';
+import { OtelIntegration } from './otel-integration';
 import { FileFollower } from '../capture/file-follower';
 import { Ingestion } from '../capture/ingestion';
 import { ProcessRunner } from '../capture/process-runner';
@@ -66,15 +65,12 @@ export class LogsController {
   private disposing?: Promise<void>;
   private sharingRequest?: Promise<void>;
   private guideOpener?: (section: 'guide' | 'whatsNew') => void;
-  private readonly terminalEnvironment?: vscode.EnvironmentVariableCollection;
+  readonly otel: OtelIntegration;
 
   constructor(context: Pick<vscode.ExtensionContext, 'globalState'> & Partial<Pick<vscode.ExtensionContext, 'environmentVariableCollection'>>) {
     this.globalState = context.globalState;
-    this.terminalEnvironment = context.environmentVariableCollection;
-    this.runner.environment = (server, env) => {
-      const defaults = this.otelVariables(serviceName(server));
-      return defaults ? missingOtelVariables(env, defaults) : {};
-    };
+    this.otel = new OtelIntegration(this.config, this.otlp, () => this.notifications.send({ type: 'update' }), context.environmentVariableCollection);
+    this.runner.environment = (server, env) => this.otel.processEnvironment(server, env);
     this.searches = new SavedSearches(context.globalState);
     const workspaceApi = vscode.workspace as typeof vscode.workspace & { onDidChangeWorkspaceFolders?: typeof vscode.workspace.onDidChangeWorkspaceFolders; onDidGrantWorkspaceTrust?: typeof vscode.workspace.onDidGrantWorkspaceTrust; };
     this.sharingSubscriptions = [];
@@ -96,11 +92,9 @@ export class LogsController {
       });
       if (event.affectsConfiguration('logline.captureTerminals')) this.terminalCapture.setEnabled(this.config.get('captureTerminals', false));
       if (event.affectsConfiguration('logline.servers')) this.notifications.send({ type: 'serversChanged' });
-      if (event.affectsConfiguration('logline.otlp')) void this.syncOtlp();
+      if (event.affectsConfiguration('logline.otlp')) void this.otel.sync();
     });
-    // Leave the terminal environment as found until the receiver is running.
-    this.terminalEnvironment?.clear();
-    if (this.config.get('otlp.enabled', false)) void this.syncOtlp();
+    if (this.config.get('otlp.enabled', false)) void this.otel.sync();
   }
   snapshot(request: Extract<ViewRequest, { type: 'snapshot'; }>) {
     this.terminalCapture.pruneStale();
@@ -262,54 +256,13 @@ export class LogsController {
     });
   }
   stopSharing(): void { this.agentAccess.revoke(); this.notifications.send({ type: 'update' }); }
-  /** OpenTelemetry variables for a new process, or undefined when the receiver should not be targeted. */
-  otelVariables(service?: string): Record<string, string> | undefined {
-    if (!this.otlp.running || !this.otlp.endpoint || !this.config.get('otlp.injectEnvironment', true)) return undefined;
-    return otelDefaults(this.otlp.endpoint, service);
-  }
-  /** Start, restart, or stop the receiver to match settings, then update the terminal environment. */
-  async syncOtlp(): Promise<void> {
-    if (this.disposing) return;
-    const enabled = this.config.get('otlp.enabled', false);
-    const port = this.config.get('otlp.port', 4318);
-    const portChanged = this.otlp.running && this.otlp.endpoint !== undefined && !this.otlp.error && !this.otlp.endpoint.endsWith(`:${port}`);
-    if (!enabled || portChanged) await this.otlp.stop();
-    if (enabled && !this.disposing) await this.otlp.start(port);
-    if (this.disposing) { await this.otlp.stop(); return; }
-    this.updateTerminalEnvironment();
-    this.notifications.send({ type: 'update' });
-  }
-  async toggleOtlp(enabled: boolean): Promise<void> {
-    const target = vscode.workspace.workspaceFolders?.length ? vscode.ConfigurationTarget.Workspace : vscode.ConfigurationTarget.Global;
-    await vscode.workspace.getConfiguration('logline').update('otlp.enabled', enabled, target);
-    this.config.refresh();
-    await this.syncOtlp();
-    if (enabled && this.otlp.running) {
-      void vscode.window.showInformationMessage(`Logline is receiving OpenTelemetry on ${this.otlp.endpoint}. Servers, tasks, debug sessions, and new terminals started from now on send telemetry here.`);
-    } else if (enabled && this.otlp.error) void vscode.window.showWarningMessage(`Logline: ${this.otlp.error}`);
-  }
-  private updateTerminalEnvironment(): void {
-    const collection = this.terminalEnvironment;
-    if (!collection) return;
-    collection.clear();
-    const defaults = this.otelVariables();
-    if (!defaults) return;
-    for (const [name, value] of Object.entries(missingOtelVariables(process.env, defaults))) collection.replace(name, value);
-    collection.description = `Sends OpenTelemetry data from new terminals to Logline at ${this.otlp.endpoint}`;
-  }
+  toggleOtlp(enabled: boolean): Promise<void> { return this.otel.toggle(enabled); }
   /** Spans and retained logs that share a trace id. */
   traceView(traceId: string): TraceView {
     const id = traceId.toLowerCase();
     const spans = this.spans.trace(id);
     const read = this.store.reversePage({ query: `traceId:${JSON.stringify(id)}` }, 500);
-    const logs = read.events.reverse()
-      .filter(event => String(getField(event, 'traceId') ?? '').toLowerCase() === id && !(spans.length && getField(event, 'kind') === 'span'))
-      .map(event => {
-        const spanId = getField(event, 'spanId');
-        return { id: event.id, level: event.level, message: event.message ?? '', timeMs: event.timestampMs,
-          spanId: typeof spanId === 'string' ? spanId.toLowerCase() : undefined, server: event.server };
-      });
-    return buildTrace(id, spans, logs);
+    return buildTrace(id, spans, traceLogs(read.events, id, spans.length > 0));
   }
   async toggleTerminalCapture(enabled: boolean): Promise<void> {
     await vscode.workspace.getConfiguration('logline').update('captureTerminals', enabled, vscode.ConfigurationTarget.Workspace);
@@ -359,8 +312,7 @@ export class LogsController {
     this.tasks.disposeObservation();
     this.terminalCapture.dispose();
     this.debug.dispose();
-    this.terminalEnvironment?.clear();
-    await this.otlp.stop();
+    await this.otel.dispose();
     await this.files.dispose();
     // Closing streams may emit a final partial line; flush persistence afterwards.
     await this.runner.dispose();
@@ -368,8 +320,3 @@ export class LogsController {
   }
 }
 
-// Saved servers and tasks name their service; ad-hoc commands leave it to the app.
-function serviceName(server: Session['server']): string | undefined {
-  if (server.id === 'custom') return undefined;
-  return (server.taskName ?? server.label).trim().slice(0, 100) || undefined;
-}

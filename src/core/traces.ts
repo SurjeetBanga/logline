@@ -1,15 +1,25 @@
 import { spanDurationMs, SPAN_KINDS, type AttrValue, type Span } from './otlp';
+import { getField } from './query';
+import type { LogEvent } from './types';
 
-/** Spans grouped by trace, bounded by count; the oldest received spans go first. */
+// Approximate retained size of a span: its strings and attribute JSON, plus overhead.
+function spanBytes(span: Span): number {
+  let bytes = 256 + (span.name.length + span.service.length) * 2 + JSON.stringify(span.attributes).length * 2;
+  for (const event of span.events) bytes += 64 + event.name.length * 2 + JSON.stringify(event.attributes).length * 2;
+  return bytes;
+}
+
+/** Spans grouped by trace, bounded by count and approximate size; the oldest received spans go first. */
 export class SpanStore {
   private readonly traces = new Map<string, Span[]>();
-  private queue: (Span | undefined)[] = [];
+  private queue: ({ span: Span; bytes: number } | undefined)[] = [];
   private head = 0;
   private count = 0;
+  private bytes = 0;
   /** Bumps whenever spans are added or removed, for change detection. */
   revision = 0;
 
-  constructor(public maxSpans = 20000) { }
+  constructor(public maxSpans = 20000, public maxBytes = 64 * 1024 * 1024) { }
 
   get size(): number { return this.count; }
 
@@ -17,11 +27,14 @@ export class SpanStore {
     const spans = this.traces.get(span.traceId) ?? [];
     // Exporters retry failed batches, which can resend spans already stored.
     if (spans.some(existing => existing.spanId === span.spanId)) return false;
+    const bytes = spanBytes(span);
+    if (bytes > this.maxBytes) return false;
     spans.push(span);
     this.traces.set(span.traceId, spans);
-    this.queue.push(span);
+    this.queue.push({ span, bytes });
     this.count++;
-    while (this.count > this.maxSpans) this.evict();
+    this.bytes += bytes;
+    while (this.count > this.maxSpans || this.bytes > this.maxBytes) this.evict();
     this.revision++;
     return true;
   }
@@ -33,15 +46,18 @@ export class SpanStore {
     this.queue = [];
     this.head = 0;
     this.count = 0;
+    this.bytes = 0;
     this.revision++;
   }
 
   private evict(): void {
-    const span = this.queue[this.head];
+    const entry = this.queue[this.head];
     this.queue[this.head++] = undefined;
     if (this.head > 1024 && this.head * 2 > this.queue.length) { this.queue = this.queue.slice(this.head); this.head = 0; }
-    if (!span) return;
+    if (!entry) return;
+    const { span } = entry;
     this.count--;
+    this.bytes -= entry.bytes;
     const spans = this.traces.get(span.traceId);
     if (!spans) return;
     const index = spans.indexOf(span);
@@ -84,6 +100,22 @@ export interface TraceView {
 }
 
 const MAX_ROW_ATTRIBUTES = 24;
+
+/**
+ * Log entries for a trace view, oldest first, from events matching a trace
+ * id. A span's own table row is left out when its span is drawn anyway.
+ */
+export function traceLogs(events: readonly LogEvent[], traceId: string, hasSpans: boolean,
+  message: (event: LogEvent) => string = event => event.message ?? ''): TraceLogInput[] {
+  return events
+    .filter(event => String(getField(event, 'traceId') ?? '').toLowerCase() === traceId && !(hasSpans && getField(event, 'kind') === 'span'))
+    .sort((a, b) => a.id - b.id)
+    .map(event => {
+      const spanId = getField(event, 'spanId');
+      return { id: event.id, level: event.level, message: message(event), timeMs: event.timestampMs,
+        spanId: typeof spanId === 'string' ? spanId.toLowerCase() : undefined, server: event.server };
+    });
+}
 
 /**
  * Arrange a trace's spans as a depth-first waterfall. Spans whose parent was

@@ -5,7 +5,7 @@ import { LogsProvider } from './vscode/logs-view-provider';
 import { registerTasks } from './vscode/tasks/provider';
 import { GuidePanel } from './vscode/guide-panel';
 import { registerAgentTools } from './vscode/agent-tools';
-import { registerDebugCapture, registerDebugEnvironment } from './vscode/debug-capture';
+import { registerDebugCapture } from './vscode/debug-capture';
 import { LogLens } from './vscode/log-lens';
 
 let controller: LogsController | undefined;
@@ -21,7 +21,7 @@ export function activate(context: vscode.ExtensionContext): { provider: LogsProv
     ...registerTasks(controller.runner, controller.registry, controller.tasks),
     ...registerAgentTools(context, controller.agentAccess),
     ...registerDebugCapture(controller.debug),
-    ...registerDebugEnvironment(() => controller?.otelVariables()),
+    ...controller.otel.registerDebugEnvironment(),
     controller,
     guide
   );

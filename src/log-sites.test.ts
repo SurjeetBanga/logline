@@ -131,3 +131,10 @@ test('skips logging calls that appear in comments', () => {
   ].join('\n');
   assert.deepEqual(extractLogSites('a.ts', source).map(site => site.template), ['after a url string', 'real call after the block']);
 });
+
+test('matches templates whose longest word touches a placeholder', () => {
+  const index = new LogSiteIndex();
+  index.setFile('a.py', extractLogSites('a.py', 'logger.info(f"cache_miss_{key} while loading")\nlogger.info(f"retrying{attempt}times")'));
+  assert.equal(index.match(event(1, 'cache_miss_user42 while loading'))?.site.line, 1);
+  assert.equal(index.match(event(2, 'retrying3times')), undefined, 'no word with real boundaries means location-only matching');
+});

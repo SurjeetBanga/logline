@@ -189,6 +189,7 @@ export function eventLocation(event: LogEvent): { file: string; line: number } |
 const basename = (file: string) => file.slice(file.lastIndexOf('/') + 1);
 const normalizePath = (file: string) => file.replace(/\\/g, '/');
 const WORD = /[A-Za-z][A-Za-z0-9_]{3,}/g;
+const KEY_WORD = /(?<![\w…])[A-Za-z][A-Za-z0-9_]{3,}(?![\w…])/g;
 
 interface Compiled { site: LogSite; regex: RegExp; score: number; }
 
@@ -292,7 +293,10 @@ export class LogSiteIndex {
     const index = new Map<string, Compiled[]>();
     for (const sites of this.files.values()) for (const site of sites) {
       if (!site.matchable) continue;
-      const words = site.literals.join(' ').match(WORD);
+      // A word touching a placeholder (`cache_miss_` in `cache_miss_{key}`)
+      // tokenizes differently in the logged message, so only words with real
+      // boundaries in the template can be keys.
+      const words = site.template.match(KEY_WORD);
       if (!words) continue;
       const key = words.reduce((longest, word) => word.length > longest.length ? word : longest).toLowerCase();
       const regex = new RegExp(site.literals.map(part => escapeRegex(part).replace(/\s+/g, '\\s+')).join('[^]*?'));

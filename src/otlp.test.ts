@@ -169,3 +169,23 @@ test('span store keeps traces bounded and ignores resent spans', () => {
   store.clear();
   assert.equal(store.trace(TRACE).length, 0);
 });
+
+test('the standardized severity number decides the level over library-specific text', () => {
+  const level = (severityNumber: number | undefined, severityText: string | undefined) => parseLogLine(logLine({
+    timeMs: 0, service: 's', body: 'x', attributes: {}, resource: {}, severityNumber, severityText
+  }), 'otlp', 1, new Date()).level;
+  assert.equal(level(17, 'E'), 'error');
+  assert.equal(level(13, 'Warning'), 'warn');
+  assert.equal(level(undefined, 'WARN'), 'warn');
+  assert.equal(level(undefined, undefined), 'info');
+  assert.equal(getField(parseLogLine(logLine({ timeMs: 0, service: 's', body: 'x', attributes: {}, resource: {}, severityNumber: 9, severityText: 'Information' }), 'otlp', 1, new Date()), 'severityText'), 'Information');
+});
+
+test('span store also bounds approximate memory', () => {
+  const store = new SpanStore(1000, 4096);
+  const big = (id: string) => span(id, undefined, 0, 1, { attributes: { payload: 'x'.repeat(600) } });
+  for (const id of ['a', 'b', 'c', 'd']) assert.equal(store.add(big(id)), true);
+  assert.ok(store.size < 4, 'older spans are evicted to stay within the byte budget');
+  assert.equal(store.add(span('z', undefined, 0, 1, { attributes: { payload: 'x'.repeat(5000) } })), false, 'a span larger than the whole budget is dropped');
+  assert.ok(store.trace(TRACE).some(item => item.spanId.startsWith('d')));
+});

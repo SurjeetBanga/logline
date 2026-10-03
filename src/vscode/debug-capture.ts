@@ -1,13 +1,11 @@
 import * as vscode from 'vscode';
 import type { DebugCapture, DebugSessionInfo } from '../capture/debug-capture';
-import { missingOtelVariables } from '../core/otel-environment';
 
 type SessionLike = Pick<vscode.DebugSession, 'id' | 'name' | 'type' | 'configuration'> & { parentSession?: SessionLike };
 type DebugApi = {
   registerDebugAdapterTrackerFactory?: typeof vscode.debug.registerDebugAdapterTrackerFactory;
   onDidTerminateDebugSession?: typeof vscode.debug.onDidTerminateDebugSession;
   stopDebugging?: typeof vscode.debug.stopDebugging;
-  registerDebugConfigurationProvider?: typeof vscode.debug.registerDebugConfigurationProvider;
 };
 
 /** Describe a session by its top-level launch configuration, so child sessions and restarts group together. */
@@ -55,21 +53,3 @@ export function registerDebugCapture(capture: DebugCapture): vscode.Disposable[]
   return disposables;
 }
 
-/**
- * Add OpenTelemetry variables to every launch configuration while the
- * receiver runs. Variables in the configuration or VS Code's environment win.
- */
-export function registerDebugEnvironment(variables: () => Record<string, string> | undefined): vscode.Disposable[] {
-  const debug = (vscode as unknown as { debug?: DebugApi }).debug;
-  if (!debug?.registerDebugConfigurationProvider) return [];
-  return [debug.registerDebugConfigurationProvider('*', {
-    resolveDebugConfiguration(_folder: unknown, configuration: vscode.DebugConfiguration) {
-      const defaults = variables();
-      if (!defaults || configuration.request === 'attach') return configuration;
-      const env = configuration.env && typeof configuration.env === 'object' && !Array.isArray(configuration.env) ? configuration.env as Record<string, string> : {};
-      const added = missingOtelVariables({ ...process.env, ...env }, defaults);
-      if (Object.keys(added).length) configuration.env = { ...added, ...env };
-      return configuration;
-    }
-  })];
-}

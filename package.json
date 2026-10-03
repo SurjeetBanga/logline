@@ -377,7 +377,7 @@
         "logline.captureDebugSessions": {
           "type": "boolean",
           "default": true,
-          "description": "Capture program output from VS Code debug sessions (Run and Debug, F5) for every debugger, such as Node.js, Python, Java, Go, and .NET. When a debugger reports where a line was logged, Logline can open that line of code. Applies to debug sessions started after the change."
+          "description": "Capture Debug Console output from VS Code debug sessions (Run and Debug, F5) for every debugger, such as Node.js, Python, Java, Go, and .NET. Configurations that print to the integrated terminal are recorded by terminal capture instead. When a debugger reports where a line was logged, Logline can open that line of code. Applies to debug sessions started after the change."
         },
         "logline.otlp.enabled": {
           "type": "boolean",
