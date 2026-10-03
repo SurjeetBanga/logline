@@ -160,3 +160,15 @@ test('completed debug runs are forgotten once none of their events are retained'
   h.registry.pruneEmptyCompleted(['debug'], (serverId, id) => h.store.sessionEventCount(serverId, id));
   assert.equal(h.registry.records.size, 0);
 });
+
+test('a line split across output events keeps the location where it started', () => {
+  const h = harness();
+  h.capture.start(session());
+  h.capture.output('s1', { category: 'stdout', output: 'first half ', source: { path: '/work/a.ts' }, line: 3 });
+  h.capture.output('s1', { category: 'stdout', output: 'second half\nnext line\n', source: { path: '/work/b.ts' }, line: 9 });
+  h.capture.end('s1');
+  const [split, next] = h.store.all();
+  assert.equal(split.message, 'first half second half');
+  assert.deepEqual(split.location, { file: '/work/a.ts', line: 3 });
+  assert.deepEqual(next.location, { file: '/work/b.ts', line: 9 });
+});

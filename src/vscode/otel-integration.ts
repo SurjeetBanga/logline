@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import * as path from 'node:path';
 import * as vscode from 'vscode';
 import type { OtlpReceiver } from '../capture/otlp-receiver';
 import type { Session } from '../capture/types';
@@ -64,17 +66,20 @@ export class OtelIntegration {
 
   /**
    * Add the variables to every launch configuration while the receiver
-   * runs. Variables in the configuration or VS Code's environment win.
+   * runs. Variables in the configuration, its env file, or VS Code's
+   * environment win. Variables are substituted by then, so `envFile` is a path.
    */
   registerDebugEnvironment(): vscode.Disposable[] {
     const debug = (vscode as unknown as { debug?: Partial<typeof vscode.debug> }).debug;
     if (!debug?.registerDebugConfigurationProvider) return [];
     return [debug.registerDebugConfigurationProvider('*', {
-      resolveDebugConfiguration: (_folder: unknown, configuration: vscode.DebugConfiguration) => {
+      resolveDebugConfigurationWithSubstitutedVariables: (folder: vscode.WorkspaceFolder | undefined, configuration: vscode.DebugConfiguration) => {
         const defaults = this.variables();
         if (!defaults || configuration.request === 'attach') return configuration;
         const env = configuration.env && typeof configuration.env === 'object' && !Array.isArray(configuration.env) ? configuration.env as Record<string, string> : {};
-        const added = missingOtelVariables({ ...process.env, ...env }, defaults);
+        // Debuggers give `env` precedence over the env file, so a value
+        // added here would replace an exporter the file configures.
+        const added = missingOtelVariables({ ...process.env, ...envFileVariables(configuration, folder?.uri.fsPath), ...env }, defaults);
         if (Object.keys(added).length) configuration.env = { ...added, ...env };
         return configuration;
       }
@@ -96,4 +101,27 @@ export class OtelIntegration {
     for (const [name, value] of Object.entries(missingOtelVariables(process.env, defaults))) collection.replace(name, value);
     collection.description = `Sends OpenTelemetry data from new terminals to Logline at ${this.receiver.endpoint}`;
   }
+}
+
+// Python debuggers read the workspace `.env` when a configuration names no env file.
+const DEFAULT_ENV_FILE_TYPES = new Set(['python', 'debugpy']);
+
+/** Variables from a launch configuration's env file(s), in dotenv syntax; unreadable files add nothing. */
+export function envFileVariables(configuration: { type?: unknown; envFile?: unknown }, folder?: string): Record<string, string> {
+  const named = typeof configuration.envFile === 'string' ? [configuration.envFile]
+    : Array.isArray(configuration.envFile) ? configuration.envFile.filter((file): file is string => typeof file === 'string') : [];
+  const files = named.length ? named
+    : folder && typeof configuration.type === 'string' && DEFAULT_ENV_FILE_TYPES.has(configuration.type) ? [path.join(folder, '.env')] : [];
+  const variables: Record<string, string> = {};
+  for (const file of files) {
+    let text: string;
+    try { text = readFileSync(folder ? path.resolve(folder, file) : file, 'utf8'); } catch { continue; }
+    for (const line of text.split(/\r?\n/)) {
+      const match = line.match(/^\s*(?:export\s+)?([A-Za-z_][\w.-]*)\s*=\s*(.*?)\s*$/);
+      if (!match) continue;
+      const value = match[2];
+      variables[match[1]] = /^(["']).*\1$/.test(value) ? value.slice(1, -1) : value.replace(/\s+#.*$/, '');
+    }
+  }
+  return variables;
 }

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { anyValue, isEntrySpan, logLine, normalizeId, readLogs, readSpans, spanLine } from './core/otlp';
+import { anyValue, isEntrySpan, logLine, nanosToMs, normalizeId, readLogs, readSpans, spanLine } from './core/otlp';
 import { decodeLogsRequest, decodeTraceRequest, ProtoError } from './core/otlp-proto';
 import { buildTrace, SpanStore } from './core/traces';
 import { parseLogLine } from './core/log-event';
@@ -188,4 +188,12 @@ test('span store also bounds approximate memory', () => {
   assert.ok(store.size < 4, 'older spans are evicted to stay within the byte budget');
   assert.equal(store.add(span('z', undefined, 0, 1, { attributes: { payload: 'x'.repeat(5000) } })), false, 'a span larger than the whole budget is dropped');
   assert.ok(store.trace(TRACE).some(item => item.spanId.startsWith('d')));
+});
+
+test('timestamps beyond the Date range fall back instead of failing the request', () => {
+  const [log] = readLogs({ resourceLogs: [{ scopeLogs: [{ logRecords: [{ timeUnixNano: 1e30, body: { stringValue: 'x' } }] }] }] }, 1000);
+  assert.equal(log.timeMs, 1000);
+  assert.doesNotThrow(() => logLine(log));
+  assert.equal(nanosToMs(9e24), undefined);
+  assert.equal(nanosToMs('1700000000000000000'), 1700000000000);
 });

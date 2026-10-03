@@ -12,6 +12,10 @@ All notable changes to Logline are documented in this file.
 - Parse plain-text logfmt lines (`level=warn msg="slow query" durationMs=212`) into structured events with level, message, timestamp, and searchable fields.
 - Join plain-text Java, Node, and Python stack traces into one event, so exception details, source links, and error grouping work for text logs. Controlled by `logline.joinStackTraces`.
 - Speed up sorted views while logs stream, sorting in general, and repeated value autocomplete.
+- Keep log lenses responsive: attributing a message to a log statement no longer backtracks (a crafted 512-character message took close to a minute), indexing minified single-line files is linear, and open editors larger than 512 KB are skipped like files on disk.
+- The OpenTelemetry receiver no longer fails a request over a timestamp outside the range a date can hold, and a crashed decoder worker only fails its own requests. Debug launches keep an exporter configured in their `envFile` (or a Python workspace `.env`) instead of overriding it.
+- Copilot trace results redact source labels and span event names, and sharing selected OpenTelemetry runs shares only those runs' spans. Debug output lines split across output events keep the location where they started.
+- `logline.persistLogs` writes a `.gitignore` into `.logline/` so persisted, unredacted logs are not committed by accident.
 
 ## 1.9.1 — 2026-09-17
 

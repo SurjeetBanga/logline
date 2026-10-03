@@ -50,9 +50,10 @@ export function extractLogSites(file: string, text: string): LogSite[] {
   const occurrences = new Map<string, number>();
   const lineStarts = [0];
   for (let index = text.indexOf('\n'); index !== -1; index = text.indexOf('\n', index + 1)) lineStarts.push(index + 1);
+  const comments = new CommentScanner(text);
   CALL.lastIndex = 0;
   for (let match = CALL.exec(text); match && sites.length < MAX_SITES_PER_FILE; match = CALL.exec(text)) {
-    if (inComment(text, match.index, lineStarts[lineOf(lineStarts, match.index).line - 1])) continue;
+    if (comments.covers(match.index, lineStarts[lineOf(lineStarts, match.index).line - 1])) continue;
     const literal = readMessage(text, match.index + match[0].length);
     if (!literal) continue;
     const method = (match[2] ?? match[3] ?? match[4]).replace(/(?:f|w|ln)$/, '').toLowerCase();
@@ -76,12 +77,52 @@ export function extractLogSites(file: string, text: string): LogSite[] {
 
 // Examples in comments and doc comments are not logging calls. Detection is
 // heuristic: `//` after code (but not in a URL), comment-only lines starting
-// with `*`, `#` or `--`, and an unclosed `/*` before the call.
-function inComment(text: string, offset: number, lineStart: number): boolean {
-  const prefix = text.slice(lineStart, offset);
-  if (/^\s*(?:\*|#(?![{\[])|--)/.test(prefix) || /(?:^|[^:"'`\\])\/\//.test(prefix)) return true;
-  return text.lastIndexOf('/*', offset) > text.lastIndexOf('*/', offset);
+// with `*`, `#` or `--`, and an unclosed `/*` before the call. Calls are
+// visited in order, so each line and each comment delimiter is scanned once;
+// a minified file is a single long line with thousands of calls.
+class CommentScanner {
+  private line = -1;
+  /** Where the rest of the current line becomes a comment, or Infinity. */
+  private lineComment = Infinity;
+  private nextSlash: number;
+  private nextOpen: number;
+  private nextClose: number;
+  private lastOpen = -1;
+  private lastClose = -1;
+
+  constructor(private readonly text: string) {
+    this.nextSlash = text.indexOf('//');
+    this.nextOpen = text.indexOf('/*');
+    this.nextClose = text.indexOf('*/');
+  }
+
+  /** Whether `offset`, on the line starting at `lineStart`, is inside a comment. Offsets must not decrease. */
+  covers(offset: number, lineStart: number): boolean {
+    if (lineStart !== this.line) {
+      this.line = lineStart;
+      this.lineComment = this.commentStart(lineStart);
+    }
+    if (offset >= this.lineComment) return true;
+    while (this.nextOpen !== -1 && this.nextOpen <= offset) { this.lastOpen = this.nextOpen; this.nextOpen = this.text.indexOf('/*', this.nextOpen + 1); }
+    while (this.nextClose !== -1 && this.nextClose <= offset) { this.lastClose = this.nextClose; this.nextClose = this.text.indexOf('*/', this.nextClose + 1); }
+    return this.lastOpen > this.lastClose;
+  }
+
+  private commentStart(lineStart: number): number {
+    const { text } = this;
+    LINE_PREFIX.lastIndex = lineStart;
+    if (LINE_PREFIX.test(text)) return LINE_PREFIX.lastIndex;
+    const newline = text.indexOf('\n', lineStart);
+    const lineEnd = newline === -1 ? text.length : newline;
+    while (this.nextSlash !== -1 && this.nextSlash < lineStart) this.nextSlash = text.indexOf('//', this.nextSlash + 1);
+    for (let index = this.nextSlash; index !== -1 && index < lineEnd; index = text.indexOf('//', index + 1)) {
+      // `//` right after `:` or a quote is a URL or a string, not a comment.
+      if (index === lineStart || !/[:"'`\\]/.test(text[index - 1])) return index + 2;
+    }
+    return Infinity;
+  }
 }
+const LINE_PREFIX = /[^\S\n]*(?:\*|#(?![{\[])|--)/y;
 
 function lineOf(starts: number[], offset: number): { line: number; column: number } {
   let low = 0, high = starts.length - 1;
@@ -250,7 +291,25 @@ const normalizePath = (file: string) => file.replace(/\\/g, '/');
 const WORD = /[A-Za-z][A-Za-z0-9_]{3,}/g;
 const KEY_WORD = /(?<![\w…])[A-Za-z][A-Za-z0-9_]{3,}(?![\w…])/g;
 
-interface Compiled { site: LogSite; regex: RegExp; score: number; }
+interface Compiled { site: LogSite; parts: RegExp[]; score: number; }
+
+/**
+ * Whether the literal parts occur in order, separated by anything. Each part
+ * is found at its earliest, shortest occurrence after the previous one, which
+ * decides the same as one regex joined by lazy wildcards without its
+ * backtracking: that regex takes seconds to fail on a 512-character message
+ * repeating most of a template's words.
+ */
+function inOrder(parts: readonly RegExp[], message: string): boolean {
+  let position = 0;
+  for (const part of parts) {
+    part.lastIndex = position;
+    const found = part.exec(message);
+    if (!found) return false;
+    position = found.index + found[0].length;
+  }
+  return true;
+}
 
 /**
  * All known logging calls in the workspace, with two ways to attribute an
@@ -333,7 +392,7 @@ export class LogSiteIndex {
       for (const candidate of this.wordIndex().get(word.toLowerCase()) ?? []) {
         if (seen.has(candidate)) continue;
         seen.add(candidate);
-        if (!candidate.regex.test(message)) continue;
+        if (!inOrder(candidate.parts, message)) continue;
         if (!best || candidate.score > best.score) { best = candidate; tied = false; }
         else if (candidate.score === best.score) tied = true;
       }
@@ -368,9 +427,9 @@ export class LogSiteIndex {
       const words = site.template.match(KEY_WORD);
       if (!words) continue;
       const key = words.reduce((longest, word) => word.length > longest.length ? word : longest).toLowerCase();
-      const regex = new RegExp(site.literals.map(part => escapeRegex(part).replace(/\s+/g, '\\s+')).join('[^]*?'));
+      const parts = site.literals.map(part => new RegExp(escapeRegex(part).replace(/\s+/g, '\\s+?'), 'g'));
       const list = index.get(key) ?? [];
-      list.push({ site, regex, score: site.literals.join('').replace(/\s+/g, '').length });
+      list.push({ site, parts, score: site.literals.join('').replace(/\s+/g, '').length });
       index.set(key, list);
     }
     return this.byWord = index;

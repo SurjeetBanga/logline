@@ -256,7 +256,8 @@ export class LogLens implements vscode.CodeLensProvider, vscode.HoverProvider, v
     const file = this.fileId(uri);
     this.uris.set(file, uri);
     const version = this.sources.index.version;
-    this.sources.index.setFile(file, extractLogSites(file, text));
+    // Open editors are indexed from memory, so they get the same bound as files read from disk.
+    this.sources.index.setFile(file, text.length > MAX_FILE_BYTES ? [] : extractLogSites(file, text));
     if (this.sources.index.version !== version) this.indexedAt = Date.now();
     this.schedule();
   }
