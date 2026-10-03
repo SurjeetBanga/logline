@@ -52,7 +52,7 @@ export function createRows(state: ViewerState, columns: () => Column[], formatTi
     context.className = 'context-button';
     context.dataset.id = String(event.id);
     actions.append(context);
-    container.append(actions, buildEventDetails(event.id, state.selectedDetailText, state.selectedExceptions));
+    container.append(actions, buildEventDetails(event.id, state.selectedDetailText, state.selectedExceptions, state.selectedLinks));
     details.append(container);
     return details;
   }

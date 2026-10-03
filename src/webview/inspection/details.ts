@@ -1,6 +1,7 @@
 import type { ExceptionBlock } from '../../core/exceptions';
+import type { DetailLinks } from '../../protocol/messages';
 
-export function buildEventDetails(id: number, text: string | undefined, exceptions: ExceptionBlock[]) {
+export function buildEventDetails(id: number, text: string | undefined, exceptions: ExceptionBlock[], links: DetailLinks = {}) {
   const container = document.createElement('div');
   container.className = 'event-details';
   const copy = document.createElement('button');
@@ -13,6 +14,14 @@ export function buildEventDetails(id: number, text: string | undefined, exceptio
   share.textContent = 'Share source with Agent';
   share.dataset.id = String(id);
   container.append(share);
+  if (links.site) {
+    const site = document.createElement('button');
+    site.className = 'log-site-button';
+    site.textContent = `Open log statement · ${links.site}`;
+    site.title = 'Open the line of code that logged this event';
+    site.dataset.id = String(id);
+    container.append(site);
+  }
   exceptions.forEach((exception, blockIndex) => {
     const section = document.createElement('section');
     section.className = 'exception-block';

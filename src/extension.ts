@@ -6,6 +6,7 @@ import { registerTasks } from './vscode/tasks/provider';
 import { GuidePanel } from './vscode/guide-panel';
 import { registerAgentTools } from './vscode/agent-tools';
 import { registerDebugCapture } from './vscode/debug-capture';
+import { LogLens } from './vscode/log-lens';
 
 let controller: LogsController | undefined;
 
@@ -23,6 +24,15 @@ export function activate(context: vscode.ExtensionContext): { provider: LogsProv
     controller,
     guide
   );
+  // Editor surfaces are optional: hosts without CodeLens support still capture logs.
+  if (typeof vscode.languages?.registerCodeLensProvider === 'function') {
+    const logController = controller;
+    controller.lens = new LogLens({
+      store: logController.store, config: logController.config, index: logController.logSites, tracker: logController.siteTracker,
+      generation: () => logController.state.generation, showQuery: query => logController.showQuery(query)
+    }, context.extensionUri);
+    context.subscriptions.push(controller.lens);
+  }
   startAutoServers(controller);
   return { provider };
 }

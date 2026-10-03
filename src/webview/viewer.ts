@@ -103,6 +103,8 @@ export function createViewer(api: WebviewApi) {
       return;
     if (data.guideStatus) updateGuideStatus(data.guideStatus);
     bridge.received(data.requestId);
+    // A filter requested from the editor (a log statement's CodeLens).
+    if (data.applyQuery !== undefined && data.applyQuery !== search.query()) search.setQuery(data.applyQuery, true);
     if (data.generation < minimumSnapshotGeneration) {
       bridge.flush();
       return;

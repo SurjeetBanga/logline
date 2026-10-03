@@ -276,6 +276,12 @@ export class LogStore {
     return undefined;
   }
 
+  /** Retained events with an id above `id`, oldest first. */
+  *eventsAfter(id: number): Generator<LogEvent> {
+    const eventAt = (offset: number) => this.slots[(this.head + offset) % this.maxRows]!.event;
+    for (let offset = upperBound(this.size, eventAt, id); offset < this.size; offset++) yield eventAt(offset);
+  }
+
   // Neighbours are in capture order within the same process session, including
   // both streams and every level. Query filters intentionally do not apply.
   context(id: number): { events: LogEvent[]; server?: string; missing: boolean; } {

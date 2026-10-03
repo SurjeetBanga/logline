@@ -18,6 +18,12 @@ import { ViewNotifications } from './view-notifications';
 import { TerminalCapture } from './terminal-capture';
 import { GUIDE_STATE_KEY, guideStatus as getGuideStatus } from './guide-content';
 import { AgentAccessError, AgentLogAccess } from './agent-access';
+import { eventLocation, LogSiteIndex, LogSiteTracker } from '../core/log-sites';
+import { getField } from '../core/query';
+import type { LogEvent } from '../core/types';
+import type { DetailLinks } from '../protocol/messages';
+import type { LogLens } from './log-lens';
+import { openSourceLocation } from './source-navigation';
 
 const SHARE_ALL_CONFIRMED_KEY = 'logline.shareAllLogsConfirmed.v1';
 
@@ -25,7 +31,7 @@ const SHARE_ALL_CONFIRMED_KEY = 'logline.shareAllLogsConfirmed.v1';
 export class LogsController {
   readonly config = new Configuration();
   readonly notifications = new ViewNotifications(this.config);
-  readonly state = new RuntimeState(() => this.notifications.notify());
+  readonly state = new RuntimeState(() => { this.notifications.notify(); this.lens?.schedule(); });
   readonly store = new LogStore(this.config.get('maxEvents', 50000), this.config.get('maxMemoryMb', 100) * 1024 * 1024);
   readonly registry = new SessionRegistry();
   readonly persistence = new LogPersistence(this.config, () => vscode.workspace.workspaceFolders?.[0]?.uri.fsPath,
@@ -40,6 +46,11 @@ export class LogsController {
     fields: this.config.get<string[]>('redactionFields', []),
     replacement: this.config.get('redactionReplacement', '[REDACTED]')
   });
+  readonly logSites = new LogSiteIndex();
+  readonly siteTracker = new LogSiteTracker(this.logSites);
+  /** Editor integration for log statements; attached at activation. */
+  lens?: LogLens;
+  private pendingQuery?: string;
   readonly transfer = new LogTransfer(this.store, this.config, this.ingestion, this.state);
   readonly searches: SavedSearches;
   private readonly globalState: Pick<vscode.ExtensionContext, 'globalState'>['globalState'];
@@ -76,6 +87,11 @@ export class LogsController {
   }
   snapshot(request: Extract<ViewRequest, { type: 'snapshot'; }>) {
     this.terminalCapture.pruneStale();
+    const applyQuery = this.pendingQuery;
+    this.pendingQuery = undefined;
+    return { ...this.buildSnapshot(request), ...(applyQuery !== undefined ? { applyQuery } : {}) };
+  }
+  private buildSnapshot(request: Extract<ViewRequest, { type: 'snapshot'; }>) {
     return buildSnapshot(request, { store: this.store, config: this.config, registry: this.registry, state: this.state,
       ingestion: this.ingestion, persistence: this.persistence, searches: this.searches,
       running: this.isRunning(),
@@ -97,8 +113,36 @@ export class LogsController {
       showGuide: section => this.guideOpener?.(section), agentAccess: this.agentAccess,
       shareWithAgent: (sourceIds, anchor, sessionIds, chooseRuns) => this.shareWithAgent(sourceIds, anchor, sessionIds, chooseRuns),
       stopSharing: () => this.stopSharing(), askCopilot: anchor => this.askCopilot(anchor),
-      toggleTerminalCapture: enabled => this.toggleTerminalCapture(enabled)
+      toggleTerminalCapture: enabled => this.toggleTerminalCapture(enabled),
+      detailLinks: event => this.detailLinks(event), openLogSite: id => this.openLogSite(id)
     }, send, message);
+  }
+  /** Filter the Logs panel from the editor. The next snapshot carries the query, so a panel that is still loading applies it too. */
+  async showQuery(query: string): Promise<void> {
+    this.pendingQuery = query;
+    await vscode.commands.executeCommand('logline.logs.focus');
+    this.notifications.send({ type: 'update' });
+  }
+  /** The statement that logged an event: a matching indexed site, else the location the event reports. */
+  logSiteFor(event: LogEvent): { label: string; open(): Promise<void> } | undefined {
+    const match = this.lens?.enabled ? this.logSites.match(event) : undefined;
+    if (match) return { label: `${match.site.file}:${match.site.line}`, open: () => this.lens!.openSite(match.site) };
+    const location = eventLocation(event);
+    if (!location) return undefined;
+    const name = location.file.replace(/\\/g, '/');
+    return { label: `${name.slice(name.lastIndexOf('/') + 1)}:${location.line}`, open: () => openSourceLocation(location, 'Choose log statement') };
+  }
+  detailLinks(event: LogEvent): DetailLinks {
+    const traceId = getField(event, 'traceId');
+    const site = this.logSiteFor(event)?.label;
+    return { ...(site ? { site } : {}), ...(typeof traceId === 'string' && traceId ? { traceId } : {}) };
+  }
+  async openLogSite(id: number): Promise<void> {
+    const event = this.store.find(id);
+    if (!event) { void vscode.window.showInformationMessage('This event has been discarded from retained history.'); return; }
+    const site = this.logSiteFor(event);
+    if (site) await site.open();
+    else void vscode.window.showInformationMessage('Logline could not find the log statement for this event in the workspace.');
   }
   clear(): void {
     this.agentAccess.revoke();

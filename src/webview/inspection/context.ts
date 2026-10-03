@@ -64,6 +64,11 @@ export function createInspection(elements: Elements, scrollViewport: HTMLElement
       api.postMessage({ type: 'copy', id: Number(copy.dataset.id) });
       return true;
     }
+    const site = (event.target as HTMLElement).closest<HTMLElement>('.log-site-button');
+    if (site) {
+      api.postMessage({ type: 'openLogSite', id: Number(site.dataset.id) });
+      return true;
+    }
     const share = (event.target as HTMLElement).closest<HTMLElement>('.share-source-button');
     if (share) {
       api.postMessage({ type: 'shareEvent', id: Number(share.dataset.id) });
@@ -104,7 +109,7 @@ export function createInspection(elements: Elements, scrollViewport: HTMLElement
 
   }
   function receiveDetails(data: Extract<HostMessage, { type: 'details'; }>) {
-    if (elements.contextDialog.open && data.id === contextSelected) elements.contextDetails.replaceChildren(buildEventDetails(data.id, data.text, data.exceptions));
+    if (elements.contextDialog.open && data.id === contextSelected) elements.contextDetails.replaceChildren(buildEventDetails(data.id, data.text, data.exceptions, data));
   }
   return { showContext, selectContextEvent, handleDetailAction, receiveContext, receiveDetails };
 }

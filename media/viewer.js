@@ -435,7 +435,7 @@
   };
 
   // src/webview/inspection/details.ts
-  function buildEventDetails(id, text, exceptions) {
+  function buildEventDetails(id, text, exceptions, links = {}) {
     const container = document.createElement("div");
     container.className = "event-details";
     const copy = document.createElement("button");
@@ -448,6 +448,14 @@
     share.textContent = "Share source with Agent";
     share.dataset.id = String(id);
     container.append(share);
+    if (links.site) {
+      const site = document.createElement("button");
+      site.className = "log-site-button";
+      site.textContent = `Open log statement \xB7 ${links.site}`;
+      site.title = "Open the line of code that logged this event";
+      site.dataset.id = String(id);
+      container.append(site);
+    }
     exceptions.forEach((exception, blockIndex) => {
       const section = document.createElement("section");
       section.className = "exception-block";
@@ -535,6 +543,11 @@
         api.postMessage({ type: "copy", id: Number(copy.dataset.id) });
         return true;
       }
+      const site = event.target.closest(".log-site-button");
+      if (site) {
+        api.postMessage({ type: "openLogSite", id: Number(site.dataset.id) });
+        return true;
+      }
       const share = event.target.closest(".share-source-button");
       if (share) {
         api.postMessage({ type: "shareEvent", id: Number(share.dataset.id) });
@@ -571,7 +584,7 @@
       return;
     }
     function receiveDetails(data) {
-      if (elements.contextDialog.open && data.id === contextSelected) elements.contextDetails.replaceChildren(buildEventDetails(data.id, data.text, data.exceptions));
+      if (elements.contextDialog.open && data.id === contextSelected) elements.contextDetails.replaceChildren(buildEventDetails(data.id, data.text, data.exceptions, data));
     }
     return { showContext, selectContextEvent, handleDetailAction, receiveContext, receiveDetails };
   }
@@ -720,6 +733,7 @@
     selected;
     selectedDetailText;
     selectedExceptions = [];
+    selectedLinks = {};
     selectedServer;
     selectedSession;
     selectedSort;
@@ -760,6 +774,7 @@
       this.selected = void 0;
       this.selectedDetailText = void 0;
       this.selectedExceptions = [];
+      this.selectedLinks = {};
     }
     /** Explicit changes close inspection while keeping a fixed history boundary. */
     browseFromInspection() {
@@ -1241,7 +1256,7 @@
       context.className = "context-button";
       context.dataset.id = String(event.id);
       actions.append(context);
-      container.append(actions, buildEventDetails(event.id, state.selectedDetailText, state.selectedExceptions));
+      container.append(actions, buildEventDetails(event.id, state.selectedDetailText, state.selectedExceptions, state.selectedLinks));
       details.append(container);
       return details;
     }
@@ -1665,6 +1680,7 @@
       if (data.id !== state.selected) return;
       state.selectedDetailText = data.text;
       state.selectedExceptions = data.exceptions;
+      state.selectedLinks = { site: data.site, traceId: data.traceId };
       resetDetails();
       renderWindow();
     }
@@ -2007,6 +2023,7 @@
         return;
       if (data.guideStatus) updateGuideStatus(data.guideStatus);
       bridge.received(data.requestId);
+      if (data.applyQuery !== void 0 && data.applyQuery !== search.query()) search.setQuery(data.applyQuery, true);
       if (data.generation < minimumSnapshotGeneration) {
         bridge.flush();
         return;

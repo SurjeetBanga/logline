@@ -149,11 +149,26 @@
         "category": "Logline"
       },
       {
+        "command": "logline.showQuietLogStatements",
+        "title": "Show Log Statements That Have Not Logged",
+        "category": "Logline"
+      },
+      {
+        "command": "logline.showLogSite",
+        "title": "Show Log Statement Events",
+        "category": "Logline"
+      },
+      {
         "command": "logline.manageTerminalCapture",
         "title": "Manage Terminal Capture",
         "category": "Logline"
       }
     ],
+    "menus": {
+      "commandPalette": [
+        { "command": "logline.showLogSite", "when": "false" }
+      ]
+    },
     "languageModelTools": [
       {
         "name": "logline_list_shared_sources",
@@ -332,6 +347,17 @@
           "type": "boolean",
           "default": true,
           "description": "Capture program output from VS Code debug sessions (Run and Debug, F5) for every debugger, such as Node.js, Python, Java, Go, and .NET. When a debugger reports where a line was logged, Logline can open that line of code. Applies to debug sessions started after the change."
+        },
+        "logline.logLenses": {
+          "type": "string",
+          "enum": ["off", "codelens", "codelens+gutter"],
+          "enumDescriptions": [
+            "Do not index log statements or show their activity in the editor.",
+            "Show a CodeLens with hit counts above log statements that produced retained events, plus a hover with recent values.",
+            "Also mark log statements that logged errors in the editor gutter and overview ruler."
+          ],
+          "default": "codelens",
+          "description": "Connect log statements in source code to captured events. Logline indexes logging calls in up to 5,000 workspace source files and attributes each event by the code location it reports or by its message text."
         },
         "logline.captureTerminals": {
           "type": "boolean",
