@@ -52,7 +52,11 @@ function services() {
     shareWithAgent: async (...args: unknown[]) => { calls.push({ name: 'share', value: args }); },
     stopSharing: () => calls.push({ name: 'stopSharing' }),
     askCopilot: async (anchor?: number) => { calls.push({ name: 'copilot', value: anchor }); return true; },
-    toggleTerminalCapture: async (enabled: boolean) => { calls.push({ name: 'terminalCapture', value: enabled }); }
+    toggleTerminalCapture: async (enabled: boolean) => { calls.push({ name: 'terminalCapture', value: enabled }); },
+    detailLinks: () => ({ site: 'src/app.ts:4', traceId: 'abc' }),
+    openLogSite: async (id: number) => { calls.push({ name: 'openLogSite', value: id }); },
+    traceView: (traceId: string) => ({ traceId, durationMs: 0, services: [], spans: [], errors: 0, omitted: 0, logs: [] }),
+    toggleOtlp: async (enabled: boolean) => { calls.push({ name: 'otlp', value: enabled }); }
   };
 }
 
@@ -71,12 +75,16 @@ test('message router dispatches every public action and preserves normalized inp
     { type: 'toggleTerminalCapture', enabled: true }, { type: 'showGuide', section: 'whatsNew' },
     { type: 'import' }, { type: 'details', id: 1, target: 'context' }, { type: 'copy', id: 1 },
     { type: 'clear' }, { type: 'stop', serverId: 'api', sessionId: 'run' }, { type: 'config' },
-    { type: 'manageServers' }
+    { type: 'manageServers' }, { type: 'openLogSite', id: 1 }, { type: 'openLogSite', id: -1 },
+    { type: 'trace', traceId: 'ABC123' }, { type: 'trace', traceId: '../etc' }, { type: 'toggleOtlp', enabled: true }
   ];
   for (const request of requests) await handleMessage(service as any, message => sent.push(message), request);
   assert.ok(sent.some(message => (message as any).type === 'snapshot'));
   assert.ok(sent.some(message => (message as any).type === 'context' && (message as any).id === 1));
-  assert.ok(sent.some(message => (message as any).type === 'details' && (message as any).target === 'context'));
+  assert.ok(sent.some(message => (message as any).type === 'details' && (message as any).target === 'context' && (message as any).site === 'src/app.ts:4'));
+  assert.deepEqual(calls.filter(call => call.name === 'openLogSite').map(call => call.value), [1]);
+  assert.deepEqual(sent.filter(message => (message as any).type === 'trace').map(message => (message as any).trace.traceId), ['ABC123']);
+  assert.deepEqual(calls.filter(call => call.name === 'otlp').map(call => call.value), [true]);
   for (const name of ['saveSearch', 'deleteSavedSearch', 'export', 'exportForAI', 'copyFiltered', 'exportContext', 'share',
     'stopSharing', 'copilot', 'terminalCapture', 'guide', 'import', 'clipboard', 'clear', 'stop', 'command'])
     assert.ok(calls.some(call => call.name === name), `missing routed action ${name}`);

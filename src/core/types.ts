@@ -34,8 +34,11 @@ export interface LogEvent {
   dependencies?: string[];
   dependencyState?: string;
   exitReason?: string;
+  /** The code location that emitted the event, when the capture source reports it (for example a debug adapter). */
+  location?: { file: string; line: number; column?: number };
 }
 
+export type SourceKind = 'process' | 'task' | 'terminal' | 'import' | 'file' | 'debug' | 'otel';
 export type SessionStatus = 'running' | 'stopping' | 'exited' | 'failed';
 
 export interface SessionSummary {
@@ -60,7 +63,7 @@ export interface SessionSummary {
   taskScope?: string;
   taskLabel?: string;
   /** Source metadata used by terminal capture and agent sharing. */
-  sourceKind?: 'process' | 'task' | 'terminal' | 'import' | 'file';
+  sourceKind?: SourceKind;
   owned?: boolean;
   /** Whether the session can be terminated by the Logs view. */
   canStop?: boolean;

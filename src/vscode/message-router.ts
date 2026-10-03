@@ -5,7 +5,9 @@ import { formatDetails } from '../core/format-details';
 import type { LogStore } from '../core/log-store';
 import { resolveRunTarget } from '../core/server-config';
 import type { Settings } from '../core/settings';
-import { parseViewRequest, type HostMessage, type Snapshot, type ViewRequest } from '../protocol/messages';
+import { parseViewRequest, type DetailLinks, type HostMessage, type Snapshot, type ViewRequest } from '../protocol/messages';
+import type { LogEvent } from '../core/types';
+import type { TraceView } from '../core/traces';
 import type { SavedSearches } from '../storage/saved-searches';
 import type { LogTransfer } from './log-transfer';
 import { manageServers } from './servers';
@@ -22,6 +24,10 @@ interface MessageServices {
   stopSharing(): void;
   askCopilot(anchor?: number): Promise<boolean>;
   toggleTerminalCapture(enabled: boolean): Promise<void>;
+  detailLinks(event: LogEvent): DetailLinks;
+  openLogSite(id: number): Promise<void>;
+  traceView(traceId: string): TraceView;
+  toggleOtlp(enabled: boolean): Promise<void>;
 }
 export async function handleMessage(services: MessageServices, send: (message: HostMessage) => void, value: unknown): Promise<void> {
   const msg = parseViewRequest(value);
@@ -36,6 +42,9 @@ export async function handleMessage(services: MessageServices, send: (message: H
       return;
     case 'context': send({ type: 'context', id: msg.id, ...store.context(msg.id) }); return;
     case 'openSource': await openSource(store, msg); return;
+    case 'openLogSite': await services.openLogSite(msg.id); return;
+    case 'trace': send({ type: 'trace', trace: services.traceView(msg.traceId) }); return;
+    case 'toggleOtlp': await services.toggleOtlp(msg.enabled); return;
     case 'saveSearch': {
       const saved = searches.saveSearch(msg.name, msg.query ?? '', msg.levels, msg.serverId);
       send({ type: 'searches', searches: { saved: searches.savedSearches() }, saved }); return;
@@ -66,7 +75,8 @@ export async function handleMessage(services: MessageServices, send: (message: H
       if (event?.isJson && event.raw !== undefined) text = formatDetails(event.raw, config.get('indentation', 2));
       if (event?.truncated) text += `\n[Truncated: line exceeded ${config.get('maxLineLength', 65536).toLocaleString()} characters]`;
       if (msg.type === 'copy' && event) await vscode.env.clipboard.writeText(text);
-      if (msg.type === 'details') send({ type: 'details', id: msg.id, text, target: msg.target ?? 'main', exceptions: event ? extractExceptions(event) : [] });
+      if (msg.type === 'details') send({ type: 'details', id: msg.id, text, target: msg.target ?? 'main', exceptions: event ? extractExceptions(event) : [],
+        ...(event ? services.detailLinks(event) : {}) });
       return;
     }
     case 'clear': services.clear(); return;

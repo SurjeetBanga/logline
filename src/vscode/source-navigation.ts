@@ -8,7 +8,11 @@ export async function openSource(store: LogStore, msg: Record<string, unknown>):
   const event = store.find(msg.id as number);
   if (!event) { vscode.window.showInformationMessage('This event has been discarded from retained history.'); return; }
   const source = extractExceptions(event)[msg.block as number]?.lines[msg.line as number]?.source;
-  if (!source) return;
+  if (source) await openSourceLocation(source, 'Choose stack frame source');
+}
+
+/** Open a logged file location, resolved only against files inside the workspace. */
+export async function openSourceLocation(source: { file: string; line: number; column?: number }, title = 'Choose source file'): Promise<void> {
   try {
     const folders = vscode.workspace.workspaceFolders ?? [];
     const normalized = source.file.replace(/\\/g, '/').replace(/^\.\//, '');
@@ -34,14 +38,14 @@ export async function openSource(store: LogStore, msg: Record<string, unknown>):
     }
     const unique = [...new Map(candidates.map(uri => [uri.toString(), uri])).values()];
     const uri = unique.length === 1 ? unique[0] : (await vscode.window.showQuickPick(
-      unique.map(uri => ({ label: vscode.workspace.asRelativePath(uri), uri })), { title: 'Choose stack frame source' }))?.uri;
+      unique.map(uri => ({ label: vscode.workspace.asRelativePath(uri), uri })), { title }))?.uri;
     if (!uri) return;
     const document = await vscode.workspace.openTextDocument(uri);
     const line = Math.min(source.line - 1, document.lineCount - 1);
-    const column = Math.min(source.column - 1, document.lineAt(line).text.length);
+    const column = Math.min((source.column ?? 1) - 1, document.lineAt(line).text.length);
     const position = new vscode.Position(line, column);
     await vscode.window.showTextDocument(document, { preview: true, selection: new vscode.Range(position, position) });
   } catch (error) {
-    vscode.window.showInformationMessage(`Could not open stack frame: ${(error as Error).message}`);
+    vscode.window.showInformationMessage(`Could not open source: ${(error as Error).message}`);
   }
 }

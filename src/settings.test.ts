@@ -41,3 +41,13 @@ test('server validation filters malformed records and does not coerce autostart 
   assert.equal(valid.cwd, 42);
   assert.deepEqual(normalizeSetting('columns', ['a', null, 'a', 'b'], []), ['a', 'b']);
 });
+
+test('new feature settings are clamped and validated', () => {
+  assert.equal(normalizeSetting('otlp.port', 70000, 4318), 65535);
+  assert.equal(normalizeSetting('otlp.port', 4318.7, 4318), 4318);
+  assert.equal(normalizeSetting('otlp.port', '4318', 4318), 4318);
+  assert.equal(normalizeSetting('logLensMaxFiles', 10, 5000), 100);
+  assert.equal(normalizeSetting('logLenses', 'everything', 'codelens'), 'codelens');
+  assert.equal(normalizeSetting('logLenses', 'codelens+gutter', 'codelens'), 'codelens+gutter');
+  assert.equal(normalizeSetting('otlp.showSpans', 'some', 'entry'), 'entry');
+});

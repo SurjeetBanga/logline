@@ -12,6 +12,8 @@ import type { Session } from './types';
 export class ProcessRunner {
   readonly sessions = new Set<Session>();
   private readonly timers = new Set<ReturnType<typeof setTimeout>>();
+  /** Extra variables for a server's environment; existing values always win. */
+  environment?: (server: Session['server'], env: Record<string, string | undefined>) => Record<string, string>;
   constructor(private readonly config: Settings, private readonly registry: SessionRegistry,
     private readonly ingestion: Ingestion, private readonly state: RuntimeState) { }
   stop(): void { for (const session of this.sessions) this.stopSession(session); }
@@ -56,8 +58,10 @@ export class ProcessRunner {
     this.state.command = args ? [command, ...args].join(' ') : command;
     this.state.status = 'Running';
     this.state.notify();
+    const childEnv: Record<string, string | undefined> = { ...process.env, ...(env ?? {}) };
+    Object.assign(childEnv, this.environment?.(server, childEnv));
     const spawnOptions: SpawnOptions = {
-      cwd, shell: server.shell ?? !args, env: { ...process.env, ...(env ?? {}) }, detached: process.platform !== 'win32',
+      cwd, shell: server.shell ?? !args, env: childEnv, detached: process.platform !== 'win32',
       stdio: ['ignore', 'pipe', 'pipe']
     };
     const child = (args !== undefined ? spawn(command, args, spawnOptions) : spawn(command, spawnOptions)) as ChildProcessWithoutNullStreams;

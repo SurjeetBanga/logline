@@ -1,4 +1,5 @@
 import type { ExceptionBlock } from '../core/exceptions';
+import type { DetailLinks } from '../protocol/messages';
 export const LEVELS = ['trace', 'debug', 'info', 'warn', 'error', 'fatal', 'unclassified'];
 export interface PersistedState {
   query?: string; levels?: string[]; server?: string; session?: string; sort?: string; sortDirection?: 'asc' | 'desc';
@@ -17,6 +18,7 @@ export class ViewerState {
   selected?: number;
   selectedDetailText?: string;
   selectedExceptions: ExceptionBlock[] = [];
+  selectedLinks: DetailLinks = {};
   selectedServer: string;
   selectedSession: string;
   selectedSort: string;
@@ -47,7 +49,7 @@ export class ViewerState {
   currentLevels(): string[] | undefined { return this.checkedLevels.size === LEVELS.length ? undefined : [...this.checkedLevels]; }
   setFollowing(value: boolean): void { this.following = value; this.before = value ? undefined : this.newest; }
   filterChanged(): void { this.page = 0; this.lastRows = undefined; }
-  resetSelection(): void { this.selected = undefined; this.selectedDetailText = undefined; this.selectedExceptions = []; }
+  resetSelection(): void { this.selected = undefined; this.selectedDetailText = undefined; this.selectedExceptions = []; this.selectedLinks = {}; }
   /** Explicit changes close inspection while keeping a fixed history boundary. */
   browseFromInspection(): void {
     if (!this.paused) return;

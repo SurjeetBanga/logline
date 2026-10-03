@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { readFile, writeFile } from 'node:fs/promises';
+import { request } from 'node:http';
 import * as vscode from 'vscode';
 
 /** Run inside a temporary VS Code Extension Development Host. */
@@ -11,8 +12,9 @@ export async function run(): Promise<void> {
     await extension.activate();
     assert.equal(extension.isActive, true);
     const commands = await vscode.commands.getCommands();
-    for (const command of ['showLogs', 'runCommand', 'stopCommand', 'export', 'import', 'exportForAI', 'convertTask', 'captureTask', 'showGuide', 'showWhatsNew',
-      'enableTerminalCapture', 'disableTerminalCapture', 'manageTerminalCapture', 'shareWithAgent', 'shareSpecificRuns', 'stopSharing', 'askCopilot']) {
+    for (const command of ['showLogs', 'runCommand', 'followFile', 'stopCommand', 'export', 'import', 'exportForAI', 'convertTask', 'captureTask', 'showGuide', 'showWhatsNew',
+      'enableTerminalCapture', 'disableTerminalCapture', 'manageTerminalCapture', 'shareWithAgent', 'shareSpecificRuns', 'stopSharing', 'askCopilot',
+      'startOtlpReceiver', 'stopOtlpReceiver', 'showTrace', 'showQuietLogStatements', 'showLogSite']) {
       assert.ok(commands.includes(`logline.${command}`), `${command} is registered`);
     }
     await vscode.workspace.getConfiguration('logline').update('persistLogs', true, vscode.ConfigurationTarget.Workspace);
@@ -29,17 +31,65 @@ export async function run(): Promise<void> {
       await vscode.tasks.executeTask(task);
       await ended;
     } finally { clearTimeout(timer); subscription?.dispose(); }
-    const persisted = `${vscode.workspace.workspaceFolders?.[0].uri.fsPath}/.logline/latest.log`;
-    let captured = '';
-    const deadline = Date.now() + 5000;
-    while (Date.now() < deadline) {
-      try { captured = await readFile(persisted, 'utf8'); } catch { /* persistence flush is asynchronous */ }
-      if (captured.includes('extension smoke')) break;
-      await new Promise(resolve => setTimeout(resolve, 50));
-    }
-    assert.match(captured, /extension smoke/, 'task output is captured in Logline persistence');
+    const folder = vscode.workspace.workspaceFolders![0];
+    const persisted = `${folder.uri.fsPath}/.logline/latest.log`;
+    const persistedText = async (text: string) => {
+      let captured = '';
+      const deadline = Date.now() + 10000;
+      while (Date.now() < deadline) {
+        try { captured = await readFile(persisted, 'utf8'); } catch { /* persistence flush is asynchronous */ }
+        if (captured.includes(text)) break;
+        await new Promise(resolve => setTimeout(resolve, 50));
+      }
+      return captured;
+    };
+    assert.match(await persistedText('extension smoke'), /extension smoke/, 'task output is captured in Logline persistence');
     await vscode.commands.executeCommand('logline.stopCommand');
-    await writeFile(result, JSON.stringify({ passed: true, checks: ['activation', 'commands', 'webview focus', 'task discovery', 'captured task completion', 'captured task output', 'stop'] }));
+
+    // Debug capture: a Node debug session's Debug Console output reaches Logline.
+    let debugSubscription: vscode.Disposable | undefined;
+    try {
+      const ended = new Promise<void>((resolve, reject) => {
+        debugSubscription = vscode.debug.onDidTerminateDebugSession(session => { if (!session.parentSession && session.name === 'Logline smoke debug') resolve(); });
+        timer = setTimeout(() => reject(new Error('Debug session did not finish')), 30000);
+      });
+      assert.ok(await vscode.debug.startDebugging(folder, {
+        type: 'node', request: 'launch', name: 'Logline smoke debug', program: '${workspaceFolder}/app.js', console: 'internalConsole'
+      }), 'a Node debug session starts');
+      await ended;
+    } finally { clearTimeout(timer); debugSubscription?.dispose(); }
+    assert.match(await persistedText('smoke debug statement ready'), /smoke debug statement ready/, 'debug output is captured');
+
+    // Log lenses: the statement that printed the debug output shows a hit count.
+    const app = vscode.Uri.joinPath(folder.uri, 'app.js');
+    await vscode.window.showTextDocument(app);
+    let lensTitles: string[] = [];
+    const lensDeadline = Date.now() + 15000;
+    while (Date.now() < lensDeadline) {
+      const lenses = await vscode.commands.executeCommand<vscode.CodeLens[]>('vscode.executeCodeLensProvider', app) ?? [];
+      lensTitles = lenses.map(lens => lens.command?.title ?? '');
+      if (lensTitles.some(title => /\bhits?\b/.test(title))) break;
+      await new Promise(resolve => setTimeout(resolve, 200));
+    }
+    assert.ok(lensTitles.some(title => /1 hit\b/.test(title)), `the log statement shows its hit (CodeLens: ${lensTitles.join(' | ') || 'none'})`);
+
+    // OpenTelemetry: the receiver accepts an OTLP/JSON log on the configured port.
+    await vscode.commands.executeCommand('logline.startOtlpReceiver');
+    const traceId = '4bf92f3577b34da6a3ce929d0e0e4736';
+    const body = JSON.stringify({ resourceLogs: [{ resource: { attributes: [{ key: 'service.name', value: { stringValue: 'smoke' } }] },
+      scopeLogs: [{ logRecords: [{ timeUnixNano: String(BigInt(Date.now()) * 1000000n), severityNumber: 9, body: { stringValue: 'smoke otel record' }, traceId }] }] }] });
+    const status = await new Promise<number>((resolve, reject) => {
+      const post = request({ host: '127.0.0.1', port: Number(process.env.LOGLINE_SMOKE_OTLP_PORT), path: '/v1/logs', method: 'POST', headers: { 'content-type': 'application/json' } },
+        response => { response.resume(); resolve(response.statusCode ?? 0); });
+      post.on('error', reject);
+      post.end(body);
+    });
+    assert.equal(status, 200, 'the OpenTelemetry receiver accepts OTLP/JSON');
+    assert.match(await persistedText('smoke otel record'), /smoke otel record/, 'received telemetry is captured');
+    await vscode.commands.executeCommand('logline.showTrace', traceId);
+    await vscode.commands.executeCommand('logline.stopOtlpReceiver');
+    await writeFile(result, JSON.stringify({ passed: true, checks: ['activation', 'commands', 'webview focus', 'task discovery', 'captured task completion', 'captured task output', 'stop',
+      'debug capture', 'log lens', 'OpenTelemetry receiver', 'trace command'] }));
   } catch (error) {
     await writeFile(result, JSON.stringify({ passed: false, error: String(error) }));
     throw error;

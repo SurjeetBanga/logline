@@ -68,6 +68,10 @@ export function registerAgentTools(context: vscode.ExtensionContext, access: Age
       return access.inspect(input.shareId, input.id as number, input.context as number | undefined);
     })],
     ['logline_analyze_logs', invoke(access, input => access.analyze(input as unknown as AgentSearchInput))],
+    ['logline_get_trace', invoke(access, input => {
+      if (typeof input.shareId !== 'string' || typeof input.traceId !== 'string') throw new AgentAccessError('INVALID_INPUT', 'shareId and traceId are required.');
+      return access.trace(input.shareId, input.traceId);
+    })],
     ['logline_wait_for_logs', invoke(access, (input, token) => {
       if (!Number.isSafeInteger(input.watermark) || (input.watermark as number) < 0) throw new AgentAccessError('INVALID_INPUT', 'watermark must be a non-negative integer.');
       const timeoutMs = input.timeoutMs === undefined ? 5000 : Number(input.timeoutMs);

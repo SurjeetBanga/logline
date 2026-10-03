@@ -15,6 +15,10 @@ Logline can also capture commands you run in supported VS Code terminals. Turn *
 3. Enter your server command, such as `npm run dev`. Its stdout and stderr appear in the **Logs** panel.
 4. Type `level:error` in the search box and press **Enter**. Click an event's message to inspect it; choose **Resume** to follow live output again.
 
+**Debugging with F5?** Whatever the Debug Console shows appears in Logs automatically, for every debugger. For launch configurations that print to the integrated terminal (the Python and Java default), turn on terminal capture.
+
+**Using OpenTelemetry?** Choose **More actions → Start OpenTelemetry receiver**. Instrumented apps you start from Logline, a debug session, or a new terminal send their logs and traces to Logline with no collector and no code changes. Expand an event and choose **Show trace** to see the request across services.
+
 **Try it with a file:** run **Logline: Import Logs** and select [samples/demo-logs.jsonl](samples/demo-logs.jsonl) from this repository. You can also import JSON, JSONL/NDJSON, CSV, and plain-text logs.
 
 Open **Help** in the toolbar for the offline visual guide, or run **Logline: What’s New** for release highlights. See [Development](#development) to build and install from source.
@@ -23,9 +27,10 @@ Open **Help** in the toolbar for the offline visual guide, or run **Logline: Wha
 
 | Workflow | Features |
 | --- | --- |
-| **Capture** | Capture supported terminal commands, run several servers at once, follow log files on disk like `tail -F`, save commands with **Manage servers**, filter by source or run, and capture VS Code tasks. |
+| **Capture** | Capture supported terminal commands and debug sessions, run several servers at once, follow log files on disk like `tail -F`, receive OpenTelemetry logs and traces, save commands with **Manage servers**, filter by source or run, and capture VS Code tasks. |
 | **Search** | Field/value autocomplete, editable filter chips, right-click **Include value** / **Exclude value**, any combination of log levels, and up to 50 saved searches. |
-| **Inspect** | Expand JSON, read structured exceptions and nested causes, see multi-line plain-text stack traces as one event, open stack-frame source locations, share an event’s exact run, and view up to 25 surrounding events on each side from the same run. |
+| **Inspect** | Expand JSON, read structured exceptions and nested causes, see multi-line plain-text stack traces as one event, open stack-frame source locations, share an event’s exact run, view up to 25 surrounding events on each side from the same run, and follow a request across services in a trace waterfall. |
+| **Code** | See a CodeLens with live hit counts, errors, and recent values above the log statements in your editor, jump from any event to the statement that logged it, and find statements that never fired. |
 | **Arrange** | Auto-detected fields, custom and nested columns, sorting, drag-to-reorder, and resizable column widths. |
 | **Analyze** | Event rate, errors, latency, status codes, the top 10 log patterns, and normalized error groups for the current filter. |
 | **Share** | Export filtered JSONL, JSON, CSV, or Markdown context for AI tools, or share retained sources (including new runs) or specific command runs with Copilot for read-only live investigation. Exports and **Copy results** redact common credentials by default; agent tools always redact them. |
@@ -87,6 +92,9 @@ Open **Settings** in the toolbar for all options. A few useful defaults:
 | --- | --- | --- |
 | `logline.source` | `both` | Capture stdout, stderr, or both. |
 | `logline.captureTerminals` | `false` | Capture the next commands from supported VS Code terminals; output from commands already in progress cannot be recovered. |
+| `logline.captureDebugSessions` | `true` | Capture program output from debug sessions. |
+| `logline.otlp.enabled` | `false` | Start the local OpenTelemetry receiver on `127.0.0.1:4318` automatically. |
+| `logline.logLenses` | `codelens` | Show log statement activity in the editor (`off`, `codelens`, `codelens+gutter`). |
 | `logline.columns` | `[]` | Auto-detect columns, or specify preferred fields. |
 | `logline.timezone` | `local` | Show local or UTC timestamps. |
 | `logline.maxEvents` | `50000` | Maximum retained events. |

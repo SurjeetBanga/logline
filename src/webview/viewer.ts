@@ -4,6 +4,7 @@ import { SnapshotBridge } from './bridge';
 import { getElements } from './dom';
 import { EventScope } from './event-scope';
 import { createInspection } from './inspection/context';
+import { createTraceView } from './inspection/trace';
 import { createPopovers } from './popovers';
 import { createSearch } from './search/controls';
 import { ViewerState } from './state';
@@ -23,9 +24,13 @@ export function createViewer(api: WebviewApi) {
   const { popovers, createPopover } = createPopovers(scope);
   const formatTimestamp = createTimestampFormatter(state);
   const analysis = createAnalysis(elements, state);
-  const inspection = createInspection(elements, scrollViewport, api, formatTimestamp, scope);
+  const inspection = createInspection(elements, scrollViewport, api, formatTimestamp, scope, traceId => traceView.show(traceId));
   const search = createSearch(elements, state, api, popovers, { filterChanged, updateScopeSelection }, scope);
   const request = (force = false) => bridge.request(force);
+  const traceView = createTraceView(elements, api, scope, {
+    showContext: id => inspection.showContext(id), applyQuery: query => search.setQuery(query, true)
+  });
+  let otlpRunning = false;
   let cellActions: ReturnType<typeof createCellActions> | undefined;
   const table = createTable(elements, scrollViewport, state, api, formatTimestamp,
     { request: requestInteraction, saveState, filterChanged, setFollowing, updateFollowControl, updateModeLabel }, scope, () => cellActions?.rowsChanged());
@@ -71,6 +76,7 @@ export function createViewer(api: WebviewApi) {
       return;
     }
     if (data.type === 'context') { inspection.receiveContext(data); return; }
+    if (data.type === 'trace') { traceView.receive(data.trace); return; }
     if (data.type === 'details') {
       if (data.target === 'context') inspection.receiveDetails(data); else table.receiveDetails(data);
       return;
@@ -103,6 +109,14 @@ export function createViewer(api: WebviewApi) {
       return;
     if (data.guideStatus) updateGuideStatus(data.guideStatus);
     bridge.received(data.requestId);
+    // A filter requested from the editor (a log statement's CodeLens).
+    if (data.applyQuery !== undefined && data.applyQuery !== search.query()) search.setQuery(data.applyQuery, true);
+    if (data.openTrace) traceView.show(data.openTrace);
+    otlpRunning = data.otlp?.running === true;
+    elements.otlpToggle.textContent = otlpRunning ? 'Stop OpenTelemetry receiver' : 'Start OpenTelemetry receiver';
+    elements.otlpToggle.title = otlpRunning
+      ? `Receiving OpenTelemetry on ${data.otlp?.endpoint ?? 'localhost'}${data.otlp?.error ? ` (${data.otlp.error})` : ''}`
+      : 'Receive OpenTelemetry logs and traces from instrumented apps on this machine';
     if (data.generation < minimumSnapshotGeneration) {
       bridge.flush();
       return;
@@ -362,7 +376,7 @@ export function createViewer(api: WebviewApi) {
 
   const actionsContainer = elements.moreActions.closest<HTMLElement>('.popover-container')!;
   const actionsMenu = createPopover(actionsContainer, elements.moreActions, elements.actionsMenu);
-  const actionItems = [elements.shareSpecificRuns, elements.export, elements.import, elements.manage, elements.config, elements.help];
+  const actionItems = [elements.shareSpecificRuns, elements.export, elements.import, elements.otlpToggle, elements.manage, elements.config, elements.help];
   scope.listen(elements.moreActions, 'click', () => {
     if (actionsMenu.isOpen()) actionItems[0].focus();
   });
@@ -471,6 +485,7 @@ export function createViewer(api: WebviewApi) {
   scope.listen(elements.help, 'click', () => api.postMessage({ type: 'showGuide', section: guideUnread ? 'whatsNew' : 'guide' }));
 
   scope.listen(elements.manage, 'click', () => api.postMessage({ type: 'manageServers' }));
+  scope.listen(elements.otlpToggle, 'click', () => api.postMessage({ type: 'toggleOtlp', enabled: !otlpRunning }));
 
   function exportRequest(type: 'export' | 'exportForAI') {
     api.postMessage({ type, query: search.query(), levels: state.currentLevels(), serverId: state.selectedServer || undefined, sessionId: state.selectedSession || undefined });
@@ -493,7 +508,7 @@ export function createViewer(api: WebviewApi) {
 
   request();
   return {
-    state, bridge, table, search, inspection, receive,
+    state, bridge, table, search, inspection, traceView, receive,
     dispose() { scope.dispose(); clearInterval(fallbackTimer); clearTimeout(searchDebounce); clearTimeout(autocompleteDebounce); clearTimeout(copyFeedbackTimer); window.removeEventListener('message', onMessage); }
   };
 
@@ -624,7 +639,8 @@ export function createViewer(api: WebviewApi) {
           stop.dataset.serverId = session.serverId;
           stop.textContent = session.status === 'stopping' ? 'Stopping…' : 'Stop';
           stop.disabled = session.status !== 'running';
-          stop.title = stop.disabled ? 'This run is stopping.' : session.sourceKind === 'file' ? 'Stop following this file' : 'Stop this command run';
+          stop.title = stop.disabled ? 'This run is stopping.' : session.sourceKind === 'file' ? 'Stop following this file'
+            : session.sourceKind === 'debug' ? 'Stop this debug session' : 'Stop this command run';
           scope.listen(stop, 'click', event => {
             event.stopPropagation();
             if (stop.disabled) return;
@@ -634,9 +650,10 @@ export function createViewer(api: WebviewApi) {
         } else {
           const status = document.createElement('span');
           status.className = 'run-stop run-stop-disabled';
-          status.textContent = session.sourceKind === 'terminal' ? 'Capture only' : 'Unavailable';
+          status.textContent = session.sourceKind === 'terminal' || session.sourceKind === 'otel' ? 'Capture only' : 'Unavailable';
           status.title = session.sourceKind === 'terminal'
-            ? 'Externally owned terminal commands can be captured but not stopped by Logline.' : 'This run cannot be stopped from Logline.';
+            ? 'Externally owned terminal commands can be captured but not stopped by Logline.'
+            : session.sourceKind === 'otel' ? 'Telemetry is received from an application Logline does not own.' : 'This run cannot be stopped from Logline.';
           row.append(status);
         }
       }
