@@ -30,7 +30,7 @@
 .trace-table th, .trace-table td { padding: 3px 6px; vertical-align: middle; }
 .trace-table th:nth-child(1) { width: 34%; }
 .trace-table th:nth-child(2) { width: 14%; }
-.trace-table th:nth-child(4) { width: 80px; text-align: right; }
+.trace-table th:nth-child(4) { width: 96px; text-align: right; }
 .trace-name, .trace-service { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .trace-indent { display: inline-block; }
 .trace-duration { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
@@ -46,8 +46,10 @@
 .trace-section td { padding-top: 10px; color: var(--vscode-descriptionForeground, #aaa); font-weight: 600; }
 @media (max-width: 500px) {
   #traceDialog { padding: 8px; }
-  .trace-table th:nth-child(2) { width: 0; }
-  .trace-service { display: none; }
+  .trace-table th:nth-child(1) { width: 48%; }
+  /* Collapsed rather than hidden, so rows spanning every column keep the table's column count. */
+  .trace-table th:nth-child(2), .trace-service { width: 0; padding: 0; overflow: hidden; font-size: 0; }
+  .trace-table th:nth-child(4) { width: 72px; }
   #contextDialog { padding: 8px; }
   #contextDialog th:nth-child(1) { width: 86px; }
   #contextDialog th:nth-child(2), #contextDialog th:nth-child(4) { width: 48px; }

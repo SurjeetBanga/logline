@@ -1,6 +1,6 @@
 # Roadmap: three flagship features
 
-Status: proposal · October 2026
+Status: implemented on this branch · October 2026 (see the changelog's Unreleased section)
 
 Logline already covers capture, search, inspection, analysis, export, and Copilot sharing well. These three features target the gaps developers hit most often. Each one relies on a VS Code-native API that browser-based log tools cannot use, so together they make Logline feel like part of the editor rather than a log viewer that happens to run inside it.
 
@@ -69,11 +69,11 @@ JetBrains shipped a built-in OpenTelemetry tool window in IntelliJ, GoLand, PyCh
 - New `src/capture/otlp-receiver.ts` runs a Node `http` server bound to loopback only. It accepts `POST /v1/logs` and `POST /v1/traces` with `application/json` (OTLP JSON) and `application/x-protobuf`. For protobuf, ship a small generated decoder for the logs and traces messages only. That keeps bundle size down; avoid pulling in all of `protobufjs`.
 - If port 4318 is taken, for example by a real collector, fall back to an ephemeral port and inject that port. Show the active endpoint in the toolbar's capture status.
 - Inject environment variables through `ExtensionContext.environmentVariableCollection` for terminals, and merge them into the environment of `ProcessRunner` and the Logline task. Respect variables that the user has already set; Logline never overrides them.
-- Spans live in a new bounded `SpanStore` keyed by `traceId`. It is evicted together with `LogStore` and counted toward `logline.maxMemoryMb`. A span is not a row in the main table by default; there is a **Show spans** toggle.
+- Spans live in a new bounded `SpanStore` keyed by `traceId`, capped at 20,000 spans and cleared with `LogStore`. `logline.otlp.showSpans` controls which spans also become table rows: `entry` (trace roots and incoming requests, the default), `all`, or `none`.
 - The existing `logline.servers[].env` keeps working. The OTel variables are only defaults.
 - The trace view is a new dialog in `src/webview/inspection`, rendered with the virtual-scrolling table primitives to handle traces with thousands of spans.
-- Security: loopback only, an optional per-window bearer token injected alongside the endpoint, request body limit (`logline.maxLineLength` × batch cap), and a trusted workspace requirement (already enforced by Logline).
-- New settings: `logline.otlp.enabled` (default `false` for the first release, then `true`), `logline.otlp.port`, and `logline.otlp.injectEnv`.
+- Security: loopback only; requests with a browser `Origin` or a non-loopback `Host` header are refused (cross-site and DNS-rebinding protection); 16 MiB body and 64 MiB decompressed limits; and a trusted workspace requirement (already enforced by Logline).
+- New settings: `logline.otlp.enabled` (default `false`), `logline.otlp.port`, `logline.otlp.injectEnvironment`, and `logline.otlp.showSpans`.
 
 ### Effort and risks
 
