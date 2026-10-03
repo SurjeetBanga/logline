@@ -8,15 +8,15 @@ What the editors ship today (October 2026):
 
 - **VS Code.** The Output panel and Debug Console treat program output as plain text with a substring filter. The request for a structured logging console ([microsoft/vscode#185904](https://github.com/microsoft/vscode/issues/185904)) and the Debug Console filter request ([#93750](https://github.com/microsoft/vscode/issues/93750)) are still open. Breakpoints can be conditional or logpoints, but nothing pauses the debugger *because of what the program logged*.
 - **IntelliJ IDEA 2026.2.** The new OpenTelemetry plugin adds a Logs table, traces, and a service map, but only for OTLP data. The Run console is still text with a basic filter. Breakpoints, logpoints, and exception breakpoints exist, but there is no breakpoint triggered by log content. The integrated MCP server exposes run configurations and the debugger, but no structured log history.
-- **Neither editor** can debug *after the fact* from ordinary logs. Replay debugging exists only for one runtime or one product at a time: Undo for Java (a paid recorder, Linux JVM only), Temporal (workflow histories), and Salesforce's Apex Replay Debugger (Apex debug logs). Nothing turns the logs and traces that every app already produces into a debug session you can step through.
+- **Neither editor** checks log statements against what they actually logged. IntelliJ's logging inspections are static, cover only Java and Kotlin, and target performance. CodeQL and Bearer detect sensitive logging in CI by guessing from variable names. VS Code has no logging diagnostics. None can say "this line logged a JWT 37 times in your last run".
 
 | # | Feature | Why neither IDE has it | VS Code API it showcases |
 | --- | --- | --- | --- |
 | 1 | **Docker Compose and container sources** | Both IDEs show Compose output as prefixed text. Logline gets it wrong today too (see below). | `ProcessRunner`, sources |
 | 2 | **Log breakpoints: "break when this is logged"** | Both IDEs break on *code* (lines, exceptions, conditions), never on *output*. | `debug.addBreakpoints`, `DebugAdapterTracker`, DAP `pause` |
-| 3 | **Log replay debugger** | Replay debugging in both IDEs needs a runtime-specific recorder. Neither can replay plain logs. | Inline `DebugAdapter`, DAP `stepBack` / `reverseContinue`, decorations |
+| 3 | **Log doctor: diagnostics backed by runtime evidence** | IDE and CI log checks are static guesses. Logline has seen the actual output of each statement. | `DiagnosticCollection`, `CodeActionProvider`, LM tools |
 
-Suggested order: 1, then 2, then 3. Compose is the smallest change and fixes data that is parsed incorrectly today. Log breakpoints is the "how did nobody build this?" demo, and it lays the groundwork for feature 3: both rely on mapping events to log statements and on debugger integration. The replay debugger is the largest feature and is the 2.0 headline.
+Suggested order: 1, then 2, then 3. Compose is the smallest change and fixes data that is parsed incorrectly today. Log breakpoints is the "how did nobody build this?" demo. Log doctor turns the same event-to-statement mapping into security and cost findings with one-click fixes.
 
 ---
 
@@ -98,66 +98,71 @@ A 10-second GIF: a red log row appears, the user picks **Break when this logs ag
 
 ---
 
-## 3. Log replay debugger: step through a request that already happened
+## 3. Log doctor: diagnostics on log statements, backed by what they actually logged
 
 ### Pain
 
-The hardest bugs are the ones you cannot reproduce: a failure in CI, on a teammate's machine, in staging, or in a production log someone pasted into an issue. All you have are logs. Reading them means jumping between a wall of text and the source code, working out which line printed each message and in which order, and keeping the values in your head.
+Logging mistakes are expensive and hard to see from the code:
 
-Time-travel debuggers solve this, but only after recording the process with a runtime-specific tool. Examples are Undo for Java (paid, Linux JVM only), rr, and WinDbg TTD. Product-specific replay debuggers exist for Temporal workflows and Salesforce Apex. None of them work with the logs and traces an ordinary app *already* produces, in any language, from any source. Neither VS Code nor IntelliJ can do it.
+- **Secrets and personal data in logs.** A request object, a token, an email address, or a card number gets interpolated into a message. The code looks harmless (`log.info("auth ok", ctx)`), but the output is not. This is [CWE-532](https://codeql.github.com/codeql-query-help/java/java-sensitive-log/), and it is a common cause of security advisories.
+- **Noisy statements.** One debug-level statement inside a loop produces most of the log volume, which raises cost and buries the useful lines. Teams usually find it on the bill, through a log pipeline vendor, long after the code shipped.
+- **Unstructured logging.** Values concatenated into message strings cannot be filtered or charted, by Logline or by any production log tool.
+- **Errors without their exception.** `log.error("payment failed")` inside a `catch` that has an `err` in scope loses the stack trace that would have explained the failure.
 
-Logline already has the pieces: it maps events to the exact log statement (log lenses), groups events by request (trace and request IDs), and orders them across services (spans). Feature 2 adds debugger integration. Put together, a request's logs can become a debug session.
+What exists today is all **static**:
+
+- IntelliJ's logging inspections, such as [string concatenation in a log call](https://jetbrains.com/help/inspectopedia/StringConcatenationArgumentToLogCall.html), cover Java and Kotlin, and target performance.
+- CodeQL and Bearer flag sensitive logging in CI by guessing from variable names. That produces false positives, and it misses secrets hidden inside objects.
+- VS Code has no logging diagnostics at all.
+
+None of them knows what the program *actually logged*. Logline does: it maps every event to the statement that produced it.
 
 ### What users get
 
-- **Replay this request.** Choose **Replay in debugger** on any event, trace, or filter result. VS Code's own debug UI starts a session called "Logline replay". There is no new panel to learn.
-- **Stepping moves through log statements.** The editor opens at the statement that produced the first event, with the familiar yellow current-line highlight.
-  - **Step Over** (F10) moves to the next event in the request.
-  - **Step Back** and **Reverse Continue** go backwards, because DAP supports them.
-  - **Continue** runs to the next breakpoint.
-- **Real breakpoints work.** A breakpoint on a log statement, or on any line inside a function that logged, stops the replay there. Conditional breakpoints evaluate against the event's fields, for example `status >= 500` or `userId == "4812"`. Log breakpoints from feature 2 work in replay too, so the same breakpoint works live and after the fact.
-- **The Variables pane shows what was logged.**
-  - **Event**: message, level, and timestamp.
-  - **Fields**: every structured field, nested.
-  - **Exception**: parsed causes.
-  - **Request so far**: values seen earlier in the same request.
-  - Inline value decorations show the logged values next to the code, as VS Code does in a live session.
-- **The Call Stack pane shows the request path.** With traces, each frame is a span (`gateway → orders-api → payments → db`), and selecting one jumps to its first log statement. Without traces, it shows the stack frames from an attached exception, or the single source.
-- **Watch expressions** evaluate against the replay state, for example `fields.cart.total`.
-- **Works on imported logs.** Import a production log file, check out the matching commit, and replay. This is post-mortem debugging without having reproduced the bug.
-- **Gaps are visible.** Between two log statements, the editor dims the code that ran without logging and shows "no events between these lines". The replay never pretends to know more than the logs say.
+- **Problems with proof.** Diagnostics appear on log statements in the editor and the Problems panel, with evidence from captured runs. For example:
+  - `⚠ Logged a JWT in 37 events in the last run (field ctx.headers.authorization). Last seen 2 min ago.`
+  - `ⓘ 61% of all log lines in this run (48,210 events, ~3.1k/s). Called inside a loop.`
+  - `ⓘ 3 values are interpolated into the message: userId, orderId, total. Log them as fields to make them searchable.`
+  - `⚠ Error logged without the caught exception 'err'. No stack trace was recorded (12 events).`
+- **Quick fixes** (Ctrl+.), language and logger aware:
+  - **Sensitive data**: remove the argument, wrap it in a mask, or add the path to the logger's redaction config (for example pino `redact: ['req.headers.authorization']`).
+  - **Noise**: lower the level (`info` → `debug`), or add a sampling or once-per-N guard.
+  - **Unstructured**: convert to structured fields: pino `logger.info({ userId }, 'user logged in')`, Python `extra=` or structlog key-values, SLF4J placeholders or key-value pairs, Go `slog` attributes.
+  - **Missing exception**: pass the caught error to the call.
+  - **Suppress**: add `// logline-ignore: secret` for intentional cases.
+  - **Fix with Copilot**: for cases a rule cannot fix safely.
+- **Log health report.** **Logline: Show Log Health** lists every finding in the workspace, ranked by severity and volume, with a one-line summary such as "2 statements logged secrets, 3 statements produce 80% of volume". It can be copied as Markdown into a PR or issue.
+- **Proof without leaking.** The evidence never repeats the secret. It shows the type (JWT, AWS key, email, card number), the field path, a masked preview (`eyJh…[JWT]`), and a link to the events, which stay redacted in exports and agent tools as they are today.
 
 ### Design
 
-- **An inline debug adapter.** New `src/vscode/replay/adapter.ts` implements DAP in-process through `vscode.debug.registerDebugAdapterDescriptorFactory('logline-replay', …)` returning a `DebugAdapterInlineImplementation`. The debug type is contributed in `package.json`, with no launch.json needed: the command starts the session with `debug.startDebugging(undefined, { type: 'logline-replay', … })`.
-  - Capabilities: `supportsStepBack`, `supportsConditionalBreakpoints`, `supportsHitConditionalBreakpoints`, `supportsEvaluateForHovers`, and `supportsRestartRequest`.
-  - Requests: `stackTrace`, `scopes`, `variables`, `evaluate`, `next`, `stepBack`, `continue`, `reverseContinue`, and `setBreakpoints`. There is one thread per service (or per run) when the replay spans several.
-- **Timeline construction.** New pure module `src/core/replay.ts`: `buildTimeline(events, spans?) → Step[]`.
-  - Each step is `{ eventId, location, spanPath, values }`. Events are ordered by timestamp with `event-order.ts` tie-breaks, and the request is found through trace, span, or request ID fields.
-  - Locations come from `eventLocation` (debugger, OTel `code.*`, logger caller fields) first, then from `LogSiteIndex.match`.
-  - Steps without a resolvable location are kept with `location: undefined`. The UI shows them as "unattributed" in a virtual `logline-replay:` document instead of skipping them.
-- **Breakpoint semantics.** A breakpoint hits a step when its line is the step's statement, *or* when it lies inside the same enclosing function as the step's statement and before it.
-  - Function ranges come from `vscode.executeDocumentSymbolProvider`, with a line-proximity fallback.
-  - Conditions are evaluated by a small, safe expression evaluator over the step's values: comparisons, `&&`, `||`, and field paths. It never uses `eval`. The same evaluator powers `evaluate` for watches and hovers.
-- **Values.** Each step's values are the event's fields plus the placeholder values extracted from the message using its matched template (the same template matching that log lenses and feature 2's `site-conditions.ts` use). For example, `user 4812 logged in` from `` `user ${id} logged in` `` gives `id = 4812`.
-- **Code drift.** If the file changed since the logs were written, a log statement's line may have moved. Re-match by template within the file. If a step cannot be mapped, mark it "statement not found in this version" and offer **Check out commit…** when the logs carry a version or commit field.
-- **Copilot.** A `logline_replay_steps` tool returns the same timeline (redacted), so an agent can explain a failed request step by step and point at the exact lines involved.
+- **New pure module `src/core/log-findings.ts`.** It runs over events per log statement, using the attribution that `LogSiteTracker` in `log-sites.ts` already performs during ingestion, and keeps a small, bounded aggregate per statement: counts per finding type, field paths, the first and last event IDs, and masked previews only.
+- **Detectors**:
+  - **Sensitive values**: value-shape detectors in addition to the existing key-name rules in `redaction.ts`: JWT, `Bearer` tokens, AWS, GCP, GitHub and Slack key prefixes, PEM private keys, emails, and card numbers checked with Luhn. All regular expressions must be anchored and linear, as required by the earlier log lens performance fix. Share the detectors with `redaction.ts` so that exports also redact these values, which improves today's key-only redaction.
+  - **Volume**: a statement's share of events in the run, plus its peak rate. Detect "inside a loop" by looking for an enclosing `for`/`while`/`forEach` in the document symbols or the extracted range of the statement.
+  - **Unstructured**: the log lens template has interpolation placeholders (`${x}`, f-string `{x}`, `+ x +`, `%s`) and the matched events carry no structured fields for them.
+  - **Missing exception**: an error-level event with no exception block (`exceptions.ts`), from a statement inside a `catch`/`except` block that does not reference the caught identifier.
+- **New `src/vscode/log-diagnostics.ts`.** It contains a `DiagnosticCollection` keyed by statement location, refreshed with the same debounce as lenses, and a `CodeActionProvider` with fix builders per logger:
+  - First release: JS/TS (console, pino, winston), Python `logging`, and Java SLF4J.
+  - Go `slog` and others get diagnostics without auto-fixes.
+- **Settings**: `logline.logDiagnostics` (`off` | `security` | `all`, default `security`), and per-category severity overrides.
+- **Workspace trust and privacy.** Findings come only from data already in the local store and are never sent anywhere. The masked previews are created at detection time, so raw secrets are never copied into diagnostic messages.
+- **Copilot**: a `logline_log_findings` tool returns findings (masked), so an agent can be asked to "fix all logging issues in this PR".
 
 ### Effort and risks
 
-- About 3–4 weeks. The DAP adapter is mostly glue. Building the timeline, extracting values from templates, and mapping breakpoints to functions take most of the time.
-- Risk: users expect line-by-line stepping. Mitigation: name it clearly ("steps move between log statements"), dim unlogged code, and show the gap message. It reads as "replaying evidence", not "pretending to execute".
-- Risk: sparse logs make poor replays. This is also an opportunity: the "no events between these lines" hint, plus **Show Log Statements That Have Not Logged**, shows exactly where adding one log line would make the next replay clearer.
-- Risk: concurrent requests interleave in one stream. Mitigation: replay one request at a time when a trace or request ID exists. Otherwise, replay the filter result in timestamp order and warn that requests may interleave.
+- About 2–3 weeks. Detectors and diagnostics take about 1 week, and the quick-fix builders take the rest, mostly tests per logger.
+- Risk: false positives, for example emails that are legitimately logged in a dev environment. Mitigation: categories can be turned off, there is a per-statement ignore comment, and the default `security` level covers only high-confidence secrets (JWT, keys, private keys, cards that pass Luhn).
+- Risk: incorrect automatic fixes. Mitigation: offer rule-based fixes only for recognized logger call shapes, and fall back to **Fix with Copilot** with the evidence attached.
 
 ### Success metric
 
-The demo: a teammate pastes a failing request's logs into an issue. You import them, click **Replay in debugger**, and press F10 through the services until the exception, with values inline in the editor. Neither VS Code nor IntelliJ can do this, it works for every language, and it uses VS Code's own debugger UI. That makes it the strongest candidate for attention from both editor teams.
+The demo: run the app, and a yellow squiggle appears under `log.info("auth ok", ctx)` with "logged a JWT 37 times". Press Ctrl+. and choose **Add to pino redact paths**. On the next run, the squiggle is gone. It is a security story with proof, which static analyzers cannot provide. It also fits the security and diagnostics narrative that both editor teams promote.
 
 ---
 
 ## Considered, not chosen
 
-- **Run diff**, **watch rules**, and **investigation notebooks** (from earlier drafts of this proposal) were set aside in favour of the three features above.
+- **Run diff**, **watch rules**, **investigation notebooks**, and **log replay debugger** (from earlier drafts of this proposal) were set aside in favour of the three features above.
 - **An MCP server for logs.** It would make logs available to Claude Code, Cursor, and other agents, not only Copilot. It is useful, but JetBrains' built-in MCP server already exposes run and debugger context, so it is less distinctive. It is still a good follow-up for the agent audience.
 - **Replay a request from its trace** (rebuild an `.http` request from span attributes, resend it, and compare the new trace with the old one). This is a strong demo, but OTLP spans rarely carry request bodies or headers, so it would only work for simple GETs.
