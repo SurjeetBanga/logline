@@ -91,6 +91,16 @@
         "category": "Logline"
       },
       {
+        "command": "logline.breakOnMatchingLogs",
+        "title": "Break on Matching Logs",
+        "category": "Logline"
+      },
+      {
+        "command": "logline.manageLogBreakpoints",
+        "title": "Manage Log Breakpoints",
+        "category": "Logline"
+      },
+      {
         "command": "logline.stopCommand",
         "title": "Stop Active Command",
         "category": "Logline"

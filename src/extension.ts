@@ -6,6 +6,7 @@ import { registerTasks } from './vscode/tasks/provider';
 import { GuidePanel } from './vscode/guide-panel';
 import { registerAgentTools } from './vscode/agent-tools';
 import { registerDebugCapture } from './vscode/debug-capture';
+import { LogBreakpoints } from './vscode/log-breakpoints';
 import { LogLens } from './vscode/log-lens';
 
 let controller: LogsController | undefined;
@@ -33,6 +34,15 @@ export function activate(context: vscode.ExtensionContext): { provider: LogsProv
       generation: () => logController.state.generation, showQuery: query => logController.showQuery(query)
     }, context.extensionUri);
     context.subscriptions.push(controller.lens);
+  }
+  if (typeof vscode.debug?.addBreakpoints === 'function') {
+    const logController = controller;
+    const breakpoints = controller.breakpoints = new LogBreakpoints({
+      store: logController.store, index: logController.logSites, lens: () => logController.lens,
+      showEvent: id => logController.showQuery(`id:${id}`)
+    });
+    controller.debug.onEvent = (event, session) => breakpoints.onDebugEvent(event, session);
+    context.subscriptions.push(breakpoints);
   }
   startAutoServers(controller);
   return { provider };

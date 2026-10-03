@@ -20,7 +20,8 @@ export type ViewRequest =
   | { type: 'context'; id: number; }
   | { type: 'details' | 'copy'; id: number; target?: 'main' | 'context'; }
   | { type: 'openSource'; id: number; block: number; line: number; }
-  | { type: 'openLogSite'; id: number; }
+  | { type: 'openLogSite' | 'breakOnEvent'; id: number; }
+  | ({ type: 'breakOnQuery'; } & Filter)
   | { type: 'trace'; traceId: string; }
   | { type: 'toggleOtlp'; enabled: boolean; }
   | { type: 'exportContext'; ids: number[]; }
@@ -100,7 +101,8 @@ export function parseViewRequest(value: unknown): ViewRequest | undefined {
       if (id === undefined || block === undefined || line === undefined) return;
       return { type: msg.type, id, block, line };
     }
-    case 'openLogSite': { const id = index('id'); return id === undefined ? undefined : { type: msg.type, id }; }
+    case 'openLogSite': case 'breakOnEvent': { const id = index('id'); return id === undefined ? undefined : { type: msg.type, id }; }
+    case 'breakOnQuery': return { type: msg.type, query: filter.query, levels: filter.levels };
     case 'trace': {
       const traceId = string('traceId');
       return traceId && /^[A-Za-z0-9_-]{1,128}$/.test(traceId) ? { type: msg.type, traceId } : undefined;

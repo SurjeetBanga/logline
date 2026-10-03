@@ -25,6 +25,7 @@ import { eventLocation, LogSiteIndex, LogSiteTracker } from '../core/log-sites';
 import { getField } from '../core/query';
 import type { LogEvent } from '../core/types';
 import type { DetailLinks } from '../protocol/messages';
+import type { LogBreakpoints } from './log-breakpoints';
 import type { LogLens } from './log-lens';
 import { openSourceLocation } from './source-navigation';
 
@@ -55,6 +56,8 @@ export class LogsController {
   readonly siteTracker = new LogSiteTracker(this.logSites);
   /** Editor integration for log statements; attached at activation. */
   lens?: LogLens;
+  /** Debugger breakpoints driven by logs; attached at activation. */
+  breakpoints?: LogBreakpoints;
   private pendingQuery?: string;
   private pendingTrace?: string;
   readonly transfer = new LogTransfer(this.store, this.config, this.ingestion, this.state);
@@ -128,7 +131,8 @@ export class LogsController {
       stopSharing: () => this.stopSharing(), askCopilot: anchor => this.askCopilot(anchor),
       toggleTerminalCapture: enabled => this.toggleTerminalCapture(enabled),
       detailLinks: event => this.detailLinks(event), openLogSite: id => this.openLogSite(id),
-      traceView: traceId => this.traceView(traceId), toggleOtlp: enabled => this.toggleOtlp(enabled)
+      traceView: traceId => this.traceView(traceId), toggleOtlp: enabled => this.toggleOtlp(enabled),
+      breakOnEvent: id => this.breakOnEvent(id), breakOnQuery: (query, levels) => this.breakOnQuery(query, levels)
     }, send, message);
   }
   /** Filter the Logs panel from the editor. The next snapshot carries the query, so a panel that is still loading applies it too. */
@@ -163,6 +167,14 @@ export class LogsController {
     const site = this.logSiteFor(event);
     if (site) await site.open();
     else void vscode.window.showInformationMessage('Logline could not find the log statement for this event in the workspace.');
+  }
+  async breakOnEvent(id: number): Promise<void> {
+    if (!this.breakpoints) { void vscode.window.showInformationMessage('Log breakpoints need a VS Code host with debugging support.'); return; }
+    await this.breakpoints.breakOnEvent(id);
+  }
+  async breakOnQuery(query: string, levels: string[]): Promise<void> {
+    if (!this.breakpoints) { void vscode.window.showInformationMessage('Log breakpoints need a VS Code host with debugging support.'); return; }
+    await this.breakpoints.breakOnMatchingLogs(query, levels);
   }
   clear(): void {
     this.agentAccess.revoke();

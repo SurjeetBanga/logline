@@ -28,6 +28,8 @@ interface MessageServices {
   openLogSite(id: number): Promise<void>;
   traceView(traceId: string): TraceView;
   toggleOtlp(enabled: boolean): Promise<void>;
+  breakOnEvent(id: number): Promise<void>;
+  breakOnQuery(query: string, levels: string[]): Promise<void>;
 }
 export async function handleMessage(services: MessageServices, send: (message: HostMessage) => void, value: unknown): Promise<void> {
   const msg = parseViewRequest(value);
@@ -45,6 +47,8 @@ export async function handleMessage(services: MessageServices, send: (message: H
     case 'openLogSite': await services.openLogSite(msg.id); return;
     case 'trace': send({ type: 'trace', trace: services.traceView(msg.traceId) }); return;
     case 'toggleOtlp': await services.toggleOtlp(msg.enabled); return;
+    case 'breakOnEvent': await services.breakOnEvent(msg.id); return;
+    case 'breakOnQuery': await services.breakOnQuery(msg.query ?? '', msg.levels ?? []); return;
     case 'saveSearch': {
       const saved = searches.saveSearch(msg.name, msg.query ?? '', msg.levels, msg.serverId);
       send({ type: 'searches', searches: { saved: searches.savedSearches() }, saved }); return;

@@ -378,7 +378,7 @@ export function createViewer(api: WebviewApi) {
 
   const actionsContainer = elements.moreActions.closest<HTMLElement>('.popover-container')!;
   const actionsMenu = createPopover(actionsContainer, elements.moreActions, elements.actionsMenu);
-  const actionItems = [elements.shareSpecificRuns, elements.export, elements.import, elements.otlpToggle, elements.manage, elements.config, elements.help];
+  const actionItems = [elements.shareSpecificRuns, elements.export, elements.import, elements.breakOnLogs, elements.otlpToggle, elements.manage, elements.config, elements.help];
   scope.listen(elements.moreActions, 'click', () => {
     if (actionsMenu.isOpen()) actionItems[0].focus();
   });
@@ -496,6 +496,7 @@ export function createViewer(api: WebviewApi) {
   scope.listen(elements.export, 'click', () => exportRequest('export'));
 
   scope.listen(elements.import, 'click', () => api.postMessage({ type: 'import' }));
+  scope.listen(elements.breakOnLogs, 'click', () => api.postMessage({ type: 'breakOnQuery', query: search.query(), levels: state.currentLevels() }));
 
   scope.listen(elements.run, 'click', () => api.postMessage({ type: 'run', serverId: state.selectedServer || undefined }));
 

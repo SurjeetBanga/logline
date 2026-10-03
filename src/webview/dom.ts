@@ -80,6 +80,7 @@ export function getElements() {
     traceClose: element<HTMLButtonElement>('traceClose'),
     traceFilter: element<HTMLButtonElement>('traceFilter'),
     otlpToggle: element<HTMLButtonElement>('otlpToggle'),
+    breakOnLogs: element<HTMLButtonElement>('breakOnLogs'),
     saveSearchDialog: element<HTMLDialogElement>('saveSearchDialog'),
     saveSearchForm: element<HTMLFormElement>('saveSearchForm'),
     saveSearchName: element<HTMLInputElement>('saveSearchName'),

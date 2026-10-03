@@ -386,6 +386,7 @@
       traceClose: element("traceClose"),
       traceFilter: element("traceFilter"),
       otlpToggle: element("otlpToggle"),
+      breakOnLogs: element("breakOnLogs"),
       saveSearchDialog: element("saveSearchDialog"),
       saveSearchForm: element("saveSearchForm"),
       saveSearchName: element("saveSearchName"),
@@ -470,6 +471,12 @@
       site.title = "Open the line of code that logged this event";
       site.dataset.id = String(id);
       container.append(site);
+      const breakpoint = document.createElement("button");
+      breakpoint.className = "break-on-log-button";
+      breakpoint.textContent = "Break when this logs again";
+      breakpoint.title = "Add a debugger breakpoint on the statement that logged this event";
+      breakpoint.dataset.id = String(id);
+      container.append(breakpoint);
     }
     exceptions.forEach((exception, blockIndex) => {
       const section = document.createElement("section");
@@ -567,6 +574,11 @@
       const site = event.target.closest(".log-site-button");
       if (site) {
         api.postMessage({ type: "openLogSite", id: Number(site.dataset.id) });
+        return true;
+      }
+      const breakpoint = event.target.closest(".break-on-log-button");
+      if (breakpoint) {
+        api.postMessage({ type: "breakOnEvent", id: Number(breakpoint.dataset.id) });
         return true;
       }
       const share = event.target.closest(".share-source-button");
@@ -2453,7 +2465,7 @@
     });
     const actionsContainer = elements.moreActions.closest(".popover-container");
     const actionsMenu = createPopover(actionsContainer, elements.moreActions, elements.actionsMenu);
-    const actionItems = [elements.shareSpecificRuns, elements.export, elements.import, elements.otlpToggle, elements.manage, elements.config, elements.help];
+    const actionItems = [elements.shareSpecificRuns, elements.export, elements.import, elements.breakOnLogs, elements.otlpToggle, elements.manage, elements.config, elements.help];
     scope.listen(elements.moreActions, "click", () => {
       if (actionsMenu.isOpen()) actionItems[0].focus();
     });
@@ -2562,6 +2574,7 @@
     }
     scope.listen(elements.export, "click", () => exportRequest("export"));
     scope.listen(elements.import, "click", () => api.postMessage({ type: "import" }));
+    scope.listen(elements.breakOnLogs, "click", () => api.postMessage({ type: "breakOnQuery", query: search.query(), levels: state.currentLevels() }));
     scope.listen(elements.run, "click", () => api.postMessage({ type: "run", serverId: state.selectedServer || void 0 }));
     scope.listen(document, "visibilitychange", () => {
       if (!document.hidden)
