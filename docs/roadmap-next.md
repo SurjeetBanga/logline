@@ -8,15 +8,15 @@ What the editors ship today (October 2026):
 
 - **VS Code.** The Output panel and Debug Console treat program output as plain text with a substring filter. The request for a structured logging console ([microsoft/vscode#185904](https://github.com/microsoft/vscode/issues/185904)) and the Debug Console filter request ([#93750](https://github.com/microsoft/vscode/issues/93750)) are still open. Breakpoints can be conditional or logpoints, but nothing pauses the debugger *because of what the program logged*.
 - **IntelliJ IDEA 2026.2.** The new OpenTelemetry plugin adds a Logs table, traces, and a service map, but only for OTLP data. The Run console is still text with a basic filter. Breakpoints, logpoints, and exception breakpoints exist, but there is no breakpoint triggered by log content. The integrated MCP server exposes run configurations and the debugger, but no structured log history.
-- **Neither editor** can save a log investigation: the query, the result, the trace, and the explanation together as a file that can be re-run, reviewed in a PR, or attached to an issue. That workflow exists only in hosted tools such as Datadog Notebooks.
+- **Neither editor** can debug *after the fact* from ordinary logs. Replay debugging exists only for one runtime or one product at a time: Undo for Java (a paid recorder, Linux JVM only), Temporal (workflow histories), and Salesforce's Apex Replay Debugger (Apex debug logs). Nothing turns the logs and traces that every app already produces into a debug session you can step through.
 
 | # | Feature | Why neither IDE has it | VS Code API it showcases |
 | --- | --- | --- | --- |
 | 1 | **Docker Compose and container sources** | Both IDEs show Compose output as prefixed text. Logline gets it wrong today too (see below). | `ProcessRunner`, sources |
 | 2 | **Log breakpoints: "break when this is logged"** | Both IDEs break on *code* (lines, exceptions, conditions), never on *output*. | `debug.addBreakpoints`, `DebugAdapterTracker`, DAP `pause` |
-| 3 | **Investigation notebooks (`.logbook`)** | Neither IDE has a notebook over local runtime logs and traces. | `NotebookSerializer`, `NotebookController`, notebook renderers, LM tools |
+| 3 | **Log replay debugger** | Replay debugging in both IDEs needs a runtime-specific recorder. Neither can replay plain logs. | Inline `DebugAdapter`, DAP `stepBack` / `reverseContinue`, decorations |
 
-Suggested order: 1, then 2, then 3. Compose is the smallest change and fixes data that is parsed incorrectly today. Log breakpoints is the "how did nobody build this?" demo. Notebooks is the largest and is the 2.0 headline.
+Suggested order: 1, then 2, then 3. Compose is the smallest change and fixes data that is parsed incorrectly today. Log breakpoints is the "how did nobody build this?" demo, and it lays the groundwork for feature 3: both rely on mapping events to log statements and on debugger integration. The replay debugger is the largest feature and is the 2.0 headline.
 
 ---
 
@@ -98,49 +98,66 @@ A 10-second GIF: a red log row appears, the user picks **Break when this logs ag
 
 ---
 
-## 3. Investigation notebooks (`.logbook`)
+## 3. Log replay debugger: step through a request that already happened
 
 ### Pain
 
-A log investigation ends up scattered across a filter you typed, a trace you looked at, a chart you screenshotted, and a Slack message that says "it's the retry loop in `payments.ts`". None of it can be replayed. The next time the bug appears, or when a reviewer asks "how do you know?", you start again.
+The hardest bugs are the ones you cannot reproduce: a failure in CI, on a teammate's machine, in staging, or in a production log someone pasted into an issue. All you have are logs. Reading them means jumping between a wall of text and the source code, working out which line printed each message and in which order, and keeping the values in your head.
 
-Hosted platforms solved this with notebooks (Datadog Notebooks and similar investigation and postmortem notebooks), but only for data that has already been shipped to their cloud. Neither VS Code nor IntelliJ has a notebook over the logs and traces on your own machine. VS Code already has a first-class notebook platform (Jupyter, REST Book, Polyglot), but nobody has applied it to runtime logs.
+Time-travel debuggers solve this, but only after recording the process with a runtime-specific tool. Examples are Undo for Java (paid, Linux JVM only), rr, and WinDbg TTD. Product-specific replay debuggers exist for Temporal workflows and Salesforce Apex. None of them work with the logs and traces an ordinary app *already* produces, in any language, from any source. Neither VS Code nor IntelliJ can do it.
+
+Logline already has the pieces: it maps events to the exact log statement (log lenses), groups events by request (trace and request IDs), and orders them across services (spans). Feature 2 adds debugger integration. Put together, a request's logs can become a debug session.
 
 ### What users get
 
-- **New Logline notebook**, or **Open as notebook** from the current filter, creates a `*.logbook` file. Cells come in a few kinds:
-  - **Query cells.** A Logline query, such as `level:error service:api last:15m`. Running it renders a compact results table with expandable events, using the same renderer as the Logs panel.
-  - **Analysis cells.** Rate, errors, latency, and patterns charts for a query.
-  - **Trace cells.** A trace waterfall for a `traceId`.
-  - **Markdown cells** for the explanation.
-- **Live or pinned.** By default, cells run against the logs Logline currently holds, so a notebook becomes a reusable runbook ("run these 5 checks after starting the stack"). **Pin results** stores the outputs (redacted by default) in the file, so the notebook still shows the evidence when it is opened elsewhere: in a PR, on another machine, or months later.
-- **Click-through.** Events in outputs keep their actions: **Open log statement**, **Show trace**, and **Open in Logs panel**.
-- **Share.** **Export as Markdown** produces a GitHub-ready write-up with tables and a text waterfall, for issues and postmortems.
-- **Copilot / agents.** The *Ask Copilot to investigate* handoff can write its findings *into a notebook*: each query it ran becomes a cell with its output and reasoning, so the agent's investigation can be reviewed and re-run instead of disappearing in chat.
+- **Replay this request.** Choose **Replay in debugger** on any event, trace, or filter result. VS Code's own debug UI starts a session called "Logline replay". There is no new panel to learn.
+- **Stepping moves through log statements.** The editor opens at the statement that produced the first event, with the familiar yellow current-line highlight.
+  - **Step Over** (F10) moves to the next event in the request.
+  - **Step Back** and **Reverse Continue** go backwards, because DAP supports them.
+  - **Continue** runs to the next breakpoint.
+- **Real breakpoints work.** A breakpoint on a log statement, or on any line inside a function that logged, stops the replay there. Conditional breakpoints evaluate against the event's fields, for example `status >= 500` or `userId == "4812"`. Log breakpoints from feature 2 work in replay too, so the same breakpoint works live and after the fact.
+- **The Variables pane shows what was logged.**
+  - **Event**: message, level, and timestamp.
+  - **Fields**: every structured field, nested.
+  - **Exception**: parsed causes.
+  - **Request so far**: values seen earlier in the same request.
+  - Inline value decorations show the logged values next to the code, as VS Code does in a live session.
+- **The Call Stack pane shows the request path.** With traces, each frame is a span (`gateway → orders-api → payments → db`), and selecting one jumps to its first log statement. Without traces, it shows the stack frames from an attached exception, or the single source.
+- **Watch expressions** evaluate against the replay state, for example `fields.cart.total`.
+- **Works on imported logs.** Import a production log file, check out the matching commit, and replay. This is post-mortem debugging without having reproduced the bug.
+- **Gaps are visible.** Between two log statements, the editor dims the code that ran without logging and shows "no events between these lines". The replay never pretends to know more than the logs say.
 
 ### Design
 
-- `vscode.workspace.registerNotebookSerializer('logline-logbook', …)` for a small JSON format: `{ version, cells: [{ kind: 'query'|'analysis'|'trace'|'markdown', source, pinnedOutput? }] }`. Diffs read cleanly in PRs.
-- `vscode.notebooks.createNotebookController` executes cells on the host against `LogStore` (`snapshot`, `analysis`) and `traceView`, the same entry points that `message-router.ts` uses. No new query engine is needed.
-- A notebook renderer (`contributes.notebookRenderer`) reuses the webview table, `analysis/charts.ts`, and `inspection/trace.ts` modules from a separate esbuild entry, so outputs look exactly like the Logs panel.
-- Pinned outputs go through `redaction.ts` (always on, as for agent tools) and are capped per cell, for example 200 rows, so notebooks stay small enough to commit.
-- Relative time (`last:15m`) is evaluated at run time. Pinned outputs record the absolute range they captured.
-- Workspace trust: executing cells only reads Logline's in-memory store and never runs commands, so notebooks are safe to open from an untrusted PR. Logline still requires trust to activate.
+- **An inline debug adapter.** New `src/vscode/replay/adapter.ts` implements DAP in-process through `vscode.debug.registerDebugAdapterDescriptorFactory('logline-replay', …)` returning a `DebugAdapterInlineImplementation`. The debug type is contributed in `package.json`, with no launch.json needed: the command starts the session with `debug.startDebugging(undefined, { type: 'logline-replay', … })`.
+  - Capabilities: `supportsStepBack`, `supportsConditionalBreakpoints`, `supportsHitConditionalBreakpoints`, `supportsEvaluateForHovers`, and `supportsRestartRequest`.
+  - Requests: `stackTrace`, `scopes`, `variables`, `evaluate`, `next`, `stepBack`, `continue`, `reverseContinue`, and `setBreakpoints`. There is one thread per service (or per run) when the replay spans several.
+- **Timeline construction.** New pure module `src/core/replay.ts`: `buildTimeline(events, spans?) → Step[]`.
+  - Each step is `{ eventId, location, spanPath, values }`. Events are ordered by timestamp with `event-order.ts` tie-breaks, and the request is found through trace, span, or request ID fields.
+  - Locations come from `eventLocation` (debugger, OTel `code.*`, logger caller fields) first, then from `LogSiteIndex.match`.
+  - Steps without a resolvable location are kept with `location: undefined`. The UI shows them as "unattributed" in a virtual `logline-replay:` document instead of skipping them.
+- **Breakpoint semantics.** A breakpoint hits a step when its line is the step's statement, *or* when it lies inside the same enclosing function as the step's statement and before it.
+  - Function ranges come from `vscode.executeDocumentSymbolProvider`, with a line-proximity fallback.
+  - Conditions are evaluated by a small, safe expression evaluator over the step's values: comparisons, `&&`, `||`, and field paths. It never uses `eval`. The same evaluator powers `evaluate` for watches and hovers.
+- **Values.** Each step's values are the event's fields plus the placeholder values extracted from the message using its matched template (the same template matching that log lenses and feature 2's `site-conditions.ts` use). For example, `user 4812 logged in` from `` `user ${id} logged in` `` gives `id = 4812`.
+- **Code drift.** If the file changed since the logs were written, a log statement's line may have moved. Re-match by template within the file. If a step cannot be mapped, mark it "statement not found in this version" and offer **Check out commit…** when the logs carry a version or commit field.
+- **Copilot.** A `logline_replay_steps` tool returns the same timeline (redacted), so an agent can explain a failed request step by step and point at the exact lines involved.
 
 ### Effort and risks
 
-- About 3–4 weeks. The renderer packaging and the output UX take most of the time. Execution is thin glue over existing APIs.
-- Risk: pinned outputs leak data into git. Mitigation: always redact, show a "contains pinned output" banner, and add a `logline.notebooks.pinOutputs` setting for teams that want to forbid it.
-- Risk: this overlaps the Logs panel. Positioning: the panel is for *looking*, the notebook is for *keeping*. **Open as notebook** is the bridge between them.
+- About 3–4 weeks. The DAP adapter is mostly glue. Building the timeline, extracting values from templates, and mapping breakpoints to functions take most of the time.
+- Risk: users expect line-by-line stepping. Mitigation: name it clearly ("steps move between log statements"), dim unlogged code, and show the gap message. It reads as "replaying evidence", not "pretending to execute".
+- Risk: sparse logs make poor replays. This is also an opportunity: the "no events between these lines" hint, plus **Show Log Statements That Have Not Logged**, shows exactly where adding one log line would make the next replay clearer.
+- Risk: concurrent requests interleave in one stream. Mitigation: replay one request at a time when a trace or request ID exists. Otherwise, replay the filter result in timestamp order and warn that requests may interleave.
 
 ### Success metric
 
-Notebooks attached to real issues and PRs ("here's the logbook that shows the bug"). A strong candidate for a VS Code release-notes or extension spotlight, because it uses the notebook API for something it was not built for.
+The demo: a teammate pastes a failing request's logs into an issue. You import them, click **Replay in debugger**, and press F10 through the services until the exception, with values inline in the editor. Neither VS Code nor IntelliJ can do this, it works for every language, and it uses VS Code's own debugger UI. That makes it the strongest candidate for attention from both editor teams.
 
 ---
 
 ## Considered, not chosen
 
-- **Run diff** and **watch rules** (from the earlier draft of this proposal) were set aside in favour of features that neither IDE has.
+- **Run diff**, **watch rules**, and **investigation notebooks** (from earlier drafts of this proposal) were set aside in favour of the three features above.
 - **An MCP server for logs.** It would make logs available to Claude Code, Cursor, and other agents, not only Copilot. It is useful, but JetBrains' built-in MCP server already exposes run and debugger context, so it is less distinctive. It is still a good follow-up for the agent audience.
 - **Replay a request from its trace** (rebuild an `.http` request from span attributes, resend it, and compare the new trace with the old one). This is a strong demo, but OTLP spans rarely carry request bodies or headers, so it would only work for simple GETs.
