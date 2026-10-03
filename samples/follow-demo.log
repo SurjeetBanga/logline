@@ -1,0 +1,7 @@
+time=2026-10-03T10:00:00Z level=info msg="server started" port=3000
+level=warn msg="slow query" durationMs=212 table=users
+ERROR request failed
+Error: connection refused
+    at connect (/srv/db.js:42:11)
+    at handler (/srv/app.js:12:5)
+level=error msg="upstream timeout" status=504 durationMs=5003
