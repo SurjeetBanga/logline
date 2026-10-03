@@ -117,3 +117,17 @@ test('index changes invalidate cached matches', () => {
   index.deleteFile('w.py');
   assert.equal(index.match(event(1, 'worker started successfully')), undefined);
 });
+
+test('skips logging calls that appear in comments', () => {
+  const source = [
+    '// logger.info("commented out entirely")',
+    ' * Example: logger.warn("from a doc comment")',
+    '# logger.error("python comment")',
+    'const url = "http://x"; logger.info("after a url string")',
+    '/* logger.info("inside a block comment")',
+    '   logger.info("still inside the block") */',
+    'logger.info("real call after the block")',
+    'foo(); // see logger.info("trailing comment example")'
+  ].join('\n');
+  assert.deepEqual(extractLogSites('a.ts', source).map(site => site.template), ['after a url string', 'real call after the block']);
+});

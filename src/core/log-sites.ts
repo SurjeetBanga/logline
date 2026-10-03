@@ -52,6 +52,7 @@ export function extractLogSites(file: string, text: string): LogSite[] {
   for (let index = text.indexOf('\n'); index !== -1; index = text.indexOf('\n', index + 1)) lineStarts.push(index + 1);
   CALL.lastIndex = 0;
   for (let match = CALL.exec(text); match && sites.length < MAX_SITES_PER_FILE; match = CALL.exec(text)) {
+    if (inComment(text, match.index, lineStarts[lineOf(lineStarts, match.index).line - 1])) continue;
     const literal = readStringLiteral(text, match.index + match[0].length);
     if (!literal) continue;
     const method = (match[2] ?? match[3] ?? match[4]).replace(/(?:f|w|ln)$/, '').toLowerCase();
@@ -71,6 +72,15 @@ export function extractLogSites(file: string, text: string): LogSite[] {
     });
   }
   return sites;
+}
+
+// Examples in comments and doc comments are not logging calls. Detection is
+// heuristic: `//` after code (but not in a URL), comment-only lines starting
+// with `*`, `#` or `--`, and an unclosed `/*` before the call.
+function inComment(text: string, offset: number, lineStart: number): boolean {
+  const prefix = text.slice(lineStart, offset);
+  if (/^\s*(?:\*|#(?![{\[])|--)/.test(prefix) || /(?:^|[^:"'`\\])\/\//.test(prefix)) return true;
+  return text.lastIndexOf('/*', offset) > text.lastIndexOf('*/', offset);
 }
 
 function lineOf(starts: number[], offset: number): { line: number; column: number } {
