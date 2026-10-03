@@ -21,18 +21,22 @@ const MAX_LINES = 1000;
 
 const looksStructured = (line: string) => /^\s*[[{]/.test(line);
 
-export class StackJoiner {
-  private held?: { text: string; truncated: boolean; lines: number; traceback: boolean };
+/**
+ * Optional per-line metadata (such as the code location a debug adapter
+ * reported) travels with a line; a joined trace keeps its first line's.
+ */
+export class StackJoiner<M = undefined> {
+  private held?: { text: string; truncated: boolean; lines: number; traceback: boolean; meta?: M };
   private timer?: ReturnType<typeof setTimeout>;
 
   /**
    * @param flushMs How long a held line may wait for a continuation. Zero
    *   disables the timer, for sources that call end() themselves (imports).
    */
-  constructor(private readonly deliver: (line: string, truncated: boolean) => void,
+  constructor(private readonly deliver: (line: string, truncated: boolean, meta?: M) => void,
     private readonly limit = 64 * 1024, private readonly flushMs = 100) { }
 
-  write(line: string, truncated: boolean): void {
+  write(line: string, truncated: boolean, meta?: M): void {
     const held = this.held;
     if (held && !looksStructured(line) && held.lines < MAX_LINES && held.text.length + 1 + line.length <= this.limit) {
       const traceback = held.traceback || CHAINED.test(line);
@@ -51,8 +55,8 @@ export class StackJoiner {
       }
     }
     this.flush();
-    if (looksStructured(line)) { this.deliver(line, truncated); return; }
-    this.held = { text: line, truncated, lines: 1, traceback: TRACEBACK.test(line) };
+    if (looksStructured(line)) { this.deliver(line, truncated, meta); return; }
+    this.held = { text: line, truncated, lines: 1, traceback: TRACEBACK.test(line), meta };
     this.schedule();
   }
 
@@ -62,7 +66,7 @@ export class StackJoiner {
     const held = this.held;
     if (!held) return;
     this.held = undefined;
-    this.deliver(held.text, held.truncated);
+    this.deliver(held.text, held.truncated, held.meta);
   }
 
   end(): void { this.flush(); }

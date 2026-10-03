@@ -14,10 +14,10 @@ interface Slot {
 }
 
 const pickFields = ({ id, timestamp, timestampMs, level, message, isJson, truncated, stream, fields,
-  serverId, server, sessionId, taskName, taskType, taskState, dependencies, dependencyState, exitReason }: LogEvent): LogEvent =>
+  serverId, server, sessionId, taskName, taskType, taskState, dependencies, dependencyState, exitReason, location }: LogEvent): LogEvent =>
 ({
   id, timestamp, timestampMs, level, message, isJson, truncated, stream, fields, serverId, server, sessionId,
-  taskName, taskType, taskState, dependencies, dependencyState, exitReason
+  taskName, taskType, taskState, dependencies, dependencyState, exitReason, ...(location ? { location } : {})
 });
 const identity = <T>(value: T): T => value;
 
@@ -255,6 +255,7 @@ export class LogStore {
       bytes += 32 + key.length * 2 + (typeof value === 'string' ? value.length * 2 : 8);
     }
     for (const dependency of event.dependencies ?? []) bytes += 8 + dependency.length * 2;
+    if (event.location) bytes += 48 + event.location.file.length * 2;
     if (bytes > this.maxBytes) { this.discarded++; return; }
     while (this.size && (this.size === this.maxRows || this.bytes + bytes > this.maxBytes)) this.evictOldest();
     this.insertSlot({ event, bytes });

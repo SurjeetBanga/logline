@@ -624,7 +624,8 @@ export function createViewer(api: WebviewApi) {
           stop.dataset.serverId = session.serverId;
           stop.textContent = session.status === 'stopping' ? 'Stopping…' : 'Stop';
           stop.disabled = session.status !== 'running';
-          stop.title = stop.disabled ? 'This run is stopping.' : session.sourceKind === 'file' ? 'Stop following this file' : 'Stop this command run';
+          stop.title = stop.disabled ? 'This run is stopping.' : session.sourceKind === 'file' ? 'Stop following this file'
+            : session.sourceKind === 'debug' ? 'Stop this debug session' : 'Stop this command run';
           scope.listen(stop, 'click', event => {
             event.stopPropagation();
             if (stop.disabled) return;
@@ -634,9 +635,10 @@ export function createViewer(api: WebviewApi) {
         } else {
           const status = document.createElement('span');
           status.className = 'run-stop run-stop-disabled';
-          status.textContent = session.sourceKind === 'terminal' ? 'Capture only' : 'Unavailable';
+          status.textContent = session.sourceKind === 'terminal' || session.sourceKind === 'otel' ? 'Capture only' : 'Unavailable';
           status.title = session.sourceKind === 'terminal'
-            ? 'Externally owned terminal commands can be captured but not stopped by Logline.' : 'This run cannot be stopped from Logline.';
+            ? 'Externally owned terminal commands can be captured but not stopped by Logline.'
+            : session.sourceKind === 'otel' ? 'Telemetry is received from an application Logline does not own.' : 'This run cannot be stopped from Logline.';
           row.append(status);
         }
       }

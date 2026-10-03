@@ -328,6 +328,11 @@
           "default": true,
           "description": "Join plain-text stack trace lines (Java and Node `at` frames, `Caused by:`, Python tracebacks) onto the line before them, so each trace becomes one searchable event. Applies to new captures and plain-text imports."
         },
+        "logline.captureDebugSessions": {
+          "type": "boolean",
+          "default": true,
+          "description": "Capture program output from VS Code debug sessions (Run and Debug, F5) for every debugger, such as Node.js, Python, Java, Go, and .NET. When a debugger reports where a line was logged, Logline can open that line of code. Applies to debug sessions started after the change."
+        },
         "logline.captureTerminals": {
           "type": "boolean",
           "default": false,

@@ -1,5 +1,5 @@
 import type { ChildProcessWithoutNullStreams } from 'node:child_process';
-import type { SessionSummary } from '../core/types';
+import type { SessionSummary, SourceKind } from '../core/types';
 
 export interface SessionServer {
   id: string;
@@ -13,7 +13,7 @@ export interface SessionServer {
   source?: string;
   taskScope?: string;
   taskLabel?: string;
-  sourceKind?: 'process' | 'task' | 'terminal' | 'import' | 'file';
+  sourceKind?: SourceKind;
   owned?: boolean;
 }
 

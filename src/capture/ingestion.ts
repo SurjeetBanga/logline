@@ -9,6 +9,7 @@ export interface CaptureMetadata {
   truncated?: boolean;
   jsonOnly?: boolean;
   persist?: boolean;
+  location?: LogEvent['location'];
 }
 
 /** All capture sources share one monotonic ID sequence and retention path. */
@@ -33,6 +34,7 @@ export class Ingestion {
     event.sessionId = metadata.sessionId;
     event.truncated = metadata.truncated;
     if (event.truncated) event.isJson = false;
+    if (metadata.location) event.location = metadata.location;
     // Disk capture retains the physical line, including ANSI and surrounding whitespace.
     if (metadata.persist) this.persist(raw);
     this.commit(event);

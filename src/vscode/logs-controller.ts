@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import { DebugCapture } from '../capture/debug-capture';
 import { FileFollower } from '../capture/file-follower';
 import { Ingestion } from '../capture/ingestion';
 import { ProcessRunner } from '../capture/process-runner';
@@ -34,6 +35,7 @@ export class LogsController {
   readonly tasks = new TaskLifecycle(this.registry, this.ingestion, this.state, () => this.runner.sessions.size > 0);
   readonly terminalCapture = new TerminalCapture(this.config, this.ingestion, this.registry, this.state);
   readonly files = new FileFollower(this.config, this.registry, this.ingestion, this.state);
+  readonly debug = new DebugCapture(this.config, this.registry, this.ingestion, this.state, () => this.terminalCapture.isEnabled);
   readonly agentAccess = new AgentLogAccess(this.store, this.registry, () => this.ingestion.sequence, {
     fields: this.config.get<string[]>('redactionFields', []),
     replacement: this.config.get('redactionReplacement', '[REDACTED]')
@@ -220,9 +222,12 @@ export class LogsController {
       this.runner.stopSessionById(sessionId);
       this.tasks.stopSessionById(sessionId);
       this.files.stopSessionById(sessionId);
+      this.debug.stopSessionById(sessionId);
       return;
     }
-    if (serverId) { this.runner.stopServer(serverId); this.files.stopServer(serverId); } else { this.runner.stop(); this.files.stop(); }
+    // Stop all leaves debug sessions alone: VS Code owns them, so only an
+    // explicit source or run selection asks to end one.
+    if (serverId) { this.runner.stopServer(serverId); this.files.stopServer(serverId); this.debug.stopServer(serverId); } else { this.runner.stop(); this.files.stop(); }
     this.tasks.stop(serverId);
   }
   dispose(): Promise<void> {
@@ -235,6 +240,7 @@ export class LogsController {
     this.notifications.dispose();
     this.tasks.disposeObservation();
     this.terminalCapture.dispose();
+    this.debug.dispose();
     await this.files.dispose();
     // Closing streams may emit a final partial line; flush persistence afterwards.
     await this.runner.dispose();
