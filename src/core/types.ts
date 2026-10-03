@@ -60,7 +60,7 @@ export interface SessionSummary {
   taskScope?: string;
   taskLabel?: string;
   /** Source metadata used by terminal capture and agent sharing. */
-  sourceKind?: 'process' | 'task' | 'terminal' | 'import';
+  sourceKind?: 'process' | 'task' | 'terminal' | 'import' | 'file';
   owned?: boolean;
   /** Whether the session can be terminated by the Logs view. */
   canStop?: boolean;

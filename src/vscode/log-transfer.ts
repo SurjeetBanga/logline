@@ -12,6 +12,7 @@ import type { LogEvent } from '../core/types';
 import { exportChunks, exportQuery, serializeExport, type ExportFormat, type ExportRequest } from '../transfer/log-export';
 import { writeExportFile } from '../storage/export-file';
 import { importRecords } from '../transfer/log-import';
+import { StackJoiner } from '../capture/stack-joiner';
 
 export class LogTransfer {
   constructor(private readonly store: LogStore, private readonly config: Settings,
@@ -141,11 +142,22 @@ export class LogTransfer {
           : this.importFileChunks(await vscode.workspace.fs.readFile(uri));
         const format = path.extname(uri.path).slice(1).toLowerCase();
         const limit = this.config.get('maxLineLength', 65536);
-        for await (const record of importRecords(chunks, format, limit)) {
-          this.ingestion.accept(record.raw, 'import', { serverId: `imported-${sessionId}`, server: label, sessionId, truncated: record.truncated });
+        let pending = 0;
+        const ingest = (raw: string, truncated: boolean) => {
+          this.ingestion.accept(raw, 'import', { serverId: `imported-${sessionId}`, server: label, sessionId, truncated });
           imported++;
-          if (imported % 500 === 0) { this.state.notify(); await yieldToHost(); }
-        }
+          pending++;
+        };
+        // Only line-based text files carry stack traces as separate lines;
+        // JSON and CSV records already frame multi-line values themselves.
+        const joiner = format !== 'json' && format !== 'csv' && this.config.get('joinStackTraces', true)
+          ? new StackJoiner(ingest, limit, 0) : undefined;
+        try {
+          for await (const record of importRecords(chunks, format, limit)) {
+            if (joiner) joiner.write(record.raw, record.truncated); else ingest(record.raw, record.truncated);
+            if (pending >= 500) { pending = 0; this.state.notify(); await yieldToHost(); }
+          }
+        } finally { joiner?.end(); }
       } catch (error) {
         void vscode.window.showWarningMessage(`Could not finish importing ${path.basename(uri.path)}: ${(error as Error).message}`);
       }

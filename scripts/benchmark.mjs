@@ -46,3 +46,14 @@ const share = access.shareAll();
 measure('Agent search page', () => access.search({ shareId: share.shareId, limit: 200 }));
 measure('Agent analysis newest 10,000', () => access.analyze({ shareId: share.shareId }));
 measure('Retained analysis', () => store.analysis());
+measure('Sort retained events by durationMs', () => store.all({ sort: 'durationMs' }));
+measure('Repeated autocomplete keystrokes', () => { for (const value of ['r', 're', 'req', 'req-']) store.fieldSuggestions(`requestId:${value}`); });
+let streamed = 50000;
+measure('Streaming sorted page (+50 events per refresh)', () => {
+  for (let i = 0; i < 50; i++) {
+    const event = parseLogLine(JSON.stringify({ level: 'info', message: 'tick', durationMs: ++streamed % 200 }), 'stdout', streamed, receivedAt);
+    event.serverId = 'api';
+    store.add(event);
+  }
+  store.page({ sort: 'durationMs', sortDirection: 'desc' });
+});

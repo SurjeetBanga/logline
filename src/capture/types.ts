@@ -13,7 +13,7 @@ export interface SessionServer {
   source?: string;
   taskScope?: string;
   taskLabel?: string;
-  sourceKind?: 'process' | 'task' | 'terminal' | 'import';
+  sourceKind?: 'process' | 'task' | 'terminal' | 'import' | 'file';
   owned?: boolean;
 }
 

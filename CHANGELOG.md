@@ -2,6 +2,13 @@
 
 All notable changes to Logline are documented in this file.
 
+## Unreleased
+
+- Add **Logline: Follow Log File** to tail local files like `tail -F`: shows the end of existing content, then new lines, and keeps following through truncation, in-place rewrites, rotation, and files created later. Each file is its own source with an inline **Stop** action.
+- Parse plain-text logfmt lines (`level=warn msg="slow query" durationMs=212`) into structured events with level, message, timestamp, and searchable fields.
+- Join plain-text Java, Node, and Python stack traces into one event, so exception details, source links, and error grouping work for text logs. Controlled by `logline.joinStackTraces`.
+- Speed up sorted views while logs stream, sorting in general, and repeated value autocomplete.
+
 ## 1.9.1 — 2026-09-17
 
 - Refresh the demo with a short walkthrough of live capture, source and run scoping, stopping an active run, filtering, and event inspection.

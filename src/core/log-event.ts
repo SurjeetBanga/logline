@@ -1,4 +1,5 @@
 import type { LogEvent } from './types';
+import { parseLogfmt } from './logfmt';
 import { terminalLevel } from './terminal-level';
 
 const LEVELS = ['trace', 'debug', 'info', 'warn', 'error', 'fatal'];
@@ -13,13 +14,19 @@ export function parseLogLine(line: string, stream: string, id: number, receivedA
   if (looksLikeJson(trimmed)) {
     try { value = JSON.parse(trimmed); } catch { value = undefined; }
   }
-  const object: JsonObject | undefined = value && typeof value === 'object' && !Array.isArray(value) ? value as JsonObject : undefined;
+  // Plain-text lines in logfmt carry the same level/msg/time keys as JSON
+  // logs, so they share the field, level and timestamp handling below while
+  // staying non-JSON for details, exports and exception extraction.
+  const object: JsonObject | undefined = value && typeof value === 'object' && !Array.isArray(value) ? value as JsonObject
+    : value === undefined ? parseLogfmt(trimmed) : undefined;
   const severity = readValue(object, 'level', 'severity', 'log.level', 'severityText', 'SeverityText');
   const severityNumber = readValue(object, 'severityNumber', 'SeverityNumber');
   const level = severity === undefined && typeof severityNumber === 'number' && severityNumber >= 1 && severityNumber <= 24
     ? LEVELS[Math.floor((severityNumber - 1) / 4)] : normalizeLevel(severity as string | number | undefined, stream,
-      stream === 'terminal' ? terminalLevel(trimmed) : undefined);
-  const message = getMessage(object, value, trimmed);
+      stream === 'terminal' || stream === 'file' ? terminalLevel(trimmed) : undefined);
+  // A joined stack trace keeps every frame in `raw`; its row shows the first line.
+  const newline = trimmed.indexOf('\n');
+  const message = getMessage(object, value, newline === -1 ? trimmed : trimmed.slice(0, newline).trimEnd());
   const timestampInfo = getTimestamp(object, receivedAt);
   const fields = object ? extractFields(object) : {};
   return {

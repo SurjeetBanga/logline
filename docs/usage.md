@@ -14,6 +14,8 @@ A saved server can also start automatically when the extension activates by sett
 
 Turn **Terminal capture: Off** to **Terminal capture: On** in the toolbar (or run **Logline: Enable Terminal Capture**) to observe new commands in supported VS Code terminals. Capture starts at the next shell-integrated command; terminal scrollback from commands that were already running is not recoverable. Terminal output is stored as one `terminal` stream because the shell integration API does not expose stdout and stderr separately. Structured JSON levels remain authoritative; unstructured lines use an explicit leading level marker when present and otherwise appear as **Unclassified**. Capture is local and does not transmit logs by itself. Turn **Terminal capture: On** back to **Terminal capture: Off** at any time without stopping a terminal command.
 
+Run **Logline: Follow Log File** to tail one or more local files, like `tail -F`. Logline shows the last 64 KiB of existing content, starting at a whole line, then every line appended afterwards. Following continues when the file is truncated, rewritten, or rotated (the path names a new file), and a file that does not exist yet is picked up once it is created. Each file appears as its own source; use the inline **Stop** action in the Runs tab, **Stop server**, or **Stop all** to stop following. Plain-text file lines get the same leading-severity detection as terminal output. Followed files are already on disk, so they are not copied to `latest.log`.
+
 Use **Logline: Manage Terminal Capture** to ignore or re-enable a terminal for the lifetime of that terminal instance. Full-screen alternate-screen applications are skipped; run the command again in a regular shell to capture it.
 
 Choose **Share logs with agent** to make all retained Logline sources and new runs in this VS Code window available to Copilot, regardless of the current source, run, or search filters. The first use shows a confirmation explaining the scope and that common credentials are redacted but logs may still contain sensitive information. Accepting **Share logs** remembers that confirmation on this VS Code profile; later uses enable sharing immediately. Cancelling or choosing **Choose specific runs…** does not remember acceptance. You can enable sharing before any logs have arrived.
@@ -72,6 +74,8 @@ Automatic columns use fields from the selected server, recognize common aliases,
 
 Format handling covers [ECS](https://www.elastic.co/docs/reference/ecs/logging/nodejs/winston) dotted or nested fields such as `service.name`, `log.level`, `@timestamp`, and `http.response.status_code`; [Pino HTTP](https://github.com/pinojs/pino-std-serializers) request/response fields; and individual [OpenTelemetry log records](https://opentelemetry.io/docs/specs/otel/logs/data-model/) with severity, body, typed attributes, and nanosecond timestamps. Full OTLP batch envelopes and arbitrary arrays are available in event details rather than expanded into table columns.
 
+Plain-text lines in [logfmt](https://brandur.org/logfmt), such as `time=2026-10-03T10:00:00Z level=warn msg="slow query" durationMs=212`, become structured events: `level`, `msg`, and `time` work as they do in JSON, and the remaining keys become searchable, sortable fields. Pure numbers are stored as numbers, so `durationMs:>200` works. A line counts as logfmt only when every token is a `key=value` pair and there are at least two pairs, so ordinary text containing `=` stays plain text.
+
 Log4j2 JsonLayout output is supported directly: the `timeMillis` field is read as the event timestamp, and MDC values nested under `contextMap` are flattened so they're searchable like any other field.
 
 The timezone setting supports Local and UTC.
@@ -84,7 +88,7 @@ Click a column's name to sort by that field and click it again to reverse the di
 
 ## Exceptions and surrounding context
 
-Expand an event to read structured exceptions as stack frames with real line breaks and nested causes. Common `err`, `error`, `exception`, `thrown`, and stack fields are supported, including Log4j2 throwable frames and OpenTelemetry exception fields. Click a stack frame to open its source location in the workspace; ambiguous filenames open a file picker. **Original event** keeps the JSON available, and **Copy event** copies the original formatted event. Plain-text exception lines can link to source, but separate physical lines are not automatically grouped.
+Expand an event to read structured exceptions as stack frames with real line breaks and nested causes. Common `err`, `error`, `exception`, `thrown`, and stack fields are supported, including Log4j2 throwable frames and OpenTelemetry exception fields. Click a stack frame to open its source location in the workspace; ambiguous filenames open a file picker. **Original event** keeps the JSON available, and **Copy event** copies the original formatted event. Plain-text stack traces are joined into one event: Java and Node `at` frames, `Caused by:`/`Suppressed:` sections, `... N more` lines, and Python tracebacks (including chained ones) attach to the line before them. The row shows the first line; expanding it shows every frame with source links, and error grouping uses the originating frame. A line is held briefly (100 ms) to see whether frames follow it, and JSON lines are never held or joined. Turn this off with `logline.joinStackTraces`.
 
 Choose **Show context** on an expanded event to see up to 25 retained events before and after it, in capture order, from the same command run. Context includes all levels and both captured streams, regardless of the current search. Select any surrounding event to inspect its details. **Back to results** (or Escape) returns to the existing search and scroll position. Context is a fixed snapshot; ingestion continues, and discarded events cannot be recovered. Each newly imported file has its own context boundary.
 
@@ -126,6 +130,7 @@ Set `shell: true` when the command is a shell line containing pipes, redirects, 
 | `logline.servers` | `[]` | Saved server commands shown in the server selector. Each entry supports `cwd` (which expands `${workspaceFolder}`), `env`, `autoStart`, and `jsonOnly`. |
 | `logline.source` | `both` | Capture `stdout`, `stderr`, or `both`. |
 | `logline.captureTerminals` | `false` | Capture new commands from supported shell-integrated VS Code terminals. |
+| `logline.joinStackTraces` | `true` | Join plain-text stack trace lines into one event for new captures, followed files, and plain-text imports. |
 | `logline.columns` | `[]` | Preferred table columns. Empty auto-detects common fields. |
 | `logline.timezone` | `local` | `local` or `utc` for displayed timestamps. |
 | `logline.indentation` | `2` | Spaces used when formatting expanded JSON. |
