@@ -2,97 +2,25 @@
 
 Status: proposal · October 2026
 
-The first roadmap ([roadmap.md](roadmap.md)) shipped in full. The code now covers debug capture, the OpenTelemetry receiver and trace view, and live log lenses. This proposal comes from reading the code, not the docs. It looks for workflows that the code still does not support, and for patterns that other log tools have already proven.
+The first roadmap ([roadmap.md](roadmap.md)) shipped in full. The code now covers debug capture, the OpenTelemetry receiver and trace view, and live log lenses. This proposal has a sharper goal: **build things that neither VS Code nor IntelliJ IDEA supports**, so that both editor teams have a reason to notice.
 
-| # | Feature | Gap in the code today | Built from |
+What the editors ship today (October 2026):
+
+- **VS Code.** The Output panel and Debug Console treat program output as plain text with a substring filter. The request for a structured logging console ([microsoft/vscode#185904](https://github.com/microsoft/vscode/issues/185904)) and the Debug Console filter request ([#93750](https://github.com/microsoft/vscode/issues/93750)) are still open. Breakpoints can be conditional or logpoints, but nothing pauses the debugger *because of what the program logged*.
+- **IntelliJ IDEA 2026.2.** The new OpenTelemetry plugin adds a Logs table, traces, and a service map, but only for OTLP data. The Run console is still text with a basic filter. Breakpoints, logpoints, and exception breakpoints exist, but there is no breakpoint triggered by log content. The integrated MCP server exposes run configurations and the debugger, but no structured log history.
+- **Neither editor** can save a log investigation: the query, the result, the trace, and the explanation together as a file that can be re-run, reviewed in a PR, or attached to an issue. That workflow exists only in hosted tools such as Datadog Notebooks.
+
+| # | Feature | Why neither IDE has it | VS Code API it showcases |
 | --- | --- | --- | --- |
-| 1 | **Run diff: "what changed since the last run?"** | Analysis covers one filter at a time. No module compares runs (`log-analysis.ts` has no comparison API, and the protocol has no message for one). | `findPatterns`, `groupErrors`, `analyzeEvents`, sessions/runs, log sites |
-| 2 | **Watch rules: alerts and highlights** | Nothing tells you when an important log arrives unless the Logs panel is visible. `ViewNotifications` only redraws the webview. Rows have no rule-based colouring. | query engine (`query.ts`), ingestion, status bar, `window.show*Message` |
-| 3 | **Docker Compose and container sources** | `docker compose logs -f` / `docker compose up` prefix every line with `service-1  \| `. `parseLogLine` then treats JSON lines as plain text: `api-1 \| {"level":"error",...}` is stored as `level: info`, with no fields and no source split. | `ProcessRunner`, `SessionRegistry`, `parseLogLine` |
+| 1 | **Docker Compose and container sources** | Both IDEs show Compose output as prefixed text. Logline gets it wrong today too (see below). | `ProcessRunner`, sources |
+| 2 | **Log breakpoints: "break when this is logged"** | Both IDEs break on *code* (lines, exceptions, conditions), never on *output*. | `debug.addBreakpoints`, `DebugAdapterTracker`, DAP `pause` |
+| 3 | **Investigation notebooks (`.logbook`)** | Neither IDE has a notebook over local runtime logs and traces. | `NotebookSerializer`, `NotebookController`, notebook renderers, LM tools |
 
-Suggested order: 1, then 2, then 3. Run diff is the most distinctive feature and uses the most existing code. Watch rules make Logline useful even when the panel is hidden. Compose support is the smallest change and fixes data that is parsed incorrectly today.
-
----
-
-## 1. Run diff: "what changed since the last run?"
-
-### Pain
-
-The most common question in the edit, run, check loop is "what did my change break?" Today you answer it from memory: you scan for errors and try to recall whether they appeared last time. Logline already keeps several runs of the same source (task runs, debug sessions, terminal commands, and server restarts), but it never compares them.
-
-Hosted platforms treat this as a headline feature. Examples include Oracle Logging Analytics' *Compare* view, Datadog's log pattern comparison, and Sentry's "new issue in this release". No VS Code log tool offers it, and it fits the inner loop even better than it fits production, because "last run" is always one F5 away.
-
-### What users get
-
-- In the Runs tab, each run has a **Compare with previous run** action, and the Analyze view has a **Compare** toggle. Logline picks the baseline automatically: the previous run of the same source.
-- The diff view has four sections:
-  - **New**: error groups and log patterns that did not appear in the baseline. Each entry links to its first sample event and its log statement.
-  - **Gone**: patterns that stopped appearing, such as "cache warmed" disappearing after a refactor.
-  - **Changed volume**: patterns whose rate changed by more than 2× after normalizing for run duration, plus a p50/p95 latency comparison when `durationMs` is present.
-  - **Log statements**: statements that fired in the baseline but not in this run, and the reverse. This uses log lens site IDs and answers "my change stopped this code path from running."
-- **CodeLens delta.** While a comparison is active, the log lens shows `+12 vs last run` or `new`.
-- **Copilot tool.** `logline_compare_runs` returns the same diff, redacted. "Why is my test failing now?" becomes a single tool call.
-
-### Design
-
-- New pure module `src/core/run-diff.ts`: `diffRuns(baseline: LogEvent[], current: LogEvent[]) → RunDiff`. It reuses `normalizeMessage` and `errorFingerprint` from `log-analysis.ts`. Export them, and do not copy them, so that grouping cannot drift between Analyze and the diff. The existing top-10 pattern cap does not apply here. Use a cap of 200 per section, ranked by how much each pattern changed.
-- Normalize rates by run duration (`endedAt - startedAt`, or the first-to-last event span). Otherwise a 30-second run compared with a 5-minute run reports false "volume drops".
-- New protocol messages: `{ type: 'runDiff'; sessionId; baselineSessionId? }` and the reply `{ type: 'runDiff'; diff }`. Validate them in `protocol/messages.ts` in the same way as `analysis`.
-- Baseline choice: the most recent completed session with the same `serverId` (or `taskLabel` or debug configuration name) that started before the current one. The user can choose a different baseline from a dropdown.
-- Retention caveat: if eviction removed part of the baseline, show "Baseline partially evicted" instead of reporting incorrect "Gone" entries. `SessionSummary.events` compared with the count actually retained gives this signal.
-- Log-site deltas: `LogStore` already aggregates per site. Add a per-session key (`sessionId:siteId`) that is capped, using the same eviction bookkeeping.
-
-### Effort and risks
-
-- About 1.5–2 weeks. The core module is easy to unit-test, and most of the work is in the UI.
-- Risk: noisy "new" patterns from IDs that `normalizeMessage` does not catch, such as UUIDs with dashes and ISO timestamps inside messages. Extend the normalizer and add tests. This also improves the current Patterns view.
-
-### Success metric
-
-"Compare with previous run" becomes the most-clicked action in the Runs tab. It is also the feature to demo: change a line, press F5, and the diff shows `NEW: TypeError at cart.ts:42`.
+Suggested order: 1, then 2, then 3. Compose is the smallest change and fixes data that is parsed incorrectly today. Log breakpoints is the "how did nobody build this?" demo. Notebooks is the largest and is the 2.0 headline.
 
 ---
 
-## 2. Watch rules: alerts and highlights
-
-### Pain
-
-Logline only helps while you are looking at it. With the panel collapsed, or while you work in a different editor group, an `UnhandledPromiseRejection` or a `status:5xx` goes unnoticed until something visibly breaks. Inside the panel, every row looks the same, so a deprecation warning you care about gets lost among a thousand info lines.
-
-`lnav` has *watch expressions* (a query evaluated on every message that raises an event) and field highlights. IntelliJ's console offers "highlight and notify" filters through the Grep Console plugin. Datadog and Grafana build log monitors around the same idea. Logline already has the query language, so it needs only the trigger.
-
-### What users get
-
-- **Watch rules** are saved searches with an action. You create one from the search box (**Save as watch rule**) or with a right-click on a cell (**Watch this value**). Each rule has:
-  - **Notify**: a VS Code notification with **Show** (opens the event), **Open log statement**, and **Mute 10 min**. Rules are rate-limited and coalesced, for example "`level:error service:api` matched 14 times in 5s".
-  - **Badge**: a count on the Logs view badge (`WebviewView.badge`) and a status bar item such as `⚠ 3 new errors`, visible while the panel is hidden. Opening the panel clears the count.
-  - **Highlight**: a row colour or left-border colour in the table (for example, all `requestId:abc123` rows in amber), using theme colours.
-  - **Focus**: the panel opens and jumps to the event. Use it sparingly, for fatal errors only.
-- **Built-in default:** one active rule, `level:error OR level:fatal`, set to *Badge* only. You get value without configuring anything and without unwanted pop-ups.
-- Rules live in the `logline.watchRules` setting, so a team can commit them to `.vscode/settings.json`, for example "always notify on `ConnectionRefused`".
-- Copilot: when sharing is on, `logline_wait_for_logs` can wait on a named watch rule ("tell me when the migration finishes").
-
-### Design
-
-- New `src/core/watch-rules.ts` compiles each rule's query once, using the existing parser in `query.ts`, and exposes `match(event) → ruleIds[]`. It runs in ingestion right after `LogStore.append`, and only for new events, so the cost is O(rules) per event. Cap the setting at 20 rules.
-- New `src/vscode/watch-alerts.ts` owns notification throttling (at most one toast per rule every 10 s, with counts in between), the view badge, and the status bar item. Toast suppression respects `window.state.focused` and VS Code's Do Not Disturb mode.
-- Highlights travel with snapshots as a `highlight?: string` per event. Compute it on the host so that the webview never re-parses queries. Add it to the event clone in `log-store.ts`, next to `location`.
-- Settings validation follows `settings.ts` and `server-config.ts`: unknown fields are dropped, and invalid queries appear in **Manage watch rules** with the parser's error message.
-- Privacy: notifications show the redacted, first-line message, using `redaction.ts`, because notifications can appear in screen shares.
-
-### Effort and risks
-
-- About 1.5 weeks.
-- Risk: notification fatigue, which makes users disable the extension. Mitigation: the default rule is badge-only, throttling is strict, and every notification has **Mute**.
-- Risk: ingestion throughput. Benchmark with `scripts/benchmark.mjs` and 20 rules. Queries are already compiled for snapshot filtering, so the cost should be small.
-
-### Success metric
-
-At least half of active users keep a non-default rule. Fewer issues say "I didn't notice the error".
-
----
-
-## 3. Docker Compose and container sources
+## 1. Docker Compose and container sources
 
 ### Pain
 
@@ -131,9 +59,88 @@ Compose users see the same structured table as everyone else, and "docker" becom
 
 ---
 
-## Considered, not chosen (yet)
+## 2. Log breakpoints: "break when this is logged"
 
-- **Interactive timeline.** Brushing a range on the Analyze charts would set `timestamp:[…]`. The charts in `webview/analysis/charts.ts` are display-only today. It is a good small follow-up after Run diff, which reuses the same charts.
-- **Collapse repeated lines** (`×37` for identical consecutive messages). It is useful and cheap, but it is less important than the three above.
-- **Bookmarks and notes on events**, saved with an investigation and exported to Markdown or Copilot. Strong for incident write-ups, but it needs a persistence design first.
-- **Remote and SSH sources.** VS Code Remote already runs Logline on the remote host, so the main case is covered.
+### Pain
+
+You often find a bug through a log line, such as `WARN cart total negative: -12.40` or `status:500 on /checkout`, and then want to stop *the next time it happens* to look at the stack and variables. Today the workflow is manual: find the statement that logged it, set a breakpoint, guess a condition that matches only the bad case, rerun, and step past the good hits. Every debugger has exception breakpoints ("break when this is thrown"). None has the equivalent for logs, even though logs are how most bugs are noticed first.
+
+This is new in both IDEs. VS Code and IntelliJ breakpoints are anchored to code and code conditions. Neither can say "pause when the program logs something that matches `level:warn message:"total negative"`."
+
+### What users get
+
+- **Break next time this logs.** Right-click an event (or use the inspection dialog) and choose **Break when this logs again**. Logline resolves the statement through log lenses (`LogSiteIndex.match`, exact debugger locations first) and adds a real breakpoint at that line. The breakpoint is labelled `Logline: <message template>` so that it is easy to recognize in the Breakpoints view.
+  - Optional **"…with these values"**: Logline turns the event's interpolated values into a breakpoint condition where it can do so safely, for example `total < 0` from a `${total}` placeholder. You can edit the condition before the breakpoint is added.
+- **Log breakpoints from a query.** In the search box, **More → Break on matching logs** adds a *log breakpoint* entry, for example `level:error service:api`, shown in the Logs panel and in the status bar. It works in two tiers:
+  1. **Exact (preferred).** Every indexed log statement whose template could produce a matching message gets a breakpoint, so the debugger stops *before* the log runs, with the full stack and locals.
+  2. **Fallback.** When no statement can be resolved (the output comes from a library or a binary dependency), Logline sends a DAP `pause` to the debug session as soon as matching output arrives. The program stops a moment *after* the log, which is usually still inside the same request. The entry shows **"stopped after log"** so that you know it was not exact.
+- **Hit history.** Each log breakpoint keeps the last N matching events, so after you resume you can see which hits paused and which were skipped, together with their values.
+- **Works with every debugger.** It only uses source breakpoints and DAP, so Node, Python, Java, Go, .NET, and C++ all work.
+
+### Design
+
+- New `src/vscode/log-breakpoints.ts`:
+  - Exact tier: `vscode.debug.addBreakpoints([new SourceBreakpoint(location, true, condition)])`. Logline keeps a registry of the breakpoints it created, removes them with `removeBreakpoints` when the log breakpoint is deleted, and listens to `onDidChangeBreakpoints` so that it does not lose track when the user edits or deletes them by hand.
+  - Fallback tier: the existing tracker in `debug-capture.ts` already sees every `output` event. Add a hook that runs the compiled query (`matchesQuery` in `query.ts`) on each new event from a debug source. On a match, call `session.customRequest('pause', { threadId })`, using the thread from the last `stopped` or `thread` event, or thread 0 / all threads when the adapter allows it. Throttle to one pause per resume to avoid pause storms.
+- New pure helper `src/core/site-conditions.ts`: maps a message template and an event's values to a language-specific condition expression, *only* for simple placeholders (`${x}`, f-string `{x}`, Python `%s` with a named argument, SLF4J `{}` with a resolvable argument). Anything else produces no condition, so the breakpoint stops on every hit, which is always correct. Unit-test this in `src/core` like `log-sites.ts`.
+- Query-to-statement resolution reuses `findPatterns` templates and `siteQuery` in `log-sites.ts`. If a query cannot be mapped to statements (for example, only numeric field ranges), use the fallback tier and say so.
+- Copilot: a `logline_break_on_log` tool lets an agent say "I'll stop the next time this error is logged", always with a confirmation prompt, because it changes debugger state.
+
+### Effort and risks
+
+- About 2 weeks. The exact tier is small because log lenses already does the hard part. The fallback tier and per-language conditions take most of the time.
+- Risk: adapters that do not support `pause`, or that require a valid `threadId`. Mitigation: check `session` capabilities and thread events, and show "pause not supported by this debugger" instead of failing silently.
+- Risk: wrong statement attribution for short, generic templates. Mitigation: use exact attribution only when lenses marks the match as `exact` or the template is distinctive. Otherwise ask the user to pick from the candidate statements in a quick pick.
+
+### Success metric
+
+A 10-second GIF: a red log row appears, the user picks **Break when this logs again**, and the next request stops on that line with the values visible. This is the clip most likely to be picked up by the VS Code and JetBrains debugger teams, because it is a debugger capability their products do not have.
+
+---
+
+## 3. Investigation notebooks (`.logbook`)
+
+### Pain
+
+A log investigation ends up scattered across a filter you typed, a trace you looked at, a chart you screenshotted, and a Slack message that says "it's the retry loop in `payments.ts`". None of it can be replayed. The next time the bug appears, or when a reviewer asks "how do you know?", you start again.
+
+Hosted platforms solved this with notebooks (Datadog Notebooks and similar investigation and postmortem notebooks), but only for data that has already been shipped to their cloud. Neither VS Code nor IntelliJ has a notebook over the logs and traces on your own machine. VS Code already has a first-class notebook platform (Jupyter, REST Book, Polyglot), but nobody has applied it to runtime logs.
+
+### What users get
+
+- **New Logline notebook**, or **Open as notebook** from the current filter, creates a `*.logbook` file. Cells come in a few kinds:
+  - **Query cells.** A Logline query, such as `level:error service:api last:15m`. Running it renders a compact results table with expandable events, using the same renderer as the Logs panel.
+  - **Analysis cells.** Rate, errors, latency, and patterns charts for a query.
+  - **Trace cells.** A trace waterfall for a `traceId`.
+  - **Markdown cells** for the explanation.
+- **Live or pinned.** By default, cells run against the logs Logline currently holds, so a notebook becomes a reusable runbook ("run these 5 checks after starting the stack"). **Pin results** stores the outputs (redacted by default) in the file, so the notebook still shows the evidence when it is opened elsewhere: in a PR, on another machine, or months later.
+- **Click-through.** Events in outputs keep their actions: **Open log statement**, **Show trace**, and **Open in Logs panel**.
+- **Share.** **Export as Markdown** produces a GitHub-ready write-up with tables and a text waterfall, for issues and postmortems.
+- **Copilot / agents.** The *Ask Copilot to investigate* handoff can write its findings *into a notebook*: each query it ran becomes a cell with its output and reasoning, so the agent's investigation can be reviewed and re-run instead of disappearing in chat.
+
+### Design
+
+- `vscode.workspace.registerNotebookSerializer('logline-logbook', …)` for a small JSON format: `{ version, cells: [{ kind: 'query'|'analysis'|'trace'|'markdown', source, pinnedOutput? }] }`. Diffs read cleanly in PRs.
+- `vscode.notebooks.createNotebookController` executes cells on the host against `LogStore` (`snapshot`, `analysis`) and `traceView`, the same entry points that `message-router.ts` uses. No new query engine is needed.
+- A notebook renderer (`contributes.notebookRenderer`) reuses the webview table, `analysis/charts.ts`, and `inspection/trace.ts` modules from a separate esbuild entry, so outputs look exactly like the Logs panel.
+- Pinned outputs go through `redaction.ts` (always on, as for agent tools) and are capped per cell, for example 200 rows, so notebooks stay small enough to commit.
+- Relative time (`last:15m`) is evaluated at run time. Pinned outputs record the absolute range they captured.
+- Workspace trust: executing cells only reads Logline's in-memory store and never runs commands, so notebooks are safe to open from an untrusted PR. Logline still requires trust to activate.
+
+### Effort and risks
+
+- About 3–4 weeks. The renderer packaging and the output UX take most of the time. Execution is thin glue over existing APIs.
+- Risk: pinned outputs leak data into git. Mitigation: always redact, show a "contains pinned output" banner, and add a `logline.notebooks.pinOutputs` setting for teams that want to forbid it.
+- Risk: this overlaps the Logs panel. Positioning: the panel is for *looking*, the notebook is for *keeping*. **Open as notebook** is the bridge between them.
+
+### Success metric
+
+Notebooks attached to real issues and PRs ("here's the logbook that shows the bug"). A strong candidate for a VS Code release-notes or extension spotlight, because it uses the notebook API for something it was not built for.
+
+---
+
+## Considered, not chosen
+
+- **Run diff** and **watch rules** (from the earlier draft of this proposal) were set aside in favour of features that neither IDE has.
+- **An MCP server for logs.** It would make logs available to Claude Code, Cursor, and other agents, not only Copilot. It is useful, but JetBrains' built-in MCP server already exposes run and debugger context, so it is less distinctive. It is still a good follow-up for the agent audience.
+- **Replay a request from its trace** (rebuild an `.http` request from span attributes, resend it, and compare the new trace with the old one). This is a strong demo, but OTLP spans rarely carry request bodies or headers, so it would only work for simple GETs.
