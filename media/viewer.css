@@ -288,6 +288,8 @@ button:disabled { opacity: .45; cursor: default; }
 .session { display: flex; gap: 16px; padding-top: 6px; color: var(--vscode-descriptionForeground, #aaa); }
 #sessions { white-space: nowrap; }
 #command { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* VS Code styles every code element with a background; without a command it is an empty box. */
+#command:empty { display: none; }
 /* The virtualized table fully replaces its visible rows on every update,
    giving the browser's scroll-anchoring heuristic no stable node to track;
    disabling it avoids relying on that heuristic across those replacements. */

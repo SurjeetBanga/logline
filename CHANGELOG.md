@@ -5,6 +5,7 @@ All notable changes to Logline are documented in this file.
 ## Unreleased
 
 - Align the **Errors only** checkbox in the Traces list with its label and the toolbar buttons.
+- Hide the empty command box at the end of the Logs status line when no command is running.
 
 ## 1.10.0 — 2026-10-04
 
