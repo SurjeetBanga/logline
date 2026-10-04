@@ -18,7 +18,7 @@ export interface GuideRelease {
 export const GUIDE_RELEASES: GuideRelease[] = [
   {
     version: '1.12.0',
-    date: '2026-10-03',
+    date: '2026-10-04',
     highlights: [
       { title: 'Share with Claude Code and Codex', text: 'Run Logline: Connect Claude Code or Codex once. The agent then reads the logs you share through Logline\'s MCP server, with the same read-only tools, redaction, and Sharing · Stop as Copilot.', section: 'inspect' },
       { title: 'See who is reading', text: 'While sharing, the status line names the agents that read your logs, and stopping cuts every agent off at once, including waits in progress.', section: 'inspect' },

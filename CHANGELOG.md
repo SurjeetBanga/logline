@@ -2,7 +2,7 @@
 
 All notable changes to Logline are documented in this file.
 
-## 1.12.0 — 2026-10-03
+## 1.12.0 — 2026-10-04
 
 ### Behavior changes
 
