@@ -2,6 +2,12 @@
 
 All notable changes to Logline are documented in this file.
 
+## 1.12.1 — 2026-10-04
+
+### Fixes
+
+- **Logline: Connect Claude Code or Codex** writes the setup command for your default terminal shell. On Windows with Git Bash it no longer starts with PowerShell's `&`, which failed with `syntax error near unexpected token '&'`; Command Prompt gets plain double quotes, and PowerShell is unchanged.
+
 ## 1.12.0 — 2026-10-04
 
 ### Behavior changes

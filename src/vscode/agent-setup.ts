@@ -36,16 +36,31 @@ export function agentCli(agent: Agent, extensionPath: string | undefined, platfo
 
 function safeList(directory: string): string[] { try { return readdirSync(directory); } catch { return []; } }
 
+/** The shell family a command is written for. */
+export type Shell = 'posix' | 'powershell' | 'cmd';
+
+/**
+ * The family of the terminal's shell. On Windows the default may be
+ * PowerShell, Command Prompt, or Git Bash, and each quotes differently.
+ */
+export function shellKind(shellPath: string | undefined, platform: NodeJS.Platform = process.platform): Shell {
+  if (platform !== 'win32') return 'posix';
+  const name = (shellPath ?? '').split(/[\\/]/).pop()!.toLowerCase();
+  if (/^cmd(\.exe)?$/.test(name)) return 'cmd';
+  if (/^(bash|sh|zsh|fish)(\.exe)?$/.test(name)) return 'posix';
+  return 'powershell';
+}
+
 /** The command that registers Logline with an agent's CLI, for every project. */
-export function setupCommand(agent: Agent, launch: AgentLaunch, platform: NodeJS.Platform = process.platform, cli: string = agent): string {
-  const quote = platform === 'win32'
-    ? (value: string) => `"${value.replace(/"/g, '\\"')}"`
-    : (value: string) => /^[\w@%+=:,./-]+$/.test(value) ? value : `'${value.replace(/'/g, `'\\''`)}'`;
+export function setupCommand(agent: Agent, launch: AgentLaunch, shell: Shell = shellKind(vscode.env?.shell), cli: string = agent): string {
+  const quote = shell === 'posix'
+    ? (value: string) => /^[\w@%+=:,./-]+$/.test(value) ? value : `'${value.replace(/'/g, `'\\''`)}'`
+    : (value: string) => `"${value.replace(/"/g, '\\"')}"`;
   const env = Object.entries(launch.env).map(([key, value]) => `--env ${key}=${quote(value)}`).join(' ');
   const server = [launch.command, ...launch.args].map(quote).join(' ');
   // Claude Code needs an option between --env and the server name.
   // PowerShell needs & to run a quoted program path.
-  const program = cli === agent ? agent : `${platform === 'win32' ? '& ' : ''}${quote(cli)}`;
+  const program = cli === agent ? agent : `${shell === 'powershell' ? '& ' : ''}${quote(cli)}`;
   return agent === 'claude'
     ? `${program} mcp add ${env} --transport stdio --scope user logline -- ${server}`
     : `${program} mcp add logline ${env} -- ${server}`;
@@ -74,7 +89,7 @@ export async function connectAgent(launch: AgentLaunch): Promise<void> {
     return;
   }
   const name = AGENT_NAMES[picked.agent];
-  const command = setupCommand(picked.agent, launch, process.platform, agentCli(picked.agent, vscode.extensions?.getExtension(EXTENSIONS[picked.agent])?.extensionPath));
+  const command = setupCommand(picked.agent, launch, shellKind(vscode.env.shell), agentCli(picked.agent, vscode.extensions?.getExtension(EXTENSIONS[picked.agent])?.extensionPath));
   const choice = await vscode.window.showInformationMessage(`Add Logline to ${name}?`, {
     modal: true,
     detail: `This runs:\n\n${command}\n\nIt registers the Logline MCP server for your user. ${name} must be installed, as a CLI or as its VS Code extension.`
