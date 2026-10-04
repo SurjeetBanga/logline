@@ -181,12 +181,12 @@ test('agents are named for people, and setup commands quote paths for the shell'
   assert.equal(agentCli('claude', '/ext/other', 'darwin', exists, list), 'claude');
   assert.equal(setupCommand('claude', launch, 'posix', '/Users/me/.vscode/extensions/anthropic.claude-code-2.1.288/resources/native-binary/claude').split(' mcp add ')[0],
     '/Users/me/.vscode/extensions/anthropic.claude-code-2.1.288/resources/native-binary/claude');
-  const codex = 'C:\\Users\\me\\.vscode\\extensions\\openai.chatgpt\\bin\\windows-x86_64\\codex.exe';
+  const codex = 'C:\\Users\\me\\.vscode\\extensions\\openai.chatgpt\\bin\\example-platform\\codex.exe';
   const windows = agentLaunch('C:\\Users\\me\\.logline\\mcp.js', 'C:\\Program Files\\VS Code\\Code.exe');
   assert.match(setupCommand('codex', windows, 'powershell', codex), /^& "C:.*codex\.exe" mcp add logline /);
   assert.match(setupCommand('codex', windows, 'cmd', codex), /^"C:.*codex\.exe" mcp add logline /, 'Command Prompt has no & operator');
   assert.equal(setupCommand('codex', windows, 'posix', codex),
-    "'C:\\Users\\me\\.vscode\\extensions\\openai.chatgpt\\bin\\windows-x86_64\\codex.exe' mcp add logline --env ELECTRON_RUN_AS_NODE=1 -- 'C:\\Program Files\\VS Code\\Code.exe' 'C:\\Users\\me\\.logline\\mcp.js'",
+    "'C:\\Users\\me\\.vscode\\extensions\\openai.chatgpt\\bin\\example-platform\\codex.exe' mcp add logline --env ELECTRON_RUN_AS_NODE=1 -- 'C:\\Program Files\\VS Code\\Code.exe' 'C:\\Users\\me\\.logline\\mcp.js'",
     'Git Bash on Windows takes POSIX quoting and no &');
 
   // On Windows the default terminal may be PowerShell, Command Prompt, or Git Bash.

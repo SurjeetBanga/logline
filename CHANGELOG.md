@@ -2,6 +2,14 @@
 
 All notable changes to Logline are documented in this file.
 
+## 1.12.2 — 2026-10-04
+
+### Fixes
+
+- The Traces list names a trace that has only logs by the request its logs describe, such as `POST /orders/checkout`, instead of its first log message. Logline reads the method and path from fields like `method`, `path`, `requestUrl`, or `http.route`, or from `requestUrl=…` and `GET /path` text in a message, and leaves out the query string.
+- Long operations in the Traces list wrap to two lines instead of being cut off; the tooltip still has all of it.
+- Searches and columns treat `http.method` and `requestMethod` as `method`, and `http.route`, `http.target`, `http.url`, `requestUrl`, `requestUri`, and `uri` as `path`.
+
 ## 1.12.1 — 2026-10-04
 
 ### Fixes

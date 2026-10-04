@@ -194,7 +194,7 @@ export function buildTrace(traceId: string, spans: readonly Span[], logs: TraceL
 /** One row of the trace list: a request across services, from its spans or its logs. */
 export interface TraceSummary {
   traceId: string;
-  /** The root operation, or the first log message when the trace has no spans. */
+  /** The root operation; without spans, the first request its logs name, else its first log message. */
   name: string;
   /** The service of the root span, or the source of the first log. */
   service?: string;
@@ -231,7 +231,7 @@ export function summarizeTraces(traces: Iterable<[string, readonly Span[]]>, eve
       startMs: start, durationMs: Math.round((end - start) * 1000) / 1000, spans: spans.length, logs: 0, errors
     });
   }
-  const logOnly = new Map<string, { first: LogEvent; start: number; end: number; services: Set<string> }>();
+  const logOnly = new Map<string, { first: LogEvent; named?: { id: number; operation: string }; start: number; end: number; services: Set<string> }>();
   for (const event of events) {
     const value = getField(event, 'traceId');
     if (typeof value !== 'string' || !value || getField(event, 'kind') === 'span') continue;
@@ -243,8 +243,9 @@ export function summarizeTraces(traces: Iterable<[string, readonly Span[]]>, eve
     const time = event.timestampMs ?? NaN;
     const entry = logOnly.get(traceId);
     if (!entry) {
-      logOnly.set(traceId, { first: event, start: time, end: time, services: new Set(event.server ? [event.server] : []) });
-      summaries.set(traceId, { traceId, name: event.message ?? '', service: event.server, services: [], startMs: undefined, durationMs: 0, spans: 0, logs: 1, errors: failed ? 1 : 0 });
+      const operation = requestOperation(event);
+      logOnly.set(traceId, { first: event, named: operation ? { id: event.id, operation } : undefined, start: time, end: time, services: new Set(event.server ? [event.server] : []) });
+      summaries.set(traceId, { traceId, name: '', service: event.server, services: [], startMs: undefined, durationMs: 0, spans: 0, logs: 1, errors: failed ? 1 : 0 });
       continue;
     }
     const summary = summaries.get(traceId)!;
@@ -253,14 +254,39 @@ export function summarizeTraces(traces: Iterable<[string, readonly Span[]]>, eve
     if (event.server) entry.services.add(event.server);
     if (time < entry.start || Number.isNaN(entry.start)) entry.start = time;
     if (time > entry.end || Number.isNaN(entry.end)) entry.end = time;
-    if (event.id < entry.first.id) { entry.first = event; summary.name = event.message ?? ''; summary.service = event.server; }
+    if (event.id < entry.first.id) { entry.first = event; summary.service = event.server; }
+    if (!entry.named || event.id < entry.named.id) {
+      const operation = requestOperation(event);
+      if (operation) entry.named = { id: event.id, operation };
+    }
   }
   for (const [traceId, entry] of logOnly) {
     const summary = summaries.get(traceId)!;
+    summary.name = entry.named?.operation ?? entry.first.message ?? '';
     summary.services = [...entry.services].sort();
     if (Number.isFinite(entry.start)) { summary.startMs = entry.start; summary.durationMs = Math.max(0, entry.end - entry.start); }
   }
   return [...summaries.values()]
     .sort((a, b) => (b.startMs ?? -Infinity) - (a.startMs ?? -Infinity) || a.traceId.localeCompare(b.traceId))
     .slice(0, limit);
+}
+
+const HTTP_METHOD = /^(GET|HEAD|POST|PUT|PATCH|DELETE|OPTIONS|TRACE|CONNECT)$/i;
+const MESSAGE_METHOD = /\b(?:http[._]?)?(?:request)?method[=:]\s*["']?([a-z]+)/i;
+const MESSAGE_PATH = /\b(?:http[._]?)?(?:request)?(?:url|uri|path|route|target)[=:]\s*["']?((?:[a-z][a-z\d+.-]*:\/\/[^\s/"']*)?\/[^\s"',;]*)/i;
+const MESSAGE_REQUEST = /\b(GET|HEAD|POST|PUT|PATCH|DELETE|OPTIONS)\s+(\/[^\s"',;]*)/;
+
+/**
+ * The request a log names, such as `GET /api/orders`, from its fields or from
+ * `requestUrl=…` style text in its message. Query strings are left out.
+ */
+export function requestOperation(event: LogEvent): string | undefined {
+  const message = event.message ?? '';
+  const request = MESSAGE_REQUEST.exec(message);
+  const field = (name: string) => { const value = getField(event, name); return typeof value === 'string' && value ? value : undefined; };
+  const path = field('path') ?? MESSAGE_PATH.exec(message)?.[1] ?? request?.[2];
+  if (!path || !/^(\/|[a-z][a-z\d+.-]*:\/\/)/i.test(path)) return undefined;
+  const method = [field('method'), MESSAGE_METHOD.exec(message)?.[1], request?.[1]].find(value => value && HTTP_METHOD.test(value));
+  const route = path.replace(/[?#].*$/, '') || '/';
+  return method ? `${method.toUpperCase()} ${route}` : route;
 }

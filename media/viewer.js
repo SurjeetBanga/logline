@@ -1099,7 +1099,11 @@
         row.dataset.traceId = trace.traceId;
         row.tabIndex = 0;
         row.setAttribute("aria-label", `${trace.name}, ${formatDuration(trace.durationMs)}${trace.errors ? `, ${trace.errors} errors` : ""}`);
-        const name = cell(`${trace.errors ? "\u26A0 " : ""}${trace.name || trace.traceId}`, "trace-name");
+        const name = cell("", "trace-name");
+        const nameText = document.createElement("span");
+        nameText.className = "trace-name-text";
+        nameText.textContent = `${trace.errors ? "\u26A0 " : ""}${trace.name || trace.traceId}`;
+        name.append(nameText);
         name.title = `${trace.name || trace.traceId}
 Trace ${trace.traceId}`;
         const services = cell("", "traces-services");
