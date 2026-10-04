@@ -9,8 +9,13 @@ import type { TraceSummary, TraceView } from '../core/traces';
 import type { ReceiverStatus } from '../capture/otlp-receiver';
 
 export interface Filter { query?: string; serverId?: string; sessionId?: string; levels?: string[]; }
+/**
+ * The rows a view already holds for the same request, so a refresh can send
+ * only the rows that follow them. `version` is the `rowsVersion` they came with.
+ */
+export interface HeldRows { last: number; count: number; version: string; }
 export type ViewRequest =
-  | ({ type: 'snapshot'; columns?: string[]; statsOnly?: boolean; requestId?: number; doctorRevision?: number; } & PageOptions)
+  | ({ type: 'snapshot'; columns?: string[]; statsOnly?: boolean; requestId?: number; doctorRevision?: number; have?: HeldRows; } & PageOptions)
   | ({ type: 'analysis'; sessionId?: string; from?: number; to?: number; } & Filter)
   | ({ type: 'export' | 'exportForAI'; } & Filter)
   | ({ type: 'copyFiltered'; } & Filter)
@@ -40,6 +45,15 @@ export type ViewRequest =
 
 export interface Snapshot extends Stats {
   type: 'snapshot'; requestId?: number; events?: RowEvent[]; page?: number; pages?: number; matched?: number;
+  /**
+   * Set when `events` only holds rows after the view's held rows: keep the
+   * newest `keep` held rows, the first of which has id `keepFirst`.
+   */
+  keep?: number; keepFirst?: number;
+  /** Identifies how rows were projected and linked; held rows are reusable only with the same version. */
+  rowsVersion?: string;
+  /** Show the newest row at the top of the table. */
+  newestFirst?: boolean;
   columns: string[]; columnFields: string[]; fields: string[];
   status: string; command: string; running: boolean;
   servers: ServerSummary[]; sessions: ReturnType<SessionRegistry['sessionSummaries']>;
@@ -72,7 +86,15 @@ export interface Snapshot extends Stats {
 export type RowEvent = LogEvent & { traceId?: string; site?: boolean; finding?: { severity: FindingSeverity; message: string; }; };
 export type FindingSeverity = 'warning' | 'information' | 'hint';
 /** A log doctor finding as the Logs panel shows it. */
-export interface DoctorFindingView { siteId: string; code: string; severity: FindingSeverity; message: string; file: string; line: number; }
+/**
+ * A log doctor finding as the Logs panel shows it: on a log statement (`siteId`,
+ * `file`, `line`), or in a source's output that no statement accounts for
+ * (`source`, and `eventId` of an example).
+ */
+export interface DoctorFindingView {
+  siteId?: string; code: string; severity: FindingSeverity; message: string; file?: string; line?: number;
+  source?: string; eventId?: number;
+}
 /** What the Logs panel can do with a finding; `report` opens the health report. */
 export type DoctorAction = 'open' | 'showEvents' | 'fix' | 'report';
 /** Links offered with an expanded event, resolved by the host. */
@@ -98,6 +120,13 @@ export type HostMessage = Snapshot
   // Sharing status is also included in snapshots so the webview can render a
   // durable indicator after a notification-driven refresh.
 
+function heldRows(value: unknown): HeldRows | undefined {
+  if (!value || typeof value !== 'object') return undefined;
+  const { last, count, version } = value as Record<string, unknown>;
+  return Number.isSafeInteger(last) && Number.isSafeInteger(count) && (count as number) > 0 && typeof version === 'string'
+    ? { last: last as number, count: count as number, version } : undefined;
+}
+
 /** Normalize untrusted webview input once, before dispatching any host action. */
 export function parseViewRequest(value: unknown): ViewRequest | undefined {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return;
@@ -111,7 +140,7 @@ export function parseViewRequest(value: unknown): ViewRequest | undefined {
     case 'snapshot': return {
       type: msg.type, ...filter, page: index('page'), before: number('before'),
       sort: string('sort'), sortDirection: msg.sortDirection === 'desc' ? 'desc' : 'asc', columns: strings('columns'), statsOnly: msg.statsOnly === true,
-      requestId: index('requestId'), doctorRevision: index('doctorRevision')
+      requestId: index('requestId'), doctorRevision: index('doctorRevision'), have: heldRows(msg.have)
     };
     case 'analysis': return { type: msg.type, ...filter, from: number('from'), to: number('to') };
     case 'export': case 'exportForAI': case 'copyFiltered': return { type: msg.type, ...filter };

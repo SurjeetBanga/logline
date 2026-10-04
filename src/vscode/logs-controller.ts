@@ -27,6 +27,7 @@ import type { LogEvent } from '../core/types';
 import type { DetailLinks, DoctorAction, RowEvent } from '../protocol/messages';
 import type { LogBreakpoints } from './log-breakpoints';
 import { doctorMode, type LogDoctor } from './log-doctor';
+import { SensitiveScanner, type SourceSensitive } from '../core/log-findings';
 import type { LogLens } from './log-lens';
 import type { AgentBridge } from './agent-bridge';
 import { agentLaunch, connectAgent } from './agent-setup';
@@ -39,7 +40,7 @@ const SHARE_ALL_CONFIRMED_KEY = 'logline.shareAllLogsConfirmed.v1';
 export class LogsController {
   readonly config = new Configuration();
   readonly notifications = new ViewNotifications(this.config);
-  readonly state = new RuntimeState(() => { this.notifications.notify(); this.lens?.schedule(); });
+  readonly state = new RuntimeState(() => { this.notifications.notify(); this.lens?.schedule(); this.doctor?.schedule(); });
   readonly store = new LogStore(this.config.get('maxEvents', 50000), this.config.get('maxMemoryMb', 100) * 1024 * 1024);
   readonly registry = new SessionRegistry();
   readonly persistence = new LogPersistence(this.config, () => vscode.workspace.workspaceFolders?.[0]?.uri.fsPath,
@@ -58,6 +59,9 @@ export class LogsController {
   }, this.spans);
   readonly logSites = new LogSiteIndex();
   readonly siteTracker = new LogSiteTracker(this.logSites);
+  /** Sensitive values in output that no indexed statement accounts for. */
+  readonly sensitiveScanner = new SensitiveScanner();
+  private scannerBasis?: string;
   /** Editor integration for log statements; attached at activation. */
   lens?: LogLens;
   /** Debugger breakpoints driven by logs; attached at activation. */
@@ -98,6 +102,8 @@ export class LogsController {
         }
       }
       if (event.affectsConfiguration('logline.persistLogs') || event.affectsConfiguration('logline.maxDiskMb')) this.persistence.invalidate();
+      // Display settings travel with snapshots; an idle view should still apply them now.
+      if (event.affectsConfiguration('logline.newestFirst') || event.affectsConfiguration('logline.timezone')) this.notifications.notify();
       if (event.affectsConfiguration('logline.redactionFields') || event.affectsConfiguration('logline.redactionReplacement')) this.agentAccess.updateRedaction({
         fields: this.config.get<string[]>('redactionFields', []), replacement: this.config.get('redactionReplacement', '[REDACTED]')
       });
@@ -121,9 +127,11 @@ export class LogsController {
       running: this.isRunning(),
       agentAccess: this.agentAccess,
       guideStatus: this.guideStatus(), terminalCapture: this.terminalCapture, otlp: this.otlp, spans: this.spans,
-      rowLinks: event => this.rowLinks(event), agentClients: this.agentBridge?.recentClients() ?? [],
+      rowLinks: event => this.rowLinks(event),
+      rowLinksVersion: `${this.lens?.enabled ?? false}:${this.logSites.version}:${this.siteTracker.generation}:${this.doctor?.revision ?? 0}`,
+      agentClients: this.agentBridge?.recentClients() ?? [],
       doctor: this.doctor && doctorMode(this.config) !== 'off' ? {
-        revision: this.doctor.revision, total: this.doctor.findings.length,
+        revision: this.doctor.revision, total: this.doctor.total,
         // The list only travels when the view does not have this revision yet.
         ...(request.doctorRevision === this.doctor.revision ? {} : { findings: this.doctor.views() })
       } : undefined });
@@ -179,6 +187,32 @@ export class LogsController {
     const findings = siteId ? this.doctor?.findingsFor(siteId).map(finding => ({ siteId, code: finding.code, severity: finding.severity,
       message: finding.message, file: finding.site.file, line: finding.site.line })) : undefined;
     return { ...(site ? { site } : {}), ...(typeof traceId === 'string' && traceId ? { traceId } : {}), ...(findings?.length ? { findings } : {}) };
+  }
+  /**
+   * Scan new output for sensitive values that no statement reports. With log
+   * lenses on, only events the lens has attributed are scanned, and those it
+   * matched to a statement are left to that statement's finding.
+   */
+  unclaimedSensitive(): { findings: SourceSensitive[]; version: number; more: boolean } {
+    const lens = this.lens?.enabled ?? false;
+    const basis = `${this.state.generation}:${lens}:${lens ? this.siteTracker.generation : ''}`;
+    if (basis !== this.scannerBasis) { this.scannerBasis = basis; this.sensitiveScanner.reset(); }
+    const tracker = this.siteTracker;
+    const limit = lens ? tracker.watermark : Infinity;
+    const store = this.store;
+    const scanner = this.sensitiveScanner;
+    // A bounded pass keeps a rescan of a full store from blocking the extension host.
+    let budget = 10000;
+    let more = false;
+    scanner.scan((function* () {
+      for (const event of store.eventsAfter(scanner.watermark)) {
+        if (event.id > limit) return;
+        if (!budget--) { more = true; return; }
+        yield event;
+      }
+    })(), event => lens && typeof tracker.siteOf(event.id) === 'string');
+    scanner.evict(store.eventsAfter(0).next().value?.id ?? Infinity);
+    return { findings: scanner.findings, version: scanner.version, more };
   }
   /** What a table row shows about its log statement, without matching anything the lens already counted. */
   rowLinks(event: LogEvent): Pick<RowEvent, 'site' | 'finding'> {

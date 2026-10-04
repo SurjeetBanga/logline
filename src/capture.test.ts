@@ -93,3 +93,44 @@ test('process runner records spawn errors, rejects duplicate saved servers, and 
   await runner.dispose();
   await runner.dispose();
 });
+
+test('a process that ignores SIGTERM is killed after the stop grace period', { timeout: 10000, skip: process.platform === 'win32' }, async () => {
+  const registry = new SessionRegistry();
+  const state = new RuntimeState(() => { });
+  const runner = new ProcessRunner({ get: (_key, fallback) => fallback }, registry, new Ingestion(new LogStore(100), () => { }), state);
+  let exited!: (code: number) => void;
+  const done = new Promise<number>(resolve => { exited = resolve; });
+  const id = runner.run(process.execPath, undefined, { id: 'stubborn', label: 'Stubborn' }, undefined, undefined,
+    ['-e', 'process.on("SIGTERM", () => {}); console.log("ready"); setInterval(() => {}, 1000);'], exited)!;
+  const session = [...runner.sessions][0];
+  try {
+    await once(session.child.stdout, 'data');
+    const started = Date.now();
+    runner.stopSessionById(id);
+    assert.equal(registry.records.get(id)!.status, 'stopping');
+    assert.equal(await done, 1);
+    assert.ok(Date.now() - started >= 1900, 'SIGTERM alone did not stop it');
+    const record = registry.records.get(id)!;
+    assert.equal(record.signal, 'SIGKILL');
+    assert.equal(record.status, 'exited');
+    assert.equal(state.status, 'Stopped');
+    assert.equal(runner.sessions.size, 0);
+  } finally { session.child.kill('SIGKILL'); await runner.dispose(); }
+});
+
+test('a task that cannot start reports a failed task state to its dependents', { timeout: 10000 }, async () => {
+  const registry = new SessionRegistry();
+  const state = new RuntimeState(() => { });
+  const runner = new ProcessRunner({ get: (_key, fallback) => fallback }, registry, new Ingestion(new LogStore(100), () => { }), state);
+  let exited!: (code: number) => void;
+  const done = new Promise<number>(resolve => { exited = resolve; });
+  const id = runner.run('/definitely/not/a/real/logline-task', undefined,
+    { id: 'task:build', label: 'build', taskName: 'build', taskType: 'shell' }, undefined, undefined, [], exited)!;
+  await done;
+  const record = registry.records.get(id)!;
+  assert.equal(record.status, 'failed');
+  assert.equal(record.taskState, 'failed');
+  assert.match(record.exitReason ?? '', /^error: .*ENOENT/, 'the spawn error is kept as the reason, not exit code -2');
+  assert.match(state.status, /^Failed: /);
+  await runner.dispose();
+});

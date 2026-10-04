@@ -1,5 +1,6 @@
 import type { HostMessage, Snapshot } from '../protocol/messages';
 import { createAnalysis } from './analysis/charts';
+import { addFilterTerm } from './search/cell-filter';
 import { SnapshotBridge } from './bridge';
 import { getElements, setLabel } from './dom';
 import { createTooltips } from './tooltip';
@@ -23,13 +24,23 @@ export function createViewer(api: WebviewApi) {
   const scope = new EventScope();
   const elements = getElements();
   const scrollViewport = document.querySelector<HTMLElement>('.table-scroll')!;
+  // One formatter for every count: toLocaleString builds a new one per call.
+  const numberFormat = new Intl.NumberFormat();
   const saved = api.getState() ?? {};
   const state = new ViewerState(saved);
   elements.search.value = saved.query ?? '';
   const { popovers, createPopover } = createPopovers(scope);
   createTooltips(scope);
   const formatTimestamp = createTimestampFormatter(state);
-  const analysis = createAnalysis(elements, state);
+  const analysis = createAnalysis(elements, state, {
+    drill: term => {
+      const choice = addFilterTerm(search.query(), term);
+      if (choice.query === undefined) { elements.analysisStatus.textContent = choice.reason; return; }
+      elements.analysisDialog.close();
+      search.setQuery(choice.query, true);
+    },
+    selectSource: id => { elements.analysisDialog.close(); selectSource(id); }
+  }, scope);
   const inspection = createInspection(elements, scrollViewport, api, formatTimestamp, scope, traceId => traceView.show(traceId));
   const search = createSearch(elements, state, api, popovers, { filterChanged, updateScopeSelection }, scope);
   const request = (force = false) => bridge.request(force);
@@ -42,7 +53,8 @@ export function createViewer(api: WebviewApi) {
     startReceiver: () => api.postMessage({ type: 'toggleOtlp', enabled: true }),
     receiver: () => ({ running: otlpRunning, endpoint: otlpEndpoint })
   });
-  const doctor = createDoctor(elements.doctor, elements.doctorCount, elements.doctorPanel, elements.doctorList, api, scope, () => doctorPopover.close());
+  const doctor = createDoctor(elements.doctor, elements.doctorCount, elements.doctorPanel, elements.doctorList, api, scope, () => doctorPopover.close(),
+    id => inspection.showContext(id));
   let otlpRunning = false;
   let otlpEndpoint: string | undefined;
   let pointerOverRows = false;
@@ -74,7 +86,12 @@ export function createViewer(api: WebviewApi) {
   // The host increments its generation when logs are cleared. An older
   // snapshot can arrive afterwards, so keep it from restoring the old schema.
   let minimumSnapshotGeneration = 0;
-  const onMessage = (event: MessageEvent<HostMessage>) => receive(event.data);
+  const onMessage = (event: MessageEvent<HostMessage>) => {
+    if (event.data?.type !== 'snapshot') { receive(event.data); return; }
+    // Measure before the snapshot writes anything, so rendering its rows needs no forced layout.
+    table.measureViewport();
+    try { receive(event.data); } finally { table.releaseViewport(); }
+  };
   scope.listen(window, 'message', onMessage);
   function receive(data: HostMessage) {
     if (data.type === 'guideStatus') {
@@ -109,7 +126,9 @@ export function createViewer(api: WebviewApi) {
       return;
     }
     if (data.type === 'analysis') {
-      elements.analysisStatus.textContent = 'Analysis of the current retained filter';
+      const filter = search.query();
+      const source = state.selectedServer ? visibleSources.find(server => server.id === state.selectedServer)?.label ?? state.selectedServer : '';
+      elements.analysisStatus.textContent = `${filter ? `Logs matching ${filter}` : 'All retained logs'}${source ? ` from ${source}` : ''}${state.currentLevels() ? ' at the selected levels' : ''}. Click a bar, value, pattern or error group to show its logs.`;
       analysis.renderAnalysis(data.analysis);
       return;
     }
@@ -128,6 +147,7 @@ export function createViewer(api: WebviewApi) {
       return;
     if (data.guideStatus) updateGuideStatus(data.guideStatus);
     bridge.received(data.requestId);
+    const rows = bridge.rows(data);
     // A filter requested from the editor (a log statement's CodeLens).
     if (data.applyQuery !== undefined && data.applyQuery !== search.query()) search.setQuery(data.applyQuery, true);
     if (data.openTrace) traceView.show(data.openTrace);
@@ -143,9 +163,9 @@ export function createViewer(api: WebviewApi) {
     }
     doctor.receive(data.doctor);
     elements.traceCount.hidden = !data.traceCount;
-    elements.traceCount.textContent = data.traceCount ? data.traceCount.toLocaleString() : '';
+    elements.traceCount.textContent = data.traceCount ? numberFormat.format(data.traceCount) : '';
     elements.traces.title = data.traceCount
-      ? `${data.traceCount.toLocaleString()} traces received from OpenTelemetry. Show requests across services.`
+      ? `${numberFormat.format(data.traceCount)} traces received from OpenTelemetry. Show requests across services.`
       : 'Requests across services, from OpenTelemetry spans and logs with a trace id';
     elements.otlpToggle.textContent = otlpRunning ? 'Stop OpenTelemetry receiver' : 'Start OpenTelemetry receiver';
     elements.otlpToggle.title = otlpRunning
@@ -166,6 +186,7 @@ export function createViewer(api: WebviewApi) {
       state.selectedExceptions = [];
       table.resetDetails();
       table.resetAutomaticColumns();
+      bridge.forget();
       table.renderRows([]);
       bridge.refreshRequested = true;
     }
@@ -175,6 +196,12 @@ export function createViewer(api: WebviewApi) {
     if (data.timezone && data.timezone !== state.displayTimezone) {
       state.displayTimezone = data.timezone;
       state.lastRows = undefined;
+      table.invalidateRows();
+    }
+    if (data.newestFirst !== undefined && data.newestFirst !== state.newestFirst) {
+      state.newestFirst = data.newestFirst;
+      state.lastRows = undefined;
+      table.renderRows(table.events);
     }
     state.newest = data.newest;
     if (!state.following && state.before === undefined)
@@ -257,7 +284,7 @@ export function createViewer(api: WebviewApi) {
       updateCopyResultsControl();
       bridge.refreshRequested = true;
     }
-    const number = (value: number) => value.toLocaleString();
+    const number = (value: number) => numberFormat.format(value);
     const budget = Number.isFinite(data.maxBytes) ? (data.maxBytes / 1048576).toFixed(0) : '?';
     elements.counts.textContent = `${number(data.total)} received · ${number(data.retained)} retained · ${number(data.discarded)} discarded · ${(data.bytes / 1048576).toFixed(1)} / ${budget} MiB · ${data.truncated} truncated`
       + (data.persistDropped ? ` · ${number(data.persistDropped)} disk writes skipped` : '');
@@ -265,32 +292,35 @@ export function createViewer(api: WebviewApi) {
     if (Array.isArray(data.columnFields))
       state.columnFields = data.columnFields;
     table.updateColumns(data.columns ?? []);
-    if (data.events?.length)
+    if (rows?.length)
       table.lockAutomaticColumns();
     table.renderFieldList();
     if (Array.isArray(data.fields))
       state.allFields = data.fields;
     if (data.searches)
       search.renderSearchState(data.searches);
-    if (data.events && !bridge.refreshRequested && !state.paused && holdingLive()) {
+    if (rows && !bridge.refreshRequested && !state.paused && holdingLive()) {
       // Rows would move under the pointer; show them when it leaves the table.
-      heldEvents = data.events;
+      heldEvents = rows;
       updateModeLabel();
     }
-    else if (data.events && !bridge.refreshRequested && !state.paused) {
+    else if (rows && !bridge.refreshRequested && !state.paused) {
       heldEvents = undefined;
       state.page = data.page ?? 0;
       state.pages = data.pages ?? 1;
       elements.page.textContent = `Page ${state.page + 1} of ${state.pages} · ${number(data.matched ?? 0)} matches`;
       elements.older.disabled = state.page >= state.pages - 1;
       elements.newer.disabled = state.page === 0;
-      const signature = data.events.map(event => event.id).join(',');
-      if (signature !== state.lastRows) {
-        state.lastRows = signature;
-        table.renderRows(data.events);
+      // A partial refresh that added nothing returns the same array.
+      if (rows !== table.events || state.lastRows === undefined) {
+        const signature = rows.map(event => event.id).join(',');
+        if (signature !== state.lastRows) {
+          state.lastRows = signature;
+          table.renderRows(rows);
+        }
       }
-      elements.empty.hidden = data.events.length > 0;
-      elements.rowHint.hidden = state.rowHintDismissed || !data.events.length;
+      elements.empty.hidden = rows.length > 0;
+      elements.rowHint.hidden = state.rowHintDismissed || !rows.length;
       elements.empty.textContent = data.total ? 'No matching events in retained history.' : 'Run a server command to see its logs here.';
       if (state.following && !state.paused && !state.selectedSort)
         table.scheduleRenderWindow(true);
@@ -351,7 +381,9 @@ export function createViewer(api: WebviewApi) {
     elements.older.textContent = state.selectedSort ? 'Next →' : '← Older';
     elements.newer.textContent = state.selectedSort ? '← Previous' : 'Newer →';
     elements.mode.textContent = state.paused ? 'Paused — collection continues' : state.selectedSort ? `Sorted ${state.selectedSortDirection === 'asc' ? 'ascending' : 'descending'}${state.following ? ' · Live updates' : ''}`
-      : state.following ? (heldEvents ? 'Live · new rows held while you point at the table' : 'Live · newest 1,000') : 'Browsing retained history';
+      : state.following ? (heldEvents ? 'Live · new rows held while you point at the table' : 'Live · newest 1,000')
+        : state.newestFirst && state.page === 0 && state.before !== undefined && state.newest > state.before ? 'Browsing · newer logs arrived — scroll to the top for Live'
+          : 'Browsing retained history';
     elements.mode.className = state.following && !state.paused ? 'live-mode' : '';
   }
 
@@ -564,11 +596,25 @@ export function createViewer(api: WebviewApi) {
 
   scope.listen(elements.analysisClose, 'click', () => elements.analysisDialog.close());
 
+  function resumeLive() {
+    state.resume(); table.resetDetails(); saveState(); table.updateColumns(table.automaticColumns, true);
+    updateFollowControl(); updateModeLabel(); request(true); table.scheduleRenderWindow(true);
+  }
   scope.listen(elements.follow, 'click', () => {
-    if (state.paused || !state.following) {
-      state.resume(); table.resetDetails(); saveState(); table.updateColumns(table.automaticColumns, true);
-      updateFollowControl(); updateModeLabel(); request(true); table.scheduleRenderWindow(true);
-    } else { setFollowing(false); updateFollowControl(); request(true); }
+    if (state.paused || !state.following) resumeLive();
+    else { setFollowing(false); updateFollowControl(); request(true); }
+  });
+  // With the newest on top, Live sits at the top of the table. Scrolling down
+  // to read stops it, so rows hold still instead of being pushed down by new
+  // ones; scrolling back to the top resumes it.
+  let lastScrollTop = 0;
+  scope.listen(scrollViewport, 'scroll', () => {
+    const top = scrollViewport.scrollTop;
+    const wasAtTop = lastScrollTop <= 1;
+    lastScrollTop = top;
+    if (!state.newestFirst || state.paused || state.selectedSort) return;
+    if (state.following && top > 1) setFollowing(false);
+    else if (!state.following && top <= 1 && !wasAtTop && state.page === 0) resumeLive();
   });
   scope.listen(elements.older, 'click', () => {
     if (state.following && !state.paused)

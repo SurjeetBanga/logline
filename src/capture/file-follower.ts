@@ -24,7 +24,7 @@ interface Follow {
   reader: LineReader;
   joiner?: LinePipeline;
   watcher?: FSWatcher;
-  poll: ReturnType<typeof setInterval>;
+  poll?: ReturnType<typeof setInterval>;
   pumping?: Promise<void>;
   again: boolean;
   stopped: boolean;
@@ -75,11 +75,7 @@ export class FileFollower {
     };
     const joiner = new LinePipeline(ingest, linePipelineOptions(this.config, limit));
     const reader = new LineReader((line, truncated) => joiner.write(line, truncated), limit);
-    const follow: Follow = {
-      record, file, position: 0, fingerprint: Buffer.alloc(0), reader, joiner, again: false, stopped: false,
-      poll: setInterval(() => this.pump(follow), pollMs)
-    };
-    follow.poll.unref?.();
+    const follow: Follow = { record, file, position: 0, fingerprint: Buffer.alloc(0), reader, joiner, again: false, stopped: false };
     this.registry.records.set(record.id, record);
     this.follows.set(record.id, follow);
 
@@ -91,6 +87,12 @@ export class FileFollower {
       // The file can disappear between stat and open; then wait for it like a missing file.
       follow.position = await this.lineStartNear(file, Math.max(0, info.size - Math.max(0, tailBytes))).catch(() => 0);
       follow.fingerprint = await this.readAt(file, Math.max(0, follow.position - FINGERPRINT), Math.min(FINGERPRINT, follow.position));
+    }
+    // Change notices start only now: a read before the tail position is known
+    // would ingest the whole existing file from its first byte.
+    if (!follow.stopped) {
+      follow.poll = setInterval(() => this.pump(follow), pollMs);
+      follow.poll.unref?.();
     }
     this.watch(follow);
     this.state.status = `Following ${path.basename(file)}`;

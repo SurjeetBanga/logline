@@ -131,7 +131,8 @@ export class ProcessRunner {
       if (record.status !== 'failed') record.status = session.stopping ? 'exited' : (code === 0 ? 'exited' : 'failed');
       if (record.taskName) {
         record.taskState = record.status;
-        record.exitReason = signal ? `signal ${signal}` : `exit code ${typeof code === 'number' ? code : 'unknown'}`;
+        // A process that never started closes with a negative errno; keep the spawn error instead.
+        if (record.error === undefined) record.exitReason = signal ? `signal ${signal}` : `exit code ${typeof code === 'number' ? code : 'unknown'}`;
         this.registry.refreshDependents(record.taskName, record.taskScope, record.taskLabel);
       }
       if (this.sessions.delete(session)) {

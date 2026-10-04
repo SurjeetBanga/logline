@@ -40,7 +40,7 @@ You can run the command in a terminal or copy it. Restart the agent afterwards s
 
 Agents read only what you share with **Share with agent**, always redacted, and **Sharing · Stop** cuts them off immediately. While sharing, the status line shows which agents read the logs recently, for example *read by Claude Code*. Each VS Code window listens on `127.0.0.1` only and writes its port and a random token to `~/.logline/agents/`, readable only by your user; the MCP server forwards each tool call to the window whose workspace folder contains the agent's working directory. With several windows open and the agent started elsewhere, set `LOGLINE_WORKSPACE` to the folder of the window to use. Set `logline.externalAgents` to `false` to stop accepting MCP clients.
 
-**Live** follows the newest events automatically. Turn it off to browse retained history with Older/Newer. Sorting switches to Browse; returning to Live (or Resume after inspecting an event) clears the sort and expanded event and jumps to the newest rows in capture order. The panel renders up to **1,000 rows per page**.
+**Live** follows the newest events automatically, with the newest at the top. Scrolling down to read leaves Live, so new rows do not push what you are reading; the mode label says when newer logs have arrived, and scrolling back to the top (or choosing **Live**) resumes it. Set `logline.newestFirst` to `false` for terminal order, with the newest at the bottom. Turn Live off to browse retained history with Older/Newer. Sorting switches to Browse; returning to Live (or Resume after inspecting an event) clears the sort and expanded event and jumps to the newest rows in capture order. The panel renders up to **1,000 rows per page**.
 
 While an event is expanded, incoming logs leave the inspected rows alone. Changing filters, paging, sorting, or selecting columns closes inspection and refreshes the results in Browse mode. Choose Live to follow new events again.
 
@@ -100,7 +100,9 @@ Click a column's name to sort by that field and click it again to reverse the di
 
 ## Analysis
 
-**Analyze** opens retained metrics for the current filter: event rate, errors, latency, status-code counts, the top 10 log patterns by volume, and normalized error groups. Analysis uses only events currently retained in memory.
+**Analyze** summarizes the retained logs that match the current filter: totals for events, errors (with their share), and p50/p95/p99 latency; event volume with errors and latency over time, with unusual spikes marked; status codes; the most common values of fields such as source, service, and path; error groups; and the top 20 log patterns, shown with their variable parts as `*` (`POST * completed in *`). Patterns and error groups show their share, a trend over the range, and a **New** badge when they first appeared in its last quarter. Error groups also show where the error was thrown and when it was first and last seen.
+
+Everything is a way into the logs: click a bar to filter to its time range, a status code or field value to filter to it, a source to select it, or a pattern or error group to filter to its messages. The filter is added to the current search. Numbers with units (`48ms`, `1.5s`) and ids do not split a message into separate patterns, and an error logged both with and without its stack is one group. A few events with timestamps far from the rest, such as plain lines stamped on arrival among replayed logs, are left out of the time charts and noted, but still count everywhere else. Analysis uses only events currently retained in memory.
 
 ## Exceptions and surrounding context
 
@@ -141,7 +143,7 @@ A status bar item, **Break on log**, shows while log breakpoints are active; cli
 
 ## Log doctor
 
-Log doctor reports problems with log statements in the Problems panel, based on what they actually logged rather than on how the code looks. It needs log lenses, since findings are attached to the statements they index. The same findings appear in the Logs panel: **Log issues** in the toolbar lists them with **Fix…** (opens the statement with its quick fixes) and **Show events**, rows from a statement with a finding carry a log doctor icon, and expanding such an event explains the finding.
+Log doctor reports problems with log statements in the Problems panel, based on what they actually logged rather than on how the code looks. Findings on statements need log lenses, which match events to the statements they index. Secrets and personal data are also checked in every source's output, including libraries, imported files, terminals, and OpenTelemetry, where no statement is matched: those findings appear in **Log issues** and the health report under the source's name, with **Show example** to open the latest event that carried the value with the logs around it. The same findings appear in the Logs panel: **Log issues** in the toolbar lists them with **Fix…** (opens the statement with its quick fixes) and **Show events**, rows from a statement with a finding carry a log doctor icon, and expanding such an event explains the finding.
 
 | Finding | Reported when | Severity |
 | --- | --- | --- |
@@ -150,10 +152,13 @@ Log doctor reports problems with log statements in the Problems panel, based on 
 | `missing-exception` | A statement inside a `catch`/`except` block logged errors without a stack trace and does not pass the caught variable | Warning |
 | `noisy` | A statement below warning level produced at least 30% of at least 500 retained events | Information |
 | `unstructured` | A statement formats two or more values into plain-text messages instead of logging fields | Hint |
+| `quiet-failure` | At least half of a statement's events (and at least 3) are logged at trace, debug, or info but describe a failure: a stack trace, a 5xx status, or a message such as "failed", "refused", or "timed out". Messages that deny a failure, such as "no errors", do not count | Warning |
+| `contextless` | Most structured logs carry a trace, request, or correlation id, but at least 3 of a statement's events (most of them) are structured warnings or errors without one | Information |
+| `oversized` | A statement's events average 8 KB or more, or some were cut at `maxLineLength` | Information |
 
 Evidence is always masked: a finding says what was logged and where (`Logged a JSON Web Token in field headers.authorization in 37 events (eyJh…[jwt])`), never the value itself. Examples like `user@example.com` and already redacted values are ignored. Findings follow the retained events, so they update as logs arrive and disappear after **Clear**.
 
-Quick fixes (Ctrl+. or Cmd+.) depend on the finding: **Lower to debug** for a noisy `info` or `log` call; **Pass 'err' to the log call** (or **logger.exception** in Python) for a missing exception; **Fix with Copilot** for secrets, personal data, unstructured messages and exceptions, which opens chat with the finding and statement; **Show the events in Logs**; and **Ignore this finding**, which adds a `logline-ignore: <finding>` comment above the statement. A `logline-ignore` comment without a finding name silences every finding for that statement. **Logline: Show Log Health** opens a Markdown summary of all findings in the workspace that you can paste into an issue or pull request. Set `logline.logDoctor` to `security` for secrets and personal data only, or `off`.
+Quick fixes (Ctrl+. or Cmd+.) depend on the finding: **Lower to debug** for a noisy `info` or `log` call; **Raise to error** for a failure logged at `info`, `debug`, or `log`; **Pass 'err' to the log call** (or **logger.exception** in Python) for a missing exception; **Fix with Copilot** for secrets, personal data, unstructured messages, exceptions, oversized events, and missing request context, which opens chat with the finding and statement; **Show the events in Logs**; and **Ignore this finding**, which adds a `logline-ignore: <finding>` comment above the statement. A `logline-ignore` comment without a finding name silences every finding for that statement. **Logline: Show Log Health** opens a Markdown summary of all findings in the workspace, with what to do about each kind, that you can paste into an issue or pull request. Set `logline.logDoctor` to `security` for secrets and personal data only, or `off`.
 
 ## Tasks
 
@@ -205,6 +210,7 @@ Set `shell: true` when the command is a shell line containing pipes, redirects, 
 | `logline.joinStackTraces` | `true` | Join plain-text stack trace lines into one event for new captures, followed files, and plain-text imports. |
 | `logline.columns` | `[]` | Preferred table columns. Empty auto-detects common fields. |
 | `logline.timezone` | `local` | `local` or `utc` for displayed timestamps. |
+| `logline.newestFirst` | `true` | Show the newest logs at the top of the Logs panel. Turn off for terminal order, with the newest at the bottom. |
 | `logline.indentation` | `2` | Spaces used when formatting expanded JSON. |
 | `logline.maxEvents` | `50000` | Maximum events retained in memory. Applied immediately. |
 | `logline.maxMemoryMb` | `100` | Approximate memory budget for retained events. Applied immediately. |

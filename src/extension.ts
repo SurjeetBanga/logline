@@ -42,7 +42,8 @@ export function activate(context: vscode.ExtensionContext): { provider: LogsProv
         config: logController.config, index: logController.logSites, tracker: logController.siteTracker, lens: controller.lens,
         askCopilot: prompt => logController.openChat(prompt),
         showQuery: query => logController.showQuery(query),
-        onChanged: () => logController.notifications.notify()
+        onChanged: () => logController.notifications.notify(),
+        unclaimed: () => logController.unclaimedSensitive()
       });
       context.subscriptions.push(controller.doctor);
     }

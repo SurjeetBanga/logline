@@ -2,6 +2,27 @@
 
 All notable changes to Logline are documented in this file.
 
+## 1.13.0 — 2026-10-04
+
+### Changes
+
+- **Analyze** opens with totals for events, errors, and p50/p95/p99 latency, adds the most common values of fields such as source, service, and path, and shows status codes as bars. Every bar, status code, value, pattern, and error group filters the logs to it. Patterns read like `POST * completed in *`, show their share, trend, and a **New** badge, and there are 20 instead of 10. Error groups show where they were thrown, when they were first and last seen, and their trend.
+- **Log doctor** reports failures logged at info or debug (with a **Raise to error** quick fix), errors without a trace or request id when most logs have one, and statements whose events average 8 KB or more or were truncated. It also finds secrets and personal data in output that no statement accounts for, such as libraries, imports, and terminals, and lists them by source with **Show example**. The health report explains what to do about each kind of finding.
+- The newest logs appear at the top of the Logs panel, as in Datadog and other log tools. Scrolling down to read leaves Live so new rows no longer push the rows you are reading, and scrolling back to the top resumes it. Set `logline.newestFirst` to `false` for terminal order.
+
+### Performance
+
+- Live refreshes send only the new rows instead of the whole 1,000-row page, so a busy stream sends about 25 KiB per refresh instead of about 400 KiB.
+- Scrolling builds only the rows that come into view and leaves the others in place: frames take about a third of the time, and the slowest frame went from about 10 ms to under 3 ms.
+- Refreshes no longer force a layout per table cell for keyboard navigation, or a layout of the half-updated toolbar before rendering rows.
+
+### Fixes
+
+- **Analyze** no longer splits one message into many patterns or error groups when it contains numbers with units (`after 48ms`), or one error into two groups when it was logged both with and without its stack.
+- A few events with timestamps far from the rest, such as plain lines stamped on arrival among replayed logs, no longer squeeze the **Analyze** charts into a few bars; they are noted and left out of the time charts only.
+- Following a large log file could read the whole file instead of its tail when the extension host was busy at start-up.
+- A task that cannot start keeps its spawn error as the reason instead of `exit code -2`.
+
 ## 1.12.2 — 2026-10-04
 
 ### Fixes
