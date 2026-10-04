@@ -1,11 +1,13 @@
 import type { HostMessage, Snapshot } from '../protocol/messages';
 import { createAnalysis } from './analysis/charts';
 import { SnapshotBridge } from './bridge';
-import { getElements } from './dom';
+import { getElements, setLabel } from './dom';
+import { createTooltips } from './tooltip';
 import { EventScope } from './event-scope';
 import { createInspection } from './inspection/context';
 import { createTraceView } from './inspection/trace';
 import { createTraceList } from './inspection/traces';
+import { createDoctor } from './inspection/doctor';
 import { createPopovers } from './popovers';
 import { createSearch } from './search/controls';
 import { ViewerState } from './state';
@@ -23,6 +25,7 @@ export function createViewer(api: WebviewApi) {
   const state = new ViewerState(saved);
   elements.search.value = saved.query ?? '';
   const { popovers, createPopover } = createPopovers(scope);
+  createTooltips(scope);
   const formatTimestamp = createTimestampFormatter(state);
   const analysis = createAnalysis(elements, state);
   const inspection = createInspection(elements, scrollViewport, api, formatTimestamp, scope, traceId => traceView.show(traceId));
@@ -34,13 +37,18 @@ export function createViewer(api: WebviewApi) {
   const traceList = createTraceList(elements, api, scope, {
     showTrace: traceId => traceView.show(traceId, true),
     formatTime: ms => formatTimestamp({ id: 0, level: '', timestampMs: ms }) ?? '',
-    startReceiver: () => api.postMessage({ type: 'toggleOtlp', enabled: true })
+    startReceiver: () => api.postMessage({ type: 'toggleOtlp', enabled: true }),
+    receiver: () => ({ running: otlpRunning, endpoint: otlpEndpoint })
   });
+  const doctor = createDoctor(elements.doctor, elements.doctorCount, elements.doctorPanel, elements.doctorList, api, scope, () => doctorPopover.close());
   let otlpRunning = false;
+  let otlpEndpoint: string | undefined;
+  let pointerOverRows = false;
+  let heldEvents: Snapshot['events'];
   let cellActions: ReturnType<typeof createCellActions> | undefined;
   const table = createTable(elements, scrollViewport, state, api, formatTimestamp,
     { request: requestInteraction, saveState, filterChanged, setFollowing, updateFollowControl, updateModeLabel }, scope, () => cellActions?.rowsChanged());
-  const bridge = new SnapshotBridge(api, state, () => search.query(), () => table.currentColumns);
+  const bridge = new SnapshotBridge(api, state, () => search.query(), () => table.currentColumns, () => doctor.revision());
   let serverSignature = '';
   let sessionSignature = '';
   let activeScopeTab: 'sources' | 'runs' = 'sources';
@@ -119,13 +127,17 @@ export function createViewer(api: WebviewApi) {
     // A filter requested from the editor (a log statement's CodeLens).
     if (data.applyQuery !== undefined && data.applyQuery !== search.query()) search.setQuery(data.applyQuery, true);
     if (data.openTrace) traceView.show(data.openTrace);
+    const receiverWasRunning = otlpRunning;
     otlpRunning = data.otlp?.running === true;
+    otlpEndpoint = data.otlp?.endpoint;
+    if (otlpRunning !== receiverWasRunning) traceList.receiverChanged();
     // The receiver's state stays visible while it runs, and leads to the traces it collected.
     elements.otlpStatus.hidden = !otlpRunning;
     if (otlpRunning) {
       elements.otlpStatus.textContent = `OpenTelemetry ${data.otlp?.endpoint?.replace(/^https?:\/\//, '') ?? ''}`.trim();
       elements.otlpStatus.title = `Receiving OpenTelemetry logs and traces on ${data.otlp?.endpoint ?? 'localhost'}. Click to see traces.`;
     }
+    doctor.receive(data.doctor);
     elements.traceCount.hidden = !data.traceCount;
     elements.traceCount.textContent = data.traceCount ? data.traceCount.toLocaleString() : '';
     elements.traces.title = data.traceCount
@@ -168,9 +180,9 @@ export function createViewer(api: WebviewApi) {
     elements.command.textContent = data.command;
     elements.command.title = data.command;
     elements.stop.disabled = !data.running;
-    elements.captureToggle.textContent = data.captureStatus?.state === 'capturing' ? 'Terminal capture: Capturing…'
+    setLabel(elements.captureToggle, data.captureStatus?.state === 'capturing' ? 'Terminal capture: Capturing…'
       : data.captureStatus?.state === 'attention' ? 'Terminal capture: Needs attention'
-        : data.captureTerminals ? 'Terminal capture: On' : 'Terminal capture: Off';
+        : data.captureTerminals ? 'Terminal capture: On' : 'Terminal capture: Off');
     elements.captureToggle.setAttribute('aria-pressed', String(data.captureTerminals));
     elements.captureToggle.title = data.captureStatus?.detail
       || (data.captureTerminals ? 'Terminal capture is on. Click to turn it off.' : 'Terminal capture is off. Click to turn it on.');
@@ -178,7 +190,7 @@ export function createViewer(api: WebviewApi) {
     agentSharingActive = Boolean(sharing);
     const sharedRuns = sharing ? data.agentSharing.sources.reduce((sum, source) => sum + (source.runs?.length ?? source.sessions), 0) : 0;
     const sharingAll = sharing && data.agentSharing.scope === 'all';
-    elements.shareAgent.textContent = sharing ? 'Sharing logs · Stop' : 'Share logs with agent';
+    setLabel(elements.shareAgent, sharing ? 'Sharing · Stop' : 'Share with agent');
     elements.shareAgent.setAttribute('aria-pressed', String(Boolean(sharing)));
     elements.shareAgent.title = sharing
       ? sharingAll ? 'Existing and new captured logs are available to Copilot in this window. Click to stop sharing.'
@@ -187,7 +199,7 @@ export function createViewer(api: WebviewApi) {
     elements.shareScope.hidden = !sharing;
     elements.shareScope.textContent = sharingAll ? 'Sharing existing and new runs in this window until stopped'
       : sharing ? `Sharing ${sharedRuns} selected run${sharedRuns === 1 ? '' : 's'} only` : '';
-    elements.stop.textContent = state.selectedServer ? 'Stop server' : 'Stop all';
+    setLabel(elements.stop, state.selectedServer ? 'Stop server' : 'Stop all');
     const activeSessions = Array.isArray(data.sessions) ? data.sessions.filter(session => ['running', 'stopping'].includes(session.status)) : [];
     elements.sessions.textContent = activeSessions.length
       ? `${activeSessions.length} active session${activeSessions.length === 1 ? '' : 's'}` : 'No active sessions';
@@ -253,7 +265,13 @@ export function createViewer(api: WebviewApi) {
       state.allFields = data.fields;
     if (data.searches)
       search.renderSearchState(data.searches);
-    if (data.events && !bridge.refreshRequested && !state.paused) {
+    if (data.events && !bridge.refreshRequested && !state.paused && holdingLive()) {
+      // Rows would move under the pointer; show them when it leaves the table.
+      heldEvents = data.events;
+      updateModeLabel();
+    }
+    else if (data.events && !bridge.refreshRequested && !state.paused) {
+      heldEvents = undefined;
       state.page = data.page ?? 0;
       state.pages = data.pages ?? 1;
       elements.page.textContent = `Page ${state.page + 1} of ${state.pages} · ${number(data.matched ?? 0)} matches`;
@@ -265,6 +283,7 @@ export function createViewer(api: WebviewApi) {
         table.renderRows(data.events);
       }
       elements.empty.hidden = data.events.length > 0;
+      elements.rowHint.hidden = state.rowHintDismissed || !data.events.length;
       elements.empty.textContent = data.total ? 'No matching events in retained history.' : 'Run a server command to see its logs here.';
       if (state.following && !state.paused && !state.selectedSort)
         table.scheduleRenderWindow(true);
@@ -272,25 +291,46 @@ export function createViewer(api: WebviewApi) {
     bridge.flush();
   }
 
+  // While following live, new rows push the table up every refresh, so a row
+  // can move away between pointing at it and clicking. Hold the rows while the
+  // pointer is over them, the way live tails do, and catch up when it leaves.
+  function holdingLive() { return pointerOverRows && state.following && !state.selectedSort; }
+  scope.listen(scrollViewport, 'pointerenter', () => { pointerOverRows = true; });
+  scope.listen(scrollViewport, 'pointerleave', () => {
+    pointerOverRows = false;
+    const events = heldEvents;
+    heldEvents = undefined;
+    if (events && state.following && !state.paused) {
+      state.lastRows = events.map(event => event.id).join(',');
+      table.renderRows(events);
+      elements.empty.hidden = events.length > 0;
+      table.scheduleRenderWindow(true);
+    }
+    updateModeLabel();
+  });
+
   function updateFollowControl() {
     if (state.paused) {
       elements.follow.setAttribute('aria-pressed', 'false');
       elements.follow.setAttribute('aria-label', 'Resume live updates');
-      elements.follow.title = 'Resume live updates';
-      elements.follow.textContent = 'Resume';
+      elements.follow.title = 'Paused while you inspect an event; capture continues. Click to resume live logs.';
+      elements.follow.dataset.mode = 'resume';
+      setLabel(elements.follow, 'Resume');
       return;
     }
     elements.follow.setAttribute('aria-pressed', String(state.following));
     elements.follow.setAttribute('aria-label', state.following ? 'Live updates' : 'Browse retained history');
-    elements.follow.title = state.following ? 'Live updates' : 'Browse retained history';
-    elements.follow.textContent = state.following ? 'Live' : 'Browse';
+    elements.follow.title = state.following ? 'Live: new logs appear as they arrive. Click to stop following and browse history.'
+      : 'Browsing history: the table stays where it is. Click to follow live logs.';
+    elements.follow.dataset.mode = state.following ? 'live' : 'browse';
+    setLabel(elements.follow, state.following ? 'Live' : 'Browse');
   }
 
   function updateModeLabel() {
     elements.older.textContent = state.selectedSort ? 'Next →' : '← Older';
     elements.newer.textContent = state.selectedSort ? '← Previous' : 'Newer →';
     elements.mode.textContent = state.paused ? 'Paused — collection continues' : state.selectedSort ? `Sorted ${state.selectedSortDirection === 'asc' ? 'ascending' : 'descending'}${state.following ? ' · Live updates' : ''}`
-      : state.following ? 'Live · newest 1,000' : 'Browsing retained history';
+      : state.following ? (heldEvents ? 'Live · new rows held while the pointer is over them' : 'Live · newest 1,000') : 'Browsing retained history';
     elements.mode.className = state.following && !state.paused ? 'live-mode' : '';
   }
 
@@ -301,7 +341,8 @@ export function createViewer(api: WebviewApi) {
   }
   function updateCopyResultsControl() {
     elements.copyResults.hidden = !hasActiveFilter();
-    elements.copyResults.textContent = 'Copy results';
+    setLabel(elements.copyResults, 'Copy results');
+    delete elements.copyResults.dataset.copied;
   }
   function updateGuideStatus(status: { unread: boolean; version: string }) {
     guideUnread = status.unread;
@@ -316,8 +357,25 @@ export function createViewer(api: WebviewApi) {
   function filterChanged() { state.filterChanged(); updateCopyResultsControl(); saveState(); requestInteraction(); }
 
   scope.listen(elements.logs, 'click', event => {
-    if (inspection.handleDetailAction(event))
+    const target = event.target as HTMLElement;
+    const dismiss = target.closest<HTMLElement>('.dismiss-hint');
+    if (dismiss) {
+      state.cellHintDismissed = true;
+      saveState();
+      dismiss.closest('.detail-hint')?.remove();
       return;
+    }
+    if (doctor.handleAction(event) || inspection.handleDetailAction(event))
+      return;
+    const rowButton = target.closest<HTMLElement>('.row-icon, .row-action');
+    const rowId = Number(rowButton?.dataset.id);
+    if (rowButton && Number.isSafeInteger(rowId)) {
+      if (rowButton.classList.contains('row-site-button')) api.postMessage({ type: 'openLogSite', id: rowId });
+      else if (rowButton.classList.contains('row-break-button')) api.postMessage({ type: 'breakOnEvent', id: rowId });
+      else if (rowButton.classList.contains('row-context-button')) inspection.showContext(rowId);
+      else if (rowButton.classList.contains('row-finding-button') && state.selected !== rowId) toggleExpand(rowId);
+      return;
+    }
     const trace = (event.target as HTMLElement).closest<HTMLElement>('.row-trace-button');
     if (trace?.dataset.traceId) {
       traceView.show(trace.dataset.traceId);
@@ -326,7 +384,7 @@ export function createViewer(api: WebviewApi) {
     const button = (event.target as HTMLElement).closest<HTMLElement>('.message-button');
     if (!button)
       return;
-    table.toggleExpand(Number(button.closest('tr')!.dataset.id));
+    toggleExpand(Number(button.closest('tr')!.dataset.id));
   });
 
   scope.listen(elements.search, 'input', () => {
@@ -401,6 +459,15 @@ export function createViewer(api: WebviewApi) {
   });
 
   const actionsContainer = elements.moreActions.closest<HTMLElement>('.popover-container')!;
+  const doctorPopover = createPopover(elements.doctor.closest<HTMLElement>('.popover-container')!, elements.doctor, elements.doctorPanel);
+  // Findings shown in an expanded event inside Surrounding logs act the same way.
+  scope.listen(elements.contextDetails, 'click', event => { doctor.handleAction(event); });
+  scope.listen(elements.rowHintDismiss, 'click', dismissRowHint);
+  function dismissRowHint() {
+    if (!state.rowHintDismissed) { state.rowHintDismissed = true; saveState(); }
+    elements.rowHint.hidden = true;
+  }
+  function toggleExpand(id: number) { table.toggleExpand(id); }
   const actionsMenu = createPopover(actionsContainer, elements.moreActions, elements.actionsMenu);
   const actionItems = [elements.shareSpecificRuns, elements.export, elements.import, elements.breakOnLogs, elements.otlpToggle, elements.manage, elements.config, elements.help];
   scope.listen(elements.moreActions, 'click', () => {
@@ -433,7 +500,9 @@ export function createViewer(api: WebviewApi) {
   scope.listen(elements.copyResults, 'click', () => {
     if (!hasActiveFilter()) return;
     api.postMessage({ type: 'copyFiltered', query: search.query(), levels: state.currentLevels(), serverId: state.selectedServer || undefined, sessionId: state.selectedSession || undefined });
-    elements.copyResults.textContent = 'Copied';
+    setLabel(elements.copyResults, 'Copied');
+    // The label is hidden on narrow panels, so the icon confirms the copy too.
+    elements.copyResults.dataset.copied = 'true';
     clearTimeout(copyFeedbackTimer);
     copyFeedbackTimer = setTimeout(updateCopyResultsControl, 1200);
   });

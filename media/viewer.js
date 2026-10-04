@@ -242,16 +242,18 @@
 
   // src/webview/bridge.ts
   var SnapshotBridge = class {
-    constructor(api, state, query, columns = () => this.state.extraColumns) {
+    constructor(api, state, query, columns = () => this.state.extraColumns, doctorRevision = () => void 0) {
       this.api = api;
       this.state = state;
       this.query = query;
       this.columns = columns;
+      this.doctorRevision = doctorRevision;
     }
     api;
     state;
     query;
     columns;
+    doctorRevision;
     pending = false;
     refreshRequested = false;
     updateRequested = false;
@@ -280,7 +282,8 @@
         sort: state.selectedSort || void 0,
         sortDirection: state.selectedSortDirection,
         columns: this.columns(),
-        statsOnly: state.paused && !force
+        statsOnly: state.paused && !force,
+        doctorRevision: this.doctorRevision()
       });
     }
     received(requestId) {
@@ -400,8 +403,19 @@
       saveSearchDialog: element("saveSearchDialog"),
       saveSearchForm: element("saveSearchForm"),
       saveSearchName: element("saveSearchName"),
-      saveSearchCancel: element("saveSearchCancel")
+      saveSearchCancel: element("saveSearchCancel"),
+      doctor: element("doctor"),
+      doctorCount: element("doctorCount"),
+      doctorPanel: element("doctorPanel"),
+      doctorList: element("doctorList"),
+      rowHint: element("rowHint"),
+      rowHintDismiss: element("rowHintDismiss")
     };
+  }
+  function setLabel(button, text) {
+    const label = button.querySelector?.(".button-label");
+    if (label) label.textContent = text;
+    else button.textContent = text;
   }
   function cell(text, className) {
     const element2 = document.createElement("td");
@@ -415,6 +429,72 @@
     message.className = "popover-empty";
     message.textContent = text;
     return message;
+  }
+
+  // src/webview/tooltip.ts
+  var DELAY_MS = 700;
+  var WARM_DELAY_MS = 150;
+  var WARM_FOR_MS = 500;
+  function createTooltips(scope) {
+    const body = document.body;
+    if (!body) return;
+    const tip = document.createElement("div");
+    tip.className = "tooltip";
+    tip.setAttribute("role", "tooltip");
+    tip.hidden = true;
+    body.append(tip);
+    scope.track(() => tip.remove());
+    let target;
+    let timer;
+    let warmUntil = 0;
+    function adopt(element2) {
+      if (element2.title) {
+        element2.dataset.tip = element2.title;
+        if (!element2.getAttribute("aria-label") && !element2.textContent?.trim()) element2.setAttribute("aria-label", element2.title);
+        else element2.setAttribute("aria-description", element2.title);
+        element2.removeAttribute("title");
+      }
+      return element2.dataset.tip;
+    }
+    function hide() {
+      if (!tip.hidden) warmUntil = Date.now() + WARM_FOR_MS;
+      clearTimeout(timer);
+      timer = void 0;
+      target = void 0;
+      tip.hidden = true;
+    }
+    function show(element2) {
+      if (!element2.isConnected || target !== element2) return;
+      const text = element2.dataset.tip;
+      if (!text) return;
+      tip.textContent = text;
+      tip.hidden = false;
+      const anchor = element2.getBoundingClientRect();
+      const box = tip.getBoundingClientRect();
+      const margin = 6;
+      const below = anchor.bottom + margin + box.height <= window.innerHeight;
+      const left = Math.max(margin, Math.min(anchor.left + anchor.width / 2 - box.width / 2, window.innerWidth - box.width - margin));
+      tip.style.left = `${left}px`;
+      tip.style.top = `${below ? anchor.bottom + margin : Math.max(margin, anchor.top - margin - box.height)}px`;
+    }
+    function schedule(element2) {
+      const owner = element2?.closest("[title], [data-tip]") ?? void 0;
+      if (owner === target) return;
+      hide();
+      if (!owner || !adopt(owner)) return;
+      target = owner;
+      timer = setTimeout(() => show(owner), Date.now() < warmUntil ? WARM_DELAY_MS : DELAY_MS);
+    }
+    scope.listen(document, "pointerover", (event) => schedule(event.target));
+    scope.listen(document, "focusin", (event) => {
+      const element2 = event.target;
+      if (element2.matches?.(":focus-visible")) schedule(element2);
+    });
+    scope.listen(document, "focusout", hide);
+    scope.listen(document, "pointerdown", hide);
+    scope.listen(document, "keydown", hide);
+    scope.listen(document, "scroll", hide, { capture: true });
+    scope.listen(document.documentElement ?? document, "pointerleave", hide);
   }
 
   // src/webview/event-scope.ts
@@ -452,41 +532,223 @@
     }
   };
 
+  // src/webview/inspection/doctor.ts
+  var GROUPS = [
+    { codes: ["secret"], title: "Secrets in logs" },
+    { codes: ["personal"], title: "Personal data in logs" },
+    { codes: ["missing-exception"], title: "Errors logged without the exception" },
+    { codes: ["noisy"], title: "Noisy statements" },
+    { codes: ["unstructured"], title: "Values formatted into messages" }
+  ];
+  function siteLabel(file, line) {
+    return `${file.slice(file.lastIndexOf("/") + 1)}:${line}`;
+  }
+  function doctorButton(action, label, title, siteId) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "doctor-action";
+    button.textContent = label;
+    button.title = title;
+    button.dataset.doctorAction = action;
+    if (siteId !== void 0) button.dataset.siteId = siteId;
+    return button;
+  }
+  var DOCTOR_ACTION_TITLES = {
+    fix: "Open the statement and show its quick fixes: lower the level, pass the exception, ignore the finding, or fix it with Copilot",
+    showEvents: "Filter the Logs panel to the events this statement logged",
+    open: "Open the log statement in the editor"
+  };
+  function createDoctor(button, count, panel, list, api, scope, closePanel) {
+    let revision;
+    let findings = [];
+    function receive(doctor) {
+      button.hidden = !doctor;
+      if (!doctor) {
+        revision = void 0;
+        return;
+      }
+      const total = doctor.total;
+      const changed = doctor.findings !== void 0 && doctor.revision !== revision;
+      if (changed) {
+        revision = doctor.revision;
+        findings = doctor.findings;
+      }
+      count.hidden = !total;
+      count.textContent = total.toLocaleString();
+      const warnings = findings.filter((finding) => finding.severity === "warning").length;
+      button.className = !total ? "doctor-chip is-clear" : warnings ? "doctor-chip has-warnings" : "doctor-chip";
+      button.title = total ? `Log doctor found ${total.toLocaleString()} problem${total === 1 ? "" : "s"} with log statements${warnings ? `, ${warnings.toLocaleString()} of them warnings` : ""}. Click to review.` : "Log doctor checks what your log statements actually logged: secrets, personal data, errors without the exception, and noisy statements. Nothing found so far.";
+      button.setAttribute("aria-label", `Log issues: ${total.toLocaleString()}`);
+      if (changed) render(total);
+    }
+    function render(total) {
+      if (!total) {
+        const empty = document.createElement("p");
+        empty.className = "popover-empty";
+        empty.textContent = "No problems found so far. Log doctor needs log lenses (logline.logLenses) to match events to the log statements in your workspace; imported logs from other projects are not checked.";
+        list.replaceChildren(empty);
+        return;
+      }
+      const sections = [];
+      for (const group of GROUPS) {
+        const items = findings.filter((finding) => group.codes.includes(finding.code));
+        if (!items.length) continue;
+        const section = document.createElement("section");
+        section.className = "doctor-group";
+        const heading = document.createElement("h4");
+        heading.textContent = `${group.title} \xB7 ${items.length.toLocaleString()}`;
+        section.append(heading, ...items.map(item));
+        sections.push(section);
+      }
+      if (total > findings.length) {
+        const more = document.createElement("p");
+        more.className = "popover-description";
+        more.textContent = `Showing the first ${findings.length.toLocaleString()} of ${total.toLocaleString()} findings. The health report lists them all.`;
+        sections.push(more);
+      }
+      list.replaceChildren(...sections);
+    }
+    function item(finding) {
+      const row = document.createElement("div");
+      row.className = `doctor-item severity-${finding.severity}`;
+      const location = document.createElement("button");
+      location.type = "button";
+      location.className = "doctor-location";
+      location.textContent = siteLabel(finding.file, finding.line);
+      location.title = `Open ${finding.file}:${finding.line}`;
+      location.dataset.doctorAction = "open";
+      location.dataset.siteId = finding.siteId;
+      const message = document.createElement("p");
+      message.className = "doctor-message";
+      message.textContent = finding.message;
+      const actions = document.createElement("div");
+      actions.className = "doctor-actions";
+      actions.append(
+        doctorButton("fix", "Fix\u2026", DOCTOR_ACTION_TITLES.fix, finding.siteId),
+        doctorButton("showEvents", "Show events", DOCTOR_ACTION_TITLES.showEvents, finding.siteId)
+      );
+      row.append(location, message, actions);
+      return row;
+    }
+    function handleAction(event) {
+      const target = event.target.closest("[data-doctor-action]");
+      const action = target?.dataset.doctorAction;
+      if (!target || !action) return false;
+      api.postMessage({ type: "doctorAction", action, ...target.dataset.siteId ? { siteId: target.dataset.siteId } : {} });
+      if (panel.contains(target)) closePanel();
+      return true;
+    }
+    scope.listen(panel, "click", handleAction);
+    return { receive, handleAction, revision: () => revision };
+  }
+
   // src/webview/inspection/details.ts
-  function buildEventDetails(id, text, exceptions, links = {}) {
+  var ICONS = {
+    context: [["path", { d: "M4 3.5h8M2 8h12M4 12.5h8" }]],
+    trace: [["path", { d: "M2 3.5h6M5 8h7M9 12.5h5" }]],
+    code: [["path", { d: "M5.5 4.5 2 8l3.5 3.5M10.5 4.5 14 8l-3.5 3.5" }]],
+    breakpoint: [["circle", { cx: "8", cy: "8", r: "4", fill: "currentColor", stroke: "none" }]],
+    copy: [["rect", { x: "5.5", y: "5.5", width: "8", height: "8.5", rx: "1" }], ["path", { d: "M3 10.5v-7a1 1 0 0 1 1-1h6" }]],
+    agent: [["path", { d: "M8 2l1.4 4.6L14 8l-4.6 1.4L8 14l-1.4-4.6L2 8l4.6-1.4z" }]],
+    warning: [["path", { d: "M8 2.5 14.5 13.5h-13zM8 6.5v3" }], ["circle", { cx: "8", cy: "11.6", r: ".4", fill: "currentColor" }]],
+    information: [["circle", { cx: "8", cy: "8", r: "6" }], ["path", { d: "M8 7.5v4" }], ["circle", { cx: "8", cy: "5", r: ".4", fill: "currentColor" }]],
+    hint: [["path", { d: "M6 12.5h4M6.5 14.5h3M8 1.8a4.2 4.2 0 0 0-2.5 7.6c.5.4.8 1 .8 1.6h3.4c0-.6.3-1.2.8-1.6A4.2 4.2 0 0 0 8 1.8z" }]]
+  };
+  var iconTemplates = /* @__PURE__ */ new Map();
+  function icon(name) {
+    let template = iconTemplates.get(name);
+    if (!template) iconTemplates.set(name, template = buildIcon(name));
+    return template.cloneNode(true);
+  }
+  function buildIcon(name) {
+    const namespace = "http://www.w3.org/2000/svg";
+    const svg = document.createElementNS(namespace, "svg");
+    for (const [key, value] of Object.entries({ viewBox: "0 0 16 16", width: "14", height: "14", "aria-hidden": "true", fill: "none", stroke: "currentColor", "stroke-width": "1.3", "stroke-linecap": "round", "stroke-linejoin": "round" }))
+      svg.setAttribute(key, value);
+    for (const [tag, attributes] of ICONS[name]) {
+      const part = document.createElementNS(namespace, tag);
+      for (const [key, value] of Object.entries(attributes)) part.setAttribute(key, value);
+      svg.append(part);
+    }
+    return svg;
+  }
+  function eventAction(className, iconName, label, title, unavailable) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = `event-action ${className}`;
+    const text = document.createElement("span");
+    text.className = "event-action-label";
+    text.textContent = label;
+    button.append(icon(iconName), text);
+    button.title = unavailable ?? title;
+    if (unavailable) {
+      button.dataset.unavailable = unavailable;
+      button.setAttribute("aria-disabled", "true");
+    }
+    return button;
+  }
+  function buildEventDetails(id, text, exceptions, links = {}, leadingActions = []) {
     const container = document.createElement("div");
     container.className = "event-details";
-    const copy = document.createElement("button");
-    copy.className = "copy-button";
-    copy.textContent = "Copy event";
-    copy.dataset.id = String(id);
-    container.append(copy);
-    const share = document.createElement("button");
-    share.className = "share-source-button";
-    share.textContent = "Share source with Agent";
-    share.dataset.id = String(id);
-    container.append(share);
-    if (links.traceId) {
-      const trace = document.createElement("button");
-      trace.className = "trace-button";
-      trace.textContent = "Show trace";
-      trace.title = "Show every span and log in this request across services";
-      trace.dataset.traceId = links.traceId;
-      container.append(trace);
-    }
-    if (links.site) {
-      const site = document.createElement("button");
-      site.className = "log-site-button";
-      site.textContent = `Open log statement \xB7 ${links.site}`;
-      site.title = "Open the line of code that logged this event";
-      site.dataset.id = String(id);
-      container.append(site);
-      const breakpoint = document.createElement("button");
-      breakpoint.className = "break-on-log-button";
-      breakpoint.textContent = "Break when this logs again";
-      breakpoint.title = "Add a debugger breakpoint on the statement that logged this event";
-      breakpoint.dataset.id = String(id);
-      container.append(breakpoint);
+    const actions = document.createElement("div");
+    actions.className = "event-actions";
+    const investigate = document.createElement("div");
+    investigate.className = "event-action-group";
+    investigate.setAttribute("role", "group");
+    investigate.setAttribute("aria-label", "Investigate this event");
+    const output = document.createElement("div");
+    output.className = "event-action-group event-action-output";
+    output.setAttribute("role", "group");
+    output.setAttribute("aria-label", "Copy or share this event");
+    actions.append(investigate, output);
+    container.append(actions);
+    const loading = text === void 0 ? "Checking this event\u2026" : void 0;
+    const trace = eventAction(
+      "trace-button",
+      "trace",
+      "Trace",
+      "Show every span and log in this request across services",
+      links.traceId ? void 0 : loading ?? "No trace id in this event. Events that carry a traceId show their whole request across services."
+    );
+    if (links.traceId) trace.dataset.traceId = links.traceId;
+    const noSite = loading ?? "No code location found for this event. Logline links an event to code when it reports its file and line, or when a log lens matches its message.";
+    const siteName = links.site?.split(/[\\/]/).pop();
+    const site = eventAction(
+      "log-site-button",
+      "code",
+      siteName ? `Open code \xB7 ${siteName}` : "Open code",
+      `Open ${links.site}, the line of code that logged this event`,
+      links.site ? void 0 : noSite
+    );
+    const breakpoint = eventAction(
+      "break-on-log-button",
+      "breakpoint",
+      "Break here",
+      "Add a debugger breakpoint on the statement that logged this event, so the debugger stops the next time it logs",
+      links.site ? void 0 : noSite
+    );
+    site.dataset.id = breakpoint.dataset.id = String(id);
+    investigate.append(...leadingActions, trace, site, breakpoint);
+    const copy = eventAction("copy-button", "copy", "Copy", "Copy the original event to the clipboard");
+    const share = eventAction("share-source-button", "agent", "Share with agent", "Share the logs of this event's source with Copilot, so it can read them");
+    copy.dataset.id = share.dataset.id = String(id);
+    output.append(copy, share);
+    for (const finding of links.findings ?? []) {
+      const banner = document.createElement("div");
+      banner.className = `event-finding severity-${finding.severity}`;
+      banner.setAttribute("role", "note");
+      const message = document.createElement("p");
+      const label = document.createElement("strong");
+      label.textContent = "Log doctor: ";
+      message.append(label, document.createTextNode(finding.message));
+      const actions2 = document.createElement("div");
+      actions2.className = "doctor-actions";
+      actions2.append(
+        doctorButton("fix", "Fix\u2026", DOCTOR_ACTION_TITLES.fix, finding.siteId),
+        doctorButton("showEvents", "Show events", DOCTOR_ACTION_TITLES.showEvents, finding.siteId)
+      );
+      banner.append(icon(finding.severity), message, actions2);
+      container.append(banner);
     }
     exceptions.forEach((exception, blockIndex) => {
       const section = document.createElement("section");
@@ -565,6 +827,7 @@
     });
     scope.listen(elements.contextDetails, "click", handleDetailAction);
     function handleDetailAction(event) {
+      if (event.target.closest(".event-action")?.dataset.unavailable) return true;
       const source = event.target.closest(".source-link");
       if (source) {
         api.postMessage({ type: "openSource", id: Number(source.dataset.id), block: Number(source.dataset.block), line: Number(source.dataset.line) });
@@ -807,6 +1070,9 @@
       elements.tracesDialog.close();
       actions.showTrace(row.dataset.traceId);
     });
+    function receiverChanged() {
+      if (elements.tracesDialog.open) render();
+    }
     function receive(list) {
       traces = list;
       if (elements.tracesDialog.open) render();
@@ -815,9 +1081,10 @@
       const errorsOnly = elements.tracesErrorsOnly.checked;
       const shown = errorsOnly ? traces.filter((trace) => trace.errors) : traces;
       const withSpans = traces.filter((trace) => trace.spans).length;
-      elements.tracesStartReceiver.hidden = withSpans > 0;
+      const receiver = actions.receiver();
+      elements.tracesStartReceiver.hidden = receiver.running || withSpans > 0;
       if (!traces.length) {
-        elements.tracesStatus.textContent = "No traces yet. Start the OpenTelemetry receiver and run an instrumented app, or log JSON with a traceId field.";
+        elements.tracesStatus.textContent = receiver.running ? `No traces yet. The OpenTelemetry receiver is listening on ${receiver.endpoint ?? "localhost"}: run an app with OTEL_EXPORTER_OTLP_ENDPOINT=${receiver.endpoint ?? "http://127.0.0.1:4318"}, or log JSON with a traceId field.` : "No traces yet. Start the OpenTelemetry receiver and run an instrumented app, or log JSON with a traceId field.";
         elements.tracesRows.replaceChildren();
         return;
       }
@@ -857,7 +1124,7 @@
         return row;
       }));
     }
-    return { show, receive };
+    return { show, receive, receiverChanged };
   }
 
   // src/webview/popovers.ts
@@ -883,7 +1150,7 @@
           panel.style.bottom = "";
           panel.style.maxHeight = "";
           panel.style.position = "";
-          if (panel.classList.contains("fields-panel") || panel.classList.contains("cheat-sheet") || panel.classList.contains("level-menu") || panel.classList.contains("saved-searches") || panel.classList.contains("actions-menu") || panel.classList.contains("session-menu") || panel.classList.contains("scope-menu")) {
+          if (panel.classList.contains("fields-panel") || panel.classList.contains("cheat-sheet") || panel.classList.contains("level-menu") || panel.classList.contains("saved-searches") || panel.classList.contains("actions-menu") || panel.classList.contains("session-menu") || panel.classList.contains("scope-menu") || panel.classList.contains("doctor-panel")) {
             const trigger = button.getBoundingClientRect();
             const margin2 = 8;
             const spaceBelow2 = window.innerHeight - trigger.bottom - margin2;
@@ -1017,8 +1284,12 @@
     hiddenColumns;
     checkedLevels;
     displayTimezone = "local";
+    cellHintDismissed;
+    rowHintDismissed;
     constructor(saved = {}) {
       this.following = !saved.sort;
+      this.cellHintDismissed = saved.cellHintDismissed === true;
+      this.rowHintDismissed = saved.rowHintDismissed === true;
       this.selectedServer = saved.server ?? "";
       this.selectedSession = saved.session ?? "";
       this.selectedSort = saved.sort ?? "";
@@ -1090,7 +1361,9 @@
         columnWidths: this.columnWidths,
         columnOrder: this.columnOrder,
         hiddenColumns: [...this.hiddenColumns],
-        extraColumns: this.extraColumns
+        extraColumns: this.extraColumns,
+        ...this.cellHintDismissed ? { cellHintDismissed: true } : {},
+        ...this.rowHintDismissed ? { rowHintDismissed: true } : {}
       };
     }
   };
@@ -1198,7 +1471,13 @@
         const remove = document.createElement("button");
         remove.type = "button";
         remove.className = "filter-chip-remove";
-        remove.textContent = "\xD7";
+        const cross = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+        for (const [key, value2] of Object.entries({ viewBox: "0 0 16 16", width: "10", height: "10", "aria-hidden": "true", fill: "none", stroke: "currentColor", "stroke-width": "1.6", "stroke-linecap": "round" }))
+          cross.setAttribute(key, value2);
+        const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+        path.setAttribute("d", "M4 4l8 8M12 4l-8 8");
+        cross.append(path);
+        remove.append(cross);
         remove.title = `Remove filter: ${value}`;
         remove.setAttribute("aria-label", `Remove filter: ${value}`);
         scope.listen(remove, "click", (event) => {
@@ -1280,13 +1559,13 @@
     }
     function updateLevelButtonLabel() {
       if (state.checkedLevels.size === LEVELS.length)
-        elements.levelButton.textContent = "All levels";
+        setLabel(elements.levelButton, "All levels");
       else if (state.checkedLevels.size === 0)
-        elements.levelButton.textContent = "No levels";
+        setLabel(elements.levelButton, "No levels");
       else if (state.checkedLevels.size === 1)
-        elements.levelButton.textContent = `${LEVEL_LABELS[[...state.checkedLevels][0]]} only`;
+        setLabel(elements.levelButton, `${LEVEL_LABELS[[...state.checkedLevels][0]]} only`);
       else
-        elements.levelButton.textContent = `${state.checkedLevels.size} levels`;
+        setLabel(elements.levelButton, `${state.checkedLevels.size} levels`);
     }
     function setAllLevels(value) {
       state.checkedLevels = value ? new Set(LEVELS) : /* @__PURE__ */ new Set();
@@ -1480,12 +1759,22 @@
   }
 
   // src/webview/table/rows.ts
+  function rowIcon(className, iconName, label, id) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = `row-icon ${className}`;
+    button.title = label;
+    button.setAttribute("aria-label", label);
+    button.dataset.id = String(id);
+    button.append(icon(iconName));
+    return button;
+  }
   function createRows(state, columns, formatTimestamp) {
     function buildRow(event) {
       const row = document.createElement("tr");
       row.className = "event-row";
       row.dataset.id = String(event.id);
-      const messageCell = cell("");
+      const messageCell = cell("", "message-cell");
       const messageContent = document.createElement("div");
       messageContent.className = "message-content";
       const button = document.createElement("button");
@@ -1494,15 +1783,24 @@
       button.title = event.message ?? "";
       button.setAttribute("aria-expanded", String(event.id === state.selected));
       messageContent.append(button);
+      const quick = document.createElement("span");
+      quick.className = event.site ? "row-quick has-site" : "row-quick";
+      messageContent.append(quick);
       if (event.traceId) {
         const trace = document.createElement("button");
         trace.className = "row-trace-button";
         trace.type = "button";
         trace.dataset.traceId = event.traceId;
-        trace.title = "Show trace";
+        trace.title = "Trace: show this request across services";
         trace.setAttribute("aria-label", "Show trace");
         trace.innerHTML = '<svg aria-hidden="true" viewBox="0 0 16 16" width="12" height="12"><path d="M2 3.5h7M4 7.5h8M7 11.5h7" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>';
         messageContent.append(trace);
+      }
+      if (event.site)
+        messageContent.append(rowIcon("row-site-button", "code", "Open code: open the log statement that logged this event", event.id));
+      if (event.finding) {
+        const finding = rowIcon(`row-finding-button severity-${event.finding.severity}`, event.finding.severity, `Log doctor: ${event.finding.message} Click for details.`, event.id);
+        messageContent.append(finding);
       }
       messageCell.append(messageContent);
       for (const column of columns()) {
@@ -1530,18 +1828,32 @@
       details.className = "detail-row";
       const container = cell("", "detail-cell");
       container.colSpan = columns().length;
-      const actions = document.createElement("div");
-      actions.className = "detail-actions";
-      const context = document.createElement("button");
-      context.textContent = "Show context";
-      context.className = "context-button";
+      const context = eventAction("context-button", "context", "Surrounding logs", "Show the logs just before and after this event from the same run");
       context.dataset.id = String(event.id);
-      actions.append(context);
-      container.append(actions, buildEventDetails(event.id, state.selectedDetailText, state.selectedExceptions, state.selectedLinks));
+      container.append(buildEventDetails(event.id, state.selectedDetailText, state.selectedExceptions, state.selectedLinks, [context]));
+      if (!state.cellHintDismissed) {
+        const hint = document.createElement("p");
+        hint.className = "detail-hint";
+        const dismiss = document.createElement("button");
+        dismiss.type = "button";
+        dismiss.className = "dismiss-hint";
+        dismiss.textContent = "Got it";
+        hint.append(document.createTextNode("Tip: right-click any cell in the table to include or exclude its value."), dismiss);
+        container.append(hint);
+      }
       details.append(container);
       return details;
     }
-    return { buildRow, buildDetailRow };
+    function fillQuickActions(row) {
+      const slot = row.querySelector(".row-quick");
+      if (!slot || slot.firstChild) return;
+      const id = Number(row.dataset.id);
+      const quick = [rowIcon("row-action row-context-button", "context", "Surrounding logs: show the logs just before and after this event", id)];
+      if (slot.classList.contains("has-site")) quick.push(rowIcon("row-action row-break-button", "breakpoint", "Break here: stop the debugger the next time this statement logs", id));
+      for (const item of quick) item.tabIndex = -1;
+      slot.append(...quick);
+    }
+    return { buildRow, buildDetailRow, fillQuickActions };
   }
 
   // src/webview/table/controller.ts
@@ -1551,7 +1863,16 @@
     function totalColumnCount() {
       return displayedColumns.length;
     }
-    const { buildRow, buildDetailRow } = createRows(state, () => displayedColumns, formatTimestamp);
+    const { buildRow, buildDetailRow, fillQuickActions } = createRows(state, () => displayedColumns, formatTimestamp);
+    let hoveredId;
+    scope.listen(elements.logs, "pointerover", (event) => {
+      const row = event.target.closest?.("tr.event-row");
+      hoveredId = row?.dataset.id;
+      if (row) fillQuickActions(row);
+    });
+    scope.listen(elements.logs, "pointerleave", () => {
+      hoveredId = void 0;
+    });
     let virtualEvents = [];
     let rowHeight = 30;
     let rowHeightMeasured = false;
@@ -1633,6 +1954,10 @@
         }
       }
       elements.logs.replaceChildren(topSpacer, fragment, bottomSpacer);
+      if (hoveredId !== void 0) {
+        const hovered = [...elements.logs.querySelectorAll(".event-row")].find((row) => row.dataset.id === hoveredId);
+        if (hovered) fillQuickActions(hovered);
+      }
       onRowsChanged();
       for (const { element: element2, top, left } of detailScrollers) {
         element2.scrollTop = top;
@@ -1961,7 +2286,7 @@
       if (data.id !== state.selected) return;
       state.selectedDetailText = data.text;
       state.selectedExceptions = data.exceptions;
-      state.selectedLinks = { site: data.site, traceId: data.traceId };
+      state.selectedLinks = { site: data.site, traceId: data.traceId, findings: data.findings };
       resetDetails();
       renderWindow();
     }
@@ -2217,6 +2542,7 @@
     const state = new ViewerState(saved);
     elements.search.value = saved.query ?? "";
     const { popovers, createPopover } = createPopovers(scope);
+    createTooltips(scope);
     const formatTimestamp = createTimestampFormatter(state);
     const analysis = createAnalysis(elements, state);
     const inspection = createInspection(elements, scrollViewport, api, formatTimestamp, scope, (traceId) => traceView.show(traceId));
@@ -2230,9 +2556,14 @@
     const traceList = createTraceList(elements, api, scope, {
       showTrace: (traceId) => traceView.show(traceId, true),
       formatTime: (ms) => formatTimestamp({ id: 0, level: "", timestampMs: ms }) ?? "",
-      startReceiver: () => api.postMessage({ type: "toggleOtlp", enabled: true })
+      startReceiver: () => api.postMessage({ type: "toggleOtlp", enabled: true }),
+      receiver: () => ({ running: otlpRunning, endpoint: otlpEndpoint })
     });
+    const doctor = createDoctor(elements.doctor, elements.doctorCount, elements.doctorPanel, elements.doctorList, api, scope, () => doctorPopover.close());
     let otlpRunning = false;
+    let otlpEndpoint;
+    let pointerOverRows = false;
+    let heldEvents;
     let cellActions;
     const table = createTable(
       elements,
@@ -2244,7 +2575,7 @@
       scope,
       () => cellActions?.rowsChanged()
     );
-    const bridge = new SnapshotBridge(api, state, () => search.query(), () => table.currentColumns);
+    const bridge = new SnapshotBridge(api, state, () => search.query(), () => table.currentColumns, () => doctor.revision());
     let serverSignature = "";
     let sessionSignature = "";
     let activeScopeTab = "sources";
@@ -2325,12 +2656,16 @@
       bridge.received(data.requestId);
       if (data.applyQuery !== void 0 && data.applyQuery !== search.query()) search.setQuery(data.applyQuery, true);
       if (data.openTrace) traceView.show(data.openTrace);
+      const receiverWasRunning = otlpRunning;
       otlpRunning = data.otlp?.running === true;
+      otlpEndpoint = data.otlp?.endpoint;
+      if (otlpRunning !== receiverWasRunning) traceList.receiverChanged();
       elements.otlpStatus.hidden = !otlpRunning;
       if (otlpRunning) {
         elements.otlpStatus.textContent = `OpenTelemetry ${data.otlp?.endpoint?.replace(/^https?:\/\//, "") ?? ""}`.trim();
         elements.otlpStatus.title = `Receiving OpenTelemetry logs and traces on ${data.otlp?.endpoint ?? "localhost"}. Click to see traces.`;
       }
+      doctor.receive(data.doctor);
       elements.traceCount.hidden = !data.traceCount;
       elements.traceCount.textContent = data.traceCount ? data.traceCount.toLocaleString() : "";
       elements.traces.title = data.traceCount ? `${data.traceCount.toLocaleString()} traces received from OpenTelemetry. Show requests across services.` : "Requests across services, from OpenTelemetry spans and logs with a trace id";
@@ -2366,19 +2701,19 @@
       elements.command.textContent = data.command;
       elements.command.title = data.command;
       elements.stop.disabled = !data.running;
-      elements.captureToggle.textContent = data.captureStatus?.state === "capturing" ? "Terminal capture: Capturing\u2026" : data.captureStatus?.state === "attention" ? "Terminal capture: Needs attention" : data.captureTerminals ? "Terminal capture: On" : "Terminal capture: Off";
+      setLabel(elements.captureToggle, data.captureStatus?.state === "capturing" ? "Terminal capture: Capturing\u2026" : data.captureStatus?.state === "attention" ? "Terminal capture: Needs attention" : data.captureTerminals ? "Terminal capture: On" : "Terminal capture: Off");
       elements.captureToggle.setAttribute("aria-pressed", String(data.captureTerminals));
       elements.captureToggle.title = data.captureStatus?.detail || (data.captureTerminals ? "Terminal capture is on. Click to turn it off." : "Terminal capture is off. Click to turn it on.");
       const sharing = data.agentSharing?.active;
       agentSharingActive = Boolean(sharing);
       const sharedRuns = sharing ? data.agentSharing.sources.reduce((sum, source) => sum + (source.runs?.length ?? source.sessions), 0) : 0;
       const sharingAll = sharing && data.agentSharing.scope === "all";
-      elements.shareAgent.textContent = sharing ? "Sharing logs \xB7 Stop" : "Share logs with agent";
+      setLabel(elements.shareAgent, sharing ? "Sharing \xB7 Stop" : "Share with agent");
       elements.shareAgent.setAttribute("aria-pressed", String(Boolean(sharing)));
       elements.shareAgent.title = sharing ? sharingAll ? "Existing and new captured logs are available to Copilot in this window. Click to stop sharing." : `${sharedRuns} selected command run${sharedRuns === 1 ? "" : "s"} available to Copilot in this window. Click to stop sharing.` : "Share existing and new captured logs in this window until stopped";
       elements.shareScope.hidden = !sharing;
       elements.shareScope.textContent = sharingAll ? "Sharing existing and new runs in this window until stopped" : sharing ? `Sharing ${sharedRuns} selected run${sharedRuns === 1 ? "" : "s"} only` : "";
-      elements.stop.textContent = state.selectedServer ? "Stop server" : "Stop all";
+      setLabel(elements.stop, state.selectedServer ? "Stop server" : "Stop all");
       const activeSessions = Array.isArray(data.sessions) ? data.sessions.filter((session) => ["running", "stopping"].includes(session.status)) : [];
       elements.sessions.textContent = activeSessions.length ? `${activeSessions.length} active session${activeSessions.length === 1 ? "" : "s"}` : "No active sessions";
       let selectionChanged = false;
@@ -2449,7 +2784,11 @@
         state.allFields = data.fields;
       if (data.searches)
         search.renderSearchState(data.searches);
-      if (data.events && !bridge.refreshRequested && !state.paused) {
+      if (data.events && !bridge.refreshRequested && !state.paused && holdingLive()) {
+        heldEvents = data.events;
+        updateModeLabel();
+      } else if (data.events && !bridge.refreshRequested && !state.paused) {
+        heldEvents = void 0;
         state.page = data.page ?? 0;
         state.pages = data.pages ?? 1;
         elements.page.textContent = `Page ${state.page + 1} of ${state.pages} \xB7 ${number(data.matched ?? 0)} matches`;
@@ -2461,29 +2800,50 @@
           table.renderRows(data.events);
         }
         elements.empty.hidden = data.events.length > 0;
+        elements.rowHint.hidden = state.rowHintDismissed || !data.events.length;
         elements.empty.textContent = data.total ? "No matching events in retained history." : "Run a server command to see its logs here.";
         if (state.following && !state.paused && !state.selectedSort)
           table.scheduleRenderWindow(true);
       }
       bridge.flush();
     }
+    function holdingLive() {
+      return pointerOverRows && state.following && !state.selectedSort;
+    }
+    scope.listen(scrollViewport, "pointerenter", () => {
+      pointerOverRows = true;
+    });
+    scope.listen(scrollViewport, "pointerleave", () => {
+      pointerOverRows = false;
+      const events = heldEvents;
+      heldEvents = void 0;
+      if (events && state.following && !state.paused) {
+        state.lastRows = events.map((event) => event.id).join(",");
+        table.renderRows(events);
+        elements.empty.hidden = events.length > 0;
+        table.scheduleRenderWindow(true);
+      }
+      updateModeLabel();
+    });
     function updateFollowControl() {
       if (state.paused) {
         elements.follow.setAttribute("aria-pressed", "false");
         elements.follow.setAttribute("aria-label", "Resume live updates");
-        elements.follow.title = "Resume live updates";
-        elements.follow.textContent = "Resume";
+        elements.follow.title = "Paused while you inspect an event; capture continues. Click to resume live logs.";
+        elements.follow.dataset.mode = "resume";
+        setLabel(elements.follow, "Resume");
         return;
       }
       elements.follow.setAttribute("aria-pressed", String(state.following));
       elements.follow.setAttribute("aria-label", state.following ? "Live updates" : "Browse retained history");
-      elements.follow.title = state.following ? "Live updates" : "Browse retained history";
-      elements.follow.textContent = state.following ? "Live" : "Browse";
+      elements.follow.title = state.following ? "Live: new logs appear as they arrive. Click to stop following and browse history." : "Browsing history: the table stays where it is. Click to follow live logs.";
+      elements.follow.dataset.mode = state.following ? "live" : "browse";
+      setLabel(elements.follow, state.following ? "Live" : "Browse");
     }
     function updateModeLabel() {
       elements.older.textContent = state.selectedSort ? "Next \u2192" : "\u2190 Older";
       elements.newer.textContent = state.selectedSort ? "\u2190 Previous" : "Newer \u2192";
-      elements.mode.textContent = state.paused ? "Paused \u2014 collection continues" : state.selectedSort ? `Sorted ${state.selectedSortDirection === "asc" ? "ascending" : "descending"}${state.following ? " \xB7 Live updates" : ""}` : state.following ? "Live \xB7 newest 1,000" : "Browsing retained history";
+      elements.mode.textContent = state.paused ? "Paused \u2014 collection continues" : state.selectedSort ? `Sorted ${state.selectedSortDirection === "asc" ? "ascending" : "descending"}${state.following ? " \xB7 Live updates" : ""}` : state.following ? heldEvents ? "Live \xB7 new rows held while the pointer is over them" : "Live \xB7 newest 1,000" : "Browsing retained history";
       elements.mode.className = state.following && !state.paused ? "live-mode" : "";
     }
     function setFollowing(value) {
@@ -2499,7 +2859,8 @@
     }
     function updateCopyResultsControl() {
       elements.copyResults.hidden = !hasActiveFilter();
-      elements.copyResults.textContent = "Copy results";
+      setLabel(elements.copyResults, "Copy results");
+      delete elements.copyResults.dataset.copied;
     }
     function updateGuideStatus(status) {
       guideUnread = status.unread;
@@ -2524,8 +2885,25 @@
       requestInteraction();
     }
     scope.listen(elements.logs, "click", (event) => {
-      if (inspection.handleDetailAction(event))
+      const target = event.target;
+      const dismiss = target.closest(".dismiss-hint");
+      if (dismiss) {
+        state.cellHintDismissed = true;
+        saveState();
+        dismiss.closest(".detail-hint")?.remove();
         return;
+      }
+      if (doctor.handleAction(event) || inspection.handleDetailAction(event))
+        return;
+      const rowButton = target.closest(".row-icon, .row-action");
+      const rowId = Number(rowButton?.dataset.id);
+      if (rowButton && Number.isSafeInteger(rowId)) {
+        if (rowButton.classList.contains("row-site-button")) api.postMessage({ type: "openLogSite", id: rowId });
+        else if (rowButton.classList.contains("row-break-button")) api.postMessage({ type: "breakOnEvent", id: rowId });
+        else if (rowButton.classList.contains("row-context-button")) inspection.showContext(rowId);
+        else if (rowButton.classList.contains("row-finding-button") && state.selected !== rowId) toggleExpand(rowId);
+        return;
+      }
       const trace = event.target.closest(".row-trace-button");
       if (trace?.dataset.traceId) {
         traceView.show(trace.dataset.traceId);
@@ -2534,7 +2912,7 @@
       const button = event.target.closest(".message-button");
       if (!button)
         return;
-      table.toggleExpand(Number(button.closest("tr").dataset.id));
+      toggleExpand(Number(button.closest("tr").dataset.id));
     });
     scope.listen(elements.search, "input", () => {
       search.clearAutocomplete();
@@ -2596,6 +2974,21 @@
       if (!elements.scopeMenu.contains(event.relatedTarget)) scopePopover.close();
     });
     const actionsContainer = elements.moreActions.closest(".popover-container");
+    const doctorPopover = createPopover(elements.doctor.closest(".popover-container"), elements.doctor, elements.doctorPanel);
+    scope.listen(elements.contextDetails, "click", (event) => {
+      doctor.handleAction(event);
+    });
+    scope.listen(elements.rowHintDismiss, "click", dismissRowHint);
+    function dismissRowHint() {
+      if (!state.rowHintDismissed) {
+        state.rowHintDismissed = true;
+        saveState();
+      }
+      elements.rowHint.hidden = true;
+    }
+    function toggleExpand(id) {
+      table.toggleExpand(id);
+    }
     const actionsMenu = createPopover(actionsContainer, elements.moreActions, elements.actionsMenu);
     const actionItems = [elements.shareSpecificRuns, elements.export, elements.import, elements.breakOnLogs, elements.otlpToggle, elements.manage, elements.config, elements.help];
     scope.listen(elements.moreActions, "click", () => {
@@ -2625,7 +3018,8 @@
     scope.listen(elements.copyResults, "click", () => {
       if (!hasActiveFilter()) return;
       api.postMessage({ type: "copyFiltered", query: search.query(), levels: state.currentLevels(), serverId: state.selectedServer || void 0, sessionId: state.selectedSession || void 0 });
-      elements.copyResults.textContent = "Copied";
+      setLabel(elements.copyResults, "Copied");
+      elements.copyResults.dataset.copied = "true";
       clearTimeout(copyFeedbackTimer);
       copyFeedbackTimer = setTimeout(updateCopyResultsControl, 1200);
     });

@@ -10,7 +10,7 @@ import { formatDuration } from './trace';
  * spans and from logs that carry a trace id. Choosing one opens its waterfall.
  */
 export function createTraceList(elements: Elements, api: WebviewApi, scope: EventScope,
-  actions: { showTrace(traceId: string): void; formatTime(ms: number): string; startReceiver(): void }) {
+  actions: { showTrace(traceId: string): void; formatTime(ms: number): string; startReceiver(): void; receiver(): { running: boolean; endpoint?: string } }) {
   let traces: TraceSummary[] = [];
 
   function show() {
@@ -40,6 +40,9 @@ export function createTraceList(elements: Elements, api: WebviewApi, scope: Even
     actions.showTrace(row.dataset.traceId);
   });
 
+  // The receiver can start or stop while the list is open.
+  function receiverChanged() { if (elements.tracesDialog.open) render(); }
+
   function receive(list: TraceSummary[]) {
     traces = list;
     if (elements.tracesDialog.open) render();
@@ -49,9 +52,13 @@ export function createTraceList(elements: Elements, api: WebviewApi, scope: Even
     const errorsOnly = elements.tracesErrorsOnly.checked;
     const shown = errorsOnly ? traces.filter(trace => trace.errors) : traces;
     const withSpans = traces.filter(trace => trace.spans).length;
-    elements.tracesStartReceiver.hidden = withSpans > 0;
+    const receiver = actions.receiver();
+    // Offer to start the receiver only when it is not already running.
+    elements.tracesStartReceiver.hidden = receiver.running || withSpans > 0;
     if (!traces.length) {
-      elements.tracesStatus.textContent = 'No traces yet. Start the OpenTelemetry receiver and run an instrumented app, or log JSON with a traceId field.';
+      elements.tracesStatus.textContent = receiver.running
+        ? `No traces yet. The OpenTelemetry receiver is listening on ${receiver.endpoint ?? 'localhost'}: run an app with OTEL_EXPORTER_OTLP_ENDPOINT=${receiver.endpoint ?? 'http://127.0.0.1:4318'}, or log JSON with a traceId field.`
+        : 'No traces yet. Start the OpenTelemetry receiver and run an instrumented app, or log JSON with a traceId field.';
       elements.tracesRows.replaceChildren();
       return;
     }
@@ -93,5 +100,5 @@ export function createTraceList(elements: Elements, api: WebviewApi, scope: Even
     }));
   }
 
-  return { show, receive };
+  return { show, receive, receiverChanged };
 }

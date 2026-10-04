@@ -38,7 +38,9 @@ export function activate(context: vscode.ExtensionContext): { provider: LogsProv
     if (typeof vscode.languages.createDiagnosticCollection === 'function') {
       controller.doctor = new LogDoctor({
         config: logController.config, index: logController.logSites, tracker: logController.siteTracker, lens: controller.lens,
-        askCopilot: prompt => logController.openChat(prompt)
+        askCopilot: prompt => logController.openChat(prompt),
+        showQuery: query => logController.showQuery(query),
+        onChanged: () => logController.notifications.notify()
       });
       context.subscriptions.push(controller.doctor);
     }

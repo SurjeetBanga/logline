@@ -21,7 +21,7 @@ Logline can also capture commands you run in supported VS Code terminals. Turn *
 
 **Running Docker Compose?** Run **Logline: Follow Docker Compose Project**, or run `docker compose up` with **Run Command** or in a captured terminal. Each service becomes its own source, and its JSON or logfmt lines keep their level and fields.
 
-**Found a bug through a log line?** Expand the event and choose **Break when this logs again**. The debugger stops on that log statement the next time it runs.
+**Found a bug through a log line?** Expand the event and choose **Break here**. The debugger stops on that log statement the next time it runs.
 
 **Try it with a file:** run **Logline: Import Logs** and select [samples/demo-logs.jsonl](samples/demo-logs.jsonl) from this repository. You can also import JSON, JSONL/NDJSON, CSV, and plain-text logs.
 
@@ -35,7 +35,7 @@ Open **Help** in the toolbar for the offline visual guide, or run **Logline: Wha
 | **Search** | Field/value autocomplete, editable filter chips, right-click **Include value** / **Exclude value**, any combination of log levels, and up to 50 saved searches. |
 | **Inspect** | Expand JSON, read structured exceptions and nested causes, see multi-line plain-text stack traces as one event, open stack-frame source locations, share an event’s exact run, view up to 25 surrounding events on each side from the same run, browse recent traces, and follow a request across services in a trace waterfall. |
 | **Code** | See a CodeLens with live hit counts, errors, and recent values above the log statements in your editor, jump from any event to the statement that logged it, and find statements that never fired. |
-| **Debug** | Stop the debugger on the statement that logged an event with **Break when this logs again**, or pause a debug session right after it logs anything that matches a search. |
+| **Debug** | Stop the debugger on the statement that logged an event with **Break here** on an expanded event, or pause a debug session right after it logs anything that matches a search. |
 | **Fix** | **Log doctor** shows statements that logged secrets or personal data, errors logged without their exception, and statements that produce most of your log volume in the Problems panel, with masked evidence and quick fixes. |
 | **Arrange** | Auto-detected fields, custom and nested columns, sorting, drag-to-reorder, and resizable column widths. |
 | **Analyze** | Event rate, errors, latency, status codes, the top 10 log patterns, and normalized error groups for the current filter. |
@@ -112,7 +112,7 @@ Open **Settings** in the toolbar for all options. A few useful defaults:
 
 Older events are discarded when either retention limit is reached. Search, context, and analysis cover retained events only; the memory budget estimates event storage, not total VS Code memory. Add `.logline/` to `.gitignore` if you enable persistence.
 
-**Copy event** and disk persistence keep original content. **Copy results** and AI Markdown exports include the latest 1,000 matching events; full JSON/JSONL/CSV exports cover all matches in the retained snapshot. Use CSV when you want to export and re-import the original raw records—JSON/JSONL exports contain Logline event envelopes.
+**Copy** on an expanded event and disk persistence keep original content. **Copy results** and AI Markdown exports include the latest 1,000 matching events; full JSON/JSONL/CSV exports cover all matches in the retained snapshot. Use CSV when you want to export and re-import the original raw records—JSON/JSONL exports contain Logline event envelopes.
 
 See the [usage reference](docs/usage.md) for all settings, query details, import/export behavior, task examples, and retention limits.
 

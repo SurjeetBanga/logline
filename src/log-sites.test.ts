@@ -104,6 +104,34 @@ test('tracks hits, errors, and recent samples per site', () => {
   assert.equal(tracker.stats.size, 0);
 });
 
+test('evicting events subtracts what they counted', () => {
+  const index = new LogSiteIndex();
+  index.setFile('a.ts', extractLogSites('a.ts', 'logger.error(`payment ${id} declined`)\nlogger.info(`order ${id} shipped`)'));
+  const tracker = new LogSiteTracker(index);
+  tracker.findings = true;
+  tracker.process([event(1, 'payment 1 declined', { level: 'error' }), event(2, 'noise'), event(3, 'order 3 shipped'),
+    event(4, 'payment 4 declined'), event(5, 'payment 5 declined', { level: 'error' })]);
+  const payment = () => tracker.stats.get(index.sitesIn('a.ts')[0].id);
+  assert.deepEqual([payment()?.hits, payment()?.errors, payment()?.bareErrors, tracker.total], [3, 2, 2, 5]);
+  assert.equal(tracker.siteOf(4), index.sitesIn('a.ts')[0].id);
+  assert.equal(tracker.siteOf(2), null, 'counted but matched no statement');
+  assert.equal(tracker.siteOf(9), undefined, 'not counted yet');
+  assert.equal(tracker.evict(1), false, 'nothing older than the oldest retained event');
+  assert.equal(tracker.evict(3), true);
+  assert.deepEqual([payment()?.hits, payment()?.errors, payment()?.bareErrors, tracker.total], [2, 1, 1, 3]);
+  tracker.evict(5);
+  assert.equal(tracker.stats.has(index.sitesIn('a.ts')[1].id), false, 'a statement with no retained events is dropped');
+  assert.deepEqual([payment()?.hits, payment()?.errors, tracker.total], [1, 1, 1]);
+});
+
+test('statements sharing common words still match their own messages', () => {
+  const index = new LogSiteIndex();
+  const source = Array.from({ length: 50 }, (_, i) => `logger.info(\`Processing request \${id} for tenant${i} completed\`)`).join('\n');
+  index.setFile('a.ts', extractLogSites('a.ts', source));
+  assert.equal(index.match(event(1, 'Processing request 9 for tenant17 completed'))?.site.line, 18);
+  assert.equal(index.match(event(2, 'Processing request 9 for tenant99 completed')), undefined);
+});
+
 test('index changes invalidate cached matches', () => {
   const index = new LogSiteIndex();
   assert.equal(index.match(event(1, 'worker started successfully')), undefined);

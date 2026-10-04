@@ -1,7 +1,8 @@
 import * as vscode from 'vscode';
 import { SENSITIVE_LABELS, uncaughtExceptionVariable } from '../core/log-findings';
-import type { LogSite, LogSiteIndex, LogSiteTracker, SiteStats } from '../core/log-sites';
+import { siteQuery, type LogSite, type LogSiteIndex, type LogSiteTracker, type SiteStats } from '../core/log-sites';
 import type { Settings } from '../core/settings';
+import type { DoctorAction, DoctorFindingView } from '../protocol/messages';
 import type { LogLens } from './log-lens';
 
 export type DoctorMode = 'off' | 'security' | 'all';
@@ -24,6 +25,10 @@ export interface DoctorSources {
   lens: LogLens;
   /** Ask Copilot to change a statement, with the evidence in the prompt. */
   askCopilot(prompt: string): Promise<void>;
+  /** Filter the Logs panel, used to show a statement's events. */
+  showQuery?(query: string): Promise<void>;
+  /** Called when the findings shown in the Logs panel change. */
+  onChanged?(): void;
 }
 
 // A statement is noisy when it alone is this share of enough retained events.
@@ -88,6 +93,10 @@ export function isIgnored(lines: readonly string[], line: number, code: FindingC
   return false;
 }
 
+function view(finding: Finding): DoctorFindingView {
+  return { siteId: finding.site.id, code: finding.code, severity: finding.severity, message: finding.message, file: finding.site.file, line: finding.site.line };
+}
+
 /**
  * Log doctor: Problems-panel diagnostics on log statements, backed by what
  * they actually logged, with quick fixes and a workspace health report.
@@ -100,6 +109,20 @@ export class LogDoctor implements vscode.Disposable, vscode.CodeActionProvider {
   private current: Finding[] = [];
   private timer?: ReturnType<typeof setTimeout>;
   private run = 0;
+  // What the last refresh was computed from; lenses also change on a clock
+  // tick, which leaves findings as they were.
+  private computedFrom?: string;
+  // Source read from disk, kept until the index sees a file change.
+  private readonly sourceCache = new Map<string, string | undefined>();
+  private sourceVersion = -1;
+  // Diagnostics as set per file, so unchanged files are not re-sent to the Problems panel.
+  private readonly published = new Map<string, { uri: vscode.Uri; signature: string }>();
+  // Findings per statement, worst first, for rows and expanded events in the Logs panel.
+  private bySite = new Map<string, Finding[]>();
+  private viewSignature = '';
+  private viewCache?: DoctorFindingView[];
+  /** Changes whenever the findings shown in the Logs panel change. */
+  revision = 0;
 
   constructor(private readonly sources: DoctorSources) {
     this.disposables.push(this.diagnostics,
@@ -108,7 +131,11 @@ export class LogDoctor implements vscode.Disposable, vscode.CodeActionProvider {
       vscode.commands.registerCommand('logline.showLogHealth', () => this.showHealth()),
       vscode.commands.registerCommand('logline.fixLogStatementWithCopilot', (uri: vscode.Uri, line: number, message: string) =>
         sources.askCopilot(`Fix the log statement at ${vscode.workspace.asRelativePath(uri)}:${line}. Logline reported: ${message} Change only what is needed, keep the log useful, and follow the logging style of the file.`)),
-      vscode.workspace.onDidChangeConfiguration(event => { if (event.affectsConfiguration('logline.logDoctor')) this.apply(); })
+      vscode.workspace.onDidChangeConfiguration(event => { if (event.affectsConfiguration('logline.logDoctor')) this.apply(); }),
+      // An edit can add or remove a logline-ignore comment without moving any statement.
+      vscode.workspace.onDidChangeTextDocument(event => {
+        if (this.published.has(event.document.uri.toString())) { this.computedFrom = undefined; this.schedule(); }
+      })
     );
     this.apply();
   }
@@ -126,17 +153,24 @@ export class LogDoctor implements vscode.Disposable, vscode.CodeActionProvider {
     const run = ++this.run;
     const mode = doctorMode(this.sources.config);
     const { tracker, index, lens } = this.sources;
+    const computedFrom = `${mode}:${tracker.findings}:${index.version}:${tracker.watermark}:${tracker.total}:${tracker.stats.size}`;
+    if (computedFrom === this.computedFrom) return;
+    if (index.version !== this.sourceVersion) { this.sourceCache.clear(); this.sourceVersion = index.version; }
     const findings: Finding[] = [];
     const byFile = new Map<string, { uri: vscode.Uri; diagnostics: vscode.Diagnostic[] }>();
-    const texts = new Map<string, string[] | undefined>();
+    const texts = new Map<string, { text: string; lines: string[] } | undefined>();
     for (const [id, stats] of tracker.stats) {
       const site = index.find(id);
       const uri = site && lens.siteUri(site);
       if (!site || !uri) continue;
-      let lines = texts.get(site.file);
-      if (!texts.has(site.file)) { lines = (await this.read(uri))?.split('\n'); texts.set(site.file, lines); }
+      if (!texts.has(site.file)) {
+        const text = await this.read(uri);
+        texts.set(site.file, text === undefined ? undefined : { text, lines: text.split('\n') });
+      }
       if (run !== this.run) return;
-      for (const finding of siteFindings(site, stats, tracker.total, mode, lines?.join('\n'))) {
+      const source = texts.get(site.file);
+      const lines = source?.lines;
+      for (const finding of siteFindings(site, stats, tracker.total, mode, source?.text)) {
         if (lines && isIgnored(lines, site.line, finding.code)) continue;
         findings.push(finding);
         const entry = byFile.get(site.file) ?? { uri, diagnostics: [] };
@@ -151,10 +185,52 @@ export class LogDoctor implements vscode.Disposable, vscode.CodeActionProvider {
         byFile.set(site.file, entry);
       }
     }
-    this.diagnostics.clear();
-    for (const { uri, diagnostics } of byFile.values()) this.diagnostics.set(uri, diagnostics);
+    const current = new Set([...byFile.values()].map(({ uri }) => uri.toString()));
+    for (const [key, { uri }] of this.published) {
+      if (!current.has(key)) { this.diagnostics.delete(uri); this.published.delete(key); }
+    }
+    for (const { uri, diagnostics } of byFile.values()) {
+      const signature = JSON.stringify(diagnostics.map(({ range, message, code, severity }) => [range, message, code, severity]));
+      if (this.published.get(uri.toString())?.signature === signature) continue;
+      this.diagnostics.set(uri, diagnostics);
+      this.published.set(uri.toString(), { uri, signature });
+    }
+    this.computedFrom = computedFrom;
     const rank = { warning: 0, information: 1, hint: 2 };
     this.current = findings.sort((a, b) => rank[a.severity] - rank[b.severity] || a.site.file.localeCompare(b.site.file) || a.site.line - b.site.line);
+    this.findingsChanged();
+  }
+
+  /** Findings on one statement, worst first. */
+  findingsFor(siteId: string): readonly Finding[] { return this.bySite.get(siteId) ?? []; }
+
+  /** Findings as the Logs panel shows them, worst first. */
+  views(): DoctorFindingView[] { return this.viewCache ??= this.current.slice(0, 200).map(view); }
+
+  /** Act on a finding from the Logs panel. */
+  async act(action: DoctorAction, siteId?: string): Promise<void> {
+    if (action === 'report') { await this.showHealth(); return; }
+    const site = siteId === undefined ? undefined : this.sources.index.find(siteId);
+    if (!site) { void vscode.window.showInformationMessage('This log statement is no longer indexed. It may have been edited or removed.'); return; }
+    if (action === 'showEvents') { await this.sources.showQuery?.(siteQuery(site)); return; }
+    await this.sources.lens.openSite(site);
+    // The cursor lands on the statement, where the quick fixes for its diagnostics are offered.
+    if (action === 'fix') await vscode.commands.executeCommand('editor.action.quickFix');
+  }
+
+  private findingsChanged(): void {
+    const bySite = new Map<string, Finding[]>();
+    for (const finding of this.current) {
+      const list = bySite.get(finding.site.id);
+      if (list) list.push(finding); else bySite.set(finding.site.id, [finding]);
+    }
+    this.bySite = bySite;
+    const signature = JSON.stringify(this.current.map(finding => [finding.site.id, finding.code, finding.message]));
+    if (signature === this.viewSignature) return;
+    this.viewSignature = signature;
+    this.viewCache = undefined;
+    this.revision++;
+    this.sources.onChanged?.();
   }
 
   provideCodeActions(document: vscode.TextDocument, _range: vscode.Range, context: vscode.CodeActionContext): vscode.CodeAction[] {
@@ -214,7 +290,7 @@ export class LogDoctor implements vscode.Disposable, vscode.CodeActionProvider {
   }
 
   private apply(): void {
-    if (doctorMode(this.sources.config) === 'off') { this.sources.tracker.findings = false; this.diagnostics.clear(); this.current = []; return; }
+    if (doctorMode(this.sources.config) === 'off') { this.sources.tracker.findings = false; this.diagnostics.clear(); this.published.clear(); this.computedFrom = undefined; this.current = []; this.findingsChanged(); return; }
     // A stale index version makes the lens recount retained events, now with evidence.
     if (!this.sources.tracker.findings) { this.sources.tracker.findings = true; this.sources.tracker.indexVersion = -1; this.sources.lens.schedule(0); }
     this.schedule();
@@ -223,7 +299,12 @@ export class LogDoctor implements vscode.Disposable, vscode.CodeActionProvider {
   private async read(uri: vscode.Uri): Promise<string | undefined> {
     const open = vscode.workspace.textDocuments.find(document => document.uri.toString() === uri.toString());
     if (open) return open.getText();
-    try { return new TextDecoder().decode(await vscode.workspace.fs.readFile(uri)); } catch { return undefined; }
+    const key = uri.toString();
+    if (this.sourceCache.has(key)) return this.sourceCache.get(key);
+    let text: string | undefined;
+    try { text = new TextDecoder().decode(await vscode.workspace.fs.readFile(uri)); } catch { text = undefined; }
+    this.sourceCache.set(key, text);
+    return text;
   }
 
   private async showHealth(): Promise<void> {

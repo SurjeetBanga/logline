@@ -2,6 +2,28 @@
 
 All notable changes to Logline are documented in this file.
 
+## 1.11.0 — 2026-10-03
+
+### Behavior changes
+
+Nothing was removed, but a few things look or behave differently after updating:
+
+- While **Live**, new rows are held while the pointer is over the table and appear when it leaves, so rows no longer move under the pointer. The mode label says when rows are held.
+- Actions on expanded events have new names: **Show context** is **Surrounding logs**, **Open log statement** is **Open code**, **Break when this logs again** is **Break here**, **Show trace** is **Trace**, **Copy event** is **Copy**, and **Share source with Agent** is **Share with agent**. The toolbar's **Share logs with agent** is **Share with agent**.
+- Log lens counts drop evicted events right away instead of within about 10 seconds.
+- Log doctor findings also appear in the Logs panel (**Log issues**, row icons, and expanded events), not only in the Problems panel. Set `logline.logDoctor` to `off` to turn them off.
+
+### Changes
+
+- Expanded events show their actions as one labeled toolbar with icons: **Surrounding logs**, **Trace**, **Open code**, and **Break here** on the left, **Copy** and **Share with agent** on the right. Actions that do not apply to an event, such as **Trace** without a trace id, stay visible but disabled, with the reason in their tooltip, so they can be discovered from any event. **Open code** shows the file name and line, with the full path in its tooltip. A dismissible tip under the event explains right-click filtering on table cells.
+- Rows show what they link to without being opened: a code icon when Logline knows the log statement behind the event, the trace icon, and a log doctor icon when that statement has a finding. Hovering a row reveals icon buttons at the end of its message for **Surrounding logs**, **Trace**, **Open code**, and **Break here**, a chevron marks rows that expand, and a one-time tip explains opening events.
+- Toolbar buttons have icons (terminal capture, share with agent, Live/Resume/Browse, clear, stop, levels, saved searches, columns, analyze, copy results) and descriptive tooltips. Tooltips appear after a short pause instead of the browser's one-second delay, on hover or keyboard focus, styled like editor hovers. On narrower panels, **Clear**, **Stop all**, **Copy results**, **Saved searches**, and **Columns** show only their icon, leaving room for the search box. **Share logs with agent** is now **Share with agent** (**Sharing · Stop** while on), and the remove button on search filter chips is centered.
+- While following live, new rows are held while the pointer is over the table, so rows do not move between pointing and clicking; the mode label says so, and the rows catch up when the pointer leaves.
+- Add **Log issues** to the Logs toolbar while log doctor is on, with a count when it has findings and an explanation of what it checks when it has none. It lists findings by kind (secrets, personal data, missing exceptions, noisy statements, values in messages) with **Fix…**, which opens the statement with its quick fixes, **Show events**, and a link to the full report. An expanded event explains the findings on its statement with the same actions.
+- The Traces list no longer offers **Start OpenTelemetry receiver** while the receiver is already running. Its empty state says where the receiver is listening and how to point an app at it.
+- Log lenses no longer slow down the editor in large workspaces. Each statement is matched by its rarest word instead of its longest, so statements that share common words ("Processing", "completed") are no longer all tested against every message, and once retention is full, evicted events are subtracted instead of recounting every retained event every 10 seconds.
+- Log doctor reuses source it already read, skips refreshes when no counts changed, and only updates Problems for files whose findings changed.
+
 ## 1.10.0 — 2026-10-03
 
 ### Behavior changes
