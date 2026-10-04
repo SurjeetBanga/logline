@@ -17,6 +17,8 @@ import { createCellActions } from './table/cell-actions';
 import { createTimestampFormatter } from './time';
 import type { WebviewApi } from './types';
 
+const HOLD_AFTER_MOVE_MS = 2000;
+
 export function createViewer(api: WebviewApi) {
   const scope = new EventScope();
   const elements = getElements();
@@ -45,6 +47,8 @@ export function createViewer(api: WebviewApi) {
   let otlpEndpoint: string | undefined;
   let pointerOverRows = false;
   let heldEvents: Snapshot['events'];
+  let lastPointerMove = 0;
+  let holdTimer: ReturnType<typeof setTimeout> | undefined;
   let cellActions: ReturnType<typeof createCellActions> | undefined;
   const table = createTable(elements, scrollViewport, state, api, formatTimestamp,
     { request: requestInteraction, saveState, filterChanged, setFollowing, updateFollowControl, updateModeLabel }, scope, () => cellActions?.rowsChanged());
@@ -193,12 +197,15 @@ export function createViewer(api: WebviewApi) {
     setLabel(elements.shareAgent, sharing ? 'Sharing · Stop' : 'Share with agent');
     elements.shareAgent.setAttribute('aria-pressed', String(Boolean(sharing)));
     elements.shareAgent.title = sharing
-      ? sharingAll ? 'Existing and new captured logs are available to Copilot in this window. Click to stop sharing.'
-        : `${sharedRuns} selected command run${sharedRuns === 1 ? '' : 's'} available to Copilot in this window. Click to stop sharing.`
-      : 'Share existing and new captured logs in this window until stopped';
+      ? sharingAll ? 'Existing and new captured logs are available to agents in this window: Copilot, and Claude Code or Codex if connected. Click to stop sharing.'
+        : `${sharedRuns} selected command run${sharedRuns === 1 ? '' : 's'} available to agents in this window. Click to stop sharing.`
+      : 'Share existing and new captured logs with Copilot, Claude Code, Codex, or other connected agents until stopped';
     elements.shareScope.hidden = !sharing;
-    elements.shareScope.textContent = sharingAll ? 'Sharing existing and new runs in this window until stopped'
-      : sharing ? `Sharing ${sharedRuns} selected run${sharedRuns === 1 ? '' : 's'} only` : '';
+    // Which MCP clients are reading, so sharing never happens unnoticed.
+    const readers = sharing && data.agentClients?.length ? ` · read by ${data.agentClients.join(', ')}` : '';
+    elements.shareScope.textContent = (sharingAll ? 'Sharing all runs' : sharing ? `Sharing ${sharedRuns} run${sharedRuns === 1 ? '' : 's'}` : '') + readers;
+    elements.shareScope.title = sharingAll ? 'Agents can read existing and new runs in this window, redacted, until you stop sharing.'
+      : sharing ? `Agents can read ${sharedRuns} selected run${sharedRuns === 1 ? '' : 's'} in this window, redacted, until you stop sharing. Later commands are not included.` : '';
     setLabel(elements.stop, state.selectedServer ? 'Stop server' : 'Stop all');
     const activeSessions = Array.isArray(data.sessions) ? data.sessions.filter(session => ['running', 'stopping'].includes(session.status)) : [];
     elements.sessions.textContent = activeSessions.length
@@ -293,11 +300,25 @@ export function createViewer(api: WebviewApi) {
 
   // While following live, new rows push the table up every refresh, so a row
   // can move away between pointing at it and clicking. Hold the rows while the
-  // pointer is over them, the way live tails do, and catch up when it leaves.
-  function holdingLive() { return pointerOverRows && state.following && !state.selectedSort; }
-  scope.listen(scrollViewport, 'pointerenter', () => { pointerOverRows = true; });
-  scope.listen(scrollViewport, 'pointerleave', () => {
-    pointerOverRows = false;
+  // pointer moves over them, and catch up once it rests for a moment or
+  // leaves, so a pointer parked on the table does not freeze the view.
+  function holdingLive() { return pointerOverRows && Date.now() - lastPointerMove < HOLD_AFTER_MOVE_MS && state.following && !state.selectedSort; }
+  function pointerMoved() {
+    pointerOverRows = true;
+    lastPointerMove = Date.now();
+    if (!holdTimer) holdTimer = setTimeout(checkHold, HOLD_AFTER_MOVE_MS);
+  }
+  // One timer per pause in movement, not per pointermove.
+  function checkHold() {
+    holdTimer = undefined;
+    const rested = Date.now() - lastPointerMove;
+    if (pointerOverRows && rested < HOLD_AFTER_MOVE_MS) { holdTimer = setTimeout(checkHold, HOLD_AFTER_MOVE_MS - rested); return; }
+    releaseHeld();
+  }
+  scope.listen(scrollViewport, 'pointerenter', pointerMoved);
+  scope.listen(scrollViewport, 'pointermove', pointerMoved);
+  scope.listen(scrollViewport, 'pointerleave', () => { pointerOverRows = false; releaseHeld(); });
+  function releaseHeld() {
     const events = heldEvents;
     heldEvents = undefined;
     if (events && state.following && !state.paused) {
@@ -307,7 +328,7 @@ export function createViewer(api: WebviewApi) {
       table.scheduleRenderWindow(true);
     }
     updateModeLabel();
-  });
+  }
 
   function updateFollowControl() {
     if (state.paused) {
@@ -330,7 +351,7 @@ export function createViewer(api: WebviewApi) {
     elements.older.textContent = state.selectedSort ? 'Next →' : '← Older';
     elements.newer.textContent = state.selectedSort ? '← Previous' : 'Newer →';
     elements.mode.textContent = state.paused ? 'Paused — collection continues' : state.selectedSort ? `Sorted ${state.selectedSortDirection === 'asc' ? 'ascending' : 'descending'}${state.following ? ' · Live updates' : ''}`
-      : state.following ? (heldEvents ? 'Live · new rows held while the pointer is over them' : 'Live · newest 1,000') : 'Browsing retained history';
+      : state.following ? (heldEvents ? 'Live · new rows held while you point at the table' : 'Live · newest 1,000') : 'Browsing retained history';
     elements.mode.className = state.following && !state.paused ? 'live-mode' : '';
   }
 
@@ -469,7 +490,7 @@ export function createViewer(api: WebviewApi) {
   }
   function toggleExpand(id: number) { table.toggleExpand(id); }
   const actionsMenu = createPopover(actionsContainer, elements.moreActions, elements.actionsMenu);
-  const actionItems = [elements.shareSpecificRuns, elements.export, elements.import, elements.breakOnLogs, elements.otlpToggle, elements.manage, elements.config, elements.help];
+  const actionItems = [elements.shareSpecificRuns, elements.connectAgent, elements.export, elements.import, elements.breakOnLogs, elements.otlpToggle, elements.manage, elements.config, elements.help];
   scope.listen(elements.moreActions, 'click', () => {
     if (actionsMenu.isOpen()) actionItems[0].focus();
   });
@@ -516,6 +537,7 @@ export function createViewer(api: WebviewApi) {
     else api.postMessage({ type: 'shareWithAgent' });
   });
   scope.listen(elements.shareSpecificRuns, 'click', () => api.postMessage({ type: 'shareWithAgent', chooseRuns: true }));
+  scope.listen(elements.connectAgent, 'click', () => api.postMessage({ type: 'connectAgent' }));
 
   scope.listen(elements.saveSearch, 'click', () => {
     for (const popover of popovers)
@@ -606,7 +628,7 @@ export function createViewer(api: WebviewApi) {
   request();
   return {
     state, bridge, table, search, inspection, traceView, traceList, receive,
-    dispose() { scope.dispose(); clearInterval(fallbackTimer); clearTimeout(searchDebounce); clearTimeout(autocompleteDebounce); clearTimeout(copyFeedbackTimer); window.removeEventListener('message', onMessage); }
+    dispose() { scope.dispose(); clearInterval(fallbackTimer); clearTimeout(holdTimer); clearTimeout(searchDebounce); clearTimeout(autocompleteDebounce); clearTimeout(copyFeedbackTimer); window.removeEventListener('message', onMessage); }
   };
 
   function formatSource(server: Snapshot['servers'][number]): { label: string; title: string; } {
@@ -667,10 +689,10 @@ export function createViewer(api: WebviewApi) {
     const activeCount = visibleSources.reduce((sum, server) => sum + (server.activeSessions || 0), 0);
     const sourceLabel = selectedSource?.label || (state.selectedServer || activeCount ? `All sources${activeCount ? ` · ${activeCount} active` : ''}` : 'All sources');
     const selectedRun = visibleSessions.find(session => session.id === state.selectedSession);
-    const runLabel = selectedRun?.command || (visibleSessions.length ? `All runs · ${visibleSessions.length}` : 'All runs');
+    const runLabel = (selectedRun && runName(selectedRun)) || (visibleSessions.length ? `All runs · ${visibleSessions.length}` : 'All runs');
     elements.server.value = state.selectedServer;
     elements.server.textContent = `${sourceLabel} · ${runLabel}`;
-    elements.server.title = [selectedSource?.label || 'All sources', selectedRun?.command || 'All runs'].join(' · ');
+    elements.server.title = [selectedSource?.label || 'All sources', (selectedRun && runName(selectedRun)) || 'All runs'].join(' · ');
   }
 
   function setScopeTab(tab: 'sources' | 'runs', focus = false): void {
@@ -703,6 +725,11 @@ export function createViewer(api: WebviewApi) {
     requestInteraction();
   }
 
+  /** What a run is called in the picker: its command, else its task or source, never its internal id. */
+  function runName(session: Snapshot['sessions'][number]): string {
+    return session.command || (session.taskName ? `Task: ${session.taskName}` : '') || session.server || 'Run';
+  }
+
   function renderRunMenu(sessions: Snapshot['sessions']): void {
     const focusedRun = (document.activeElement as HTMLElement | undefined)?.dataset.runId;
     const all = document.createElement('button');
@@ -723,7 +750,7 @@ export function createViewer(api: WebviewApi) {
       select.tabIndex = 0;
       const started = session.startedAt ? new Date(session.startedAt).toLocaleTimeString() : '';
       const stateText = session.status === 'running' ? 'running' : (session.exitReason || session.status);
-      select.textContent = `${session.command || session.id} · ${started} · ${stateText}`;
+      select.textContent = `${runName(session)} · ${started} · ${stateText}`;
       select.title = [session.cwd, session.captureStatus ? `Capture: ${session.captureStatus}` : undefined, session.captureReason].filter(Boolean).join(' · ');
       scope.listen(select, 'click', () => selectRun(session.id));
       row.append(select);

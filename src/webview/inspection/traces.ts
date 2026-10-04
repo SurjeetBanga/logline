@@ -73,16 +73,21 @@ export function createTraceList(elements: Elements, api: WebviewApi, scope: Even
       row.tabIndex = 0;
       row.setAttribute('aria-label', `${trace.name}, ${formatDuration(trace.durationMs)}${trace.errors ? `, ${trace.errors} errors` : ''}`);
       const name = cell(`${trace.errors ? '⚠ ' : ''}${trace.name || trace.traceId}`, 'trace-name');
-      name.title = `Trace ${trace.traceId}`;
+      // The operation is often long, such as a full request path; the tooltip has all of it.
+      name.title = `${trace.name || trace.traceId}\nTrace ${trace.traceId}`;
       const services = cell('', 'traces-services');
       for (const service of trace.services.slice(0, 4)) {
         const chip = document.createElement('span');
         chip.className = 'service-chip';
         chip.textContent = service;
+        chip.title = service;
         services.append(chip);
       }
       if (trace.services.length > 4) services.append(document.createTextNode(` +${trace.services.length - 4}`));
       const duration = cell('', 'traces-duration');
+      // Flex layout goes inside the cell; a flex table cell stops lining up with its row.
+      const durationContent = document.createElement('div');
+      durationContent.className = 'traces-duration-content';
       const track = document.createElement('div');
       track.className = 'trace-track';
       const bar = document.createElement('div');
@@ -93,7 +98,8 @@ export function createTraceList(elements: Elements, api: WebviewApi, scope: Even
       const label = document.createElement('span');
       label.className = 'traces-duration-label';
       label.textContent = formatDuration(trace.durationMs);
-      duration.append(track, label);
+      durationContent.append(track, label);
+      duration.append(durationContent);
       const counts = [trace.spans ? `${trace.spans} spans` : '', trace.logs ? `${trace.logs} logs` : ''].filter(Boolean).join(' · ');
       row.append(cell(trace.startMs === undefined ? '' : actions.formatTime(trace.startMs), 'time'), name, services, duration, cell(counts, 'traces-counts'));
       return row;

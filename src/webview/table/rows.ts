@@ -30,7 +30,7 @@ export function createRows(state: ViewerState, columns: () => Column[], formatTi
     const button = document.createElement('button');
     button.className = 'message-button';
     button.textContent = `${event.message}${event.truncated ? ' [truncated]' : ''}`;
-    button.title = event.message ?? '';
+    // No tooltip: it would repeat a possibly long message. Clicking the row shows all of it.
     button.setAttribute('aria-expanded', String(event.id === state.selected));
     messageContent.append(button);
     // Room for the quick actions a hovered row shows. The space is kept on

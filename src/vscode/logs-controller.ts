@@ -28,6 +28,9 @@ import type { DetailLinks, DoctorAction, RowEvent } from '../protocol/messages';
 import type { LogBreakpoints } from './log-breakpoints';
 import { doctorMode, type LogDoctor } from './log-doctor';
 import type { LogLens } from './log-lens';
+import type { AgentBridge } from './agent-bridge';
+import { agentLaunch, connectAgent } from './agent-setup';
+import { mcpScriptPath } from '../protocol/agent-bridge';
 import { openSourceLocation } from './source-navigation';
 
 const SHARE_ALL_CONFIRMED_KEY = 'logline.shareAllLogsConfirmed.v1';
@@ -61,6 +64,8 @@ export class LogsController {
   breakpoints?: LogBreakpoints;
   /** Diagnostics on log statements; attached at activation with log lenses. */
   doctor?: LogDoctor;
+  /** Carries tool calls from Claude Code, Codex, and other MCP clients; attached at activation. */
+  agentBridge?: AgentBridge;
   private pendingQuery?: string;
   private pendingTrace?: string;
   readonly transfer = new LogTransfer(this.store, this.config, this.ingestion, this.state);
@@ -116,7 +121,7 @@ export class LogsController {
       running: this.isRunning(),
       agentAccess: this.agentAccess,
       guideStatus: this.guideStatus(), terminalCapture: this.terminalCapture, otlp: this.otlp, spans: this.spans,
-      rowLinks: event => this.rowLinks(event),
+      rowLinks: event => this.rowLinks(event), agentClients: this.agentBridge?.recentClients() ?? [],
       doctor: this.doctor && doctorMode(this.config) !== 'off' ? {
         revision: this.doctor.revision, total: this.doctor.findings.length,
         // The list only travels when the view does not have this revision yet.
@@ -142,7 +147,8 @@ export class LogsController {
       detailLinks: event => this.detailLinks(event), openLogSite: id => this.openLogSite(id),
       traceView: traceId => this.traceView(traceId), traceList: () => this.traceList(), toggleOtlp: enabled => this.toggleOtlp(enabled),
       breakOnEvent: id => this.breakOnEvent(id), breakOnQuery: (query, levels) => this.breakOnQuery(query, levels),
-      doctorAction: (action, siteId) => this.doctorAction(action, siteId)
+      doctorAction: (action, siteId) => this.doctorAction(action, siteId),
+      connectAgent: () => this.connectAgent()
     }, send, message);
   }
   /** Filter the Logs panel from the editor. The next snapshot carries the query, so a panel that is still loading applies it too. */
@@ -197,6 +203,14 @@ export class LogsController {
     if (site) await site.open();
     else void vscode.window.showInformationMessage('Logline could not find the log statement for this event in the workspace.');
   }
+  /** Register Logline with Claude Code, Codex, or another MCP client. */
+  async connectAgent(): Promise<void> {
+    if (!this.agentBridge?.running) {
+      void vscode.window.showWarningMessage('Logline is not accepting MCP clients in this window. Turn on logline.externalAgents to connect Claude Code or Codex.');
+      return;
+    }
+    await connectAgent(agentLaunch(mcpScriptPath()));
+  }
   async doctorAction(action: DoctorAction, siteId?: string): Promise<void> {
     if (!this.doctor) { void vscode.window.showInformationMessage('Log doctor needs a VS Code host with diagnostics support.'); return; }
     await this.doctor.act(action, siteId);
@@ -234,7 +248,7 @@ export class LogsController {
       if (!this.globalState.get<boolean>(SHARE_ALL_CONFIRMED_KEY, false)) {
         const answer = await vscode.window.showWarningMessage('Share logs with agent?', {
           modal: true,
-          detail: 'The agent can search captured logs in this VS Code window, including new command runs, until you stop sharing. Common credentials are automatically redacted, but logs may still contain sensitive information.'
+          detail: 'Agents can search captured logs in this VS Code window, including new command runs, until you stop sharing: Copilot, and Claude Code, Codex, or other MCP clients you connected to Logline. Common credentials are automatically redacted, but logs may still contain sensitive information.'
         }, 'Share logs', 'Choose specific runs…');
         if (this.disposing || revision !== this.agentAccess.status().revision) return;
         if (answer === 'Choose specific runs…') chooseRuns = true;
@@ -296,8 +310,8 @@ export class LogsController {
   }
   private notifySharing(scope: 'all' | 'selected'): void {
     const message = scope === 'all'
-      ? 'Logline: Existing and new captured logs are now shared with Copilot in this window.'
-      : 'Logline: The selected command runs are now shared with Copilot in this window.';
+      ? 'Logline: Existing and new captured logs are now shared with agents in this window: Copilot, and Claude Code, Codex, or other MCP clients you connected.'
+      : 'Logline: The selected command runs are now shared with agents in this window: Copilot, and Claude Code, Codex, or other MCP clients you connected.';
     void vscode.window.showInformationMessage(message, 'Ask Copilot').then(action => {
       if (action === 'Ask Copilot') void this.askCopilot();
     });

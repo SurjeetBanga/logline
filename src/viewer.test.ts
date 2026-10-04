@@ -284,7 +284,7 @@ test('More actions supports keyboard navigation and restores focus on dismissal'
   key('Home');
   assert.equal(dom.activeElement, get('shareSpecificRuns'));
   key('ArrowDown');
-  assert.equal(dom.activeElement, get('export'));
+  assert.equal(dom.activeElement, get('connectAgent'));
   key('Tab');
   assert.equal(get('actionsMenu').hidden, true);
   assert.equal(dom.activeElement, get('moreActions'));
@@ -854,7 +854,8 @@ test('the run picker renders one-click stop actions and keeps the menu open', ()
       { id: 'run-a', serverId: 'api', server: 'API', command: 'npm run api', status: 'running', startedAt: 100, canStop: true },
       { id: 'run-b', serverId: 'api', server: 'API', command: 'npm run worker', status: 'running', startedAt: 200, canStop: true },
       { id: 'terminal-a', serverId: 'terminal-1', server: 'Terminal', command: 'npm test', status: 'running', startedAt: 300, sourceKind: 'terminal', canStop: false },
-      { id: 'done', serverId: 'api', server: 'API', command: 'npm run done', status: 'exited', startedAt: 400, canStop: true }
+      { id: 'done', serverId: 'api', server: 'API', command: 'npm run done', status: 'exited', startedAt: 400, canStop: true },
+      { id: '5438c7c6b6d137bd', serverId: 'task-build', server: 'build', taskName: 'build', status: 'exited', startedAt: 500, canStop: true }
     ]
   });
 
@@ -862,7 +863,8 @@ test('the run picker renders one-click stop actions and keeps the menu open', ()
   get('runsTab').listeners.get('click')!();
   assert.equal(get('sessionMenu').hidden, false);
   const rows = get('sessionMenu').children;
-  assert.equal(rows.length, 5);
+  assert.equal(rows.length, 6);
+  assert.match(rows[5].children[0].textContent, /^Task: build · /, 'a run without a command is named by its task, not its id');
   assert.equal(rows[1].children[1].textContent, 'Stop');
   assert.equal(rows[2].children[1].textContent, 'Stop');
   assert.equal(rows[3].children[1].textContent, 'Capture only');
@@ -1066,7 +1068,11 @@ test('the main sharing button ignores view filters and stops active sharing', ()
   assert.equal(get('shareAgent').textContent, 'Sharing · Stop');
   assert.equal(get('shareAgent').attributes['aria-pressed'], 'true');
   assert.equal(get('shareScope').hidden, false);
-  assert.match(get('shareScope').textContent, /existing and new runs/);
+  assert.equal(get('shareScope').textContent, 'Sharing all runs');
+  assert.match(get('shareScope').title, /existing and new runs/);
+  receive({ type: 'snapshot', generation: 100, newest: 100, events: [], columns: [], total: 0, retained: 0, discarded: 0, bytes: 0, maxBytes: 10000, truncated: 0, page: 0, pages: 1, matched: 0,
+    agentSharing: { active: true, scope: 'all', revision: 1, sources: [] }, agentClients: ['Claude Code', 'Codex'] });
+  assert.equal(get('shareScope').textContent, 'Sharing all runs · read by Claude Code, Codex');
   get('shareAgent').listeners.get('click')!();
   assert.equal(messages.at(-1)?.type, 'stopSharing');
   receive({ type: 'snapshot', generation: 101, newest: 100, events: [], columns: [], total: 0, retained: 0, discarded: 0, bytes: 0, maxBytes: 10000, truncated: 0, page: 0, pages: 1, matched: 0,
@@ -1098,6 +1104,7 @@ test('rows show their code link and log doctor finding, with actions, and the to
   const row = get('logs').querySelectorAll('.event-row').find(item => String(item.dataset.id) === '43')!;
   const site = row.querySelector('.row-site-button')!;
   const badge = row.querySelector('.row-finding-button')!;
+  assert.equal(row.querySelector('.message-button')!.title, '', 'no tooltip repeats the message; clicking the row shows it');
   assert.match(badge.title, /Log doctor: Logged a bearer token/);
   const click = (target: Element, selector: string) => get('logs').listeners.get('click')!({ target: { closest: (wanted: string) => wanted === selector ? target : undefined } });
   click(site, '.row-icon, .row-action');
@@ -1175,10 +1182,38 @@ test('live rows hold while the pointer is over them and catch up when it leaves'
     columns: [], page: 0, pages: 2, matched: 101
   });
   assert.deepEqual(ids(), [42], 'rows do not move under the pointer');
-  assert.match(get('mode').textContent, /held while the pointer is over them/);
+  assert.match(get('mode').textContent, /held while you point at the table/);
   get('viewport').listeners.get('pointerleave')!();
   assert.deepEqual(ids(), [42, 43]);
   assert.equal(get('mode').textContent, 'Live · newest 1,000');
+});
+
+test('a pointer resting on the table stops holding live rows after two seconds', () => {
+  const { get, receive, runtime, timers } = viewer();
+  let now = 1_000_000;
+  runInContext('Date.now = () => globalThis.fakeNow()', runtime);
+  (runtime as Record<string, unknown>).fakeNow = () => now;
+  const ids = () => get('logs').querySelectorAll('.event-row').map(row => Number(row.dataset.id));
+  const snapshot = (extra: number[]) => receive({
+    type: 'snapshot', generation: 1, newest: 101, status: 'Running', command: 'node server', running: true,
+    total: 101, retained: 101, discarded: 0, bytes: 1000, maxBytes: 10000, truncated: 0,
+    events: [{ id: 42, message: 'timeout', level: 'error', timestamp: '12:00', stream: 'stderr' }, ...extra.map(id => ({ id, message: 'next', level: 'info', timestamp: '12:01', stream: 'stdout' }))],
+    columns: [], page: 0, pages: 2, matched: 101
+  });
+  const runTimers = () => { for (const [id, callback] of [...timers]) { timers.delete(id); callback(); } };
+  get('viewport').listeners.get('pointermove')!();
+  snapshot([43]);
+  assert.deepEqual(ids(), [42], 'held while the pointer moves');
+  now += 1500;
+  get('viewport').listeners.get('pointermove')!();
+  now += 1500;
+  runTimers();
+  assert.deepEqual(ids(), [42], 'still held: the pointer moved 1.5 seconds ago');
+  now += 600;
+  runTimers();
+  assert.deepEqual(ids(), [42, 43], 'released after two seconds without movement');
+  snapshot([43, 44]);
+  assert.deepEqual(ids(), [42, 43, 44], 'a resting pointer no longer holds new rows');
 });
 
 test('an expanded event explains log doctor findings on its statement', () => {

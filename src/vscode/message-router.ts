@@ -32,6 +32,7 @@ interface MessageServices {
   breakOnEvent(id: number): Promise<void>;
   breakOnQuery(query: string, levels: string[]): Promise<void>;
   doctorAction(action: DoctorAction, siteId?: string): Promise<void>;
+  connectAgent(): Promise<void>;
 }
 export async function handleMessage(services: MessageServices, send: (message: HostMessage) => void, value: unknown): Promise<void> {
   const msg = parseViewRequest(value);
@@ -67,6 +68,7 @@ export async function handleMessage(services: MessageServices, send: (message: H
     case 'exportContext': await transfer.exportContext(msg.ids); return;
     case 'shareWithAgent': await services.shareWithAgent(msg.sourceIds, msg.anchor, msg.sessionIds, msg.chooseRuns); return;
     case 'stopSharing': services.stopSharing(); return;
+    case 'connectAgent': await services.connectAgent(); return;
     case 'askCopilot': await services.askCopilot(msg.anchor); return;
     case 'shareEvent': {
       const event = store.find(msg.id);

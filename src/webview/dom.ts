@@ -58,6 +58,7 @@ export function getElements() {
     captureToggle: element<HTMLButtonElement>('captureToggle'),
     shareAgent: element<HTMLButtonElement>('shareAgent'),
     shareSpecificRuns: element<HTMLButtonElement>('shareSpecificRuns'),
+    connectAgent: element<HTMLButtonElement>('connectAgent'),
     shareScope: element<HTMLElement>('shareScope'),
     status: element<HTMLElement>('status'),
     sessions: element<HTMLElement>('sessions'),

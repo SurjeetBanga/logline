@@ -4,7 +4,7 @@ import { Ingestion } from './capture/ingestion';
 import { RuntimeState } from './capture/runtime-state';
 import { SessionRegistry } from './capture/session-registry';
 import { LogStore } from './core/log-store';
-import { TaskLifecycle } from './vscode/tasks/lifecycle';
+import { TaskLifecycle, taskCommand } from './vscode/tasks/lifecycle';
 function setup() {
   const store = new LogStore(100), registry = new SessionRegistry();
   return { store, registry, tasks: new TaskLifecycle(registry, new Ingestion(store, () => { }), new RuntimeState(() => { }), () => false) };
@@ -121,4 +121,14 @@ test('dependencies follow the latest run in the same scope and recognize convert
   tasks.captureTaskEnd(rerun);
   assert.equal(buildRecord.dependencyState, 'ready');
   assert.equal(registry.dependencyState(['Logline: Lint'], 'root-a'), 'ready');
+});
+
+test('observed tasks are named by the command they run', () => {
+  const task = (execution: unknown) => ({ name: 'build', definition: { type: 'shell' }, execution }) as unknown as import('vscode').Task;
+  assert.equal(taskCommand(task({ commandLine: ' npm run build ' })), 'npm run build');
+  assert.equal(taskCommand(task({ command: 'gradlew', args: ['bootRun', { value: '--info' }] })), 'gradlew bootRun --info');
+  assert.equal(taskCommand(task({ command: { value: 'make' }, args: [] })), 'make');
+  assert.equal(taskCommand(task({ process: 'node', args: ['server.js'] })), 'node server.js');
+  assert.equal(taskCommand(task(undefined)), undefined);
+  assert.equal(taskCommand(task({ commandLine: '' })), undefined);
 });

@@ -34,9 +34,11 @@ export interface SnapshotSources {
   /** What each row links to: its log statement and that statement's worst finding. */
   rowLinks?(event: LogEvent): Pick<RowEvent, 'site' | 'finding'>;
   doctor?: { revision: number; total: number; findings?: DoctorFindingView[] };
+  /** MCP clients such as Claude Code that called recently. */
+  agentClients?: string[];
 }
 export function buildSnapshot(msg: Extract<ViewRequest, { type: 'snapshot'; }>,
-  { store, config, registry, state, ingestion, persistence, searches, running, guideStatus, agentAccess, terminalCapture, otlp, spans, rowLinks, doctor }: SnapshotSources): Snapshot {
+  { store, config, registry, state, ingestion, persistence, searches, running, guideStatus, agentAccess, terminalCapture, otlp, spans, rowLinks, doctor, agentClients }: SnapshotSources): Snapshot {
   const options = { query: msg.query, serverId: msg.serverId, sessionId: msg.sessionId, levels: msg.levels,
     page: msg.page, before: msg.before, sort: msg.sort, sortDirection: msg.sortDirection };
   const configured = config.get<string[]>('columns', []);
@@ -79,7 +81,8 @@ export function buildSnapshot(msg: Extract<ViewRequest, { type: 'snapshot'; }>,
     timezone: config.get('timezone', 'local'), guideStatus, agentSharing: agentAccess.status(),
     captureTerminals: config.get('captureTerminals', false), captureStatus: terminalCapture?.status(), otlp: otlp?.status(),
     traceCount: spans?.traceCount ?? 0,
-    ...(doctor ? { doctor } : {})
+    ...(doctor ? { doctor } : {}),
+    ...(agentClients?.length ? { agentClients } : {})
   };
 
 }

@@ -302,9 +302,12 @@ button[aria-pressed="true"] { border-color: var(--vscode-focusBorder, #007acc); 
 .live-mode { color: var(--vscode-testing-iconPassed, #89d185); font-weight: 600; }
 button:disabled { opacity: .45; cursor: default; }
 :focus-visible { outline: 2px solid var(--vscode-focusBorder, #007acc); outline-offset: 1px; }
-.session { display: flex; gap: 16px; padding-top: 6px; color: var(--vscode-descriptionForeground, #aaa); }
-#sessions { white-space: nowrap; }
-#command { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.session { display: flex; align-items: center; gap: 14px; min-width: 0; padding-top: 6px; color: var(--vscode-descriptionForeground, #aaa); white-space: nowrap; }
+.session > * { flex: none; }
+#shareScope { color: var(--vscode-textLink-foreground, #3794ff); }
+/* The running command is context, not content: one muted line, cut to fit, with the full command in its tooltip. */
+.session > #command { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; padding: 0; background: transparent; color: inherit; font-size: 12px; }
+#command::before { content: '$ '; opacity: .7; }
 /* VS Code styles every code element with a background; without a command it is an empty box. */
 #command:empty { display: none; }
 /* The virtualized table fully replaces its visible rows on every update,
@@ -376,17 +379,20 @@ footer { padding: 8px 14px; font-size: 12px; flex: none; }
 .traces-filter { display: inline-flex; align-items: center; gap: 4px; margin-right: 10px; color: var(--vscode-descriptionForeground, #aaa); font-size: 12px; }
 .traces-filter input[type="checkbox"] { margin: 0; width: auto; height: auto; padding: 0; border: none; background: none; }
 .traces-table th:nth-child(1) { width: 104px; }
-.traces-table th:nth-child(2) { width: 30%; }
-.traces-table th:nth-child(3) { width: auto; }
-.traces-table th:nth-child(4) { width: 22%; text-align: left; }
-.traces-table th:nth-child(5) { width: 130px; }
+/* The operation takes the room that is left; the other columns have fixed widths. */
+.traces-table th:nth-child(2) { width: auto; }
+.traces-table th:nth-child(3) { width: 180px; }
+.traces-table th:nth-child(4) { width: 200px; text-align: left; }
+.traces-table th:nth-child(5) { width: 140px; }
+.traces-table td { border-bottom: 1px solid var(--vscode-panel-border, rgba(128, 128, 128, .2)); }
 .traces-row { cursor: pointer; }
 .traces-row:hover, .traces-row:focus-visible { background: var(--vscode-list-hoverBackground, rgba(90, 93, 94, .31)); outline: none; }
 .traces-row:focus-visible { box-shadow: inset 0 0 0 1px var(--vscode-focusBorder, #007fd4); }
-.traces-services { overflow: hidden; white-space: nowrap; }
+.traces-services { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.traces-services .service-chip { max-width: 100%; overflow: hidden; text-overflow: ellipsis; vertical-align: middle; }
 .service-chip { display: inline-block; margin-right: 4px; padding: 0 6px; border-radius: 9px; background: var(--vscode-editorWidget-background, rgba(128, 128, 128, .18)); font-size: 11px; line-height: 17px; }
-.traces-duration { display: flex; align-items: center; gap: 8px; }
-.traces-duration .trace-track { flex: 1; }
+.traces-duration-content { display: flex; align-items: center; gap: 8px; }
+.traces-duration-content .trace-track { flex: 1; min-width: 40px; }
 .traces-duration-label, .traces-counts { color: var(--vscode-descriptionForeground, #aaa); font-variant-numeric: tabular-nums; white-space: nowrap; font-size: 12px; }
 @media (max-width: 640px) {
   .traces-table th:nth-child(3), .traces-services, .traces-table th:nth-child(5), .traces-counts { width: 0; padding: 0; overflow: hidden; font-size: 0; }
@@ -436,7 +442,7 @@ footer { padding: 8px 14px; font-size: 12px; flex: none; }
 #follow[data-mode="live"] .tb-icon { color: var(--vscode-testing-iconPassed, #73c991); }
 #shareAgent[aria-pressed="true"] .tb-icon { color: var(--vscode-textLink-foreground, #3794ff); }
 /* Quick tooltips, styled like editor hovers. */
-.tooltip { position: fixed; z-index: 1000; max-width: 320px; padding: 4px 8px; border: 1px solid var(--vscode-editorHoverWidget-border, #454545); border-radius: 3px; background: var(--vscode-editorHoverWidget-background, #252526); color: var(--vscode-editorHoverWidget-foreground, #ccc); box-shadow: 0 2px 8px var(--vscode-widget-shadow, rgba(0, 0, 0, .36)); font-family: var(--vscode-font-family, system-ui, sans-serif); font-size: 12px; line-height: 1.4; white-space: normal; pointer-events: none; }
+.tooltip { position: fixed; z-index: 1000; max-width: 320px; padding: 4px 8px; border: 1px solid var(--vscode-editorHoverWidget-border, #454545); border-radius: 3px; background: var(--vscode-editorHoverWidget-background, #252526); color: var(--vscode-editorHoverWidget-foreground, #ccc); box-shadow: 0 2px 8px var(--vscode-widget-shadow, rgba(0, 0, 0, .36)); font-family: var(--vscode-font-family, system-ui, sans-serif); font-size: 12px; line-height: 1.4; white-space: pre-line; overflow-wrap: anywhere; pointer-events: none; }
 /* On narrower panels, the least-used toolbar buttons show only their icon; their tooltips name them. */
 @media (max-width: 1100px) {
   #clear .button-label, #stop .button-label, #copyResults .button-label, #searchTools .button-label, #fieldsButton .button-label { display: none; }
