@@ -173,7 +173,7 @@ test('trace summaries list span traces and log-only traces, newest first', () =>
   const request = 'b'.repeat(32);
   const named = summarizeTraces([], [
     logged(4, request, 'Loading cart', 6000),
-    logged(5, request, 'requestUrl=/shop/orders/checkout?step=2 method=POST user=me took 40ms', 6100),
+    logged(5, request, 'path=/shop/orders/checkout?step=2 method=POST user=me took 40ms', 6100),
     logged(6, request, 'GET /later', 6200)
   ]);
   assert.equal(named[0].name, 'POST /shop/orders/checkout');
