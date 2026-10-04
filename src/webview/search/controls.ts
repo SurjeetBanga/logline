@@ -4,7 +4,7 @@ import { queryError } from '../../core/query-validation';
 import { queryTokens } from '../../core/query-tokens';
 import type { SavedSearch } from '../../storage/saved-searches';
 import type { Elements } from '../dom';
-import { emptyMessage } from '../dom';
+import { emptyMessage, setLabel } from '../dom';
 import { EventScope } from '../event-scope';
 import type { Popover } from '../popovers';
 import type { ViewerState } from '../state';
@@ -111,7 +111,14 @@ export function createSearch(elements: Elements, state: ViewerState, api: Webvie
       const remove = document.createElement('button');
       remove.type = 'button';
       remove.className = 'filter-chip-remove';
-      remove.textContent = '×';
+      // A drawn cross centres exactly; the × glyph sits on the text baseline and looks off-centre.
+      const cross = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+      for (const [key, value] of Object.entries({ viewBox: '0 0 16 16', width: '10', height: '10', 'aria-hidden': 'true', fill: 'none', stroke: 'currentColor', 'stroke-width': '1.6', 'stroke-linecap': 'round' }))
+        cross.setAttribute(key, value);
+      const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+      path.setAttribute('d', 'M4 4l8 8M12 4l-8 8');
+      cross.append(path);
+      remove.append(cross);
       remove.title = `Remove filter: ${value}`;
       remove.setAttribute('aria-label', `Remove filter: ${value}`);
       scope.listen(remove, 'click', event => { event.stopPropagation(); removeAt(index); });
@@ -193,13 +200,13 @@ export function createSearch(elements: Elements, state: ViewerState, api: Webvie
 
   function updateLevelButtonLabel() {
     if (state.checkedLevels.size === LEVELS.length)
-      elements.levelButton.textContent = 'All levels';
+      setLabel(elements.levelButton, 'All levels');
     else if (state.checkedLevels.size === 0)
-      elements.levelButton.textContent = 'No levels';
+      setLabel(elements.levelButton, 'No levels');
     else if (state.checkedLevels.size === 1)
-      elements.levelButton.textContent = `${LEVEL_LABELS[[...state.checkedLevels][0]]} only`;
+      setLabel(elements.levelButton, `${LEVEL_LABELS[[...state.checkedLevels][0]]} only`);
     else
-      elements.levelButton.textContent = `${state.checkedLevels.size} levels`;
+      setLabel(elements.levelButton, `${state.checkedLevels.size} levels`);
   }
 
   function setAllLevels(value: boolean) {

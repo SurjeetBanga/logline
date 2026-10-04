@@ -7,7 +7,7 @@ import { openSourceLocation } from './source-navigation';
 export type LensMode = 'off' | 'codelens' | 'codelens+gutter';
 
 export interface LensSources {
-  store: Pick<LogStore, 'eventsAfter' | 'discarded'>;
+  store: Pick<LogStore, 'eventsAfter'>;
   config: Settings;
   index: LogSiteIndex;
   tracker: LogSiteTracker;
@@ -21,10 +21,8 @@ const GLOB = `**/*.{${LOG_SITE_EXTENSIONS.join(',')}}`;
 const EXCLUDE = '**/{node_modules,.git,out,dist,build,target,vendor,.venv,venv,__pycache__,coverage,.next,bin,obj}/**';
 const MAX_FILE_BYTES = 512 * 1024;
 // Indexing a workspace changes the index many times a second; recounting
-// waits for it to settle. Evictions only lower counts, so they are folded in
-// at most this often.
+// waits for it to settle.
 const INDEX_SETTLE_MS = 1000;
-const EVICTION_RECOUNT_MS = 10000;
 
 export function lensMode(config: Settings): LensMode {
   const value = config.get<string>('logLenses', 'codelens');
@@ -64,9 +62,7 @@ export class LogLens implements vscode.CodeLensProvider, vscode.HoverProvider, v
   private refreshTimer?: ReturnType<typeof setTimeout>;
   private clockTimer?: ReturnType<typeof setInterval>;
   private generation?: number;
-  private discarded = 0;
   private indexedAt = 0;
-  private recountedAt = 0;
   private scan = 0;
   private disposed = false;
   // Basenames already looked up on demand, so each is searched for once.
@@ -95,9 +91,9 @@ export class LogLens implements vscode.CodeLensProvider, vscode.HoverProvider, v
   }
 
   /**
-   * Bring counts up to date. New events are counted incrementally; clearing
-   * logs, re-indexing source, or evicting old events recounts the retained
-   * events, so counts match what the Logs panel can show.
+   * Bring counts up to date. New events are counted and evicted events
+   * subtracted incrementally; clearing logs or re-indexing source recounts the
+   * retained events, so counts match what the Logs panel can show.
    */
   refresh(now = Date.now()): void {
     if (!this.enabled) return;
@@ -106,19 +102,16 @@ export class LogLens implements vscode.CodeLensProvider, vscode.HoverProvider, v
     const cleared = generation !== this.generation;
     const reindexed = tracker.indexVersion !== index.version;
     if (reindexed && !cleared && now - this.indexedAt < INDEX_SETTLE_MS) { this.schedule(INDEX_SETTLE_MS); return; }
-    const evicted = store.discarded !== this.discarded;
-    const recount = cleared || reindexed || (evicted && now - this.recountedAt >= EVICTION_RECOUNT_MS);
     let changed: boolean;
-    if (recount) {
+    if (cleared || reindexed) {
       const hadStats = tracker.stats.size > 0;
       this.generation = generation;
-      this.discarded = store.discarded;
-      this.recountedAt = now;
       tracker.reset();
       changed = tracker.process(store.eventsAfter(0)) || hadStats;
     } else {
       changed = tracker.process(store.eventsAfter(tracker.watermark));
-      if (evicted) this.schedule(EVICTION_RECOUNT_MS - (now - this.recountedAt));
+      // Evicted events are always the oldest, so subtract what they counted.
+      changed = tracker.evict(store.eventsAfter(0).next().value?.id ?? Infinity) || changed;
     }
     if (changed) { this.changeEmitter.fire(); this.decorate(); }
     const unresolved = index.takeUnresolved();

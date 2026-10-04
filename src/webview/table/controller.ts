@@ -12,7 +12,16 @@ export function createTable(elements: Elements, scrollViewport: HTMLElement, sta
   const { request, saveState, updateFollowControl, updateModeLabel } = actions;
   function totalColumnCount() { return displayedColumns.length; }
 
-  const { buildRow, buildDetailRow } = createRows(state, () => displayedColumns, formatTimestamp);
+  const { buildRow, buildDetailRow, fillQuickActions } = createRows(state, () => displayedColumns, formatTimestamp);
+  // Quick actions are built for the row under the pointer only. Remember
+  // which one, so a re-render under a still pointer rebuilds them.
+  let hoveredId: string | undefined;
+  scope.listen(elements.logs, 'pointerover', event => {
+    const row = (event.target as HTMLElement).closest?.<HTMLElement>('tr.event-row');
+    hoveredId = row?.dataset.id;
+    if (row) fillQuickActions(row);
+  });
+  scope.listen(elements.logs, 'pointerleave', () => { hoveredId = undefined; });
 
   // Only the rows scrolled into view are ever built, bracketed by two
   // height-only spacer rows that stand in for the rest of the page. That keeps
@@ -122,6 +131,10 @@ export function createTable(elements: Elements, scrollViewport: HTMLElement, sta
     // (besides dropping keyboard focus) makes Chrome yank the scroll position
     // once focus falls back to <body>. Re-focus the same row's new button.
     elements.logs.replaceChildren(topSpacer!, fragment, bottomSpacer!);
+    if (hoveredId !== undefined) {
+      const hovered = [...elements.logs.querySelectorAll<HTMLElement>('.event-row')].find(row => row.dataset.id === hoveredId);
+      if (hovered) fillQuickActions(hovered);
+    }
     onRowsChanged();
     for (const { element, top, left } of detailScrollers) {
       element.scrollTop = top;
@@ -467,7 +480,7 @@ export function createTable(elements: Elements, scrollViewport: HTMLElement, sta
   function receiveDetails(data: Extract<HostMessage, { type: 'details'; }>) {
     if (data.id !== state.selected) return;
     state.selectedDetailText = data.text; state.selectedExceptions = data.exceptions;
-    state.selectedLinks = { site: data.site, traceId: data.traceId };
+    state.selectedLinks = { site: data.site, traceId: data.traceId, findings: data.findings };
     resetDetails(); renderWindow();
   }
 

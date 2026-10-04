@@ -10,7 +10,7 @@ import type { ReceiverStatus } from '../capture/otlp-receiver';
 
 export interface Filter { query?: string; serverId?: string; sessionId?: string; levels?: string[]; }
 export type ViewRequest =
-  | ({ type: 'snapshot'; columns?: string[]; statsOnly?: boolean; requestId?: number; } & PageOptions)
+  | ({ type: 'snapshot'; columns?: string[]; statsOnly?: boolean; requestId?: number; doctorRevision?: number; } & PageOptions)
   | ({ type: 'analysis'; sessionId?: string; from?: number; to?: number; } & Filter)
   | ({ type: 'export' | 'exportForAI'; } & Filter)
   | ({ type: 'copyFiltered'; } & Filter)
@@ -21,6 +21,7 @@ export type ViewRequest =
   | { type: 'details' | 'copy'; id: number; target?: 'main' | 'context'; }
   | { type: 'openSource'; id: number; block: number; line: number; }
   | { type: 'openLogSite' | 'breakOnEvent'; id: number; }
+  | { type: 'doctorAction'; action: DoctorAction; siteId?: string; }
   | ({ type: 'breakOnQuery'; } & Filter)
   | { type: 'trace'; traceId: string; }
   | { type: 'traces'; }
@@ -54,14 +55,30 @@ export interface Snapshot extends Stats {
   otlp?: ReceiverStatus;
   /** Traces with spans currently retained. */
   traceCount?: number;
+  /**
+   * Log doctor findings, worst first, while log doctor is on. `findings` is
+   * left out when the view already has this revision.
+   */
+  doctor?: { revision: number; total: number; findings?: DoctorFindingView[]; };
 }
-/** A table row: the event with its displayed fields, plus its trace id for the row's trace button. */
-export type RowEvent = LogEvent & { traceId?: string };
+/**
+ * A table row: the event with its displayed fields, plus what the row links
+ * to: its trace, whether its log statement is known, and that statement's
+ * worst log doctor finding.
+ */
+export type RowEvent = LogEvent & { traceId?: string; site?: boolean; finding?: { severity: FindingSeverity; message: string; }; };
+export type FindingSeverity = 'warning' | 'information' | 'hint';
+/** A log doctor finding as the Logs panel shows it. */
+export interface DoctorFindingView { siteId: string; code: string; severity: FindingSeverity; message: string; file: string; line: number; }
+/** What the Logs panel can do with a finding; `report` opens the health report. */
+export type DoctorAction = 'open' | 'showEvents' | 'fix' | 'report';
 /** Links offered with an expanded event, resolved by the host. */
 export interface DetailLinks {
   /** The log statement that produced the event, as `path:line`. */
   site?: string;
   traceId?: string;
+  /** Log doctor findings on that statement. */
+  findings?: DoctorFindingView[];
 }
 export interface GuideStatus { version: string; unread: boolean; }
 export type HostMessage = Snapshot
@@ -91,7 +108,7 @@ export function parseViewRequest(value: unknown): ViewRequest | undefined {
     case 'snapshot': return {
       type: msg.type, ...filter, page: index('page'), before: number('before'),
       sort: string('sort'), sortDirection: msg.sortDirection === 'desc' ? 'desc' : 'asc', columns: strings('columns'), statsOnly: msg.statsOnly === true,
-      requestId: index('requestId')
+      requestId: index('requestId'), doctorRevision: index('doctorRevision')
     };
     case 'analysis': return { type: msg.type, ...filter, from: number('from'), to: number('to') };
     case 'export': case 'exportForAI': case 'copyFiltered': return { type: msg.type, ...filter };
@@ -108,6 +125,11 @@ export function parseViewRequest(value: unknown): ViewRequest | undefined {
       return { type: msg.type, id, block, line };
     }
     case 'openLogSite': case 'breakOnEvent': { const id = index('id'); return id === undefined ? undefined : { type: msg.type, id }; }
+    case 'doctorAction': {
+      const action = ['open', 'showEvents', 'fix', 'report'].includes(msg.action as string) ? msg.action as DoctorAction : undefined;
+      const siteId = string('siteId')?.slice(0, 4096);
+      return action && (action === 'report' || siteId) ? { type: msg.type, action, ...(siteId ? { siteId } : {}) } : undefined;
+    }
     case 'breakOnQuery': return { type: msg.type, query: filter.query, levels: filter.levels };
     case 'traces': return { type: msg.type };
     case 'trace': {

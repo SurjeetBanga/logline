@@ -327,7 +327,7 @@ export class AgentLogAccess {
   }
 
   private assertShare(id?: string): void {
-    if (!this.shareId) throw new AgentAccessError('NOT_SHARED', 'No Logline logs are shared with Copilot. Use Share logs with agent in the Logs toolbar first.');
+    if (!this.shareId) throw new AgentAccessError('NOT_SHARED', 'No Logline logs are shared with Copilot. Use Share with agent in the Logs toolbar first.');
     if (id !== undefined && id !== this.shareId) throw new AgentAccessError('SHARE_CHANGED', 'The Logline sharing grant has changed.');
     this.refreshAllRuns();
   }

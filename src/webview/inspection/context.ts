@@ -55,6 +55,8 @@ export function createInspection(elements: Elements, scrollViewport: HTMLElement
   scope.listen(elements.contextDetails, 'click', handleDetailAction);
 
   function handleDetailAction(event: Event) {
+    // Unavailable actions stay focusable so their reason can be read; clicking does nothing.
+    if ((event.target as HTMLElement).closest<HTMLElement>('.event-action')?.dataset.unavailable) return true;
     const source = (event.target as HTMLElement).closest<HTMLElement>('.source-link');
     if (source) {
       api.postMessage({ type: 'openSource', id: Number(source.dataset.id), block: Number(source.dataset.block), line: Number(source.dataset.line) });

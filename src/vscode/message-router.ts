@@ -5,7 +5,7 @@ import { formatDetails } from '../core/format-details';
 import type { LogStore } from '../core/log-store';
 import { resolveRunTarget } from '../core/server-config';
 import type { Settings } from '../core/settings';
-import { parseViewRequest, type DetailLinks, type HostMessage, type Snapshot, type ViewRequest } from '../protocol/messages';
+import { parseViewRequest, type DetailLinks, type DoctorAction, type HostMessage, type Snapshot, type ViewRequest } from '../protocol/messages';
 import type { LogEvent } from '../core/types';
 import type { TraceSummary, TraceView } from '../core/traces';
 import type { SavedSearches } from '../storage/saved-searches';
@@ -31,6 +31,7 @@ interface MessageServices {
   toggleOtlp(enabled: boolean): Promise<void>;
   breakOnEvent(id: number): Promise<void>;
   breakOnQuery(query: string, levels: string[]): Promise<void>;
+  doctorAction(action: DoctorAction, siteId?: string): Promise<void>;
 }
 export async function handleMessage(services: MessageServices, send: (message: HostMessage) => void, value: unknown): Promise<void> {
   const msg = parseViewRequest(value);
@@ -50,6 +51,7 @@ export async function handleMessage(services: MessageServices, send: (message: H
     case 'traces': send({ type: 'traces', traces: services.traceList() }); return;
     case 'toggleOtlp': await services.toggleOtlp(msg.enabled); return;
     case 'breakOnEvent': await services.breakOnEvent(msg.id); return;
+    case 'doctorAction': await services.doctorAction(msg.action, msg.siteId); return;
     case 'breakOnQuery': await services.breakOnQuery(msg.query ?? '', msg.levels ?? []); return;
     case 'saveSearch': {
       const saved = searches.saveSearch(msg.name, msg.query ?? '', msg.levels, msg.serverId);

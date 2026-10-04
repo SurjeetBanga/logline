@@ -94,10 +94,23 @@ export function getElements() {
     saveSearchDialog: element<HTMLDialogElement>('saveSearchDialog'),
     saveSearchForm: element<HTMLFormElement>('saveSearchForm'),
     saveSearchName: element<HTMLInputElement>('saveSearchName'),
-    saveSearchCancel: element<HTMLButtonElement>('saveSearchCancel')
+    saveSearchCancel: element<HTMLButtonElement>('saveSearchCancel'),
+    doctor: element<HTMLButtonElement>('doctor'),
+    doctorCount: element<HTMLElement>('doctorCount'),
+    doctorPanel: element<HTMLElement>('doctorPanel'),
+    doctorList: element<HTMLElement>('doctorList'),
+    rowHint: element<HTMLElement>('rowHint'),
+    rowHintDismiss: element<HTMLButtonElement>('rowHintDismiss')
   };
 }
 export type Elements = ReturnType<typeof getElements>;
+
+/** Change a toolbar button's text while keeping its icon. */
+export function setLabel(button: HTMLElement, text: string) {
+  const label = button.querySelector?.<HTMLElement>('.button-label');
+  if (label) label.textContent = text;
+  else button.textContent = text;
+}
 export function cell(text: string | number | boolean | undefined, className?: string) {
   const element = document.createElement('td');
   element.textContent = String(text ?? '');

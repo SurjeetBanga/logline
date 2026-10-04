@@ -19,6 +19,7 @@ class Element {
   attributes: Record<string, string> = {};
   className = '';
   textContent = '';
+  title = '';
   value = '';
   open = false;
   checked = false;
@@ -72,6 +73,12 @@ class Element {
   }
   getBoundingClientRect() { return { height: this.height, width: this.width, top: 0, left: 0, bottom: this.height, right: this.width }; }
   remove() { }
+  cloneNode(): Element {
+    const copy = new Element();
+    Object.assign(copy, { className: this.className, textContent: this.textContent, attributes: { ...this.attributes }, dataset: { ...this.dataset } });
+    copy.append(...this.children.map(child => child.cloneNode()));
+    return copy;
+  }
   focus(options?: { preventScroll?: boolean; }) { this.focusCalls.push(options); this.onFocus?.(options); }
   scrollIntoView(options?: unknown) { this.scrollIntoViewCalls.push(options); }
   showModal() { this.open = true; }
@@ -1056,7 +1063,7 @@ test('the main sharing button ignores view filters and stops active sharing', ()
   assert.deepEqual(JSON.parse(JSON.stringify(messages.at(-1))), { type: 'shareWithAgent' });
   receive({ type: 'snapshot', generation: 100, newest: 100, events: [], columns: [], total: 0, retained: 0, discarded: 0, bytes: 0, maxBytes: 10000, truncated: 0, page: 0, pages: 1, matched: 0,
     agentSharing: { active: true, scope: 'all', revision: 1, sources: [] } });
-  assert.equal(get('shareAgent').textContent, 'Sharing logs · Stop');
+  assert.equal(get('shareAgent').textContent, 'Sharing · Stop');
   assert.equal(get('shareAgent').attributes['aria-pressed'], 'true');
   assert.equal(get('shareScope').hidden, false);
   assert.match(get('shareScope').textContent, /existing and new runs/);
@@ -1064,7 +1071,7 @@ test('the main sharing button ignores view filters and stops active sharing', ()
   assert.equal(messages.at(-1)?.type, 'stopSharing');
   receive({ type: 'snapshot', generation: 101, newest: 100, events: [], columns: [], total: 0, retained: 0, discarded: 0, bytes: 0, maxBytes: 10000, truncated: 0, page: 0, pages: 1, matched: 0,
     agentSharing: { active: false, revision: 2, sources: [] } });
-  assert.equal(get('shareAgent').textContent, 'Share logs with agent');
+  assert.equal(get('shareAgent').textContent, 'Share with agent');
   assert.equal(get('shareScope').hidden, true);
 });
 
@@ -1077,12 +1084,120 @@ test('specific run sharing remains available through More actions', () => {
   assert.equal(get('actionsMenu').hidden, true);
 });
 
+test('rows show their code link and log doctor finding, with actions, and the toolbar lists findings', () => {
+  const { get, receive, messages, app } = viewer();
+  const finding = { siteId: 'src/pay.ts\u00004', code: 'secret', severity: 'warning', message: 'Logged a bearer token.', file: 'src/pay.ts', line: 4 };
+  assert.equal(get('doctor').hidden, true, 'no chip while log doctor is off');
+  assert.equal(get('rowHint').hidden, false, 'first-run tip explains opening events');
+  receive({
+    type: 'snapshot', generation: 1, newest: 101, status: 'Running', command: 'node server', running: true,
+    total: 101, retained: 101, discarded: 0, bytes: 1000, maxBytes: 10000, truncated: 0,
+    events: [{ id: 43, message: 'charged card', level: 'info', timestamp: '12:01', stream: 'stdout', site: true, finding: { severity: 'warning', message: finding.message } }],
+    columns: [], page: 0, pages: 1, matched: 1, doctor: { revision: 3, findings: [finding], total: 1 }
+  });
+  const row = get('logs').querySelectorAll('.event-row').find(item => String(item.dataset.id) === '43')!;
+  const site = row.querySelector('.row-site-button')!;
+  const badge = row.querySelector('.row-finding-button')!;
+  assert.match(badge.title, /Log doctor: Logged a bearer token/);
+  const click = (target: Element, selector: string) => get('logs').listeners.get('click')!({ target: { closest: (wanted: string) => wanted === selector ? target : undefined } });
+  click(site, '.row-icon, .row-action');
+  assert.deepEqual(JSON.parse(JSON.stringify(messages.at(-1))), { type: 'openLogSite', id: 43 });
+  const slot = row.querySelector('.row-quick')!;
+  assert.equal(slot.children.length, 0, 'quick actions are not built until the row is hovered');
+  get('logs').listeners.get('pointerover')!({ target: { closest: () => row } });
+  assert.deepEqual(slot.children.map(button => button.className.split(' ').at(-1)), ['row-context-button', 'row-break-button']);
+  get('logs').listeners.get('pointerover')!({ target: { closest: () => row } });
+  assert.equal(slot.children.length, 2, 'hovering again does not add more');
+  click(slot.children[1], '.row-icon, .row-action');
+  assert.deepEqual(JSON.parse(JSON.stringify(messages.at(-1))), { type: 'breakOnEvent', id: 43 });
+  app.table.resetDetails();
+  app.table.renderWindow();
+  const rebuilt = get('logs').querySelectorAll('.event-row').find(item => String(item.dataset.id) === '43')!;
+  assert.notEqual(rebuilt, row);
+  assert.equal(rebuilt.querySelector('.row-quick')!.children.length, 2, 'a re-render under a still pointer keeps the hovered row\'s actions');
+  click(badge, '.row-icon, .row-action');
+  assert.deepEqual(JSON.parse(JSON.stringify(messages.at(-1))), { type: 'details', id: 43 }, 'the badge opens the event, where the finding is explained');
+  assert.equal(get('rowHint').hidden, false, 'the tip stays until it is dismissed');
+  receive({ type: 'details', id: 43, text: 'raw', target: 'main', exceptions: [], site: 'src/pay.ts:4', findings: [finding] });
+  assert.match(get('logs').querySelector('.event-finding')!.className, /severity-warning/, 'the expanded event explains the finding');
+
+  assert.equal(get('doctor').hidden, false);
+  assert.equal(get('doctorCount').textContent, '1');
+  assert.match(get('doctor').className, /has-warnings/);
+  const item = get('doctorList').querySelectorAll('.doctor-item')[0];
+  assert.equal(item.querySelector('.doctor-location')!.textContent, 'pay.ts:4');
+  const fix = item.querySelectorAll('.doctor-action').find(button => button.textContent === 'Fix…')!;
+  app.bridge.pending = false;
+  app.bridge.request(true);
+  assert.equal(messages.at(-1)!.doctorRevision, 3, 'the host can skip a list the view already has');
+  receive({
+    type: 'snapshot', generation: 1, newest: 102, status: 'Running', command: 'node server', running: true,
+    total: 102, retained: 102, discarded: 0, bytes: 1000, maxBytes: 10000, truncated: 0, events: [], columns: [], page: 0, pages: 1, matched: 0,
+    doctor: { revision: 3, total: 1 }
+  });
+  assert.equal(get('doctorList').querySelectorAll('.doctor-item').length, 1, 'a snapshot without the list keeps the one shown');
+  receive({
+    type: 'snapshot', generation: 1, newest: 103, status: 'Running', command: 'node server', running: true,
+    total: 103, retained: 103, discarded: 0, bytes: 1000, maxBytes: 10000, truncated: 0, events: [], columns: [], page: 0, pages: 1, matched: 0,
+    doctor: { revision: 4, total: 0, findings: [] }
+  });
+  assert.equal(get('doctor').hidden, false, 'with nothing found the chip stays visible');
+  assert.match(get('doctor').className, /is-clear/);
+  assert.equal(get('doctorCount').hidden, true);
+  assert.match(get('doctorList').querySelector('.popover-empty')!.textContent, /No problems found so far/);
+  get('doctorPanel').listeners.get('click')!({ target: { closest: (wanted: string) => wanted === '[data-doctor-action]' ? fix : undefined } });
+  assert.deepEqual(JSON.parse(JSON.stringify(messages.at(-1))), { type: 'doctorAction', action: 'fix', siteId: finding.siteId });
+});
+
+test('Got it hides the first-run tip for good', () => {
+  const { get, receive, savedStates } = viewer();
+  assert.equal(get('rowHint').hidden, false);
+  get('rowHintDismiss').listeners.get('click')!();
+  assert.equal(get('rowHint').hidden, true);
+  assert.equal(savedStates.at(-1)!.rowHintDismissed, true);
+  receive({
+    type: 'snapshot', generation: 1, newest: 101, status: 'Running', command: 'node server', running: true,
+    total: 101, retained: 101, discarded: 0, bytes: 1000, maxBytes: 10000, truncated: 0,
+    events: [{ id: 44, message: 'later', level: 'info', timestamp: '12:02', stream: 'stdout' }], columns: [], page: 0, pages: 1, matched: 1
+  });
+  assert.equal(get('rowHint').hidden, true, 'later snapshots keep it hidden');
+});
+
+test('live rows hold while the pointer is over them and catch up when it leaves', () => {
+  const { get, receive } = viewer();
+  const ids = () => get('logs').querySelectorAll('.event-row').map(row => Number(row.dataset.id));
+  assert.deepEqual(ids(), [42]);
+  get('viewport').listeners.get('pointerenter')!();
+  receive({
+    type: 'snapshot', generation: 1, newest: 101, status: 'Running', command: 'node server', running: true,
+    total: 101, retained: 101, discarded: 0, bytes: 1000, maxBytes: 10000, truncated: 0,
+    events: [{ id: 42, message: 'timeout', level: 'error', timestamp: '12:00', stream: 'stderr' }, { id: 43, message: 'next', level: 'info', timestamp: '12:01', stream: 'stdout' }],
+    columns: [], page: 0, pages: 2, matched: 101
+  });
+  assert.deepEqual(ids(), [42], 'rows do not move under the pointer');
+  assert.match(get('mode').textContent, /held while the pointer is over them/);
+  get('viewport').listeners.get('pointerleave')!();
+  assert.deepEqual(ids(), [42, 43]);
+  assert.equal(get('mode').textContent, 'Live · newest 1,000');
+});
+
+test('an expanded event explains log doctor findings on its statement', () => {
+  const { renderDetails } = viewer();
+  const details = renderDetails(42, 'raw', [], { site: 'src/pay.ts:4', findings: [{ siteId: 's', code: 'secret', severity: 'warning', message: 'Logged a bearer token.', file: 'src/pay.ts', line: 4 }] });
+  const banner = details.querySelector('.event-finding')!;
+  assert.match(banner.className, /severity-warning/);
+  assert.deepEqual(banner.querySelectorAll('.doctor-action').map(button => [button.textContent, button.dataset.doctorAction, button.dataset.siteId]),
+    [['Fix…', 'fix', 's'], ['Show events', 'showEvents', 's']]);
+  assert.equal(renderDetails(42, 'raw', []).querySelector('.event-finding'), undefined);
+});
+
 test('event details link to the log statement and the trace', () => {
   const { get, renderDetails, messages } = viewer();
   const details = renderDetails(42, 'raw', [], { site: 'src/auth.ts:18', traceId: 'abc123' });
   const site = details.querySelector('.log-site-button')!;
   const trace = details.querySelector('.trace-button')!;
-  assert.equal(site.textContent, 'Open log statement · src/auth.ts:18');
+  assert.equal(site.querySelector('.event-action-label')!.textContent, 'Open code · auth.ts:18');
+  assert.match(site.title, /src\/auth\.ts:18/);
   assert.equal(trace.dataset.traceId, 'abc123');
   const click = (target: Element, selector: string) => get('contextDetails').listeners.get('click')!({ target: { closest: (wanted: string) => wanted === selector ? target : undefined } });
   click(site, '.log-site-button');
@@ -1090,7 +1205,17 @@ test('event details link to the log statement and the trace', () => {
   click(trace, '.trace-button');
   assert.equal(get('traceDialog').open, true);
   assert.deepEqual(JSON.parse(JSON.stringify(messages.at(-1))), { type: 'trace', traceId: 'abc123' });
-  assert.equal(renderDetails(42, 'raw', []).querySelector('.trace-button'), undefined);
+  // Actions that do not apply stay visible, explain why, and do nothing when clicked.
+  const plain = renderDetails(43, 'raw', []);
+  const unavailable = plain.querySelector('.trace-button')!;
+  assert.match(String(unavailable.dataset.unavailable), /No trace id/);
+  assert.equal(unavailable.attributes['aria-disabled'], 'true');
+  assert.match(String(plain.querySelector('.log-site-button')!.dataset.unavailable), /No code location/);
+  const sent = messages.length;
+  get('contextDetails').listeners.get('click')!({ target: { closest: (wanted: string) => wanted === '.event-action' ? plain.querySelector('.log-site-button') : undefined } });
+  assert.equal(messages.length, sent);
+  assert.equal(get('traceDialog').open, true, 'unchanged');
+  assert.match(String(renderDetails(44, undefined, []).querySelector('.trace-button')!.dataset.unavailable), /Checking/, 'unknown while details load');
 });
 
 test('the trace dialog renders a waterfall with logs and opens their context', () => {
@@ -1158,7 +1283,14 @@ test('the Traces list shows recent requests and opens a waterfall that can retur
   app.traceView.show('abc');
   assert.equal(get('traceBack').hidden, true, 'a trace opened from a row has no list to return to');
   receive({ type: 'traces', traces: [] });
-  assert.match(get('tracesStatus').textContent, /No traces yet/);
+  assert.match(get('tracesStatus').textContent, /No traces yet. Start the OpenTelemetry receiver/);
+  assert.equal(get('tracesStartReceiver').hidden, false);
+  receive({
+    type: 'snapshot', generation: 1, newest: 100, status: 'Running', command: '', running: false, total: 0, retained: 0, discarded: 0, bytes: 0,
+    maxBytes: 1, truncated: 0, events: [], columns: [], page: 0, pages: 1, matched: 0, otlp: { running: true, endpoint: 'http://127.0.0.1:4318' }
+  });
+  assert.equal(get('tracesStartReceiver').hidden, true, 'a running receiver is not offered again');
+  assert.match(get('tracesStatus').textContent, /listening on http:\/\/127\.0\.0\.1:4318/);
 });
 
 test('snapshots apply editor requests once and reflect the OpenTelemetry receiver', () => {

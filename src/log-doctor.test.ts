@@ -72,17 +72,19 @@ test('log doctor reports runtime evidence on statements and offers fixes', async
   ].join('\n');
   const uri = { path: '/w/src/checkout.ts', toString: () => 'file:///w/src/checkout.ts' };
   const collections = new Map<string, Diagnostic[]>();
+  let sets = 0;
   const mock = {
     Range, Position, Diagnostic, WorkspaceEdit, CodeAction,
     CodeActionKind: { QuickFix: 'quickfix' }, DiagnosticSeverity: { Error: 0, Warning: 1, Information: 2, Hint: 3 },
     languages: {
-      createDiagnosticCollection: () => ({ clear: () => collections.clear(), set: (target: typeof uri, diagnostics: Diagnostic[]) => collections.set(target.path, diagnostics), dispose() { } }),
+      createDiagnosticCollection: () => ({ clear: () => collections.clear(), set: (target: typeof uri, diagnostics: Diagnostic[]) => { sets++; collections.set(target.path, diagnostics); }, delete: (target: typeof uri) => collections.delete(target.path), dispose() { } }),
       registerCodeActionsProvider: () => ({ dispose() { } })
     },
     commands: { registerCommand: () => ({ dispose() { } }) },
     workspace: {
       textDocuments: [{ uri, getText: () => source }],
       onDidChangeConfiguration: () => ({ dispose() { } }),
+      onDidChangeTextDocument: () => ({ dispose() { } }),
       asRelativePath: () => 'src/checkout.ts'
     }
   };
@@ -99,8 +101,15 @@ test('log doctor reports runtime evidence on statements and offers fixes', async
   ];
   tracker.process(events);
   const lens = { siteUri: () => uri, onDidChangeCodeLenses: () => ({ dispose() { } }), schedule() { } };
-  const doctor = new LogDoctor({ config: { get: <T>(_key: string, fallback: T) => fallback }, index, tracker, lens: lens as never, askCopilot: async () => undefined });
+  let changes = 0;
+  const doctor = new LogDoctor({ config: { get: <T>(_key: string, fallback: T) => fallback }, index, tracker, lens: lens as never, askCopilot: async () => undefined, onChanged: () => changes++ });
   await doctor.refresh();
+  const secretSite = index.sitesIn('src/checkout.ts')[0];
+  assert.deepEqual(doctor.findingsFor(secretSite.id).map(finding => finding.code), ['secret']);
+  assert.deepEqual(doctor.views()[0], { siteId: secretSite.id, code: 'secret', severity: 'warning', message: doctor.findings[0].message, file: 'src/checkout.ts', line: 2 });
+  const changesAfterFirst = changes;
+  const revisionAfterFirst = doctor.revision;
+  assert.equal(doctor.views(), doctor.views(), 'the panel list is built once per change');
   const diagnostics = collections.get('/w/src/checkout.ts')!;
   const byCode = new Map(diagnostics.map(diagnostic => [diagnostic.code, diagnostic]));
   assert.match(byCode.get('secret')!.message, /Logged a JSON Web Token in field headers\.authorization in 1 event \(eyJh…\[jwt\]\)/);
@@ -109,6 +118,14 @@ test('log doctor reports runtime evidence on statements and offers fixes', async
   assert.match(byCode.get('noisy')!.message, /Logged 99% of all retained events \(600 of 602\)/);
   assert.match(byCode.get('unstructured')!.message, /Formats 2 values into the message text/);
   assert.equal(doctor.findings[0].severity, 'warning');
+  await doctor.refresh();
+  assert.equal(sets, 1, 'nothing new was counted, so diagnostics are not re-sent');
+  assert.equal(changes, changesAfterFirst, 'the Logs panel is not told about unchanged findings');
+  assert.equal(doctor.revision, revisionAfterFirst);
+  tracker.process([event(++id, 'cart c600 has 600 items', 'terminal')]);
+  await doctor.refresh();
+  assert.equal(sets, 2);
+  assert.match(new Map(collections.get('/w/src/checkout.ts')!.map(diagnostic => [diagnostic.code, diagnostic])).get('noisy')!.message, /601 of 603/);
 
   const lines = source.split('\n');
   const document = { uri, lineAt: (line: number) => ({ lineNumber: line, text: lines[line] }) };

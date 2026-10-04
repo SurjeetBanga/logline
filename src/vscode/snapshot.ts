@@ -5,7 +5,7 @@ import type { LogStore } from '../core/log-store';
 import { getField } from '../core/query';
 import type { Settings } from '../core/settings';
 import type { LogEvent } from '../core/types';
-import type { GuideStatus, Snapshot, ViewRequest } from '../protocol/messages';
+import type { DoctorFindingView, GuideStatus, RowEvent, Snapshot, ViewRequest } from '../protocol/messages';
 import type { LogPersistence } from '../storage/log-persistence';
 import type { SavedSearches } from '../storage/saved-searches';
 import type { AgentLogAccess } from './agent-access';
@@ -31,9 +31,12 @@ export interface SnapshotSources {
   guideStatus: GuideStatus; agentAccess: AgentLogAccess; terminalCapture?: { status(): { state: 'off' | 'waiting' | 'capturing' | 'attention'; detail: string; active: number; failed: number } };
   otlp?: { status(): ReceiverStatus };
   spans?: { traceCount: number };
+  /** What each row links to: its log statement and that statement's worst finding. */
+  rowLinks?(event: LogEvent): Pick<RowEvent, 'site' | 'finding'>;
+  doctor?: { revision: number; total: number; findings?: DoctorFindingView[] };
 }
 export function buildSnapshot(msg: Extract<ViewRequest, { type: 'snapshot'; }>,
-  { store, config, registry, state, ingestion, persistence, searches, running, guideStatus, agentAccess, terminalCapture, otlp, spans }: SnapshotSources): Snapshot {
+  { store, config, registry, state, ingestion, persistence, searches, running, guideStatus, agentAccess, terminalCapture, otlp, spans, rowLinks, doctor }: SnapshotSources): Snapshot {
   const options = { query: msg.query, serverId: msg.serverId, sessionId: msg.sessionId, levels: msg.levels,
     page: msg.page, before: msg.before, sort: msg.sort, sortDirection: msg.sortDirection };
   const configured = config.get<string[]>('columns', []);
@@ -50,7 +53,7 @@ export function buildSnapshot(msg: Extract<ViewRequest, { type: 'snapshot'; }>,
   // wide the log records happen to be.
   const events = pageResult?.events.map(event => {
     const traceId = getField(event, 'traceId');
-    return { ...event, fields: pickColumns(event, projectedColumns), ...(typeof traceId === 'string' && traceId ? { traceId } : {}) };
+    return { ...event, fields: pickColumns(event, projectedColumns), ...(typeof traceId === 'string' && traceId ? { traceId } : {}), ...rowLinks?.(event) };
   });
   const sessions = registry.sessionSummaries();
   const known = new Set(sessions.map(session => `${session.serverId}\0${session.id}`));
@@ -75,7 +78,8 @@ export function buildSnapshot(msg: Extract<ViewRequest, { type: 'snapshot'; }>,
     persistDropped: persistence.persistDropped,
     timezone: config.get('timezone', 'local'), guideStatus, agentSharing: agentAccess.status(),
     captureTerminals: config.get('captureTerminals', false), captureStatus: terminalCapture?.status(), otlp: otlp?.status(),
-    traceCount: spans?.traceCount ?? 0
+    traceCount: spans?.traceCount ?? 0,
+    ...(doctor ? { doctor } : {})
   };
 
 }

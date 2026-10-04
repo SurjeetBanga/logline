@@ -17,12 +17,21 @@ export interface GuideRelease {
 
 export const GUIDE_RELEASES: GuideRelease[] = [
   {
+    version: '1.11.0',
+    date: '2026-10-03',
+    highlights: [
+      { title: 'See what each event links to', text: 'Rows show icons for their trace, the log statement behind them, and log doctor findings. Hover a row for Surrounding logs and Break here, and expand an event for every action, with unavailable ones explaining why.', section: 'inspect' },
+      { title: 'Log issues next to your logs', text: 'Log issues in the toolbar lists what log doctor found, such as secrets, missing exceptions, and noisy statements, with Fix… to open the statement and its quick fixes and Show events to filter the table.', section: 'inspect' },
+      { title: 'Faster in large workspaces', text: 'Log lenses match statements by their rarest word and subtract evicted events instead of recounting, so big repositories and full retention no longer slow the editor.', section: 'inspect' }
+    ]
+  },
+  {
     version: '1.10.0',
     date: '2026-10-03',
     highlights: [
       { title: 'Capture more of your runs', text: 'Debug sessions, followed log files, and Docker Compose or Kubernetes output become sources, with one source per service and plain-text stack traces joined into one event.', section: 'capture' },
       { title: 'Follow requests across services', text: 'Start the local OpenTelemetry receiver, browse recent requests in the Traces list, and open a waterfall with every span and log of a trace.', section: 'inspect' },
-      { title: 'Logs in your editor', text: 'Log lenses show live hits above logging calls, Break when this logs again stops the debugger on a statement, and log doctor reports secrets, personal data, and missing exceptions in the Problems panel.', section: 'inspect' }
+      { title: 'Logs in your editor', text: 'Log lenses show live hits above logging calls, Break here on an event stops the debugger on a statement, and log doctor reports secrets, personal data, and missing exceptions in the Problems panel.', section: 'inspect' }
     ]
   },
   {
@@ -39,8 +48,8 @@ export const GUIDE_RELEASES: GuideRelease[] = [
     date: '2026-09-15',
     highlights: [
       { title: 'Capture the terminal you already use', text: 'Turn Terminal capture: On once and run commands normally; new shell-integrated terminal output becomes searchable in Logs, with plain text shown as Unclassified when no level is marked.', section: 'capture' },
-      { title: 'Share logs with agent', text: 'Confirm once to share retained sources and new runs in this window. Results are always redacted, but may still contain sensitive information. Choose specific runs from More actions to limit access.', section: 'share' },
-      { title: 'Keep using your existing agent chat', text: 'Sharing logs · Stop makes your sharing state visible. Ask Copilot to check the logs through read-only Logline tools, share an expanded event’s exact run, and click the sharing button again to stop.', section: 'share' }
+      { title: 'Share with agent', text: 'Confirm once to share retained sources and new runs in this window. Results are always redacted, but may still contain sensitive information. Choose specific runs from More actions to limit access.', section: 'share' },
+      { title: 'Keep using your existing agent chat', text: 'Sharing · Stop makes your sharing state visible. Ask Copilot to check the logs through read-only Logline tools, share an expanded event’s exact run, and click the sharing button again to stop.', section: 'share' }
     ]
   },
   {

@@ -24,9 +24,9 @@ import { AgentAccessError, AgentLogAccess } from './agent-access';
 import { eventLocation, LogSiteIndex, LogSiteTracker } from '../core/log-sites';
 import { getField } from '../core/query';
 import type { LogEvent } from '../core/types';
-import type { DetailLinks } from '../protocol/messages';
+import type { DetailLinks, DoctorAction, RowEvent } from '../protocol/messages';
 import type { LogBreakpoints } from './log-breakpoints';
-import type { LogDoctor } from './log-doctor';
+import { doctorMode, type LogDoctor } from './log-doctor';
 import type { LogLens } from './log-lens';
 import { openSourceLocation } from './source-navigation';
 
@@ -115,7 +115,13 @@ export class LogsController {
       ingestion: this.ingestion, persistence: this.persistence, searches: this.searches,
       running: this.isRunning(),
       agentAccess: this.agentAccess,
-      guideStatus: this.guideStatus(), terminalCapture: this.terminalCapture, otlp: this.otlp, spans: this.spans });
+      guideStatus: this.guideStatus(), terminalCapture: this.terminalCapture, otlp: this.otlp, spans: this.spans,
+      rowLinks: event => this.rowLinks(event),
+      doctor: this.doctor && doctorMode(this.config) !== 'off' ? {
+        revision: this.doctor.revision, total: this.doctor.findings.length,
+        // The list only travels when the view does not have this revision yet.
+        ...(request.doctorRevision === this.doctor.revision ? {} : { findings: this.doctor.views() })
+      } : undefined });
   }
   guideStatus() {
     return getGuideStatus(this.globalState.get<string>(GUIDE_STATE_KEY));
@@ -135,7 +141,8 @@ export class LogsController {
       toggleTerminalCapture: enabled => this.toggleTerminalCapture(enabled),
       detailLinks: event => this.detailLinks(event), openLogSite: id => this.openLogSite(id),
       traceView: traceId => this.traceView(traceId), traceList: () => this.traceList(), toggleOtlp: enabled => this.toggleOtlp(enabled),
-      breakOnEvent: id => this.breakOnEvent(id), breakOnQuery: (query, levels) => this.breakOnQuery(query, levels)
+      breakOnEvent: id => this.breakOnEvent(id), breakOnQuery: (query, levels) => this.breakOnQuery(query, levels),
+      doctorAction: (action, siteId) => this.doctorAction(action, siteId)
     }, send, message);
   }
   /** Filter the Logs panel from the editor. The next snapshot carries the query, so a panel that is still loading applies it too. */
@@ -162,7 +169,26 @@ export class LogsController {
   detailLinks(event: LogEvent): DetailLinks {
     const traceId = getField(event, 'traceId');
     const site = this.logSiteFor(event)?.label;
-    return { ...(site ? { site } : {}), ...(typeof traceId === 'string' && traceId ? { traceId } : {}) };
+    const siteId = this.siteIdOf(event);
+    const findings = siteId ? this.doctor?.findingsFor(siteId).map(finding => ({ siteId, code: finding.code, severity: finding.severity,
+      message: finding.message, file: finding.site.file, line: finding.site.line })) : undefined;
+    return { ...(site ? { site } : {}), ...(typeof traceId === 'string' && traceId ? { traceId } : {}), ...(findings?.length ? { findings } : {}) };
+  }
+  /** What a table row shows about its log statement, without matching anything the lens already counted. */
+  rowLinks(event: LogEvent): Pick<RowEvent, 'site' | 'finding'> {
+    const siteId = this.siteIdOf(event);
+    const [worst] = siteId ? this.doctor?.findingsFor(siteId) ?? [] : [];
+    return {
+      ...(siteId || eventLocation(event) ? { site: true } : {}),
+      ...(worst ? { finding: { severity: worst.severity, message: worst.message } } : {})
+    };
+  }
+  private siteIdOf(event: LogEvent): string | undefined {
+    if (!this.lens?.enabled) return undefined;
+    const counted = this.siteTracker.siteOf(event.id);
+    // Events newer than the last lens refresh are matched directly.
+    if (counted === undefined) return event.id > this.siteTracker.watermark ? this.logSites.match(event)?.site.id : undefined;
+    return counted ?? undefined;
   }
   async openLogSite(id: number): Promise<void> {
     const event = this.store.find(id);
@@ -170,6 +196,10 @@ export class LogsController {
     const site = this.logSiteFor(event);
     if (site) await site.open();
     else void vscode.window.showInformationMessage('Logline could not find the log statement for this event in the workspace.');
+  }
+  async doctorAction(action: DoctorAction, siteId?: string): Promise<void> {
+    if (!this.doctor) { void vscode.window.showInformationMessage('Log doctor needs a VS Code host with diagnostics support.'); return; }
+    await this.doctor.act(action, siteId);
   }
   async breakOnEvent(id: number): Promise<void> {
     if (!this.breakpoints) { void vscode.window.showInformationMessage('Log breakpoints need a VS Code host with debugging support.'); return; }

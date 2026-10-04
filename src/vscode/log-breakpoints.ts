@@ -20,7 +20,7 @@ export interface LogBreakpointSources {
 const MAX_SITE_BREAKPOINTS = 10;
 
 /**
- * Debugger breakpoints driven by logs. "Break when this logs again" puts a
+ * Debugger breakpoints driven by logs. "Break here" on an event puts a
  * breakpoint on the statement that logged an event. "Break on matching
  * logs" does that for every statement that logged a matching event so far,
  * and pauses a debug session right after it logs any other matching event.
@@ -122,7 +122,7 @@ export class LogBreakpoints implements vscode.Disposable {
   private async manage(): Promise<void> {
     const rules = this.rules.list();
     if (!rules.length) {
-      void vscode.window.showInformationMessage('No log breakpoints are set. Use Break on matching logs in the Logs panel, or Break when this logs again on an event.');
+      void vscode.window.showInformationMessage('No log breakpoints are set. Use Break on matching logs in the Logs panel, or Break here on an expanded event.');
       return;
     }
     type Item = vscode.QuickPickItem & { id?: number };

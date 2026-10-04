@@ -152,9 +152,11 @@ test('lens counts drop events evicted from retention', async () => {
   add(h.store, 3, '{"level":"error","msg":"login failed for user bob"}');
   h.lens.refresh(later + 1000);
   const titles = () => (h.lens.provideCodeLenses(document as never) as unknown as CodeLens[]).map(lens => lens.command.title.replace(/ · last .*$/, ''));
-  assert.deepEqual(titles(), ['$(pulse) 2 hits', '$(pulse) 1 hit · 1 error'], 'new events count right away');
-  h.lens.refresh(later + 12000);
   assert.deepEqual(titles(), ['$(pulse) 1 hit', '$(pulse) 1 hit · 1 error'], 'the evicted event no longer counts');
+  add(h.store, 4, '{"level":"info","msg":"user 43 logged in"}');
+  add(h.store, 5, '{"level":"info","msg":"user 44 logged in"}');
+  h.lens.refresh(later + 2000);
+  assert.deepEqual(titles(), ['$(pulse) 2 hits'], 'a statement whose events were all evicted loses its lens');
   h.lens.dispose();
 });
 

@@ -7,6 +7,12 @@ test('message boundary rejects invalid actions and source coordinates', () => {
     { type: 'context', id: '1' }, { type: 'copy', id: NaN }, { type: 'exportContext', ids: '1,2' }]) {
     assert.equal(parseViewRequest(value), undefined);
   }
+  assert.deepEqual(parseViewRequest({ type: 'doctorAction', action: 'fix', siteId: 'a.ts\u00001', extra: 1 }), { type: 'doctorAction', action: 'fix', siteId: 'a.ts\u00001' });
+  assert.deepEqual(parseViewRequest({ type: 'doctorAction', action: 'report' }), { type: 'doctorAction', action: 'report' });
+  assert.equal((parseViewRequest({ type: 'snapshot', doctorRevision: 4 }) as { doctorRevision?: number }).doctorRevision, 4);
+  assert.equal((parseViewRequest({ type: 'snapshot', doctorRevision: -1 }) as { doctorRevision?: number }).doctorRevision, undefined);
+  assert.equal(parseViewRequest({ type: 'doctorAction', action: 'fix' }), undefined, 'a statement action needs a statement');
+  assert.equal(parseViewRequest({ type: 'doctorAction', action: 'delete', siteId: 'a' }), undefined);
   assert.deepEqual(parseViewRequest({ type: 'openSource', id: 1, block: 0, line: 2, file: '/tmp/other', command: 'run' }),
     { type: 'openSource', id: 1, block: 0, line: 2 });
   assert.deepEqual(parseViewRequest({ type: 'copyFiltered', query: 'status:500', levels: ['error'], serverId: 'api' }),

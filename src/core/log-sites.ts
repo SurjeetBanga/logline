@@ -416,19 +416,30 @@ export class LogSiteIndex {
     return this.byBasename = index;
   }
 
-  // Each matchable site is filed under the longest word in its literals, so
-  // a message only tests the sites whose key word it contains.
+  // Each matchable site is filed under the rarest word in its literals, so a
+  // message only tests the sites whose key word it contains. Keying on a
+  // common word ("Processing", "completed") would put thousands of statements
+  // in one bucket and test every message against all of them.
   private wordIndex(): Map<string, Compiled[]> {
     if (this.byWord) return this.byWord;
-    const index = new Map<string, Compiled[]>();
+    const keyed: [LogSite, string[]][] = [];
+    const frequency = new Map<string, number>();
     for (const sites of this.files.values()) for (const site of sites) {
       if (!site.matchable) continue;
       // A word touching a placeholder (`cache_miss_` in `cache_miss_{key}`)
       // tokenizes differently in the logged message, so only words with real
       // boundaries in the template can be keys.
-      const words = site.template.match(KEY_WORD);
-      if (!words) continue;
-      const key = words.reduce((longest, word) => word.length > longest.length ? word : longest).toLowerCase();
+      const words = [...new Set(site.template.match(KEY_WORD)?.map(word => word.toLowerCase()))];
+      if (!words.length) continue;
+      keyed.push([site, words]);
+      for (const word of words) frequency.set(word, (frequency.get(word) ?? 0) + 1);
+    }
+    const index = new Map<string, Compiled[]>();
+    for (const [site, words] of keyed) {
+      const key = words.reduce((best, word) => {
+        const difference = frequency.get(word)! - frequency.get(best)!;
+        return difference < 0 || (difference === 0 && word.length > best.length) ? word : best;
+      });
       const parts = site.literals.map(part => new RegExp(escapeRegex(part).replace(/\s+/g, '\\s+?'), 'g'));
       const list = index.get(key) ?? [];
       list.push({ site, parts, score: site.literals.join('').replace(/\s+/g, '').length });
@@ -470,7 +481,57 @@ export class LogSiteTracker {
 
   constructor(readonly index: LogSiteIndex) { }
 
-  reset(watermark = 0): void { this.stats.clear(); this.watermark = watermark; this.indexVersion = this.index.version; this.total = 0; }
+  // What each counted event added, oldest first, so evicting an event can
+  // subtract it without re-matching every retained event.
+  private counted: Counted[] = [];
+  private countedHead = 0;
+
+  reset(watermark = 0): void {
+    this.stats.clear(); this.watermark = watermark; this.indexVersion = this.index.version; this.total = 0;
+    this.counted = []; this.countedHead = 0;
+  }
+
+  /**
+   * The site a counted event was attributed to: its id, `null` when it matched
+   * no statement, or `undefined` when the event has not been counted.
+   */
+  siteOf(id: number): string | null | undefined {
+    let low = this.countedHead, high = this.counted.length - 1;
+    while (low <= high) {
+      const middle = (low + high) >> 1;
+      const entry = this.counted[middle];
+      if (entry.id === id) return entry.site ?? null;
+      if (entry.id < id) low = middle + 1; else high = middle - 1;
+    }
+    return undefined;
+  }
+
+  /** Stop counting events older than `oldestId`; returns whether any site changed. */
+  evict(oldestId: number): boolean {
+    let changed = false;
+    while (this.countedHead < this.counted.length && this.counted[this.countedHead].id < oldestId) {
+      const entry = this.counted[this.countedHead++];
+      this.total--;
+      if (!entry.site) continue;
+      const stats = this.stats.get(entry.site);
+      if (!stats) continue;
+      changed = true;
+      if (!--stats.hits) { this.stats.delete(entry.site); continue; }
+      if (entry.exact) stats.exact--;
+      if (entry.error) stats.errors--;
+      if (entry.bareError) stats.bareErrors!--;
+      if (entry.plain) stats.plain!--;
+      for (const kind of entry.sensitive ?? []) {
+        const found = stats.sensitive?.get(kind);
+        if (found && !--found.count) stats.sensitive!.delete(kind);
+      }
+    }
+    if (this.countedHead > 1024 && this.countedHead * 2 > this.counted.length) {
+      this.counted = this.counted.slice(this.countedHead);
+      this.countedHead = 0;
+    }
+    return changed;
+  }
 
   /** Count events in id order; returns whether any site changed. */
   process(events: Iterable<LogEvent>): boolean {
@@ -480,29 +541,37 @@ export class LogSiteTracker {
       this.watermark = event.id;
       this.total++;
       const match = this.index.match(event);
-      if (!match) continue;
+      if (!match) { this.counted.push({ id: event.id }); continue; }
       let stats = this.stats.get(match.site.id);
       if (!stats) { stats = { hits: 0, errors: 0, samples: [], exact: 0 }; this.stats.set(match.site.id, stats); }
+      const entry: Counted = { id: event.id, site: match.site.id, exact: match.exact, error: event.level === 'error' || event.level === 'fatal' };
       stats.hits++;
-      if (match.exact) stats.exact++;
-      if (event.level === 'error' || event.level === 'fatal') stats.errors++;
+      if (entry.exact) stats.exact++;
+      if (entry.error) stats.errors++;
       stats.lastSeen = event.timestampMs ?? stats.lastSeen;
       stats.samples.push({ id: event.id, level: event.level, message: (event.message ?? '').slice(0, 200), time: event.timestampMs });
       if (stats.samples.length > 3) stats.samples.shift();
-      if (this.findings) collectFindings(stats, event);
+      if (this.findings) collectFindings(stats, event, entry);
+      this.counted.push(entry);
       changed = true;
     }
     return changed;
   }
 }
 
-function collectFindings(stats: SiteStats, event: LogEvent): void {
+interface Counted {
+  id: number; site?: string; exact?: boolean; error?: boolean;
+  sensitive?: SensitiveKind[]; bareError?: boolean; plain?: boolean;
+}
+
+function collectFindings(stats: SiteStats, event: LogEvent, counted: Counted): void {
   for (const value of findSensitiveValues(event)) {
     stats.sensitive ??= new Map();
     const entry = stats.sensitive.get(value.kind);
     if (entry) { entry.count++; entry.lastId = event.id; entry.value = value; }
     else stats.sensitive.set(value.kind, { value, count: 1, lastId: event.id });
+    (counted.sensitive ??= []).push(value.kind);
   }
-  if ((event.level === 'error' || event.level === 'fatal') && !extractExceptions(event).length) stats.bareErrors = (stats.bareErrors ?? 0) + 1;
-  if (!event.isJson && !Object.keys(event.fields ?? {}).length) stats.plain = (stats.plain ?? 0) + 1;
+  if ((event.level === 'error' || event.level === 'fatal') && !extractExceptions(event).length) { stats.bareErrors = (stats.bareErrors ?? 0) + 1; counted.bareError = true; }
+  if (!event.isJson && !Object.keys(event.fields ?? {}).length) { stats.plain = (stats.plain ?? 0) + 1; counted.plain = true; }
 }

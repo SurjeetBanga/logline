@@ -4,6 +4,7 @@ export const LEVELS = ['trace', 'debug', 'info', 'warn', 'error', 'fatal', 'uncl
 export interface PersistedState {
   query?: string; levels?: string[]; server?: string; session?: string; sort?: string; sortDirection?: 'asc' | 'desc';
   extraColumns?: string[]; columnWidths?: Record<string, number>; columnOrder?: string[]; hiddenColumns?: string[];
+  cellHintDismissed?: boolean; rowHintDismissed?: boolean;
 }
 /** Persistent preferences and interaction state, independent of DOM rendering. */
 export class ViewerState {
@@ -31,8 +32,12 @@ export class ViewerState {
   hiddenColumns: Set<string>;
   checkedLevels: Set<string>;
   displayTimezone = 'local';
+  cellHintDismissed: boolean;
+  rowHintDismissed: boolean;
   constructor(saved: PersistedState = {}) {
     this.following = !saved.sort;
+    this.cellHintDismissed = saved.cellHintDismissed === true;
+    this.rowHintDismissed = saved.rowHintDismissed === true;
     this.selectedServer = saved.server ?? '';
     this.selectedSession = saved.session ?? '';
     this.selectedSort = saved.sort ?? '';
@@ -76,7 +81,7 @@ export class ViewerState {
     return {
       query, levels: [...this.checkedLevels], server: this.selectedServer, ...(this.selectedSession ? { session: this.selectedSession } : {}), sort: this.selectedSort,
       sortDirection: this.selectedSortDirection, columnWidths: this.columnWidths, columnOrder: this.columnOrder,
-      hiddenColumns: [...this.hiddenColumns], extraColumns: this.extraColumns
+      hiddenColumns: [...this.hiddenColumns], extraColumns: this.extraColumns, ...(this.cellHintDismissed ? { cellHintDismissed: true } : {}), ...(this.rowHintDismissed ? { rowHintDismissed: true } : {})
     };
   }
 }
