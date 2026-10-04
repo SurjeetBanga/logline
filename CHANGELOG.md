@@ -2,6 +2,10 @@
 
 All notable changes to Logline are documented in this file.
 
+## Unreleased
+
+- Align the **Errors only** checkbox in the Traces list with its label and the toolbar buttons.
+
 ## 1.10.0 — 2026-10-04
 
 ### Behavior changes
