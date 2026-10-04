@@ -72,8 +72,12 @@ export function createTraceList(elements: Elements, api: WebviewApi, scope: Even
       row.dataset.traceId = trace.traceId;
       row.tabIndex = 0;
       row.setAttribute('aria-label', `${trace.name}, ${formatDuration(trace.durationMs)}${trace.errors ? `, ${trace.errors} errors` : ''}`);
-      const name = cell(`${trace.errors ? '⚠ ' : ''}${trace.name || trace.traceId}`, 'trace-name');
-      // The operation is often long, such as a full request path; the tooltip has all of it.
+      const name = cell('', 'trace-name');
+      // The operation is often long, such as a full request path: it wraps to two lines, and the tooltip has all of it.
+      const nameText = document.createElement('span');
+      nameText.className = 'trace-name-text';
+      nameText.textContent = `${trace.errors ? '⚠ ' : ''}${trace.name || trace.traceId}`;
+      name.append(nameText);
       name.title = `${trace.name || trace.traceId}\nTrace ${trace.traceId}`;
       const services = cell('', 'traces-services');
       for (const service of trace.services.slice(0, 4)) {

@@ -2,7 +2,8 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { anyValue, isEntrySpan, logLine, nanosToMs, normalizeId, readLogs, readSpans, spanLine } from './core/otlp';
 import { decodeLogsRequest, decodeTraceRequest, ProtoError } from './core/otlp-proto';
-import { buildTrace, SpanStore, summarizeTraces } from './core/traces';
+import type { LogEvent } from './core/types';
+import { buildTrace, requestOperation, SpanStore, summarizeTraces } from './core/traces';
 import { parseLogLine } from './core/log-event';
 import { extractExceptions } from './core/exceptions';
 import { getField } from './core/query';
@@ -167,6 +168,26 @@ test('trace summaries list span traces and log-only traces, newest first', () =>
     [TRACE, 'GET /cart', 'web', 2, 1, 1, 200, ['db', 'web']]
   ]);
   assert.equal(summarizeTraces(store.entries(), [], 1).length, 1);
+
+  // Without spans, the operation is the request the logs name, not whatever was logged first.
+  const request = 'b'.repeat(32);
+  const named = summarizeTraces([], [
+    logged(4, request, 'Loading cart', 6000),
+    logged(5, request, 'requestUrl=/shop/orders/checkout?step=2 method=POST user=me took 40ms', 6100),
+    logged(6, request, 'GET /later', 6200)
+  ]);
+  assert.equal(named[0].name, 'POST /shop/orders/checkout');
+});
+
+test('request operations come from fields or from key=value text in the message', () => {
+  const event = (message: string, fields?: Record<string, string>) => ({ id: 1, message, fields, raw: message } as LogEvent);
+  assert.equal(requestOperation(event('done', { method: 'get', path: '/api/orders?page=2' })), 'GET /api/orders');
+  assert.equal(requestOperation(event('done', { 'http.route': '/users/:id' })), '/users/:id');
+  assert.equal(requestOperation(event('requestUri="/a/b" httpMethod=delete')), 'DELETE /a/b');
+  assert.equal(requestOperation(event('Handled PUT /items/7 in 3ms')), 'PUT /items/7');
+  assert.equal(requestOperation(event('url=https://shop.example/cart#top')), 'https://shop.example/cart');
+  assert.equal(requestOperation(event('path=relative/thing')), undefined, 'not a path or URL');
+  assert.equal(requestOperation(event('Loading cart')), undefined);
 });
 
 test('cyclic parent links cannot loop the waterfall', () => {
