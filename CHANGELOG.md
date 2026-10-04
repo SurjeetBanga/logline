@@ -2,11 +2,6 @@
 
 All notable changes to Logline are documented in this file.
 
-## Unreleased
-
-- Align the **Errors only** checkbox in the Traces list with its label and the toolbar buttons.
-- Hide the empty command box at the end of the Logs status line when no command is running.
-
 ## 1.10.0 — 2026-10-04
 
 ### Behavior changes
@@ -39,6 +34,7 @@ Nothing was removed or renamed, but some new features are on by default and chan
 - The OpenTelemetry receiver no longer fails a request over a timestamp outside the range a date can hold, and a crashed decoder worker only fails its own requests. Debug launches keep an exporter configured in their `envFile` (or a Python workspace `.env`) instead of overriding it.
 - Copilot trace results redact source labels and span event names, and sharing selected OpenTelemetry runs shares only those runs' spans. Debug output lines split across output events keep the location where they started.
 - `logline.persistLogs` writes a `.gitignore` into `.logline/` so persisted, unredacted logs are not committed by accident.
+- The Logs status line no longer shows an empty box after the session count when no command is running.
 
 ## 1.9.1 — 2026-09-17
 
