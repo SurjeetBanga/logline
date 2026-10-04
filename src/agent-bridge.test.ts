@@ -158,16 +158,16 @@ test('a cancelled MCP request aborts its call to the window', async () => {
 
 test('agents are named for people, and setup commands quote paths for the shell', () => {
   assert.deepEqual(['claude-code', 'codex-mcp-client', 'cursor<script>', '!!!'].map(agentLabel), ['Claude Code', 'Codex', 'cursorscript', 'an MCP client']);
-  const { agentLaunch, setupCommand, mcpConfiguration } = withVscode({}, () => require('./vscode/agent-setup') as typeof import('./vscode/agent-setup'));
+  const { agentLaunch, setupCommand, shellKind, mcpConfiguration } = withVscode({}, () => require('./vscode/agent-setup') as typeof import('./vscode/agent-setup'));
   const launch = agentLaunch('/Users/me/.logline/mcp.js', '/Applications/Visual Studio Code.app/Contents/MacOS/Code Helper (Plugin)');
   assert.deepEqual(launch.env, { ELECTRON_RUN_AS_NODE: '1' }, 'VS Code runs the server, so Node.js need not be installed');
-  assert.equal(setupCommand('claude', launch, 'darwin'),
+  assert.equal(setupCommand('claude', launch, 'posix'),
     "claude mcp add --env ELECTRON_RUN_AS_NODE=1 --transport stdio --scope user logline -- '/Applications/Visual Studio Code.app/Contents/MacOS/Code Helper (Plugin)' /Users/me/.logline/mcp.js");
-  assert.equal(setupCommand('codex', launch, 'darwin'),
+  assert.equal(setupCommand('codex', launch, 'posix'),
     "codex mcp add logline --env ELECTRON_RUN_AS_NODE=1 -- '/Applications/Visual Studio Code.app/Contents/MacOS/Code Helper (Plugin)' /Users/me/.logline/mcp.js");
-  assert.equal(setupCommand('codex', agentLaunch('C:\\Users\\me\\.logline\\mcp.js', 'C:\\Program Files\\VS Code\\Code.exe'), 'win32'),
+  assert.equal(setupCommand('codex', agentLaunch('C:\\Users\\me\\.logline\\mcp.js', 'C:\\Program Files\\VS Code\\Code.exe'), 'powershell'),
     'codex mcp add logline --env ELECTRON_RUN_AS_NODE="1" -- "C:\\Program Files\\VS Code\\Code.exe" "C:\\Users\\me\\.logline\\mcp.js"');
-  assert.equal(setupCommand('claude', agentLaunch("/tmp/it's/mcp.js", '/usr/bin/code'), 'linux').endsWith("-- /usr/bin/code '/tmp/it'\\''s/mcp.js'"), true);
+  assert.equal(setupCommand('claude', agentLaunch("/tmp/it's/mcp.js", '/usr/bin/code'), 'posix').endsWith("-- /usr/bin/code '/tmp/it'\\''s/mcp.js'"), true);
   assert.deepEqual(JSON.parse(mcpConfiguration(launch)).mcpServers.logline.args, ['/Users/me/.logline/mcp.js']);
 
   // The Claude Code and Codex extensions bring their own CLI, which is often not on PATH.
@@ -179,9 +179,23 @@ test('agents are named for people, and setup commands quote paths for the shell'
   assert.equal(agentCli('codex', '/ext/codex', 'darwin', exists, list), join('/ext/codex', 'bin', 'macos-aarch64', 'codex'));
   assert.equal(agentCli('claude', undefined, 'darwin', exists, list), 'claude', 'without the extension, the CLI on PATH');
   assert.equal(agentCli('claude', '/ext/other', 'darwin', exists, list), 'claude');
-  assert.equal(setupCommand('claude', launch, 'darwin', '/Users/me/.vscode/extensions/anthropic.claude-code-2.1.288/resources/native-binary/claude').split(' mcp add ')[0],
+  assert.equal(setupCommand('claude', launch, 'posix', '/Users/me/.vscode/extensions/anthropic.claude-code-2.1.288/resources/native-binary/claude').split(' mcp add ')[0],
     '/Users/me/.vscode/extensions/anthropic.claude-code-2.1.288/resources/native-binary/claude');
-  assert.match(setupCommand('codex', launch, 'win32', 'C:\\Users\\me\\.vscode\\extensions\\openai.chatgpt\\bin\\windows-x86_64\\codex.exe'), /^& "C:.*codex\.exe" mcp add logline /);
+  const codex = 'C:\\Users\\me\\.vscode\\extensions\\openai.chatgpt\\bin\\windows-x86_64\\codex.exe';
+  const windows = agentLaunch('C:\\Users\\me\\.logline\\mcp.js', 'C:\\Program Files\\VS Code\\Code.exe');
+  assert.match(setupCommand('codex', windows, 'powershell', codex), /^& "C:.*codex\.exe" mcp add logline /);
+  assert.match(setupCommand('codex', windows, 'cmd', codex), /^"C:.*codex\.exe" mcp add logline /, 'Command Prompt has no & operator');
+  assert.equal(setupCommand('codex', windows, 'posix', codex),
+    "'C:\\Users\\me\\.vscode\\extensions\\openai.chatgpt\\bin\\windows-x86_64\\codex.exe' mcp add logline --env ELECTRON_RUN_AS_NODE=1 -- 'C:\\Program Files\\VS Code\\Code.exe' 'C:\\Users\\me\\.logline\\mcp.js'",
+    'Git Bash on Windows takes POSIX quoting and no &');
+
+  // On Windows the default terminal may be PowerShell, Command Prompt, or Git Bash.
+  assert.equal(shellKind('/bin/zsh', 'darwin'), 'posix');
+  assert.equal(shellKind('C:\\Program Files\\Git\\bin\\bash.exe', 'win32'), 'posix');
+  assert.equal(shellKind('C:\\WINDOWS\\System32\\cmd.exe', 'win32'), 'cmd');
+  assert.equal(shellKind('C:\\Program Files\\PowerShell\\7\\pwsh.exe', 'win32'), 'powershell');
+  assert.equal(shellKind('C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe', 'win32'), 'powershell');
+  assert.equal(shellKind(undefined, 'win32'), 'powershell');
 });
 
 test('the bridge drops oversized requests', async () => {
