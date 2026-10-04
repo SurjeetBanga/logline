@@ -21,6 +21,7 @@ class Element {
   textContent = '';
   value = '';
   open = false;
+  checked = false;
   hidden = false;
   disabled = false;
   tabIndex = -1;
@@ -1129,18 +1130,58 @@ test('a trace without spans explains how to collect them, and Filter logs by tra
   assert.equal(messages.at(-1)?.type, 'snapshot');
 });
 
+test('the Traces list shows recent requests and opens a waterfall that can return to the list', () => {
+  const { get, app, receive, messages } = viewer();
+  get('traces').listeners.get('click')!();
+  assert.equal(get('tracesDialog').open, true);
+  assert.deepEqual(JSON.parse(JSON.stringify(messages.at(-1))), { type: 'traces' });
+  receive({ type: 'traces', traces: [
+    { traceId: 'f1', name: 'POST /checkout', service: 'api', services: ['api', 'payments'], startMs: 1000, durationMs: 120, spans: 3, logs: 4, errors: 1 },
+    { traceId: 'f2', name: 'GET /health', service: 'api', services: ['api'], startMs: 900, durationMs: 4, spans: 1, logs: 0, errors: 0 },
+    { traceId: 'f3', name: 'job started', service: 'worker', services: ['worker'], startMs: 800, durationMs: 30, spans: 0, logs: 2, errors: 0 }
+  ] });
+  assert.match(get('tracesStatus').textContent, /^3 recent traces · 1 with errors · 1 from logs only/);
+  assert.equal(get('tracesStartReceiver').hidden, true);
+  assert.deepEqual(get('tracesRows').children.map(row => row.dataset.traceId), ['f1', 'f2', 'f3']);
+  assert.equal(get('tracesRows').children[0].className, 'traces-row trace-error');
+  get('tracesErrorsOnly').checked = true;
+  get('tracesErrorsOnly').listeners.get('change')!();
+  assert.deepEqual(get('tracesRows').children.map(row => row.dataset.traceId), ['f1']);
+  const row = get('tracesRows').children[0];
+  get('tracesRows').listeners.get('click')!({ target: { closest: () => row } });
+  assert.equal(get('tracesDialog').open, false);
+  assert.equal(get('traceDialog').open, true);
+  assert.equal(get('traceBack').hidden, false);
+  assert.deepEqual(JSON.parse(JSON.stringify(messages.at(-1))), { type: 'trace', traceId: 'f1' });
+  get('traceBack').listeners.get('click')!();
+  assert.equal(get('tracesDialog').open, true);
+  app.traceView.show('abc');
+  assert.equal(get('traceBack').hidden, true, 'a trace opened from a row has no list to return to');
+  receive({ type: 'traces', traces: [] });
+  assert.match(get('tracesStatus').textContent, /No traces yet/);
+});
+
 test('snapshots apply editor requests once and reflect the OpenTelemetry receiver', () => {
   const { get, app, receive, messages } = viewer();
   const snapshot = (extra: Record<string, unknown>) => receive({
     type: 'snapshot', generation: 1, newest: 100, status: 'Running', command: '', running: false, total: 0, retained: 0, discarded: 0, bytes: 0,
     maxBytes: 1, truncated: 0, events: [], columns: [], page: 0, pages: 1, matched: 0, ...extra
   });
-  snapshot({ applyQuery: 'message:/user.*logged\\s+in/', otlp: { running: true, endpoint: 'http://127.0.0.1:4318' } });
+  snapshot({ applyQuery: 'message:/user.*logged\\s+in/', otlp: { running: true, endpoint: 'http://127.0.0.1:4318' }, traceCount: 12, status: 'OpenTelemetry receiver on http://127.0.0.1:4318' });
   assert.equal(app.search.query(), 'message:/user.*logged\\s+in/');
+  assert.equal(get('otlpStatus').hidden, false);
+  assert.equal(get('otlpStatus').textContent, 'OpenTelemetry 127.0.0.1:4318');
+  assert.equal(get('status').textContent, 'Ready', 'the chip replaces the receiver status text');
+  assert.equal(get('traceCount').textContent, '12');
+  get('otlpStatus').listeners.get('click')!();
+  assert.equal(get('tracesDialog').open, true);
+  assert.deepEqual(JSON.parse(JSON.stringify(messages.at(-1))), { type: 'traces' });
   assert.equal(get('otlpToggle').textContent, 'Stop OpenTelemetry receiver');
   get('otlpToggle').listeners.get('click')!();
   assert.deepEqual(JSON.parse(JSON.stringify(messages.at(-1))), { type: 'toggleOtlp', enabled: false });
   snapshot({ openTrace: 'abc123', otlp: { running: false } });
   assert.equal(get('traceDialog').open, true);
+  assert.equal(get('otlpStatus').hidden, true);
+  assert.equal(get('traceCount').hidden, true);
   assert.equal(get('otlpToggle').textContent, 'Start OpenTelemetry receiver');
 });

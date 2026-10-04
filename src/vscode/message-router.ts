@@ -7,7 +7,7 @@ import { resolveRunTarget } from '../core/server-config';
 import type { Settings } from '../core/settings';
 import { parseViewRequest, type DetailLinks, type HostMessage, type Snapshot, type ViewRequest } from '../protocol/messages';
 import type { LogEvent } from '../core/types';
-import type { TraceView } from '../core/traces';
+import type { TraceSummary, TraceView } from '../core/traces';
 import type { SavedSearches } from '../storage/saved-searches';
 import type { LogTransfer } from './log-transfer';
 import { manageServers } from './servers';
@@ -27,7 +27,10 @@ interface MessageServices {
   detailLinks(event: LogEvent): DetailLinks;
   openLogSite(id: number): Promise<void>;
   traceView(traceId: string): TraceView;
+  traceList(): TraceSummary[];
   toggleOtlp(enabled: boolean): Promise<void>;
+  breakOnEvent(id: number): Promise<void>;
+  breakOnQuery(query: string, levels: string[]): Promise<void>;
 }
 export async function handleMessage(services: MessageServices, send: (message: HostMessage) => void, value: unknown): Promise<void> {
   const msg = parseViewRequest(value);
@@ -44,7 +47,10 @@ export async function handleMessage(services: MessageServices, send: (message: H
     case 'openSource': await openSource(store, msg); return;
     case 'openLogSite': await services.openLogSite(msg.id); return;
     case 'trace': send({ type: 'trace', trace: services.traceView(msg.traceId) }); return;
+    case 'traces': send({ type: 'traces', traces: services.traceList() }); return;
     case 'toggleOtlp': await services.toggleOtlp(msg.enabled); return;
+    case 'breakOnEvent': await services.breakOnEvent(msg.id); return;
+    case 'breakOnQuery': await services.breakOnQuery(msg.query ?? '', msg.levels ?? []); return;
     case 'saveSearch': {
       const saved = searches.saveSearch(msg.name, msg.query ?? '', msg.levels, msg.serverId);
       send({ type: 'searches', searches: { saved: searches.savedSearches() }, saved }); return;

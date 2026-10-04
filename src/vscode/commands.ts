@@ -1,3 +1,4 @@
+import * as path from 'node:path';
 import * as vscode from 'vscode';
 import { resolveAutoStartServers, resolveCwd } from '../core/server-config';
 import type { ServerConfig } from '../core/types';
@@ -41,6 +42,27 @@ export function registerCommands(controller: LogsController, openGuide?: (sectio
       }
       for (const uri of files) await controller.files.follow(uri.fsPath);
       if (files.length) await vscode.commands.executeCommand('logline.logs.focus');
+    }),
+    vscode.commands.registerCommand('logline.followCompose', async () => {
+      if (!vscode.workspace.isTrusted) {
+        vscode.window.showWarningMessage('Trust this workspace before following a Docker Compose project.');
+        return;
+      }
+      const files = await vscode.workspace.findFiles('**/{compose,docker-compose}{,.*}.{yaml,yml}', '**/node_modules/**', 50);
+      if (!files.length) {
+        vscode.window.showWarningMessage('Logline found no compose.yaml or docker-compose.yml in this workspace.');
+        return;
+      }
+      const picked = files.length === 1 ? files[0] : (await vscode.window.showQuickPick(
+        files.map(uri => ({ label: vscode.workspace.asRelativePath(uri), uri })), { title: 'Follow Docker Compose project' }))?.uri;
+      if (!picked) return;
+      const folder = path.dirname(picked.fsPath);
+      // `logs --follow` attaches to running services without starting them, and
+      // keeps following containers that restart. Timestamps order lines from
+      // services whose own logs carry none.
+      controller.runner.run('docker', folder, { id: `compose:${picked.fsPath}`, label: `Compose · ${path.basename(folder)}` }, undefined, undefined,
+        ['compose', '-f', picked.fsPath, 'logs', '--follow', '--no-color', '--timestamps', '--tail', '200']);
+      await vscode.commands.executeCommand('logline.logs.focus');
     }),
     vscode.commands.registerCommand('logline.stopCommand', () => controller.stop()),
     vscode.commands.registerCommand('logline.export', () => controller.transfer.exportLogs()),

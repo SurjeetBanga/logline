@@ -20,6 +20,8 @@ export interface DebugSessionInfo {
   /** `integratedTerminal` output is already visible to terminal capture. */
   console?: string;
   stop?: () => void;
+  /** Ask the debugger to pause the program; resolves to whether a pause was requested. */
+  pause?: () => Promise<boolean>;
 }
 
 /** The body of a Debug Adapter Protocol `output` event. */
@@ -62,6 +64,8 @@ const STREAMS: Record<string, string> = { stdout: 'stdout', stderr: 'stderr', im
  */
 export class DebugCapture {
   private readonly captures = new Map<string, Capture>();
+  /** Called for each event captured from a debug session, after it is stored. */
+  onEvent?: (event: LogEvent, session: DebugSessionInfo) => void;
 
   constructor(private readonly config: Settings, private readonly registry: SessionRegistry,
     private readonly ingestion: Ingestion, private readonly state: RuntimeState,
@@ -145,6 +149,7 @@ export class DebugCapture {
       if (!event) return;
       record.events++;
       this.state.notify();
+      this.onEvent?.(event, capture.info);
     };
     const joiner = this.config.get('joinStackTraces', true) ? new StackJoiner<Location>(ingest, limit) : undefined;
     const created: Stream = {

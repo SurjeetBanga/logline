@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { anyValue, isEntrySpan, logLine, nanosToMs, normalizeId, readLogs, readSpans, spanLine } from './core/otlp';
 import { decodeLogsRequest, decodeTraceRequest, ProtoError } from './core/otlp-proto';
-import { buildTrace, SpanStore } from './core/traces';
+import { buildTrace, SpanStore, summarizeTraces } from './core/traces';
 import { parseLogLine } from './core/log-event';
 import { extractExceptions } from './core/exceptions';
 import { getField } from './core/query';
@@ -149,6 +149,24 @@ test('builds a depth-first waterfall with the critical path and orphan roots', (
   assert.equal(buildTrace(TRACE, spans, [], 2).omitted, 3);
   const logsOnly = buildTrace(TRACE, [], [{ id: 1, level: 'info', message: 'x', timeMs: 50 }, { id: 2, level: 'info', message: 'y', timeMs: 80 }]);
   assert.deepEqual([logsOnly.durationMs, logsOnly.logs.map(log => log.offsetMs)], [30, [0, 30]]);
+});
+
+test('trace summaries list span traces and log-only traces, newest first', () => {
+  const store = new SpanStore();
+  for (const item of [span('a', undefined, 1000, 1200, { service: 'web', name: 'GET /cart' }), span('b', 'a', 1010, 1100, { service: 'db', status: { code: 2 } })]) store.add(item);
+  const logged = (id: number, traceId: string, message: string, time: number, level = 'info') => {
+    const event = parseLogLine(JSON.stringify({ level, msg: message, traceId, time: new Date(time).toISOString() }), 'stdout', id, new Date(0));
+    return { ...event, server: 'api' };
+  };
+  const other = 'a'.repeat(32);
+  const summaries = summarizeTraces(store.entries(), [
+    logged(1, TRACE, 'inside the span trace', 1050), logged(3, other, 'second', 5300, 'error'), logged(2, other, 'first', 5000)
+  ]);
+  assert.deepEqual(summaries.map(item => [item.traceId, item.name, item.service, item.spans, item.logs, item.errors, item.durationMs, item.services]), [
+    [other, 'first', 'api', 0, 2, 1, 300, ['api']],
+    [TRACE, 'GET /cart', 'web', 2, 1, 1, 200, ['db', 'web']]
+  ]);
+  assert.equal(summarizeTraces(store.entries(), [], 1).length, 1);
 });
 
 test('cyclic parent links cannot loop the waterfall', () => {

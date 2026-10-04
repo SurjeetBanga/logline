@@ -182,6 +182,9 @@ export class LogLens implements vscode.CodeLensProvider, vscode.HoverProvider, v
     return new vscode.Hover(markdown);
   }
 
+  /** The file an indexed site was read from, when it was indexed in this window. */
+  siteUri(site: LogSite): vscode.Uri | undefined { return this.uris.get(site.file); }
+
   /** Open the statement for a site found in the index. */
   async openSite(site: LogSite): Promise<void> {
     const uri = this.uris.get(site.file);

@@ -8,7 +8,8 @@ import type { Ingestion } from './ingestion';
 import { LineReader } from './line-reader';
 import type { RuntimeState } from './runtime-state';
 import type { SessionRegistry } from './session-registry';
-import { StackJoiner } from './stack-joiner';
+import type { ContainerTag } from '../core/container-prefix';
+import { LinePipeline, linePipelineOptions } from './line-pipeline';
 
 const CHUNK = 64 * 1024;
 const FINGERPRINT = 64;
@@ -21,7 +22,7 @@ interface Follow {
   fingerprint: Buffer;
   inode?: number;
   reader: LineReader;
-  joiner?: StackJoiner;
+  joiner?: LinePipeline;
   watcher?: FSWatcher;
   poll: ReturnType<typeof setInterval>;
   pumping?: Promise<void>;
@@ -65,17 +66,15 @@ export class FileFollower {
       sourceKind: 'file', owned: true, canStop: true, captureComplete: false, command: `tail -F ${file}`, cwd: path.dirname(file)
     };
     const limit = this.config.get('maxLineLength', 65536);
-    const ingest = (line: string, truncated: boolean) => {
+    const ingest = (line: string, truncated: boolean, container?: ContainerTag) => {
       if (follow.stopped) return;
-      const event = this.ingestion.accept(line, 'file', { serverId, server: label, sessionId: record.id, truncated });
+      const event = this.ingestion.accept(line, 'file', { serverId, server: label, sessionId: record.id, truncated, container });
       if (!event) return;
       record.events++;
       this.state.notify();
     };
-    const joiner = this.config.get('joinStackTraces', true) ? new StackJoiner(ingest, limit) : undefined;
-    const reader = new LineReader((line, truncated) => {
-      if (joiner) joiner.write(line, truncated); else ingest(line, truncated);
-    }, limit);
+    const joiner = new LinePipeline(ingest, linePipelineOptions(this.config, limit));
+    const reader = new LineReader((line, truncated) => joiner.write(line, truncated), limit);
     const follow: Follow = {
       record, file, position: 0, fingerprint: Buffer.alloc(0), reader, joiner, again: false, stopped: false,
       poll: setInterval(() => this.pump(follow), pollMs)

@@ -4,9 +4,9 @@
 
 Logline can also capture commands you run in supported VS Code terminals. Turn **Terminal capture: Off** to **Terminal capture: On** in the Logs panel, run the next command normally, and its output becomes searchable without wrapping the command. Commands already in progress cannot be backfilled. Completed terminal runs remain available while their logs are retained; empty stale terminal metadata is removed automatically. Use the combined source/run dropdown’s **Runs** tab to stop an individual Logline-owned process or task with its inline **Stop** action; externally captured terminal commands remain observe-only. Its **Sources** tab filters by server, task, terminal, or imported source. Choose **Share logs with agent** to make retained Logline sources and new runs in this VS Code window available to Copilot. The first use asks for confirmation and explains that redaction may not remove every sensitive value; later uses enable sharing immediately. The toolbar shows **Sharing logs · Stop**, with the sharing scope below it. Continue in your existing Copilot agent chat and ask it to check the logs. Use **More actions → Choose specific runs to share…** to limit access, or click **Stop** on the sharing button to revoke it. Sharing is held in memory and ends when logs are cleared or the window or workspace changes.
 
-![Logline demo: follow incoming logs, filter errors with search chips and cell actions, inspect a stack trace and surrounding context, then analyze the results.](media/demo.gif)
+![Logline demo: a running service streams logs and traces into the Logs panel, the Traces list opens a failed request's waterfall, log doctor flags a token and a swallowed exception in the editor, Break when this logs again stops the debugger on a log statement, and Docker Compose output splits into one source per service.](media/demo.gif)
 
-*The actual Logline viewer using [synthetic sample logs](samples/demo-logs.jsonl).*
+*Logline running in VS Code with a [small demo app](samples/README.md) and [Docker Compose sample logs](samples/compose-demo.log).*
 
 ## Get started
 
@@ -17,7 +17,11 @@ Logline can also capture commands you run in supported VS Code terminals. Turn *
 
 **Debugging with F5?** Whatever the Debug Console shows appears in Logs automatically, for every debugger. For launch configurations that print to the integrated terminal (the Python and Java default), turn on terminal capture.
 
-**Using OpenTelemetry?** Choose **More actions → Start OpenTelemetry receiver**. Instrumented apps you start from Logline, a debug session, or a new terminal send their logs and traces to Logline with no collector and no code changes. Expand an event and choose **Show trace** to see the request across services.
+**Using OpenTelemetry?** Choose **More actions → Start OpenTelemetry receiver**. Instrumented apps you start from Logline, a debug session, or a new terminal send their logs and traces to Logline with no collector and no code changes. Choose **Traces** to see recent requests, or the trace button on any row to see that request across services.
+
+**Running Docker Compose?** Run **Logline: Follow Docker Compose Project**, or run `docker compose up` with **Run Command** or in a captured terminal. Each service becomes its own source, and its JSON or logfmt lines keep their level and fields.
+
+**Found a bug through a log line?** Expand the event and choose **Break when this logs again**. The debugger stops on that log statement the next time it runs.
 
 **Try it with a file:** run **Logline: Import Logs** and select [samples/demo-logs.jsonl](samples/demo-logs.jsonl) from this repository. You can also import JSON, JSONL/NDJSON, CSV, and plain-text logs.
 
@@ -27,15 +31,19 @@ Open **Help** in the toolbar for the offline visual guide, or run **Logline: Wha
 
 | Workflow | Features |
 | --- | --- |
-| **Capture** | Capture supported terminal commands and debug sessions, run several servers at once, follow log files on disk like `tail -F`, receive OpenTelemetry logs and traces, save commands with **Manage servers**, filter by source or run, and capture VS Code tasks. |
+| **Capture** | Capture supported terminal commands and debug sessions, run several servers at once, follow log files on disk like `tail -F`, split Docker Compose and Kubernetes output into one source per service, receive OpenTelemetry logs and traces, save commands with **Manage servers**, filter by source or run, and capture VS Code tasks. |
 | **Search** | Field/value autocomplete, editable filter chips, right-click **Include value** / **Exclude value**, any combination of log levels, and up to 50 saved searches. |
-| **Inspect** | Expand JSON, read structured exceptions and nested causes, see multi-line plain-text stack traces as one event, open stack-frame source locations, share an event’s exact run, view up to 25 surrounding events on each side from the same run, and follow a request across services in a trace waterfall. |
+| **Inspect** | Expand JSON, read structured exceptions and nested causes, see multi-line plain-text stack traces as one event, open stack-frame source locations, share an event’s exact run, view up to 25 surrounding events on each side from the same run, browse recent traces, and follow a request across services in a trace waterfall. |
 | **Code** | See a CodeLens with live hit counts, errors, and recent values above the log statements in your editor, jump from any event to the statement that logged it, and find statements that never fired. |
+| **Debug** | Stop the debugger on the statement that logged an event with **Break when this logs again**, or pause a debug session right after it logs anything that matches a search. |
+| **Fix** | **Log doctor** shows statements that logged secrets or personal data, errors logged without their exception, and statements that produce most of your log volume in the Problems panel, with masked evidence and quick fixes. |
 | **Arrange** | Auto-detected fields, custom and nested columns, sorting, drag-to-reorder, and resizable column widths. |
 | **Analyze** | Event rate, errors, latency, status codes, the top 10 log patterns, and normalized error groups for the current filter. |
 | **Share** | Export filtered JSONL, JSON, CSV, or Markdown context for AI tools, or share retained sources (including new runs) or specific command runs with Copilot for read-only live investigation. Exports and **Copy results** redact common credentials by default; agent tools always redact them. |
 
 **Live** follows the newest events. Turn it off to browse retained history in pages of up to 1,000 rows. Expanding an event holds your place while collection continues; changing filters, sorting, paging, or columns returns inspection to **Browse**. Choose **Live** or **Resume** to return to the newest rows.
+
+**Coming in the next release:** Docker Compose and Kubernetes sources, log breakpoints, log doctor, and a Traces list, alongside debug session capture, the OpenTelemetry receiver, and log lenses. See [Unreleased](CHANGELOG.md#unreleased) in the changelog.
 
 **New in 1.9.1:** the demo now walks through live capture, source and run scoping, stopping an active run, filtering, and event inspection. The 1.9.0 release added a combined Sources/Runs picker with one-click stopping for Logline-owned processes and tasks, reliable capture for already-open terminals, automatic cleanup of stale terminal metadata, and clearer capture state labels. See the [changelog](CHANGELOG.md) for the full release history.
 
@@ -95,6 +103,8 @@ Open **Settings** in the toolbar for all options. A few useful defaults:
 | `logline.captureDebugSessions` | `true` | Capture program output from debug sessions. |
 | `logline.otlp.enabled` | `false` | Start the local OpenTelemetry receiver on `127.0.0.1:4318` automatically. |
 | `logline.logLenses` | `codelens` | Show log statement activity in the editor (`off`, `codelens`, `codelens+gutter`). |
+| `logline.logDoctor` | `all` | Report problems with log statements in the Problems panel (`off`, `security`, `all`). |
+| `logline.containerPrefixes` | `auto` | Split Docker Compose and `kubectl logs --prefix` output into one source per service. |
 | `logline.columns` | `[]` | Auto-detect columns, or specify preferred fields. |
 | `logline.timezone` | `local` | Show local or UTC timestamps. |
 | `logline.maxEvents` | `50000` | Maximum retained events. |

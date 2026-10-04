@@ -11,7 +11,9 @@ const mock = {
   workspace: {
     get isTrusted() { return trusted; },
     workspaceFolders: [{ uri: { fsPath: '/workspace' } }],
-    getConfiguration: () => ({ update: async (key: string, value: unknown) => calls.push({ name: `config:${key}`, value }) })
+    getConfiguration: () => ({ update: async (key: string, value: unknown) => calls.push({ name: `config:${key}`, value }) }),
+    findFiles: async () => [{ scheme: 'file', fsPath: '/workspace/deploy/compose.yaml' }],
+    asRelativePath: (uri: { fsPath: string }) => uri.fsPath
   },
   window: {
     showWarningMessage: (message: string) => calls.push({ name: 'warning', value: message }),
@@ -44,14 +46,17 @@ test('commands register the complete action surface and honor trust/focus/config
   } as any;
   const guideCalls: string[] = [];
   const registrations = registerCommands(controller, section => guideCalls.push(section));
-  assert.equal(handlers.size, 21);
+  assert.equal(handlers.size, 22);
   await handlers.get('logline.runCommand')!();
   for (const name of ['logline.stopCommand', 'logline.export', 'logline.import', 'logline.exportForAI', 'logline.convertTask',
     'logline.captureTask', 'logline.showGuide', 'logline.showWhatsNew', 'logline.showLogs', 'logline.enableTerminalCapture',
     'logline.disableTerminalCapture', 'logline.shareWithAgent', 'logline.shareSpecificRuns', 'logline.stopSharing',
-    'logline.askCopilot', 'logline.manageTerminalCapture', 'logline.followFile']) await handlers.get(name)!();
+    'logline.askCopilot', 'logline.manageTerminalCapture', 'logline.followFile', 'logline.followCompose']) await handlers.get(name)!();
   assert.ok(calls.some(call => call.name === 'follow' && call.value === '/workspace/app.log'));
   assert.equal(ran[0][0], 'node server.js');
+  // Compose is followed without a shell, from the project's folder, with Docker timestamps.
+  assert.deepEqual(ran[1].slice(0, 3), ['docker', '/workspace/deploy', { id: 'compose:/workspace/deploy/compose.yaml', label: 'Compose · deploy' }]);
+  assert.deepEqual(ran[1][5], ['compose', '-f', '/workspace/deploy/compose.yaml', 'logs', '--follow', '--no-color', '--timestamps', '--tail', '200']);
   assert.deepEqual(guideCalls, ['guide', 'whatsNew']);
   assert.ok(calls.some(call => call.name === 'command' && call.value === 'logline.logs.focus'));
   assert.ok(calls.some(call => call.name === 'config:captureTerminals' && call.value === true));
@@ -61,7 +66,7 @@ test('commands register the complete action surface and honor trust/focus/config
   registerCommands(controller);
   await handlers.get('logline.runCommand')!();
   assert.ok(calls.some(call => call.name === 'warning' && String(call.value).includes('Trust')));
-  assert.equal(ran.length, 1);
+  assert.equal(ran.length, 2);
 });
 
 test('auto-start runs only trusted eligible saved servers with resolved cwd', () => {

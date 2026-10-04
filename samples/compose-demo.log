@@ -1,0 +1,48 @@
+Attaching to api-1, worker-1, db-1
+db-1      | 2026-10-04T08:00:00.000000000Z LOG:  database system is ready to accept connections
+api-1     | 2026-10-04T08:00:00.040000000Z {"level":"info","msg":"server listening","port":3000}
+worker-1  | 2026-10-04T08:00:00.055000000Z level=info msg="consumer started" queue=emails
+api-1     | 2026-10-04T08:00:00.175000000Z {"level":"info","msg":"request completed","method":"POST","path":"/checkout","status":200,"durationMs":94,"requestId":"req_1001"}
+api-1     | 2026-10-04T08:00:00.273000000Z {"level":"info","msg":"request completed","method":"POST","path":"/checkout","status":200,"durationMs":113,"requestId":"req_1002"}
+api-1     | 2026-10-04T08:00:00.499000000Z {"level":"info","msg":"request completed","method":"POST","path":"/checkout","status":200,"durationMs":24,"requestId":"req_1003"}
+api-1     | 2026-10-04T08:00:00.577000000Z {"level":"info","msg":"request completed","method":"POST","path":"/checkout","status":200,"durationMs":149,"requestId":"req_1004"}
+worker-1  | 2026-10-04T08:00:00.661000000Z level=info msg="email sent" to_domain=acme.io durationMs=53
+api-1     | 2026-10-04T08:00:00.691000000Z {"level":"info","msg":"request completed","method":"POST","path":"/checkout","status":200,"durationMs":161,"requestId":"req_1005"}
+api-1     | 2026-10-04T08:00:00.765000000Z {"level":"info","msg":"request completed","method":"POST","path":"/checkout","status":200,"durationMs":141,"requestId":"req_1006"}
+api-1     | 2026-10-04T08:00:00.879000000Z {"level":"info","msg":"request completed","method":"POST","path":"/checkout","status":200,"durationMs":21,"requestId":"req_1007"}
+api-1     | 2026-10-04T08:00:00.961000000Z {"level":"info","msg":"request completed","method":"POST","path":"/checkout","status":200,"durationMs":123,"requestId":"req_1008"}
+worker-1  | 2026-10-04T08:00:01.128000000Z level=info msg="email sent" to_domain=acme.io durationMs=34
+api-1     | 2026-10-04T08:00:01.158000000Z {"level":"error","msg":"request completed","method":"POST","path":"/checkout","status":503,"durationMs":946,"requestId":"req_1009"}
+db-1      | 2026-10-04T08:00:01.359000000Z ERROR:  canceling statement due to statement timeout
+db-1      | 2026-10-04T08:00:01.364000000Z STATEMENT:  SELECT * FROM orders WHERE customer_id = $1 FOR UPDATE
+api-1     | 2026-10-04T08:00:01.369000000Z {"level":"info","msg":"request completed","method":"POST","path":"/checkout","status":200,"durationMs":120,"requestId":"req_1010"}
+api-1     | 2026-10-04T08:00:01.444000000Z {"level":"info","msg":"request completed","method":"POST","path":"/checkout","status":200,"durationMs":156,"requestId":"req_1011"}
+api-1     | 2026-10-04T08:00:01.535000000Z {"level":"info","msg":"request completed","method":"POST","path":"/checkout","status":200,"durationMs":69,"requestId":"req_1012"}
+worker-1  | 2026-10-04T08:00:01.756000000Z level=info msg="email sent" to_domain=acme.io durationMs=70
+api-1     | 2026-10-04T08:00:01.786000000Z {"level":"info","msg":"request completed","method":"POST","path":"/checkout","status":200,"durationMs":161,"requestId":"req_1013"}
+api-1     | 2026-10-04T08:00:01.861000000Z {"level":"info","msg":"request completed","method":"POST","path":"/checkout","status":200,"durationMs":159,"requestId":"req_1014"}
+api-1     | 2026-10-04T08:00:02.070000000Z {"level":"info","msg":"request completed","method":"POST","path":"/checkout","status":200,"durationMs":113,"requestId":"req_1015"}
+worker-1  | 2026-10-04T08:00:02.142000000Z level=warn msg="retrying job" attempt=2 job=invoice-8812
+api-1     | 2026-10-04T08:00:02.192000000Z {"level":"info","msg":"request completed","method":"POST","path":"/checkout","status":200,"durationMs":68,"requestId":"req_1016"}
+worker-1  | 2026-10-04T08:00:02.263000000Z level=info msg="email sent" to_domain=acme.io durationMs=65
+api-1     | 2026-10-04T08:00:02.293000000Z {"level":"info","msg":"request completed","method":"POST","path":"/checkout","status":200,"durationMs":46,"requestId":"req_1017"}
+api-1     | 2026-10-04T08:00:02.427000000Z {"level":"info","msg":"request completed","method":"POST","path":"/checkout","status":200,"durationMs":119,"requestId":"req_1018"}
+api-1     | 2026-10-04T08:00:02.523000000Z {"level":"info","msg":"request completed","method":"POST","path":"/checkout","status":200,"durationMs":150,"requestId":"req_1019"}
+api-1     | 2026-10-04T08:00:02.613000000Z {"level":"info","msg":"request completed","method":"POST","path":"/checkout","status":200,"durationMs":158,"requestId":"req_1020"}
+worker-1  | 2026-10-04T08:00:02.751000000Z level=info msg="email sent" to_domain=acme.io durationMs=65
+api-1     | 2026-10-04T08:00:02.781000000Z {"level":"info","msg":"request completed","method":"POST","path":"/checkout","status":200,"durationMs":58,"requestId":"req_1021"}
+api-1     | 2026-10-04T08:00:02.867000000Z {"level":"error","msg":"request completed","method":"POST","path":"/checkout","status":503,"durationMs":1192,"requestId":"req_1022"}
+api-1     | 2026-10-04T08:00:03.090000000Z Error: connect ECONNREFUSED 10.0.0.12:5432
+api-1     | 2026-10-04T08:00:03.091000000Z     at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1611:16)
+worker-1  | 2026-10-04T08:00:03.092000000Z level=info msg="email sent" to_domain=acme.io durationMs=41
+api-1     | 2026-10-04T08:00:03.093000000Z     at Pool.connect (/app/src/db.js:42:11)
+api-1     | 2026-10-04T08:00:03.293000000Z {"level":"info","msg":"request completed","method":"POST","path":"/checkout","status":200,"durationMs":60,"requestId":"req_1023"}
+api-1     | 2026-10-04T08:00:03.448000000Z {"level":"info","msg":"request completed","method":"POST","path":"/checkout","status":200,"durationMs":36,"requestId":"req_1024"}
+worker-1  | 2026-10-04T08:00:03.648000000Z level=info msg="email sent" to_domain=acme.io durationMs=75
+api-1     | 2026-10-04T08:00:03.678000000Z {"level":"info","msg":"request completed","method":"POST","path":"/checkout","status":200,"durationMs":28,"requestId":"req_1025"}
+api-1     | 2026-10-04T08:00:03.882000000Z {"level":"info","msg":"request completed","method":"POST","path":"/checkout","status":200,"durationMs":27,"requestId":"req_1026"}
+api-1     | 2026-10-04T08:00:04.100000000Z {"level":"info","msg":"request completed","method":"POST","path":"/checkout","status":200,"durationMs":64,"requestId":"req_1027"}
+api-1     | 2026-10-04T08:00:04.287000000Z {"level":"info","msg":"request completed","method":"POST","path":"/checkout","status":200,"durationMs":148,"requestId":"req_1028"}
+worker-1  | 2026-10-04T08:00:04.456000000Z level=info msg="email sent" to_domain=acme.io durationMs=79
+api-1     | 2026-10-04T08:00:04.486000000Z {"level":"info","msg":"request completed","method":"POST","path":"/checkout","status":200,"durationMs":92,"requestId":"req_1029"}
+api-1     | 2026-10-04T08:00:04.665000000Z {"level":"info","msg":"request completed","method":"POST","path":"/checkout","status":200,"durationMs":161,"requestId":"req_1030"}

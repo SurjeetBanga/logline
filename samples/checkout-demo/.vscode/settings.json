@@ -1,0 +1,5 @@
+{
+  "logline.servers": [
+    { "id": "checkout", "label": "Checkout API", "command": "node src/server.js", "cwd": "${workspaceFolder}" }
+  ]
+}

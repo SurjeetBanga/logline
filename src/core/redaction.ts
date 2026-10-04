@@ -13,7 +13,7 @@ function normalizedKey(key: string): string {
   return key.toLowerCase().replace(/[^a-z0-9]/g, '');
 }
 
-function isSensitiveKey(key: string, fields: string[] = []): boolean {
+export function isSensitiveKey(key: string, fields: string[] = []): boolean {
   const normalized = normalizedKey(key);
   if (fields.some(field => normalizedKey(field) === normalized)) return true;
   return SENSITIVE_KEY.test(key) && !/(count|limit|ttl|expires?|duration)$/i.test(key);

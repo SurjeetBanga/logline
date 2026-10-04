@@ -1,3 +1,5 @@
+import { extractExceptions } from './exceptions';
+import { findSensitiveValues, type SensitiveKind, type SensitiveValue } from './log-findings';
 import { getField } from './query';
 import type { LogEvent } from './types';
 
@@ -444,7 +446,15 @@ export class LogSiteIndex {
 }
 
 export interface SiteSample { id: number; level: string; message: string; time?: number; }
-export interface SiteStats { hits: number; errors: number; lastSeen?: number; samples: SiteSample[]; exact: number; }
+export interface SiteStats {
+  hits: number; errors: number; lastSeen?: number; samples: SiteSample[]; exact: number;
+  /** Collected when findings are on: sensitive values by kind, with the latest event that carried each. */
+  sensitive?: Map<SensitiveKind, { value: SensitiveValue; count: number; lastId: number }>;
+  /** Error-level events that carried no stack trace or exception. */
+  bareErrors?: number;
+  /** Events logged as plain text, without structured fields. */
+  plain?: number;
+}
 
 /** Per-site counts of retained and newly captured events. */
 export class LogSiteTracker {
@@ -453,10 +463,14 @@ export class LogSiteTracker {
   watermark = 0;
   /** The index version the counts were computed against. */
   indexVersion = -1;
+  /** Every event counted, attributed or not; the base for a statement's share of volume. */
+  total = 0;
+  /** Also collect the evidence log doctor reports. */
+  findings = false;
 
   constructor(readonly index: LogSiteIndex) { }
 
-  reset(watermark = 0): void { this.stats.clear(); this.watermark = watermark; this.indexVersion = this.index.version; }
+  reset(watermark = 0): void { this.stats.clear(); this.watermark = watermark; this.indexVersion = this.index.version; this.total = 0; }
 
   /** Count events in id order; returns whether any site changed. */
   process(events: Iterable<LogEvent>): boolean {
@@ -464,6 +478,7 @@ export class LogSiteTracker {
     for (const event of events) {
       if (event.id <= this.watermark) continue;
       this.watermark = event.id;
+      this.total++;
       const match = this.index.match(event);
       if (!match) continue;
       let stats = this.stats.get(match.site.id);
@@ -474,8 +489,20 @@ export class LogSiteTracker {
       stats.lastSeen = event.timestampMs ?? stats.lastSeen;
       stats.samples.push({ id: event.id, level: event.level, message: (event.message ?? '').slice(0, 200), time: event.timestampMs });
       if (stats.samples.length > 3) stats.samples.shift();
+      if (this.findings) collectFindings(stats, event);
       changed = true;
     }
     return changed;
   }
+}
+
+function collectFindings(stats: SiteStats, event: LogEvent): void {
+  for (const value of findSensitiveValues(event)) {
+    stats.sensitive ??= new Map();
+    const entry = stats.sensitive.get(value.kind);
+    if (entry) { entry.count++; entry.lastId = event.id; entry.value = value; }
+    else stats.sensitive.set(value.kind, { value, count: 1, lastId: event.id });
+  }
+  if ((event.level === 'error' || event.level === 'fatal') && !extractExceptions(event).length) stats.bareErrors = (stats.bareErrors ?? 0) + 1;
+  if (!event.isJson && !Object.keys(event.fields ?? {}).length) stats.plain = (stats.plain ?? 0) + 1;
 }

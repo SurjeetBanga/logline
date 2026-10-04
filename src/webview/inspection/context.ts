@@ -76,6 +76,11 @@ export function createInspection(elements: Elements, scrollViewport: HTMLElement
       api.postMessage({ type: 'openLogSite', id: Number(site.dataset.id) });
       return true;
     }
+    const breakpoint = (event.target as HTMLElement).closest<HTMLElement>('.break-on-log-button');
+    if (breakpoint) {
+      api.postMessage({ type: 'breakOnEvent', id: Number(breakpoint.dataset.id) });
+      return true;
+    }
     const share = (event.target as HTMLElement).closest<HTMLElement>('.share-source-button');
     if (share) {
       api.postMessage({ type: 'shareEvent', id: Number(share.dataset.id) });

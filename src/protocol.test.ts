@@ -19,6 +19,11 @@ test('message boundary rejects invalid actions and source coordinates', () => {
     { type: 'showGuide', section: 'whatsNew' });
   assert.deepEqual(parseViewRequest({ type: 'showGuide', section: 'unknown' }),
     { type: 'showGuide', section: 'guide' });
+  assert.deepEqual(parseViewRequest({ type: 'traces', limit: 5 }), { type: 'traces' });
+  assert.deepEqual(parseViewRequest({ type: 'breakOnEvent', id: 7 }), { type: 'breakOnEvent', id: 7 });
+  assert.equal(parseViewRequest({ type: 'breakOnEvent', id: -1 }), undefined);
+  assert.deepEqual(JSON.parse(JSON.stringify(parseViewRequest({ type: 'breakOnQuery', query: 'level:error', levels: ['error', 3], serverId: 'api' }))),
+    { type: 'breakOnQuery', query: 'level:error', levels: ['error'] });
 });
 
 test('message boundary preserves an empty level selection and normalizes pagination', () => {

@@ -86,6 +86,31 @@
         "category": "Logline"
       },
       {
+        "command": "logline.followCompose",
+        "title": "Follow Docker Compose Project",
+        "category": "Logline"
+      },
+      {
+        "command": "logline.breakOnMatchingLogs",
+        "title": "Break on Matching Logs",
+        "category": "Logline"
+      },
+      {
+        "command": "logline.manageLogBreakpoints",
+        "title": "Manage Log Breakpoints",
+        "category": "Logline"
+      },
+      {
+        "command": "logline.showLogHealth",
+        "title": "Show Log Health",
+        "category": "Logline"
+      },
+      {
+        "command": "logline.fixLogStatementWithCopilot",
+        "title": "Fix Log Statement with Copilot",
+        "category": "Logline"
+      },
+      {
         "command": "logline.stopCommand",
         "title": "Stop Active Command",
         "category": "Logline"
@@ -188,7 +213,8 @@
     ],
     "menus": {
       "commandPalette": [
-        { "command": "logline.showLogSite", "when": "false" }
+        { "command": "logline.showLogSite", "when": "false" },
+        { "command": "logline.fixLogStatementWithCopilot", "when": "false" }
       ]
     },
     "languageModelTools": [
@@ -374,6 +400,16 @@
           "default": true,
           "description": "Join plain-text stack trace lines (Java and Node `at` frames, `Caused by:`, Python tracebacks) onto the line before them, so each trace becomes one searchable event. Applies to new captures and plain-text imports."
         },
+        "logline.containerPrefixes": {
+          "type": "string",
+          "enum": ["auto", "off"],
+          "enumDescriptions": [
+            "Split Docker Compose (`api-1  | …`) and `kubectl logs --prefix` (`[pod/…/…] …`) prefixes, so each service becomes its own source and its JSON or logfmt payload is parsed.",
+            "Keep container prefixes as part of the message."
+          ],
+          "default": "auto",
+          "description": "Recognize container log prefixes in captured and imported plain-text output. Docker timestamps printed with `--timestamps` are used when the payload has none. Applies to new captures and imports."
+        },
         "logline.captureDebugSessions": {
           "type": "boolean",
           "default": true,
@@ -417,6 +453,17 @@
           ],
           "default": "codelens",
           "description": "Connect log statements in source code to captured events. Logline indexes logging calls in up to 5,000 workspace source files and attributes each event by the code location it reports or by its message text."
+        },
+        "logline.logDoctor": {
+          "type": "string",
+          "enum": ["off", "security", "all"],
+          "enumDescriptions": [
+            "Do not check log statements.",
+            "Report log statements that logged secrets (tokens, keys, credentials) or personal data (email addresses, card numbers).",
+            "Also report errors logged without the caught exception, statements that produce most of the log volume, and values formatted into message text."
+          ],
+          "default": "all",
+          "description": "Report problems with log statements in the Problems panel, based on the events they actually logged. Requires log lenses. Values are masked in every report. Add a `logline-ignore` comment on or above a statement to silence it."
         },
         "logline.logLensMaxFiles": {
           "type": "integer",

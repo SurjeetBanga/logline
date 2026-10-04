@@ -1,11 +1,12 @@
 import type { LogEvent } from '../../core/types';
+import type { RowEvent } from '../../protocol/messages';
 import { cell } from '../dom';
 import { buildEventDetails } from '../inspection/details';
 import type { ViewerState } from '../state';
 
 export interface Column { key: string; label: string; }
 export function createRows(state: ViewerState, columns: () => Column[], formatTimestamp: (event: LogEvent) => string | undefined) {
-  function buildRow(event: LogEvent) {
+  function buildRow(event: RowEvent) {
     const row = document.createElement('tr');
     row.className = 'event-row';
     row.dataset.id = String(event.id);
@@ -18,6 +19,17 @@ export function createRows(state: ViewerState, columns: () => Column[], formatTi
     button.title = event.message ?? '';
     button.setAttribute('aria-expanded', String(event.id === state.selected));
     messageContent.append(button);
+    if (event.traceId) {
+      // One click from any request's log to its waterfall across services.
+      const trace = document.createElement('button');
+      trace.className = 'row-trace-button';
+      trace.type = 'button';
+      trace.dataset.traceId = event.traceId;
+      trace.title = 'Show trace';
+      trace.setAttribute('aria-label', 'Show trace');
+      trace.innerHTML = '<svg aria-hidden="true" viewBox="0 0 16 16" width="12" height="12"><path d="M2 3.5h7M4 7.5h8M7 11.5h7" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>';
+      messageContent.append(trace);
+    }
     messageCell.append(messageContent);
     for (const column of columns()) {
       let tableCell: HTMLTableCellElement;

@@ -380,12 +380,23 @@
       contextLogs: element("contextLogs"),
       contextDetails: element("contextDetails"),
       traceDialog: element("traceDialog"),
+      traceBack: element("traceBack"),
+      traces: element("traces"),
+      traceCount: element("traceCount"),
+      tracesDialog: element("tracesDialog"),
+      tracesClose: element("tracesClose"),
+      tracesStatus: element("tracesStatus"),
+      tracesRows: element("tracesRows"),
+      tracesErrorsOnly: element("tracesErrorsOnly"),
+      tracesStartReceiver: element("tracesStartReceiver"),
+      otlpStatus: element("otlpStatus"),
       traceTitle: element("traceTitle"),
       traceStatus: element("traceStatus"),
       traceRows: element("traceRows"),
       traceClose: element("traceClose"),
       traceFilter: element("traceFilter"),
       otlpToggle: element("otlpToggle"),
+      breakOnLogs: element("breakOnLogs"),
       saveSearchDialog: element("saveSearchDialog"),
       saveSearchForm: element("saveSearchForm"),
       saveSearchName: element("saveSearchName"),
@@ -470,6 +481,12 @@
       site.title = "Open the line of code that logged this event";
       site.dataset.id = String(id);
       container.append(site);
+      const breakpoint = document.createElement("button");
+      breakpoint.className = "break-on-log-button";
+      breakpoint.textContent = "Break when this logs again";
+      breakpoint.title = "Add a debugger breakpoint on the statement that logged this event";
+      breakpoint.dataset.id = String(id);
+      container.append(breakpoint);
     }
     exceptions.forEach((exception, blockIndex) => {
       const section = document.createElement("section");
@@ -569,6 +586,11 @@
         api.postMessage({ type: "openLogSite", id: Number(site.dataset.id) });
         return true;
       }
+      const breakpoint = event.target.closest(".break-on-log-button");
+      if (breakpoint) {
+        api.postMessage({ type: "breakOnEvent", id: Number(breakpoint.dataset.id) });
+        return true;
+      }
       const share = event.target.closest(".share-source-button");
       if (share) {
         api.postMessage({ type: "shareEvent", id: Number(share.dataset.id) });
@@ -618,8 +640,9 @@
   }
   function createTraceView(elements, api, scope, actions) {
     let current;
-    function show(traceId) {
+    function show(traceId, fromList = false) {
       current = traceId.toLowerCase();
+      elements.traceBack.hidden = !fromList;
       elements.traceTitle.textContent = `Trace ${current.length > 12 ? `${current.slice(0, 8)}\u2026${current.slice(-4)}` : current}`;
       elements.traceTitle.title = current;
       elements.traceStatus.textContent = "Loading\u2026";
@@ -628,6 +651,10 @@
       api.postMessage({ type: "trace", traceId: current });
     }
     scope.listen(elements.traceClose, "click", () => elements.traceDialog.close());
+    scope.listen(elements.traceBack, "click", () => {
+      elements.traceDialog.close();
+      actions.showList();
+    });
     scope.listen(elements.traceDialog, "close", () => {
       current = void 0;
       elements.traceRows.replaceChildren();
@@ -744,9 +771,93 @@
       name,
       cell(log.server ?? "", "trace-service"),
       timeline(log.offsetMs ?? 0, void 0, total, "trace-log-mark"),
-      cell(log.offsetMs === void 0 ? "" : `+${formatDuration(log.offsetMs)}`, "trace-duration")
+      cell(log.offsetMs === void 0 ? "" : `${log.offsetMs < 0 ? "\u2212" : "+"}${formatDuration(Math.abs(log.offsetMs))}`, "trace-duration")
     );
     return row;
+  }
+
+  // src/webview/inspection/traces.ts
+  function createTraceList(elements, api, scope, actions) {
+    let traces = [];
+    function show() {
+      elements.tracesStatus.textContent = "Loading\u2026";
+      elements.tracesRows.replaceChildren();
+      if (!elements.tracesDialog.open) elements.tracesDialog.showModal();
+      api.postMessage({ type: "traces" });
+    }
+    scope.listen(elements.traces, "click", show);
+    scope.listen(elements.tracesClose, "click", () => elements.tracesDialog.close());
+    scope.listen(elements.tracesErrorsOnly, "change", render);
+    scope.listen(elements.tracesStartReceiver, "click", () => {
+      actions.startReceiver();
+      elements.tracesDialog.close();
+    });
+    scope.listen(elements.tracesRows, "click", (event) => {
+      const row = event.target.closest("[data-trace-id]");
+      if (!row?.dataset.traceId) return;
+      elements.tracesDialog.close();
+      actions.showTrace(row.dataset.traceId);
+    });
+    scope.listen(elements.tracesRows, "keydown", (event) => {
+      const key = event.key;
+      if (key !== "Enter" && key !== " ") return;
+      const row = event.target.closest("[data-trace-id]");
+      if (!row?.dataset.traceId) return;
+      event.preventDefault();
+      elements.tracesDialog.close();
+      actions.showTrace(row.dataset.traceId);
+    });
+    function receive(list) {
+      traces = list;
+      if (elements.tracesDialog.open) render();
+    }
+    function render() {
+      const errorsOnly = elements.tracesErrorsOnly.checked;
+      const shown = errorsOnly ? traces.filter((trace) => trace.errors) : traces;
+      const withSpans = traces.filter((trace) => trace.spans).length;
+      elements.tracesStartReceiver.hidden = withSpans > 0;
+      if (!traces.length) {
+        elements.tracesStatus.textContent = "No traces yet. Start the OpenTelemetry receiver and run an instrumented app, or log JSON with a traceId field.";
+        elements.tracesRows.replaceChildren();
+        return;
+      }
+      const failed = traces.filter((trace) => trace.errors).length;
+      elements.tracesStatus.textContent = `${traces.length.toLocaleString()} recent ${traces.length === 1 ? "trace" : "traces"} \xB7 ${failed.toLocaleString()} with errors` + (withSpans < traces.length ? ` \xB7 ${(traces.length - withSpans).toLocaleString()} from logs only` : "") + " \xB7 Choose one to see its waterfall";
+      const longest = Math.max(1, ...shown.map((trace) => trace.durationMs));
+      elements.tracesRows.replaceChildren(...shown.map((trace) => {
+        const row = document.createElement("tr");
+        row.className = `traces-row${trace.errors ? " trace-error" : ""}`;
+        row.dataset.traceId = trace.traceId;
+        row.tabIndex = 0;
+        row.setAttribute("aria-label", `${trace.name}, ${formatDuration(trace.durationMs)}${trace.errors ? `, ${trace.errors} errors` : ""}`);
+        const name = cell(`${trace.errors ? "\u26A0 " : ""}${trace.name || trace.traceId}`, "trace-name");
+        name.title = `Trace ${trace.traceId}`;
+        const services = cell("", "traces-services");
+        for (const service of trace.services.slice(0, 4)) {
+          const chip = document.createElement("span");
+          chip.className = "service-chip";
+          chip.textContent = service;
+          services.append(chip);
+        }
+        if (trace.services.length > 4) services.append(document.createTextNode(` +${trace.services.length - 4}`));
+        const duration = cell("", "traces-duration");
+        const track = document.createElement("div");
+        track.className = "trace-track";
+        const bar = document.createElement("div");
+        bar.className = "trace-bar";
+        bar.style.left = "0";
+        bar.style.width = `${Math.max(1, trace.durationMs / longest * 100)}%`;
+        track.append(bar);
+        const label = document.createElement("span");
+        label.className = "traces-duration-label";
+        label.textContent = formatDuration(trace.durationMs);
+        duration.append(track, label);
+        const counts = [trace.spans ? `${trace.spans} spans` : "", trace.logs ? `${trace.logs} logs` : ""].filter(Boolean).join(" \xB7 ");
+        row.append(cell(trace.startMs === void 0 ? "" : actions.formatTime(trace.startMs), "time"), name, services, duration, cell(counts, "traces-counts"));
+        return row;
+      }));
+    }
+    return { show, receive };
   }
 
   // src/webview/popovers.ts
@@ -1383,6 +1494,16 @@
       button.title = event.message ?? "";
       button.setAttribute("aria-expanded", String(event.id === state.selected));
       messageContent.append(button);
+      if (event.traceId) {
+        const trace = document.createElement("button");
+        trace.className = "row-trace-button";
+        trace.type = "button";
+        trace.dataset.traceId = event.traceId;
+        trace.title = "Show trace";
+        trace.setAttribute("aria-label", "Show trace");
+        trace.innerHTML = '<svg aria-hidden="true" viewBox="0 0 16 16" width="12" height="12"><path d="M2 3.5h7M4 7.5h8M7 11.5h7" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>';
+        messageContent.append(trace);
+      }
       messageCell.append(messageContent);
       for (const column of columns()) {
         let tableCell;
@@ -2103,7 +2224,13 @@
     const request = (force = false) => bridge.request(force);
     const traceView = createTraceView(elements, api, scope, {
       showContext: (id) => inspection.showContext(id),
-      applyQuery: (query) => search.setQuery(query, true)
+      applyQuery: (query) => search.setQuery(query, true),
+      showList: () => traceList.show()
+    });
+    const traceList = createTraceList(elements, api, scope, {
+      showTrace: (traceId) => traceView.show(traceId, true),
+      formatTime: (ms) => formatTimestamp({ id: 0, level: "", timestampMs: ms }) ?? "",
+      startReceiver: () => api.postMessage({ type: "toggleOtlp", enabled: true })
     });
     let otlpRunning = false;
     let cellActions;
@@ -2161,6 +2288,10 @@
         traceView.receive(data.trace);
         return;
       }
+      if (data.type === "traces") {
+        traceList.receive(data.traces);
+        return;
+      }
       if (data.type === "details") {
         if (data.target === "context") inspection.receiveDetails(data);
         else table.receiveDetails(data);
@@ -2195,6 +2326,14 @@
       if (data.applyQuery !== void 0 && data.applyQuery !== search.query()) search.setQuery(data.applyQuery, true);
       if (data.openTrace) traceView.show(data.openTrace);
       otlpRunning = data.otlp?.running === true;
+      elements.otlpStatus.hidden = !otlpRunning;
+      if (otlpRunning) {
+        elements.otlpStatus.textContent = `OpenTelemetry ${data.otlp?.endpoint?.replace(/^https?:\/\//, "") ?? ""}`.trim();
+        elements.otlpStatus.title = `Receiving OpenTelemetry logs and traces on ${data.otlp?.endpoint ?? "localhost"}. Click to see traces.`;
+      }
+      elements.traceCount.hidden = !data.traceCount;
+      elements.traceCount.textContent = data.traceCount ? data.traceCount.toLocaleString() : "";
+      elements.traces.title = data.traceCount ? `${data.traceCount.toLocaleString()} traces received from OpenTelemetry. Show requests across services.` : "Requests across services, from OpenTelemetry spans and logs with a trace id";
       elements.otlpToggle.textContent = otlpRunning ? "Stop OpenTelemetry receiver" : "Start OpenTelemetry receiver";
       elements.otlpToggle.title = otlpRunning ? `Receiving OpenTelemetry on ${data.otlp?.endpoint ?? "localhost"}${data.otlp?.error ? ` (${data.otlp.error})` : ""}` : "Receive OpenTelemetry logs and traces from instrumented apps on this machine";
       if (data.generation < minimumSnapshotGeneration) {
@@ -2223,7 +2362,7 @@
       state.newest = data.newest;
       if (!state.following && state.before === void 0)
         state.before = state.newest;
-      elements.status.textContent = data.status;
+      elements.status.textContent = otlpRunning && data.status.startsWith("OpenTelemetry receiver on") ? "Ready" : data.status;
       elements.command.textContent = data.command;
       elements.command.title = data.command;
       elements.stop.disabled = !data.running;
@@ -2273,7 +2412,7 @@
         }
       }
       if (data.sessions) {
-        const sessions = data.sessions.filter((session) => !state.selectedServer || session.serverId === state.selectedServer);
+        const sessions = data.sessions.filter((session) => !state.selectedServer || session.serverId === state.selectedServer || state.selectedServer.startsWith(`${session.serverId}::`));
         const signature = JSON.stringify(sessions.map((session) => [session.id, session.serverId, session.command, session.status, session.startedAt, session.endedAt, session.captureStatus, session.captureReason, session.canStop]));
         if (signature !== sessionSignature) {
           sessionSignature = signature;
@@ -2387,6 +2526,11 @@
     scope.listen(elements.logs, "click", (event) => {
       if (inspection.handleDetailAction(event))
         return;
+      const trace = event.target.closest(".row-trace-button");
+      if (trace?.dataset.traceId) {
+        traceView.show(trace.dataset.traceId);
+        return;
+      }
       const button = event.target.closest(".message-button");
       if (!button)
         return;
@@ -2453,7 +2597,7 @@
     });
     const actionsContainer = elements.moreActions.closest(".popover-container");
     const actionsMenu = createPopover(actionsContainer, elements.moreActions, elements.actionsMenu);
-    const actionItems = [elements.shareSpecificRuns, elements.export, elements.import, elements.otlpToggle, elements.manage, elements.config, elements.help];
+    const actionItems = [elements.shareSpecificRuns, elements.export, elements.import, elements.breakOnLogs, elements.otlpToggle, elements.manage, elements.config, elements.help];
     scope.listen(elements.moreActions, "click", () => {
       if (actionsMenu.isOpen()) actionItems[0].focus();
     });
@@ -2557,11 +2701,13 @@
     scope.listen(elements.help, "click", () => api.postMessage({ type: "showGuide", section: guideUnread ? "whatsNew" : "guide" }));
     scope.listen(elements.manage, "click", () => api.postMessage({ type: "manageServers" }));
     scope.listen(elements.otlpToggle, "click", () => api.postMessage({ type: "toggleOtlp", enabled: !otlpRunning }));
+    scope.listen(elements.otlpStatus, "click", () => traceList.show());
     function exportRequest(type) {
       api.postMessage({ type, query: search.query(), levels: state.currentLevels(), serverId: state.selectedServer || void 0, sessionId: state.selectedSession || void 0 });
     }
     scope.listen(elements.export, "click", () => exportRequest("export"));
     scope.listen(elements.import, "click", () => api.postMessage({ type: "import" }));
+    scope.listen(elements.breakOnLogs, "click", () => api.postMessage({ type: "breakOnQuery", query: search.query(), levels: state.currentLevels() }));
     scope.listen(elements.run, "click", () => api.postMessage({ type: "run", serverId: state.selectedServer || void 0 }));
     scope.listen(document, "visibilitychange", () => {
       if (!document.hidden)
@@ -2576,6 +2722,7 @@
       search,
       inspection,
       traceView,
+      traceList,
       receive,
       dispose() {
         scope.dispose();

@@ -29,6 +29,12 @@ export function buildEventDetails(id: number, text: string | undefined, exceptio
     site.title = 'Open the line of code that logged this event';
     site.dataset.id = String(id);
     container.append(site);
+    const breakpoint = document.createElement('button');
+    breakpoint.className = 'break-on-log-button';
+    breakpoint.textContent = 'Break when this logs again';
+    breakpoint.title = 'Add a debugger breakpoint on the statement that logged this event';
+    breakpoint.dataset.id = String(id);
+    container.append(breakpoint);
   }
   exceptions.forEach((exception, blockIndex) => {
     const section = document.createElement('section');

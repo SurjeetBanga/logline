@@ -4,7 +4,8 @@ import type { Settings } from '../core/settings';
 import type { SessionSummary } from '../core/types';
 import type { Ingestion } from './ingestion';
 import { LineReader } from './line-reader';
-import { StackJoiner } from './stack-joiner';
+import type { ContainerTag } from '../core/container-prefix';
+import { LinePipeline, linePipelineOptions } from './line-pipeline';
 import type { RuntimeState } from './runtime-state';
 import type { SessionRegistry } from './session-registry';
 import type { Session } from './types';
@@ -85,25 +86,25 @@ export class ProcessRunner {
       if (source !== 'both' && source !== stream) child[stream].resume();
     }
     const limit = this.config.get('maxLineLength', 65536);
-    const joiners: StackJoiner[] = [];
+    const joiners: LinePipeline[] = [];
     const readers = (['stdout', 'stderr'] as const).filter(stream => source === 'both' || source === stream).map(stream => {
-      const ingest = (line: string, truncated: boolean) => {
+      const ingest = (line: string, truncated: boolean, container?: ContainerTag) => {
         if (!this.sessions.has(session)) return;
         const event = this.ingestion.accept(line, stream, {
           serverId: server.id, server: server.label,
-          sessionId: record.id, truncated, jsonOnly: server.jsonOnly, persist: true
+          sessionId: record.id, truncated, jsonOnly: server.jsonOnly, persist: true, container
         });
         if (!event) return;
         record.events++;
         this.state.notify();
       };
       // Each stream is joined separately: a trace never interleaves stdout and stderr.
-      const joiner = this.config.get('joinStackTraces', true) ? new StackJoiner(ingest, limit) : undefined;
-      if (joiner) joiners.push(joiner);
+      const joiner = new LinePipeline(ingest, linePipelineOptions(this.config, limit));
+      joiners.push(joiner);
       const reader = new LineReader((line, truncated) => {
         if (!this.sessions.has(session)) return;
         output?.write(line + '\r\n');
-        if (joiner) joiner.write(line, truncated); else ingest(line, truncated);
+        joiner.write(line, truncated);
       }, limit);
       child[stream].on('data', chunk => reader.write(chunk));
       return reader;

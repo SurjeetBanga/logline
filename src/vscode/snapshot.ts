@@ -30,9 +30,10 @@ export interface SnapshotSources {
   ingestion: Ingestion; persistence: LogPersistence; searches: SavedSearches; running: boolean;
   guideStatus: GuideStatus; agentAccess: AgentLogAccess; terminalCapture?: { status(): { state: 'off' | 'waiting' | 'capturing' | 'attention'; detail: string; active: number; failed: number } };
   otlp?: { status(): ReceiverStatus };
+  spans?: { traceCount: number };
 }
 export function buildSnapshot(msg: Extract<ViewRequest, { type: 'snapshot'; }>,
-  { store, config, registry, state, ingestion, persistence, searches, running, guideStatus, agentAccess, terminalCapture, otlp }: SnapshotSources): Snapshot {
+  { store, config, registry, state, ingestion, persistence, searches, running, guideStatus, agentAccess, terminalCapture, otlp, spans }: SnapshotSources): Snapshot {
   const options = { query: msg.query, serverId: msg.serverId, sessionId: msg.sessionId, levels: msg.levels,
     page: msg.page, before: msg.before, sort: msg.sort, sortDirection: msg.sortDirection };
   const configured = config.get<string[]>('columns', []);
@@ -47,7 +48,10 @@ export function buildSnapshot(msg: Extract<ViewRequest, { type: 'snapshot'; }>,
   // payload can carry dozens of keys per event. Trimming here keeps the
   // refresh payload proportional to what is on screen rather than to how
   // wide the log records happen to be.
-  const events = pageResult?.events.map(event => ({ ...event, fields: pickColumns(event, projectedColumns) }));
+  const events = pageResult?.events.map(event => {
+    const traceId = getField(event, 'traceId');
+    return { ...event, fields: pickColumns(event, projectedColumns), ...(typeof traceId === 'string' && traceId ? { traceId } : {}) };
+  });
   const sessions = registry.sessionSummaries();
   const known = new Set(sessions.map(session => `${session.serverId}\0${session.id}`));
   // Imported files and retained runs whose registry record has been pruned
@@ -70,7 +74,8 @@ export function buildSnapshot(msg: Extract<ViewRequest, { type: 'snapshot'; }>,
     newest: ingestion.sequence, generation: state.generation,
     persistDropped: persistence.persistDropped,
     timezone: config.get('timezone', 'local'), guideStatus, agentSharing: agentAccess.status(),
-    captureTerminals: config.get('captureTerminals', false), captureStatus: terminalCapture?.status(), otlp: otlp?.status()
+    captureTerminals: config.get('captureTerminals', false), captureStatus: terminalCapture?.status(), otlp: otlp?.status(),
+    traceCount: spans?.traceCount ?? 0
   };
 
 }
