@@ -288,6 +288,8 @@ button:disabled { opacity: .45; cursor: default; }
 .session { display: flex; gap: 16px; padding-top: 6px; color: var(--vscode-descriptionForeground, #aaa); }
 #sessions { white-space: nowrap; }
 #command { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* VS Code styles every code element with a background; without a command it is an empty box. */
+#command:empty { display: none; }
 /* The virtualized table fully replaces its visible rows on every update,
    giving the browser's scroll-anchoring heuristic no stable node to track;
    disabling it avoids relying on that heuristic across those replacements. */
@@ -353,7 +355,9 @@ footer { padding: 8px 14px; font-size: 12px; flex: none; }
 #tracesDialog[open] { display: flex; flex-direction: column; }
 #tracesDialog::backdrop { background: rgba(0, 0, 0, .5); }
 #tracesStatus { color: var(--vscode-descriptionForeground, #aaa); font-size: 12px; margin: 8px 0; }
+#tracesDialog .context-header > span { display: inline-flex; align-items: center; }
 .traces-filter { display: inline-flex; align-items: center; gap: 4px; margin-right: 10px; color: var(--vscode-descriptionForeground, #aaa); font-size: 12px; }
+.traces-filter input[type="checkbox"] { margin: 0; width: auto; height: auto; padding: 0; border: none; background: none; }
 .traces-table th:nth-child(1) { width: 104px; }
 .traces-table th:nth-child(2) { width: 30%; }
 .traces-table th:nth-child(3) { width: auto; }
