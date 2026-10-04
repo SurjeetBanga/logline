@@ -1,12 +1,16 @@
 # Logline
 
-**Live tail for JSON logs, right inside VS Code.** Run your server, filter the noise, and inspect an error without leaving the editor. Logline turns structured logs into a searchable table in the bottom **Logs** panel and keeps plain-text output alongside them.
-
-Logline can also capture commands you run in supported VS Code terminals. Turn **Terminal capture: Off** to **Terminal capture: On** in the Logs panel, run the next command normally, and its output becomes searchable without wrapping the command. Commands already in progress cannot be backfilled. Completed terminal runs remain available while their logs are retained; empty stale terminal metadata is removed automatically. Use the combined source/run dropdown’s **Runs** tab to stop an individual Logline-owned process or task with its inline **Stop** action; externally captured terminal commands remain observe-only. Its **Sources** tab filters by server, task, terminal, or imported source. Choose **Share logs with agent** to make retained Logline sources and new runs in this VS Code window available to Copilot. The first use asks for confirmation and explains that redaction may not remove every sensitive value; later uses enable sharing immediately. The toolbar shows **Sharing logs · Stop**, with the sharing scope below it. Continue in your existing Copilot agent chat and ask it to check the logs. Use **More actions → Choose specific runs to share…** to limit access, or click **Stop** on the sharing button to revoke it. Sharing is held in memory and ends when logs are cleared or the window or workspace changes.
+**Live tail for JSON logs, right inside VS Code.** Run your server, filter the noise, inspect errors, and let Copilot investigate them — without leaving the editor.
 
 ![Logline demo: a running service streams logs and traces into the Logs panel, the Traces list opens a failed request's waterfall, log doctor flags a token and a swallowed exception in the editor, Break when this logs again stops the debugger on a log statement, and Docker Compose output splits into one source per service.](media/demo.gif)
 
 *Logline running in VS Code with a [small demo app](samples/README.md) and [Docker Compose sample logs](samples/compose-demo.log).*
+
+- Searchable, sortable table for structured logs: Pino, Winston, Log4j2, ECS, OpenTelemetry, JSONL
+- Queries like `level:error status:5xx durationMs:>200`
+- Expand JSON, read nested exceptions, jump to stack-frame source
+- Capture terminal commands, VS Code tasks, debug sessions, or imported log files
+- Share redacted, read-only logs with Copilot agent mode, Claude Code, or Codex for live debugging
 
 ## Get started
 
@@ -26,6 +30,12 @@ Logline can also capture commands you run in supported VS Code terminals. Turn *
 **Try it with a file:** run **Logline: Import Logs** and select [samples/demo-logs.jsonl](samples/demo-logs.jsonl) from this repository. You can also import JSON, JSONL/NDJSON, CSV, and plain-text logs.
 
 Open **Help** in the toolbar for the offline visual guide, or run **Logline: What’s New** for release highlights. See [Development](#development) to build and install from source.
+
+## Terminal capture and Copilot sharing
+
+Logline turns structured logs into a searchable table in the bottom **Logs** panel and keeps plain-text output alongside them.
+
+Logline can also capture commands you run in supported VS Code terminals. Turn **Terminal capture: Off** to **Terminal capture: On** in the Logs panel, run the next command normally, and its output becomes searchable without wrapping the command. Commands already in progress cannot be backfilled. Completed terminal runs remain available while their logs are retained; empty stale terminal metadata is removed automatically. Use the combined source/run dropdown’s **Runs** tab to stop an individual Logline-owned process or task with its inline **Stop** action; externally captured terminal commands remain observe-only. Its **Sources** tab filters by server, task, terminal, or imported source. Choose **Share logs with agent** to make retained Logline sources and new runs in this VS Code window available to Copilot. The first use asks for confirmation and explains that redaction may not remove every sensitive value; later uses enable sharing immediately. The toolbar shows **Sharing logs · Stop**, with the sharing scope below it. Continue in your existing Copilot agent chat and ask it to check the logs. Use **More actions → Choose specific runs to share…** to limit access, or click **Stop** on the sharing button to revoke it. Sharing is held in memory and ends when logs are cleared or the window or workspace changes.
 
 ## What you can do
 

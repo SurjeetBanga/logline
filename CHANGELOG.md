@@ -2,6 +2,12 @@
 
 All notable changes to Logline are documented in this file.
 
+## 1.13.1 — 2026-10-04
+
+### Changes
+
+- Improved Marketplace listing: categories, keywords, sponsor link, and README overview.
+
 ## 1.13.0 — 2026-10-04
 
 ### Changes

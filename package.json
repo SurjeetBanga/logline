@@ -2,7 +2,7 @@
   "name": "logline",
   "displayName": "Logline — Live Tail for JSON Logs",
   "description": "Capture terminal and server output in a searchable, expandable JSON log viewer, and share it with Copilot, Claude Code, or Codex.",
-  "version": "1.13.0",
+  "version": "1.13.1",
   "publisher": "surjeetbanga",
   "license": "MIT",
   "repository": {
@@ -13,6 +13,9 @@
     "url": "https://github.com/SurjeetBanga/logline/issues"
   },
   "homepage": "https://github.com/SurjeetBanga/logline#readme",
+  "sponsor": {
+    "url": "https://github.com/sponsors/SurjeetBanga"
+  },
   "icon": "media/icon.png",
   "engines": {
     "vscode": "^1.99.0"
@@ -20,7 +23,7 @@
   "categories": [
     "Debuggers",
     "Visualization",
-    "Other"
+    "AI"
   ],
   "keywords": [
     "live tail",
@@ -36,7 +39,16 @@
     "Copilot",
     "Claude Code",
     "Codex",
-    "MCP"
+    "MCP",
+    "logs",
+    "tail",
+    "jsonl",
+    "ndjson",
+    "pino",
+    "winston",
+    "log4j",
+    "debugging",
+    "terminal"
   ],
   "activationEvents": [
     "onStartupFinished"
@@ -779,13 +791,15 @@
     "typecheck": "tsc --noEmit && tsc -p tsconfig.webview.json && tsc -p tsconfig.test.json --noEmit",
     "test": "node scripts/test.mjs",
     "benchmark": "npm run compile && node --expose-gc scripts/benchmark.mjs",
-    "smoke": "npm run compile && tsc -p tsconfig.test.json && node scripts/smoke.mjs"
+    "smoke": "npm run compile && tsc -p tsconfig.test.json && node scripts/smoke.mjs",
+    "publish:ovsx": "ovsx publish -p $OVSX_PAT"
   },
   "devDependencies": {
     "@types/node": "^20.19.43",
     "@types/vscode": "^1.99.0",
     "@vscode/vsce": "^3.6.0",
     "esbuild": "^0.28.2",
+    "ovsx": "^1.2.0",
     "typescript": "^5.9.3"
   },
   "dependencies": {
