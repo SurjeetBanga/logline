@@ -161,7 +161,8 @@ export class LogDoctor implements vscode.Disposable, vscode.CodeActionProvider {
     const actions: vscode.CodeAction[] = [];
     for (const diagnostic of context.diagnostics) {
       const finding = this.findingsByDiagnostic.get(diagnostic);
-      if (!finding) continue;
+      // Diagnostics do not move with edits; skip a statement whose line no longer exists.
+      if (!finding || finding.site.line < 1 || finding.site.line > document.lineCount) continue;
       const line = document.lineAt(finding.site.line - 1);
       const fix = (title: string, edit: (workspaceEdit: vscode.WorkspaceEdit) => void, preferred = false) => {
         const action = new vscode.CodeAction(title, vscode.CodeActionKind.QuickFix);

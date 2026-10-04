@@ -37,8 +37,8 @@ const DETECTORS: Detector[] = [
   { kind: 'google-key', category: 'secret', hint: 'AIza', pattern: /\bAIza[0-9A-Za-z_-]{35}\b/ },
   { kind: 'stripe-key', category: 'secret', hint: '_live_', pattern: /\b[rs]k_live_[0-9A-Za-z]{16,}/ },
   { kind: 'email', category: 'personal', hint: '@', pattern: /\b[A-Za-z0-9._%+-]{1,64}@[A-Za-z0-9-]{1,63}(?:\.[A-Za-z0-9-]{1,63}){0,8}\.[A-Za-z]{2,24}\b/ },
-  // 15- and 16-digit card numbers (Amex, Visa, Mastercard, Discover).
-  { kind: 'card', category: 'personal', hint: '', pattern: /\b[3-6]\d{3}(?:[ -]?\d{4}){2}[ -]?\d{3,4}\b/, check: luhn }
+  // 15- and 16-digit card numbers (Amex, Visa, Mastercard, Discover), grouped 4-4-4-4 or Amex 4-6-5.
+  { kind: 'card', category: 'personal', hint: '', pattern: /\b[3-6]\d{3}(?:(?:[ -]?\d{4}){2}[ -]?\d{3,4}|[ -]\d{6}[ -]\d{5})\b/, check: luhn }
 ];
 // Long numbers are often ids; a card needs its usual grouping or a field named like one.
 const CARD_GROUPS = /^\d{4}([ -])\d{4}\1\d{4}\1\d{3,4}$|^\d{4}([ -])\d{6}\2\d{5}$/;
