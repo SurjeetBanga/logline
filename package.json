@@ -1,8 +1,8 @@
 {
   "name": "logline",
   "displayName": "Logline \u2014 Live Tail for JSON Logs",
-  "description": "Capture terminal and server output in a searchable, expandable JSON log viewer with Copilot agent sharing.",
-  "version": "1.11.0",
+  "description": "Capture terminal and server output in a searchable, expandable JSON log viewer, and share it with Copilot, Claude Code, or Codex.",
+  "version": "1.12.0",
   "publisher": "surjeetbanga",
   "license": "MIT",
   "repository": {
@@ -33,7 +33,10 @@
     "codelens",
     "structured logs",
     "server",
-    "Copilot"
+    "Copilot",
+    "Claude Code",
+    "Codex",
+    "MCP"
   ],
   "activationEvents": [
     "onStartupFinished"
@@ -176,6 +179,11 @@
         "category": "Logline"
       },
       {
+        "command": "logline.connectAgent",
+        "title": "Connect Claude Code or Codex",
+        "category": "Logline"
+      },
+      {
         "command": "logline.askCopilot",
         "title": "Ask Copilot to Investigate Logs",
         "category": "Logline"
@@ -223,7 +231,7 @@
         "displayName": "List shared Logline runs",
         "toolReferenceName": "logline_list_shared_sources",
         "canBeReferencedInPrompt": true,
-        "userDescription": "List Logline command runs explicitly shared with Copilot.",
+        "userDescription": "List Logline command runs explicitly shared with agents.",
         "modelDescription": "Read-only. When the user asks about terminal output, server errors, or shared Logline logs, call this first with no arguments to discover shared command runs and their shareId. Sharing is available to agent chats in this VS Code window; no chat selection or user-provided shareId is needed. Use the returned shareId with the other Logline tools. Never infer access to unshared runs.",
         "inputSchema": { "type": "object", "properties": { "shareId": { "type": "string" } } }
       },
@@ -414,6 +422,11 @@
           "type": "boolean",
           "default": true,
           "description": "Capture Debug Console output from VS Code debug sessions (Run and Debug, F5) for every debugger, such as Node.js, Python, Java, Go, and .NET. Configurations that print to the integrated terminal are recorded by terminal capture instead. When a debugger reports where a line was logged, Logline can open that line of code. Applies to debug sessions started after the change."
+        },
+        "logline.externalAgents": {
+          "type": "boolean",
+          "default": true,
+          "description": "Let Claude Code, Codex, and other MCP clients you connect with Logline: Connect Claude Code or Codex read the logs you share with Share with agent, like Copilot. Logline listens on 127.0.0.1 only and accepts calls only from processes that can read its token in ~/.logline."
         },
         "logline.otlp.enabled": {
           "type": "boolean",

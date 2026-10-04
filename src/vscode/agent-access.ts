@@ -44,6 +44,9 @@ export class AgentLogAccess {
     this.redactor = createRedactor(this.redaction);
   }
 
+  /** The current grant's id, or undefined while nothing is shared. */
+  get grant(): string | undefined { return this.shareId; }
+
   status(): AgentShareStatus {
     this.refreshAllRuns();
     const recordsBySource = new Map<string, SessionSummary[]>();
@@ -327,7 +330,7 @@ export class AgentLogAccess {
   }
 
   private assertShare(id?: string): void {
-    if (!this.shareId) throw new AgentAccessError('NOT_SHARED', 'No Logline logs are shared with Copilot. Use Share with agent in the Logs toolbar first.');
+    if (!this.shareId) throw new AgentAccessError('NOT_SHARED', 'No Logline logs are shared with agents. Ask the user to choose Share with agent in the Logline Logs panel in VS Code.');
     if (id !== undefined && id !== this.shareId) throw new AgentAccessError('SHARE_CHANGED', 'The Logline sharing grant has changed.');
     this.refreshAllRuns();
   }

@@ -55,7 +55,8 @@ export class TaskLifecycle {
       taskState: 'running',
       dependencies: deps,
       dependencyState: this.registry.dependencyState(deps, taskScope),
-      source: task.source, sourceKind: 'task', owned: false, canStop: true
+      source: task.source, sourceKind: 'task', owned: false, canStop: true,
+      command: taskCommand(task) ?? taskName
     };
     this.executions.set(execution, record);
     this.registry.records.set(record.id, record);
@@ -145,4 +146,17 @@ export class TaskLifecycle {
     }
     this.registry.pruneSessionRegistry();
   }
+}
+
+/** The command line a task runs, so the run picker can show it instead of an id. */
+export function taskCommand(task: vscode.Task): string | undefined {
+  const execution = task.execution as { commandLine?: unknown; command?: unknown; process?: unknown; args?: unknown } | undefined;
+  if (!execution) return undefined;
+  if (typeof execution.commandLine === 'string' && execution.commandLine.trim()) return execution.commandLine.trim();
+  const program = typeof execution.process === 'string' ? execution.process
+    : typeof execution.command === 'string' ? execution.command
+      : (execution.command as { value?: unknown } | undefined)?.value;
+  if (typeof program !== 'string' || !program) return undefined;
+  const args = Array.isArray(execution.args) ? execution.args.map(arg => typeof arg === 'string' ? arg : (arg as { value?: unknown })?.value).filter((arg): arg is string => typeof arg === 'string') : [];
+  return [program, ...args].join(' ');
 }

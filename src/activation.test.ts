@@ -1,3 +1,6 @@
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { withVscode } from './test/vscode-mock';
@@ -35,11 +38,24 @@ const { activate, deactivate } = withVscode(mock, () => require('./extension') a
 
 test('activation registers the provider, command/task surfaces, autostart, and idempotent shutdown', async () => {
   registeredCommands.length = 0;
-  const context = { extensionUri: { fsPath: process.cwd() }, subscriptions: [], globalState: { get: (_key: string, fallback: unknown) => fallback, update: async () => undefined } } as any;
+  // Activation starts the agent bridge, which writes under the home directory.
+  const home = process.env.HOME;
+  process.env.HOME = mkdtempSync(join(tmpdir(), 'logline-home-'));
+  const extensionPath = mkdtempSync(join(tmpdir(), 'logline-extension-'));
+  mkdirSync(join(extensionPath, 'out'));
+  writeFileSync(join(extensionPath, 'out', 'mcp.js'), '// stand-in for the bundled MCP server\n');
+  const context = { extensionUri: { fsPath: extensionPath }, subscriptions: [], globalState: { get: (_key: string, fallback: unknown) => fallback, update: async () => undefined } } as any;
   const result = activate(context);
   assert.ok(result.provider);
-  assert.equal(registeredCommands.length, 22);
+  assert.equal(registeredCommands.length, 23);
   assert.ok(context.subscriptions.length >= 20);
+  await new Promise(resolve => setTimeout(resolve, 50));
+  assert.ok(existsSync(join(process.env.HOME, '.logline', 'mcp.js')), 'the MCP server script is installed at a stable path');
+  assert.equal(readdirSync(join(process.env.HOME, '.logline', 'agents')).length, 1, 'the window publishes how agents reach it');
   await deactivate();
   await deactivate();
+  for (const disposable of context.subscriptions) disposable.dispose?.();
+  await new Promise(resolve => setTimeout(resolve, 10));
+  assert.equal(readdirSync(join(process.env.HOME, '.logline', 'agents')).length, 0, 'closing the window removes its discovery file');
+  process.env.HOME = home;
 });

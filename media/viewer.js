@@ -367,6 +367,7 @@
       captureToggle: element("captureToggle"),
       shareAgent: element("shareAgent"),
       shareSpecificRuns: element("shareSpecificRuns"),
+      connectAgent: element("connectAgent"),
       shareScope: element("shareScope"),
       status: element("status"),
       sessions: element("sessions"),
@@ -435,6 +436,7 @@
   var DELAY_MS = 700;
   var WARM_DELAY_MS = 150;
   var WARM_FOR_MS = 500;
+  var MAX_TEXT = 280;
   function createTooltips(scope) {
     const body = document.body;
     if (!body) return;
@@ -467,7 +469,7 @@
       if (!element2.isConnected || target !== element2) return;
       const text = element2.dataset.tip;
       if (!text) return;
-      tip.textContent = text;
+      tip.textContent = text.length > MAX_TEXT ? `${text.slice(0, MAX_TEXT - 1)}\u2026` : text;
       tip.hidden = false;
       const anchor = element2.getBoundingClientRect();
       const box = tip.getBoundingClientRect();
@@ -1098,16 +1100,20 @@
         row.tabIndex = 0;
         row.setAttribute("aria-label", `${trace.name}, ${formatDuration(trace.durationMs)}${trace.errors ? `, ${trace.errors} errors` : ""}`);
         const name = cell(`${trace.errors ? "\u26A0 " : ""}${trace.name || trace.traceId}`, "trace-name");
-        name.title = `Trace ${trace.traceId}`;
+        name.title = `${trace.name || trace.traceId}
+Trace ${trace.traceId}`;
         const services = cell("", "traces-services");
         for (const service of trace.services.slice(0, 4)) {
           const chip = document.createElement("span");
           chip.className = "service-chip";
           chip.textContent = service;
+          chip.title = service;
           services.append(chip);
         }
         if (trace.services.length > 4) services.append(document.createTextNode(` +${trace.services.length - 4}`));
         const duration = cell("", "traces-duration");
+        const durationContent = document.createElement("div");
+        durationContent.className = "traces-duration-content";
         const track = document.createElement("div");
         track.className = "trace-track";
         const bar = document.createElement("div");
@@ -1118,7 +1124,8 @@
         const label = document.createElement("span");
         label.className = "traces-duration-label";
         label.textContent = formatDuration(trace.durationMs);
-        duration.append(track, label);
+        durationContent.append(track, label);
+        duration.append(durationContent);
         const counts = [trace.spans ? `${trace.spans} spans` : "", trace.logs ? `${trace.logs} logs` : ""].filter(Boolean).join(" \xB7 ");
         row.append(cell(trace.startMs === void 0 ? "" : actions.formatTime(trace.startMs), "time"), name, services, duration, cell(counts, "traces-counts"));
         return row;
@@ -1780,7 +1787,6 @@
       const button = document.createElement("button");
       button.className = "message-button";
       button.textContent = `${event.message}${event.truncated ? " [truncated]" : ""}`;
-      button.title = event.message ?? "";
       button.setAttribute("aria-expanded", String(event.id === state.selected));
       messageContent.append(button);
       const quick = document.createElement("span");
@@ -2534,6 +2540,7 @@
   }
 
   // src/webview/viewer.ts
+  var HOLD_AFTER_MOVE_MS = 2e3;
   function createViewer(api) {
     const scope = new EventScope();
     const elements = getElements();
@@ -2564,6 +2571,8 @@
     let otlpEndpoint;
     let pointerOverRows = false;
     let heldEvents;
+    let lastPointerMove = 0;
+    let holdTimer;
     let cellActions;
     const table = createTable(
       elements,
@@ -2710,9 +2719,11 @@
       const sharingAll = sharing && data.agentSharing.scope === "all";
       setLabel(elements.shareAgent, sharing ? "Sharing \xB7 Stop" : "Share with agent");
       elements.shareAgent.setAttribute("aria-pressed", String(Boolean(sharing)));
-      elements.shareAgent.title = sharing ? sharingAll ? "Existing and new captured logs are available to Copilot in this window. Click to stop sharing." : `${sharedRuns} selected command run${sharedRuns === 1 ? "" : "s"} available to Copilot in this window. Click to stop sharing.` : "Share existing and new captured logs in this window until stopped";
+      elements.shareAgent.title = sharing ? sharingAll ? "Existing and new captured logs are available to agents in this window: Copilot, and Claude Code or Codex if connected. Click to stop sharing." : `${sharedRuns} selected command run${sharedRuns === 1 ? "" : "s"} available to agents in this window. Click to stop sharing.` : "Share existing and new captured logs with Copilot, Claude Code, Codex, or other connected agents until stopped";
       elements.shareScope.hidden = !sharing;
-      elements.shareScope.textContent = sharingAll ? "Sharing existing and new runs in this window until stopped" : sharing ? `Sharing ${sharedRuns} selected run${sharedRuns === 1 ? "" : "s"} only` : "";
+      const readers = sharing && data.agentClients?.length ? ` \xB7 read by ${data.agentClients.join(", ")}` : "";
+      elements.shareScope.textContent = (sharingAll ? "Sharing all runs" : sharing ? `Sharing ${sharedRuns} run${sharedRuns === 1 ? "" : "s"}` : "") + readers;
+      elements.shareScope.title = sharingAll ? "Agents can read existing and new runs in this window, redacted, until you stop sharing." : sharing ? `Agents can read ${sharedRuns} selected run${sharedRuns === 1 ? "" : "s"} in this window, redacted, until you stop sharing. Later commands are not included.` : "";
       setLabel(elements.stop, state.selectedServer ? "Stop server" : "Stop all");
       const activeSessions = Array.isArray(data.sessions) ? data.sessions.filter((session) => ["running", "stopping"].includes(session.status)) : [];
       elements.sessions.textContent = activeSessions.length ? `${activeSessions.length} active session${activeSessions.length === 1 ? "" : "s"}` : "No active sessions";
@@ -2808,13 +2819,29 @@
       bridge.flush();
     }
     function holdingLive() {
-      return pointerOverRows && state.following && !state.selectedSort;
+      return pointerOverRows && Date.now() - lastPointerMove < HOLD_AFTER_MOVE_MS && state.following && !state.selectedSort;
     }
-    scope.listen(scrollViewport, "pointerenter", () => {
+    function pointerMoved() {
       pointerOverRows = true;
-    });
+      lastPointerMove = Date.now();
+      if (!holdTimer) holdTimer = setTimeout(checkHold, HOLD_AFTER_MOVE_MS);
+    }
+    function checkHold() {
+      holdTimer = void 0;
+      const rested = Date.now() - lastPointerMove;
+      if (pointerOverRows && rested < HOLD_AFTER_MOVE_MS) {
+        holdTimer = setTimeout(checkHold, HOLD_AFTER_MOVE_MS - rested);
+        return;
+      }
+      releaseHeld();
+    }
+    scope.listen(scrollViewport, "pointerenter", pointerMoved);
+    scope.listen(scrollViewport, "pointermove", pointerMoved);
     scope.listen(scrollViewport, "pointerleave", () => {
       pointerOverRows = false;
+      releaseHeld();
+    });
+    function releaseHeld() {
       const events = heldEvents;
       heldEvents = void 0;
       if (events && state.following && !state.paused) {
@@ -2824,7 +2851,7 @@
         table.scheduleRenderWindow(true);
       }
       updateModeLabel();
-    });
+    }
     function updateFollowControl() {
       if (state.paused) {
         elements.follow.setAttribute("aria-pressed", "false");
@@ -2843,7 +2870,7 @@
     function updateModeLabel() {
       elements.older.textContent = state.selectedSort ? "Next \u2192" : "\u2190 Older";
       elements.newer.textContent = state.selectedSort ? "\u2190 Previous" : "Newer \u2192";
-      elements.mode.textContent = state.paused ? "Paused \u2014 collection continues" : state.selectedSort ? `Sorted ${state.selectedSortDirection === "asc" ? "ascending" : "descending"}${state.following ? " \xB7 Live updates" : ""}` : state.following ? heldEvents ? "Live \xB7 new rows held while the pointer is over them" : "Live \xB7 newest 1,000" : "Browsing retained history";
+      elements.mode.textContent = state.paused ? "Paused \u2014 collection continues" : state.selectedSort ? `Sorted ${state.selectedSortDirection === "asc" ? "ascending" : "descending"}${state.following ? " \xB7 Live updates" : ""}` : state.following ? heldEvents ? "Live \xB7 new rows held while you point at the table" : "Live \xB7 newest 1,000" : "Browsing retained history";
       elements.mode.className = state.following && !state.paused ? "live-mode" : "";
     }
     function setFollowing(value) {
@@ -2990,7 +3017,7 @@
       table.toggleExpand(id);
     }
     const actionsMenu = createPopover(actionsContainer, elements.moreActions, elements.actionsMenu);
-    const actionItems = [elements.shareSpecificRuns, elements.export, elements.import, elements.breakOnLogs, elements.otlpToggle, elements.manage, elements.config, elements.help];
+    const actionItems = [elements.shareSpecificRuns, elements.connectAgent, elements.export, elements.import, elements.breakOnLogs, elements.otlpToggle, elements.manage, elements.config, elements.help];
     scope.listen(elements.moreActions, "click", () => {
       if (actionsMenu.isOpen()) actionItems[0].focus();
     });
@@ -3032,6 +3059,7 @@
       else api.postMessage({ type: "shareWithAgent" });
     });
     scope.listen(elements.shareSpecificRuns, "click", () => api.postMessage({ type: "shareWithAgent", chooseRuns: true }));
+    scope.listen(elements.connectAgent, "click", () => api.postMessage({ type: "connectAgent" }));
     scope.listen(elements.saveSearch, "click", () => {
       for (const popover of popovers)
         popover.close();
@@ -3121,6 +3149,7 @@
       dispose() {
         scope.dispose();
         clearInterval(fallbackTimer);
+        clearTimeout(holdTimer);
         clearTimeout(searchDebounce);
         clearTimeout(autocompleteDebounce);
         clearTimeout(copyFeedbackTimer);
@@ -3182,10 +3211,10 @@
       const activeCount = visibleSources.reduce((sum, server) => sum + (server.activeSessions || 0), 0);
       const sourceLabel = selectedSource?.label || (state.selectedServer || activeCount ? `All sources${activeCount ? ` \xB7 ${activeCount} active` : ""}` : "All sources");
       const selectedRun = visibleSessions.find((session) => session.id === state.selectedSession);
-      const runLabel = selectedRun?.command || (visibleSessions.length ? `All runs \xB7 ${visibleSessions.length}` : "All runs");
+      const runLabel = selectedRun && runName(selectedRun) || (visibleSessions.length ? `All runs \xB7 ${visibleSessions.length}` : "All runs");
       elements.server.value = state.selectedServer;
       elements.server.textContent = `${sourceLabel} \xB7 ${runLabel}`;
-      elements.server.title = [selectedSource?.label || "All sources", selectedRun?.command || "All runs"].join(" \xB7 ");
+      elements.server.title = [selectedSource?.label || "All sources", selectedRun && runName(selectedRun) || "All runs"].join(" \xB7 ");
     }
     function setScopeTab(tab, focus = false) {
       activeScopeTab = tab;
@@ -3215,6 +3244,9 @@
       scopePopover.close(true);
       requestInteraction();
     }
+    function runName(session) {
+      return session.command || (session.taskName ? `Task: ${session.taskName}` : "") || session.server || "Run";
+    }
     function renderRunMenu(sessions) {
       const focusedRun = document.activeElement?.dataset.runId;
       const all = document.createElement("button");
@@ -3235,7 +3267,7 @@
         select.tabIndex = 0;
         const started = session.startedAt ? new Date(session.startedAt).toLocaleTimeString() : "";
         const stateText = session.status === "running" ? "running" : session.exitReason || session.status;
-        select.textContent = `${session.command || session.id} \xB7 ${started} \xB7 ${stateText}`;
+        select.textContent = `${runName(session)} \xB7 ${started} \xB7 ${stateText}`;
         select.title = [session.cwd, session.captureStatus ? `Capture: ${session.captureStatus}` : void 0, session.captureReason].filter(Boolean).join(" \xB7 ");
         scope.listen(select, "click", () => selectRun(session.id));
         row.append(select);

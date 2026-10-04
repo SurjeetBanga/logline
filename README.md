@@ -39,7 +39,7 @@ Open **Help** in the toolbar for the offline visual guide, or run **Logline: Wha
 | **Fix** | **Log doctor** shows statements that logged secrets or personal data, errors logged without their exception, and statements that produce most of your log volume in the Problems panel, with masked evidence and quick fixes. |
 | **Arrange** | Auto-detected fields, custom and nested columns, sorting, drag-to-reorder, and resizable column widths. |
 | **Analyze** | Event rate, errors, latency, status codes, the top 10 log patterns, and normalized error groups for the current filter. |
-| **Share** | Export filtered JSONL, JSON, CSV, or Markdown context for AI tools, or share retained sources (including new runs) or specific command runs with Copilot for read-only live investigation. Exports and **Copy results** redact common credentials by default; agent tools always redact them. |
+| **Share** | Export filtered JSONL, JSON, CSV, or Markdown context for AI tools, or share retained sources (including new runs) or specific command runs with Copilot, Claude Code, Codex, or another MCP client for read-only live investigation. Exports and **Copy results** redact common credentials by default; agent tools always redact them. |
 
 **Live** follows the newest events. Turn it off to browse retained history in pages of up to 1,000 rows. Expanding an event holds your place while collection continues; changing filters, sorting, paging, or columns returns inspection to **Browse**. Choose **Live** or **Resume** to return to the newest rows.
 
@@ -88,7 +88,7 @@ Set `autoStart` to `true` to start when Logline activates. Set `jsonOnly` to `tr
 
 **Already using VS Code tasks?** Run **Logline: Convert VS Code Task to Logline** to create a captured wrapper, including supported dependencies. Logline observes ordinary task lifecycle events automatically; retaining their stdout/stderr requires a captured wrapper. You can also define a task with `"type": "logline"` directly—see [task configuration](docs/usage.md#tasks).
 
-**Working with Copilot?** Share all retained Logline sources, choose specific runs, or share the exact run behind an expanded event. Sharing grants read-only access to redacted results in the current VS Code window; it does not execute commands or send logs into chat automatically. Ask Copilot to use the Logline tools, or run **Logline: Ask Copilot to Investigate Logs** for an editable handoff prompt.
+**Working with an agent?** Share all retained Logline sources, choose specific runs, or share the exact run behind an expanded event. Sharing grants read-only access to redacted results in the current VS Code window; it does not execute commands or send logs into chat automatically. Copilot sees the Logline tools in this window. For **Claude Code** or **Codex**, run **Logline: Connect Claude Code or Codex** once; the agent then reads the same shared logs through Logline's MCP server, from the terminal or its own extension. See [agents](docs/usage.md#claude-code-codex-and-other-mcp-clients).
 
 ## Settings and retention
 

@@ -2,6 +2,24 @@
 
 All notable changes to Logline are documented in this file.
 
+## 1.12.0 — 2026-10-04
+
+### Behavior changes
+
+- Each VS Code window running Logline now listens on `127.0.0.1` for MCP clients and keeps a small discovery file in `~/.logline/agents/`, readable only by you, plus the MCP server script at `~/.logline/mcp.js`. Agents still read nothing until you choose **Share with agent**. Set `logline.externalAgents` to `false` to turn this off.
+- The status line shows sharing as **Sharing all runs** or **Sharing N runs**, with details in its tooltip, and the running command as a single muted line.
+- Messages in the table no longer have a tooltip.
+- While **Live**, new rows are held only while the pointer moves over the table. Two seconds after it stops, or as soon as it leaves, the table catches up, so a pointer resting on the table no longer freezes it.
+
+### Changes
+
+- Share logs with **Claude Code**, **Codex**, and other MCP clients, not only Copilot. **Logline: Connect Claude Code or Codex** (also under **More actions**) registers Logline's MCP server with the agent; it exposes the same six read-only tools, answers only from what **Share with agent** shares, always redacted, and **Sharing · Stop** cuts every agent off. The server runs with VS Code's own runtime from `~/.logline/mcp.js` and reaches the window whose workspace contains the agent's working directory over `127.0.0.1` with a per-window token. While sharing, the status line shows which agents read the logs recently. Set `logline.externalAgents` to `false` to turn this off.
+- While sharing, the status line names the agents that read the logs under the current grant, such as *Sharing all runs · read by Claude Code*. Stopping sharing clears it, and an agent's refused calls do not count.
+- The status line stays on one line: shorter sharing text with details in its tooltip, and the running command as a muted `$ …` line cut to fit.
+- The Traces list gives the operation the remaining width, with the full operation and trace id in its tooltip, and its duration column lines up with each row.
+- Messages in the table no longer show a tooltip that repeats them; click a row to read the full message. Tooltips wrap long values and stop at 280 characters.
+- The run picker names runs by their command, or their task or source, instead of an internal id. Observed VS Code tasks record their command line.
+
 ## 1.11.0 — 2026-10-03
 
 ### Behavior changes

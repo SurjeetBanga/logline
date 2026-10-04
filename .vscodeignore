@@ -19,3 +19,4 @@ out-tests/**
 scripts/**
 .claude/**
 CLAUDE.md
+out/mcp/**

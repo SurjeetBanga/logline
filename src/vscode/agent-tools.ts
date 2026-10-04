@@ -14,7 +14,8 @@ interface LanguageModelRuntime {
 }
 const runtimeVscode = vscode as unknown as LanguageModelRuntime;
 
-const textResult = (value: unknown) => {
+/** A tool result as bounded JSON text, the same for Copilot and MCP clients. */
+export function boundedText(value: unknown): string {
   const json = JSON.stringify(value);
   const oversized = value && typeof value === 'object' ? value as Record<string, unknown> : {};
   const text = Buffer.byteLength(json, 'utf8') <= MAX_BYTES ? json : JSON.stringify({
@@ -26,6 +27,11 @@ const textResult = (value: unknown) => {
     ...(Number.isSafeInteger(oversized.matched) ? { matched: oversized.matched } : {}),
     ...(Number.isSafeInteger(oversized.newest) ? { newest: oversized.newest } : {})
   });
+  return text;
+}
+
+const textResult = (value: unknown) => {
+  const text = boundedText(value);
   const Result = runtimeVscode.LanguageModelToolResult;
   const TextPart = runtimeVscode.LanguageModelTextPart;
   return Result ? new Result(TextPart ? [new TextPart(text)] : [{ type: 'text', value: text }]) : { content: [{ type: 'text', value: text }] };
@@ -49,34 +55,50 @@ function invoke(access: AgentLogAccess, callback: ToolCallback) {
       return { invocationMessage: 'Reading shared Logline runs', confirmationMessages: { title: 'Read shared Logline runs', message: MarkdownString ? new MarkdownString(message) : message } };
     },
     async invoke(options: unknown, token?: CancellationTokenLike) {
-      try { return textResult(await callback(inputOf(options), token)); }
-      catch (error) { const e = error instanceof AgentAccessError ? error : new AgentAccessError('INVALID_INPUT', String(error)); return textResult({ error: e.code, message: e.message }); }
+      return textResult(await callTool(callback, inputOf(options), token));
     }
   };
+}
+
+async function callTool(callback: ToolCallback, input: ToolInput, token?: CancellationTokenLike): Promise<unknown> {
+  try { return await callback(input, token); }
+  catch (error) { const e = error instanceof AgentAccessError ? error : new AgentAccessError('INVALID_INPUT', String(error)); return { error: e.code, message: e.message }; }
+}
+
+/** The Logline tools, by name. Copilot and MCP clients such as Claude Code and Codex call the same ones. */
+export function agentToolHandlers(access: AgentLogAccess): Map<string, ToolCallback> {
+  return new Map<string, ToolCallback>([
+    ['logline_list_shared_sources', input => access.list(input)],
+    ['logline_search_logs', input => access.search(input as unknown as AgentSearchInput)],
+    ['logline_inspect_event', input => {
+      if (typeof input.shareId !== 'string' || !Number.isSafeInteger(input.id) || (input.id as number) < 0) throw new AgentAccessError('INVALID_INPUT', 'shareId and a non-negative integer id are required.');
+      if (input.context !== undefined && (!Number.isSafeInteger(input.context) || (input.context as number) < 0 || (input.context as number) > 25)) throw new AgentAccessError('INVALID_INPUT', 'context must be an integer from 0 to 25.');
+      return access.inspect(input.shareId, input.id as number, input.context as number | undefined);
+    }],
+    ['logline_analyze_logs', input => access.analyze(input as unknown as AgentSearchInput)],
+    ['logline_get_trace', input => {
+      if (typeof input.shareId !== 'string' || typeof input.traceId !== 'string') throw new AgentAccessError('INVALID_INPUT', 'shareId and traceId are required.');
+      return access.trace(input.shareId, input.traceId);
+    }],
+    ['logline_wait_for_logs', (input, token) => {
+      if (!Number.isSafeInteger(input.watermark) || (input.watermark as number) < 0) throw new AgentAccessError('INVALID_INPUT', 'watermark must be a non-negative integer.');
+      const timeoutMs = input.timeoutMs === undefined ? 5000 : Number(input.timeoutMs);
+      return access.wait(input as unknown as AgentSearchInput, input.watermark as number, timeoutMs, token);
+    }]
+  ]);
+}
+
+/** Run one tool for an MCP client and return its bounded JSON text. */
+export async function runAgentTool(access: AgentLogAccess, name: string, input: unknown, token?: CancellationTokenLike): Promise<string> {
+  const callback = agentToolHandlers(access).get(name);
+  if (!callback) return boundedText({ error: 'INVALID_INPUT', message: `Unknown Logline tool: ${name}` });
+  const args = input && typeof input === 'object' && !Array.isArray(input) ? input as ToolInput : {};
+  return boundedText(await callTool(callback, args, token));
 }
 
 export function registerAgentTools(context: vscode.ExtensionContext, access: AgentLogAccess): vscode.Disposable[] {
   void context;
   const lm = runtimeVscode.lm;
   if (!lm?.registerTool) return [];
-  const tools: [string, unknown][] = [
-    ['logline_list_shared_sources', invoke(access, input => access.list(input))],
-    ['logline_search_logs', invoke(access, input => access.search(input as unknown as AgentSearchInput))],
-    ['logline_inspect_event', invoke(access, input => {
-      if (typeof input.shareId !== 'string' || !Number.isSafeInteger(input.id) || (input.id as number) < 0) throw new AgentAccessError('INVALID_INPUT', 'shareId and a non-negative integer id are required.');
-      if (input.context !== undefined && (!Number.isSafeInteger(input.context) || (input.context as number) < 0 || (input.context as number) > 25)) throw new AgentAccessError('INVALID_INPUT', 'context must be an integer from 0 to 25.');
-      return access.inspect(input.shareId, input.id as number, input.context as number | undefined);
-    })],
-    ['logline_analyze_logs', invoke(access, input => access.analyze(input as unknown as AgentSearchInput))],
-    ['logline_get_trace', invoke(access, input => {
-      if (typeof input.shareId !== 'string' || typeof input.traceId !== 'string') throw new AgentAccessError('INVALID_INPUT', 'shareId and traceId are required.');
-      return access.trace(input.shareId, input.traceId);
-    })],
-    ['logline_wait_for_logs', invoke(access, (input, token) => {
-      if (!Number.isSafeInteger(input.watermark) || (input.watermark as number) < 0) throw new AgentAccessError('INVALID_INPUT', 'watermark must be a non-negative integer.');
-      const timeoutMs = input.timeoutMs === undefined ? 5000 : Number(input.timeoutMs);
-      return access.wait(input as unknown as AgentSearchInput, input.watermark as number, timeoutMs, token);
-    })]
-  ];
-  return tools.map(([name, tool]) => lm.registerTool(name, tool));
+  return [...agentToolHandlers(access)].map(([name, callback]) => lm.registerTool(name, invoke(access, callback)));
 }

@@ -87,6 +87,7 @@ export function registerCommands(controller: LogsController, openGuide?: (sectio
     vscode.commands.registerCommand('logline.shareSpecificRuns', () => controller.shareWithAgent(undefined, undefined, undefined, true)),
     vscode.commands.registerCommand('logline.stopSharing', () => controller.stopSharing()),
     vscode.commands.registerCommand('logline.askCopilot', () => controller.askCopilot()),
+    vscode.commands.registerCommand('logline.connectAgent', () => controller.connectAgent()),
     vscode.commands.registerCommand('logline.startOtlpReceiver', () => controller.toggleOtlp(true)),
     vscode.commands.registerCommand('logline.stopOtlpReceiver', () => controller.toggleOtlp(false)),
     vscode.commands.registerCommand('logline.showTrace', async (value?: unknown) => {

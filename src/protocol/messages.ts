@@ -22,6 +22,7 @@ export type ViewRequest =
   | { type: 'openSource'; id: number; block: number; line: number; }
   | { type: 'openLogSite' | 'breakOnEvent'; id: number; }
   | { type: 'doctorAction'; action: DoctorAction; siteId?: string; }
+  | { type: 'connectAgent'; }
   | ({ type: 'breakOnQuery'; } & Filter)
   | { type: 'trace'; traceId: string; }
   | { type: 'traces'; }
@@ -60,6 +61,8 @@ export interface Snapshot extends Stats {
    * left out when the view already has this revision.
    */
   doctor?: { revision: number; total: number; findings?: DoctorFindingView[]; };
+  /** MCP clients such as Claude Code and Codex that read shared logs recently. */
+  agentClients?: string[];
 }
 /**
  * A table row: the event with its displayed fields, plus what the row links
@@ -139,7 +142,7 @@ export function parseViewRequest(value: unknown): ViewRequest | undefined {
     case 'toggleOtlp': return { type: msg.type, enabled: msg.enabled === true };
     case 'exportContext': return Array.isArray(msg.ids) ? { type: msg.type, ids: msg.ids.filter((id): id is number => Number.isSafeInteger(id) && id >= 0) } : undefined;
     case 'shareWithAgent': return { type: msg.type, sourceIds: strings('sourceIds'), sessionIds: strings('sessionIds'), anchor: index('anchor'), chooseRuns: msg.chooseRuns === true };
-    case 'stopSharing': return { type: msg.type };
+    case 'stopSharing': case 'connectAgent': return { type: msg.type };
     case 'askCopilot': return { type: msg.type, anchor: index('anchor') };
     case 'shareEvent': { const id = index('id'); return id === undefined ? undefined : { type: msg.type, id }; }
     case 'toggleTerminalCapture': return { type: msg.type, enabled: msg.enabled === true };

@@ -5,6 +5,8 @@ const DELAY_MS = 700;
 // Once one is showing, the next one along a row of icons follows quickly.
 const WARM_DELAY_MS = 150;
 const WARM_FOR_MS = 500;
+// Tooltips describe controls; longer text belongs in the view it comes from.
+const MAX_TEXT = 280;
 
 /**
  * Quick tooltips for anything with a `title`. Native tooltips wait about a
@@ -48,7 +50,7 @@ export function createTooltips(scope: EventScope) {
     if (!element.isConnected || target !== element) return;
     const text = element.dataset.tip;
     if (!text) return;
-    tip.textContent = text;
+    tip.textContent = text.length > MAX_TEXT ? `${text.slice(0, MAX_TEXT - 1)}…` : text;
     tip.hidden = false;
     const anchor = element.getBoundingClientRect();
     const box = tip.getBoundingClientRect();

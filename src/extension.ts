@@ -1,10 +1,12 @@
+import { join } from 'node:path';
 import * as vscode from 'vscode';
 import { registerCommands, startAutoServers } from './vscode/commands';
 import { LogsController } from './vscode/logs-controller';
 import { LogsProvider } from './vscode/logs-view-provider';
 import { registerTasks } from './vscode/tasks/provider';
 import { GuidePanel } from './vscode/guide-panel';
-import { registerAgentTools } from './vscode/agent-tools';
+import { registerAgentTools, runAgentTool } from './vscode/agent-tools';
+import { AgentBridge, installMcpScript } from './vscode/agent-bridge';
 import { registerDebugCapture } from './vscode/debug-capture';
 import { LogBreakpoints } from './vscode/log-breakpoints';
 import { LogDoctor } from './vscode/log-doctor';
@@ -54,6 +56,25 @@ export function activate(context: vscode.ExtensionContext): { provider: LogsProv
     controller.debug.onEvent = (event, session) => breakpoints.onDebugEvent(event, session);
     context.subscriptions.push(breakpoints);
   }
+  // Claude Code, Codex, and other MCP clients reach shared logs through a local bridge.
+  const agentController = controller;
+  const bridge = controller.agentBridge = new AgentBridge({
+    run: (tool, input, token) => runAgentTool(agentController.agentAccess, tool, input, token),
+    folders: () => (vscode.workspace.workspaceFolders ?? []).map(folder => folder.uri.fsPath),
+    name: () => vscode.workspace.name ?? 'VS Code',
+    onClient: () => agentController.notifications.notify(),
+    grant: () => agentController.agentAccess.grant
+  });
+  const syncBridge = async () => {
+    try {
+      if (agentController.config.get('externalAgents', true)) { installMcpScript(join(context.extensionUri.fsPath, 'out', 'mcp.js')); await bridge.start(); }
+      else await bridge.stop();
+    } catch (error) { console.warn(`Logline could not start the agent bridge: ${error instanceof Error ? error.message : String(error)}`); }
+  };
+  void syncBridge();
+  context.subscriptions.push({ dispose: () => void bridge.stop() },
+    vscode.workspace.onDidChangeWorkspaceFolders?.(() => bridge.publish()) ?? { dispose() { } },
+    vscode.workspace.onDidChangeConfiguration?.(event => { if (event.affectsConfiguration('logline.externalAgents')) void syncBridge(); }) ?? { dispose() { } });
   startAutoServers(controller);
   return { provider };
 }
