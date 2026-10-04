@@ -2,7 +2,19 @@
 
 All notable changes to Logline are documented in this file.
 
-## Unreleased
+## 1.10.0 — 2026-10-04
+
+### Behavior changes
+
+Nothing was removed or renamed, but some new features are on by default and change what you see after updating. Each can be turned off with one setting:
+
+- Plain-text stack traces are joined into one event instead of one event per line. Set `logline.joinStackTraces` to `false` to keep one event per line.
+- Docker Compose and `kubectl logs --prefix` output is split into one source per service. A saved search scoped to the source that captured that output no longer matches its events; scope it to a service source instead, or set `logline.containerPrefixes` to `off`.
+- Output from debug sessions (F5) appears in Logs. Set `logline.captureDebugSessions` to `false` to turn this off.
+- Logging calls in your editor show a CodeLens with live hit counts. Set `logline.logLenses` to `off` to hide them.
+- Log doctor reports problems with log statements in the Problems panel. Set `logline.logDoctor` to `security` to report only secrets and personal data, or `off` to turn it off.
+
+### Changes
 
 - Split **Docker Compose** (`api-1  | …`) and `kubectl logs --prefix` (`[pod/…/…] …`) output by its container prefix, so JSON and logfmt payloads keep their level and fields and each service becomes its own source. Stack traces are joined per container, Docker timestamps are used when the payload has none, and the container name is kept as a searchable `container` field. Works for commands, captured terminals, followed files, and imports. **Logline: Follow Docker Compose Project** tails a compose file in the workspace. Controlled by `logline.containerPrefixes`.
 - Add **log breakpoints**. **Break when this logs again** on an expanded event puts a debugger breakpoint on the statement that logged it. **More actions → Break on matching logs** does the same for every statement that logged a match of the current filter, and pauses a debug session right after it logs another match that Logline cannot map to code. **Logline: Manage Log Breakpoints** and a status bar item list and remove them.

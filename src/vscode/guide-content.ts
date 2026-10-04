@@ -17,6 +17,15 @@ export interface GuideRelease {
 
 export const GUIDE_RELEASES: GuideRelease[] = [
   {
+    version: '1.10.0',
+    date: '2026-10-04',
+    highlights: [
+      { title: 'Capture more of your runs', text: 'Debug sessions, followed log files, and Docker Compose or Kubernetes output become sources, with one source per service and plain-text stack traces joined into one event.', section: 'capture' },
+      { title: 'Follow requests across services', text: 'Start the local OpenTelemetry receiver, browse recent requests in the Traces list, and open a waterfall with every span and log of a trace.', section: 'inspect' },
+      { title: 'Logs in your editor', text: 'Log lenses show live hits above logging calls, Break when this logs again stops the debugger on a statement, and log doctor reports secrets, personal data, and missing exceptions in the Problems panel.', section: 'inspect' }
+    ]
+  },
+  {
     version: '1.9.0',
     date: '2026-09-17',
     highlights: [

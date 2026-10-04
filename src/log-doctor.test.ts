@@ -21,6 +21,8 @@ test('sensitive values are found in fields and plain text, and only a masked pre
   const text = findSensitiveValues(event(2, 'charging card 4242 4242 4242 4242 with key AKIAIOSFODNN7EXAMPLE', 'terminal'));
   assert.deepEqual(text.map(value => [value.kind, value.path, value.preview]).sort(),
     [['aws-key', 'message', 'AKIA…[aws-key]'], ['card', 'message', '•••• 4242']]);
+  assert.deepEqual(findSensitiveValues(event(4, 'charging amex 3782 822463 10005', 'terminal')).map(value => [value.kind, value.preview]),
+    [['card', '•••• 0005']], 'Amex numbers are grouped 4-6-5');
 });
 
 test('ordinary values are not reported as sensitive', () => {

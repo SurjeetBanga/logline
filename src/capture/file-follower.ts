@@ -88,7 +88,8 @@ export class FileFollower {
     const info = await stat(file).catch(() => undefined);
     if (info?.isFile()) {
       follow.inode = info.ino;
-      follow.position = await this.lineStartNear(file, Math.max(0, info.size - Math.max(0, tailBytes)));
+      // The file can disappear between stat and open; then wait for it like a missing file.
+      follow.position = await this.lineStartNear(file, Math.max(0, info.size - Math.max(0, tailBytes))).catch(() => 0);
       follow.fingerprint = await this.readAt(file, Math.max(0, follow.position - FINGERPRINT), Math.min(FINGERPRINT, follow.position));
     }
     this.watch(follow);
