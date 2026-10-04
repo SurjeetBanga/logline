@@ -1,5 +1,5 @@
 import { extractExceptions } from './exceptions';
-import { findSensitiveValues, type SensitiveKind, type SensitiveValue } from './log-findings';
+import { findSensitiveValues, hasRequestContext, isQuietFailure, isStructured, type SensitiveKind, type SensitiveValue } from './log-findings';
 import { getField } from './query';
 import type { LogEvent } from './types';
 
@@ -465,6 +465,13 @@ export interface SiteStats {
   bareErrors?: number;
   /** Events logged as plain text, without structured fields. */
   plain?: number;
+  /** Events below warning that describe a failure. */
+  quietFailures?: number;
+  /** Characters logged, and events cut at the line limit. */
+  chars?: number;
+  truncated?: number;
+  /** Structured warnings and errors without a trace or request id. */
+  contextless?: number;
 }
 
 /** Per-site counts of retained and newly captured events. */
@@ -478,6 +485,11 @@ export class LogSiteTracker {
   total = 0;
   /** Also collect the evidence log doctor reports. */
   findings = false;
+  /** Structured events counted, and how many named their request or trace. */
+  structured = 0;
+  correlated = 0;
+  /** Counts resets, after which an event can be attributed differently. */
+  generation = 0;
 
   constructor(readonly index: LogSiteIndex) { }
 
@@ -487,7 +499,8 @@ export class LogSiteTracker {
   private countedHead = 0;
 
   reset(watermark = 0): void {
-    this.stats.clear(); this.watermark = watermark; this.indexVersion = this.index.version; this.total = 0;
+    this.stats.clear(); this.watermark = watermark; this.indexVersion = this.index.version; this.total = 0; this.generation++;
+    this.structured = 0; this.correlated = 0;
     this.counted = []; this.countedHead = 0;
   }
 
@@ -512,6 +525,8 @@ export class LogSiteTracker {
     while (this.countedHead < this.counted.length && this.counted[this.countedHead].id < oldestId) {
       const entry = this.counted[this.countedHead++];
       this.total--;
+      if (entry.structured) this.structured--;
+      if (entry.correlated) this.correlated--;
       if (!entry.site) continue;
       const stats = this.stats.get(entry.site);
       if (!stats) continue;
@@ -521,6 +536,10 @@ export class LogSiteTracker {
       if (entry.error) stats.errors--;
       if (entry.bareError) stats.bareErrors!--;
       if (entry.plain) stats.plain!--;
+      if (entry.quietFailure) stats.quietFailures!--;
+      if (entry.chars) stats.chars! -= entry.chars;
+      if (entry.truncated) stats.truncated!--;
+      if (entry.contextless) stats.contextless!--;
       for (const kind of entry.sensitive ?? []) {
         const found = stats.sensitive?.get(kind);
         if (found && !--found.count) stats.sensitive!.delete(kind);
@@ -541,10 +560,14 @@ export class LogSiteTracker {
       this.watermark = event.id;
       this.total++;
       const match = this.index.match(event);
-      if (!match) { this.counted.push({ id: event.id }); continue; }
+      // Whether structured logs usually carry a request id is a property of all of them.
+      const context = this.findings ? requestContext(event) : undefined;
+      if (context?.structured) this.structured++;
+      if (context?.correlated) this.correlated++;
+      if (!match) { this.counted.push({ id: event.id, ...context }); continue; }
       let stats = this.stats.get(match.site.id);
       if (!stats) { stats = { hits: 0, errors: 0, samples: [], exact: 0 }; this.stats.set(match.site.id, stats); }
-      const entry: Counted = { id: event.id, site: match.site.id, exact: match.exact, error: event.level === 'error' || event.level === 'fatal' };
+      const entry: Counted = { id: event.id, site: match.site.id, exact: match.exact, error: event.level === 'error' || event.level === 'fatal', ...context };
       stats.hits++;
       if (entry.exact) stats.exact++;
       if (entry.error) stats.errors++;
@@ -562,6 +585,13 @@ export class LogSiteTracker {
 interface Counted {
   id: number; site?: string; exact?: boolean; error?: boolean;
   sensitive?: SensitiveKind[]; bareError?: boolean; plain?: boolean;
+  quietFailure?: boolean; chars?: number; truncated?: boolean; contextless?: boolean;
+  structured?: boolean; correlated?: boolean;
+}
+
+function requestContext(event: LogEvent): Pick<Counted, 'structured' | 'correlated'> {
+  if (!isStructured(event)) return {};
+  return hasRequestContext(event) ? { structured: true, correlated: true } : { structured: true };
 }
 
 function collectFindings(stats: SiteStats, event: LogEvent, counted: Counted): void {
@@ -574,4 +604,11 @@ function collectFindings(stats: SiteStats, event: LogEvent, counted: Counted): v
   }
   if ((event.level === 'error' || event.level === 'fatal') && !extractExceptions(event).length) { stats.bareErrors = (stats.bareErrors ?? 0) + 1; counted.bareError = true; }
   if (!event.isJson && !Object.keys(event.fields ?? {}).length) { stats.plain = (stats.plain ?? 0) + 1; counted.plain = true; }
+  if (isQuietFailure(event)) { stats.quietFailures = (stats.quietFailures ?? 0) + 1; counted.quietFailure = true; }
+  const chars = (event.raw ?? event.message ?? '').length;
+  if (chars) { stats.chars = (stats.chars ?? 0) + chars; counted.chars = chars; }
+  if (event.truncated) { stats.truncated = (stats.truncated ?? 0) + 1; counted.truncated = true; }
+  if (counted.structured && !counted.correlated && ['warn', 'error', 'fatal'].includes(event.level)) {
+    stats.contextless = (stats.contextless ?? 0) + 1; counted.contextless = true;
+  }
 }

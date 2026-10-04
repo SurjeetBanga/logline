@@ -5,8 +5,12 @@ import { parseLogLine } from '../out/core/log-event.js';
 import { redactEvent } from '../out/core/redaction.js';
 import { AgentLogAccess } from '../out/vscode/agent-access.js';
 import { SessionRegistry } from '../out/capture/session-registry.js';
+import { RuntimeState } from '../out/capture/runtime-state.js';
+import { buildSnapshot } from '../out/vscode/snapshot.js';
 
 // Diagnostic microbenchmark, not a timing assertion in the test suite.
+globalThis.gc?.();
+const heapBefore = process.memoryUsage().heapUsed;
 const store = new LogStore(50000, 100 * 1024 * 1024);
 const receivedAt = new Date('2026-09-14T12:00:00Z');
 const start = performance.now();
@@ -19,6 +23,11 @@ for (let id = 1; id <= 50000; id++) {
 assert.equal(store.size, 50000);
 console.log(`Node ${process.version}, ${process.platform}/${process.arch}`);
 console.log(`Parsed and retained 50,000 events: ${(performance.now() - start).toFixed(1)} ms; estimated storage ${(store.bytes / 1048576).toFixed(1)} MiB`);
+if (globalThis.gc) {
+  gc();
+  // The retention budget is an estimate; compare it with what the heap actually holds.
+  console.log(`Measured heap for retained events: ${((process.memoryUsage().heapUsed - heapBefore) / 1048576).toFixed(1)} MiB`);
+}
 
 function measure(label, action) {
   action(); // warm up
@@ -57,3 +66,9 @@ measure('Streaming sorted page (+50 events per refresh)', () => {
   }
   store.page({ sort: 'durationMs', sortDirection: 'desc' });
 });
+// What each live refresh costs the extension host, and how much crosses to the webview.
+const snapshotSources = { store, config: { get: (_key, fallback) => fallback }, registry: new SessionRegistry(), state: new RuntimeState(() => {}),
+  ingestion: { sequence: streamed }, persistence: { persistDropped: 0 }, searches: { savedSearches: () => [] }, running: true,
+  guideStatus: { version: '', unread: false }, agentAccess: { status: () => ({ active: false, sources: [] }) } };
+measure('Live snapshot of the newest page', () => buildSnapshot({ type: 'snapshot' }, snapshotSources));
+console.log(`Live snapshot message: ${(JSON.stringify(buildSnapshot({ type: 'snapshot' }, snapshotSources)).length / 1024).toFixed(0)} KiB`);

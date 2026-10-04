@@ -23,7 +23,11 @@ export function cellFilterQuery(input: string, cell: CellValue, exclude: boolean
     return { reason: 'This field name cannot be used in a field filter.' };
   if (cell.value === undefined || cell.value === null || String(cell.value) === '')
     return { reason: 'This cell has no value to filter.' };
-  const term = `${exclude ? '-' : ''}${cell.field}:${JSON.stringify(String(cell.value))}`;
+  return addFilterTerm(input, `${exclude ? '-' : ''}${cell.field}:${JSON.stringify(String(cell.value))}`, limit);
+}
+
+/** Narrow a search by one more term, in every `OR` branch so no branch escapes it. */
+export function addFilterTerm(input: string, term: string, limit = 256): FilterChoice {
   const groups: string[][] = [[]];
   for (const token of queryTokens(input)) {
     if (token === 'OR' || token === 'or') groups.push([]);

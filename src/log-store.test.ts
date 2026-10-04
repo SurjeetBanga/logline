@@ -321,9 +321,10 @@ test('log patterns cluster every retained event, any level, by normalized messag
   assert.equal(cacheMiss?.level, 'warn');
 });
 
-test('log patterns are capped at the top 10 by volume', () => {
+test('log patterns are capped at the top 20 by volume', () => {
   const store = new LogStore();
-  const words = ['alpha', 'bravo', 'charlie', 'delta', 'echo', 'foxtrot', 'golf', 'hotel', 'india', 'juliet', 'kilo', 'lima', 'mike', 'november', 'oscar'];
+  const base = ['alpha', 'bravo', 'charlie', 'delta', 'echo', 'foxtrot', 'golf', 'hotel', 'india', 'juliet', 'kilo', 'lima', 'mike', 'november', 'oscar'];
+  const words = [...base, ...base.slice(0, 10).map(word => `${word}-again`)];
   let id = 0;
   for (let template = 0; template < words.length; template++) {
     for (let occurrence = 0; occurrence <= template; occurrence++) {
@@ -331,8 +332,8 @@ test('log patterns are capped at the top 10 by volume', () => {
     }
   }
   const patterns = store.patterns();
-  assert.equal(patterns.length, 10);
-  assert.equal(patterns[0].message, 'oscar pattern occurred');
+  assert.equal(patterns.length, 20);
+  assert.equal(patterns[0].message, 'juliet-again pattern occurred');
 });
 
 test('analysis flags rate buckets that spike against the series baseline, not raw counts alone', () => {

@@ -1,3 +1,5 @@
+import { extractExceptions } from './exceptions';
+import { getField } from './query';
 import { isSensitiveKey } from './redaction';
 import type { LogEvent } from './types';
 
@@ -171,3 +173,96 @@ function callText(lines: string[], start: number): string {
 }
 
 const mentions = (call: string, name: string) => new RegExp(`(?<![\\w$])${name.replace(/\$/g, '\\$')}(?![\\w$])`).test(call);
+
+// Words a failure is described with. A message that denies one ("no errors",
+// "0 failures") is not a failure.
+const FAILURE_WORDS = /\b(?:error|exception|failed|failure|fatal|panic|traceback|unhandled|crash(?:ed)?|refused|timed out|timeout)\b/i;
+const NOT_A_FAILURE = /\b(?:no|0|zero|without|none)\s+(?:errors?|exceptions?|failures?)\b|\b(?:errors?|failures?)\s*[=:]\s*(?:0|none|null|false)\b/i;
+const QUIET_LEVELS = new Set(['trace', 'debug', 'info']);
+
+/**
+ * An event logged below warning that describes a failure: it carries a stack,
+ * a 5xx status, or says it failed. Error filters, alerts and error counts miss it.
+ */
+export function isQuietFailure(event: LogEvent): boolean {
+  if (!QUIET_LEVELS.has(event.level)) return false;
+  const status = Number(getField(event, 'status'));
+  if (Number.isFinite(status) && status >= 500 && status < 600) return true;
+  const message = event.message ?? '';
+  if (FAILURE_WORDS.test(message) && !NOT_A_FAILURE.test(message)) return true;
+  return extractExceptions(event).length > 0;
+}
+
+/** A structured event that names the request or trace it belongs to. */
+export function hasRequestContext(event: LogEvent): boolean {
+  return [getField(event, 'traceId'), getField(event, 'requestId'), getField(event, 'correlationId'), getField(event, 'correlation_id')]
+    .some(value => value !== undefined && value !== null && value !== '');
+}
+
+export function isStructured(event: LogEvent): boolean {
+  return Boolean(event.isJson) || Object.keys(event.fields ?? {}).length > 0;
+}
+
+/** Sensitive values found in one source's events, by kind. */
+export interface SourceSensitive {
+  serverId: string; server: string; value: SensitiveValue; count: number; lastId: number;
+}
+
+/**
+ * Sensitive values in events that no log statement claimed: third-party
+ * output, imports, terminals, OpenTelemetry. Like a sensitive data scanner,
+ * it needs no source code. Counts follow retention: evicted events are
+ * subtracted, and only events carrying a value are remembered.
+ */
+export class SensitiveScanner {
+  /** The newest event id scanned. */
+  watermark = 0;
+  private readonly found = new Map<string, SourceSensitive>();
+  private carried: { id: number; keys: string[] }[] = [];
+  private carriedHead = 0;
+  /** Changes whenever the counts change. */
+  version = 0;
+
+  reset(): void {
+    this.found.clear(); this.carried = []; this.carriedHead = 0; this.watermark = 0; this.version++;
+  }
+
+  /** Scan events in id order; `claimed` says whether a statement already reports an event. */
+  scan(events: Iterable<LogEvent>, claimed: (event: LogEvent) => boolean = () => false): void {
+    for (const event of events) {
+      if (event.id <= this.watermark) continue;
+      this.watermark = event.id;
+      if (claimed(event)) continue;
+      const values = findSensitiveValues(event);
+      if (!values.length) continue;
+      const serverId = event.serverId ?? '';
+      const keys: string[] = [];
+      for (const value of values) {
+        const key = `${serverId}\0${value.kind}`;
+        const entry = this.found.get(key);
+        if (entry) { entry.count++; entry.lastId = event.id; entry.value = value; }
+        else this.found.set(key, { serverId, server: event.server ?? serverId, value, count: 1, lastId: event.id });
+        keys.push(key);
+      }
+      this.carried.push({ id: event.id, keys });
+      this.version++;
+    }
+  }
+
+  /** Forget events older than `oldestId`, which retention has dropped. */
+  evict(oldestId: number): void {
+    while (this.carriedHead < this.carried.length && this.carried[this.carriedHead].id < oldestId) {
+      for (const key of this.carried[this.carriedHead++].keys) {
+        const entry = this.found.get(key);
+        if (entry && !--entry.count) this.found.delete(key);
+      }
+      this.version++;
+    }
+    if (this.carriedHead > 1024 && this.carriedHead * 2 > this.carried.length) {
+      this.carried = this.carried.slice(this.carriedHead);
+      this.carriedHead = 0;
+    }
+  }
+
+  get findings(): SourceSensitive[] { return [...this.found.values()]; }
+}

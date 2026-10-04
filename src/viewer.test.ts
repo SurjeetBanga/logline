@@ -40,6 +40,16 @@ class Element {
   get classList() { return { contains: (name: string) => this.className.split(' ').includes(name) }; }
   append(...children: Element[]) { for (const child of children) child.parent = this; this.children.push(...children); }
   replaceChildren(...children: Element[]) { this.children = []; this.append(...children); }
+  get parentNode() { return this.parent; }
+  get nextSibling() { const siblings = this.parent?.children ?? []; return siblings[siblings.indexOf(this) + 1] ?? null; }
+  removeChild(child: Element) { this.children = this.children.filter(item => item !== child); if (child.parent === this) child.parent = undefined; return child; }
+  insertBefore(child: Element, reference: Element | null) {
+    this.children = this.children.filter(item => item !== child);
+    const index = reference ? this.children.indexOf(reference) : -1;
+    this.children.splice(index < 0 ? this.children.length : index, 0, child);
+    child.parent = this;
+    return child;
+  }
   addEventListener(name: string, callback: (event?: any) => void, options?: AddEventListenerOptions) {
     if (!this.handlers.has(name)) this.handlers.set(name, new Set());
     this.handlers.get(name)!.add(callback);
@@ -338,7 +348,7 @@ test('save current opens a dialog (not window.prompt, which webviews block) and 
   assert.equal(saved?.query, 'timeout');
 });
 
-test('analysis renders log patterns with a trend sparkline, flags anomalous chart buckets, and shows error-group stack locations', () => {
+test('analysis renders patterns, error groups and anomalies with trends', () => {
   const { get, receive } = viewer();
   receive({
     type: 'analysis', analysis: {
@@ -346,33 +356,54 @@ test('analysis renders log patterns with a trend sparkline, flags anomalous char
       errors: [{ bucket: 0, count: 0, anomalous: false }],
       latency: [{ bucket: 0, average: 10, p95: 12, count: 1, anomalous: false }],
       statusCodes: [],
-      patterns: [{ key: 'user <n> logged in', message: 'user 1 logged in', level: 'info', count: 3, sampleIds: [1], trend: [1, 2] }],
-      errorGroups: [{ key: 'paymenterror@/work/billing.ts:55', message: 'Failed to charge card', count: 2, sampleIds: [1], location: '/work/billing.ts:55' }],
-      range: {}
+      patterns: [{ key: 'user <n> logged in', message: 'user 1 logged in', pattern: 'user * logged in', level: 'info', count: 3, sampleIds: [1], trend: [1, 2], isNew: true, query: 'message:"user" message:"logged in"' }],
+      errorGroups: [{ key: 'paymenterror@/work/billing.ts:55', message: 'Failed to charge card', count: 2, sampleIds: [1], location: '/work/billing.ts:55', trend: [0, 2] }],
+      range: {}, summary: { events: 41, errors: 2, sources: 1, outside: 0, latency: { p50: 10, p95: 12, p99: 12, count: 1 } }
     }
   });
   const content = get('analysisContent');
-  const patternRow = content.querySelectorAll('.pattern-row')[0];
-  assert.match(patternRow.querySelector('.pattern-text')!.textContent, /3 × user 1 logged in/);
-  assert.equal(content.querySelectorAll('.sparkline-bar').length, 2);
+  assert.deepEqual(content.querySelectorAll('.tile-value').map(tile => tile.textContent), ['41', '2', '12 ms']);
+  const texts = content.querySelectorAll('.group-text').map(text => text.textContent);
+  assert.deepEqual(texts, ['Failed to charge card', 'user * logged in']);
+  assert.match(content.querySelectorAll('.group-detail')[0].textContent, /\/work\/billing\.ts:55/);
+  assert.equal(content.querySelectorAll('.new-pattern').length, 1);
+  assert.equal(content.querySelectorAll('.sparkline-bar').length, 4);
   assert.equal(content.querySelectorAll('.anomalous').length, 1);
   assert.equal(content.querySelectorAll('.anomaly-marker').length, 1);
-  const groupsSection = content.children[0].children[4];
-  assert.match(groupsSection.children[1].textContent, /2 × Failed to charge card — \/work\/billing\.ts:55/);
 });
 
-test('analysis renders status codes', () => {
-  const { get, receive } = viewer();
-  receive({
-    type: 'analysis', analysis: {
-      rate: [], errors: [], latency: [], statusCodes: [{ code: '200', count: 8 }, { code: '500', count: 2 }],
-      patterns: [], errorGroups: [],
-      range: {}
-    }
-  });
-  const content = get('analysisContent').children[0];
-  const statusSection = content.children[2];
-  assert.deepEqual(statusSection.children.slice(1).map(p => p.textContent), ['200: 8', '500: 2']);
+test('analysis rows, values and bars narrow the search to their logs', () => {
+  const { get, receive, app } = viewer();
+  const from = Date.parse('2026-10-04T12:00:00Z');
+  const analyze = () => {
+    get('analysisDialog').open = true;
+    receive({
+      type: 'analysis', analysis: {
+        rate: [{ bucket: 0, count: 5, anomalous: false }, { bucket: 1, count: 0, anomalous: false }], errors: [], latency: [],
+        statusCodes: [{ code: '200', count: 8 }, { code: '500', count: 2 }],
+        patterns: [{ key: 'k', message: 'cache miss 1', pattern: 'cache miss *', level: 'info', count: 2, sampleIds: [], trend: [], query: 'message:"cache miss"' }], errorGroups: [],
+        topValues: [{ field: 'serverId', label: 'Source', total: 10, values: [{ value: 'worker', label: 'Worker', count: 4 }] }],
+        range: { from, to: from + 60000 }
+      }
+    });
+  };
+  const click = (target: Element) => get('analysisContent').listeners.get('click')!({ target });
+  analyze();
+  const rows = get('analysisContent').querySelectorAll('.bar-row');
+  assert.deepEqual(rows.map(row => row.querySelector('.bar-label')!.textContent), ['200', '500', 'Worker']);
+  click(rows[1]);
+  assert.equal(get('search').value, 'timeout status:500', 'added to the current search');
+  assert.equal(get('analysisDialog').open, false);
+  analyze();
+  click(get('analysisContent').querySelectorAll('.volume-bar')[0]);
+  assert.equal(get('search').value, 'timeout status:500 timestamp:[2026-10-04T12:00:00.000Z TO 2026-10-04T12:00:30.000Z]');
+  assert.equal(get('analysisContent').querySelectorAll('.volume-bar')[1].dataset.term, undefined, 'an empty bar has nothing to show');
+  analyze();
+  click(get('analysisContent').querySelectorAll('.group-row')[0]);
+  assert.match(get('search').value, / message:"cache miss"$/);
+  analyze();
+  click(get('analysisContent').querySelectorAll('.bar-row')[2]);
+  assert.equal(app.state.selectedServer, 'worker', 'a source is selected exactly, not searched by substring');
 });
 
 test('autocomplete suggestions list known field names alongside matching values', () => {
@@ -558,6 +589,7 @@ test('cell menu fits viewport edges and dismisses on outside click, scroll and r
 
 test('roving table focus opens keyboard actions, navigates them and restores focus on Escape', () => {
   const { get, app, dom } = viewer();
+  app.state.newestFirst = false; // terminal order: these rows are laid out oldest first
   app.table.renderRows([{ id: 42, level: 'error', message: 'timeout' }, { id: 43, level: 'info' }]);
   const rows = get('logs').querySelectorAll('.event-row');
   const all = rows.flatMap(row => row.children);
@@ -600,8 +632,58 @@ test('a refreshed table restores the focused cell and keeps one tab stop', () =>
   assert.equal(newCells[1].tabIndex, 0);
 });
 
-test('Live settles at the new bottom after layout and resumes even when row IDs are unchanged', () => {
+test('newest first: Live stays at the top, scrolling down holds rows still, and the top resumes Live', () => {
+  const { get, app, messages } = viewer();
+  const rows = (last: number) => Array.from({ length: last }, (_, i) => ({ id: i + 1, level: 'info', message: 'line ' + i }));
+  const ids = () => get('logs').querySelectorAll('.event-row').map(row => Number(row.dataset.id));
+  const scroll = (top: number) => { get('viewport').scrollTop = top; get('viewport').listeners.get('scroll')!(); };
+  app.table.renderRows(rows(100));
+  assert.equal(ids()[0], 100);
+  app.table.renderRows(rows(105));
+  assert.equal(ids()[0], 105, 'new rows appear on top');
+  assert.equal(get('viewport').scrollTop, 0);
+  scroll(300);
+  assert.equal(app.state.following, false, 'reading older rows leaves Live');
+  assert.match(get('mode').textContent, /^Browsing/);
+  // Row 95 is at the top of the viewport; five newer rows above must not move it.
+  app.table.renderRows(rows(110));
+  assert.equal(get('viewport').scrollTop, 450);
+  scroll(0);
+  assert.equal(app.state.following, true, 'the top resumes Live');
+  assert.equal(messages.at(-1)?.type, 'snapshot');
+  assert.equal(messages.at(-1)?.before, undefined);
+});
+
+test('a partial refresh merges new rows with the held ones, reuses their DOM, and falls back to a full page', () => {
+  const { get, messages, receive } = viewer();
+  const row = (id: number) => ({ id, message: 'line ' + id, level: 'info', timestamp: '12:00', stream: 'stdout' });
+  const ids = () => get('logs').querySelectorAll('.event-row').map(item => Number(item.dataset.id));
+  const respond = (extra: Record<string, unknown>) => receive({
+    type: 'snapshot', requestId: messages.at(-1)!.requestId, generation: 1, newest: 10, status: 'Running', command: 'node server', running: true,
+    total: 10, retained: 10, discarded: 0, bytes: 1000, maxBytes: 10000, truncated: 0, columns: [], page: 0, pages: 1, matched: 3, ...extra
+  });
+  receive({ type: 'update' });
+  assert.equal(messages.at(-1)!.have, undefined);
+  respond({ events: [row(1), row(2), row(3)], rowsVersion: 'v1' });
+  assert.deepEqual(ids(), [3, 2, 1]);
+  const kept = get('logs').querySelectorAll('.event-row').slice(0, 2);
+  receive({ type: 'update' });
+  assert.deepEqual(JSON.parse(JSON.stringify(messages.at(-1)!.have)), { last: 3, count: 3, version: 'v1' });
+  respond({ events: [row(4)], keep: 2, keepFirst: 2, rowsVersion: 'v1' });
+  assert.deepEqual(ids(), [4, 3, 2]);
+  assert.deepEqual(get('logs').querySelectorAll('.event-row').slice(1), kept, 'held rows keep their DOM');
+  receive({ type: 'update' });
+  assert.deepEqual(JSON.parse(JSON.stringify(messages.at(-1)!.have)), { last: 4, count: 3, version: 'v1' });
+  const sent = messages.length;
+  respond({ events: [row(6)], keep: 3, keepFirst: 99, rowsVersion: 'v1' });
+  assert.deepEqual(ids(), [4, 3, 2], 'rows that cannot be placed are not shown');
+  assert.equal(messages.length, sent + 1);
+  assert.equal(messages.at(-1)!.have, undefined, 'the follow-up asks for the whole page');
+});
+
+test('in terminal order, Live settles at the new bottom after layout and resumes even when row IDs are unchanged', () => {
   const { get, app, flushFrames } = viewer();
+  app.state.newestFirst = false;
   app.table.renderRows(Array.from({ length: 1000 }, (_, i) => ({ id: i + 1, level: "info", message: "line " + i })));
   get('viewport').scrollHeight = 32000; // layout finishes after the initial render
   flushFrames();
@@ -703,6 +785,7 @@ test('autocomplete ignores changed input or server and inserts a complete query'
 
 test('scrolling past expanded details keeps their DOM state and does not repeatedly replace rows', () => {
   const { get, app, flushFrames, receive } = viewer();
+  app.state.newestFirst = false; // terminal order: these rows are laid out oldest first
   get('viewport').scrollTop = 0;
   (() => {
     app.state.following = false;
@@ -729,6 +812,7 @@ test('scrolling past expanded details keeps their DOM state and does not repeate
 
 test('restoring row focus during scrolling uses preventScroll', () => {
   const { get, app, dom } = viewer();
+  app.state.newestFirst = false; // terminal order: these rows are laid out oldest first
   get('viewport').scrollTop = 0;
   (() => {
     app.state.following = false;
@@ -738,10 +822,60 @@ test('restoring row focus during scrolling uses preventScroll', () => {
   dom.activeElement = get("logs").querySelector('tr.event-row[data-id="10"] .message-button');
   get('viewport').scrollTop = 300;
   app.table.renderWindow();
+  // Scrolling keeps rows that stay in the window, so the same button is refocused.
+  const kept = get('logs').querySelector('tr.event-row[data-id="10"] .message-button')!;
+  assert.equal(kept, focused);
+  assert.deepEqual(JSON.parse(JSON.stringify(kept.focusCalls)), [{ preventScroll: true }]);
+  assert.equal(get('viewport').scrollTop, 300);
+  // A refresh with new row data rebuilds rows; the new button for the same event takes focus.
+  dom.activeElement = kept;
+  app.table.renderRows(app.table.events.map(event => ({ ...event })));
   const restored = get('logs').querySelector('tr.event-row[data-id="10"] .message-button')!;
   assert.notEqual(restored, focused);
   assert.deepEqual(JSON.parse(JSON.stringify(restored.focusCalls)), [{ preventScroll: true }]);
   assert.equal(get('viewport').scrollTop, 300);
+});
+
+test('scrolling builds only the rows entering the window and keeps the others in place', () => {
+  const { get, app } = viewer();
+  app.state.newestFirst = false; // terminal order: these rows are laid out oldest first
+  app.state.following = false;
+  get('viewport').scrollTop = 0;
+  app.table.renderRows(Array.from({ length: 1000 }, (_, i) => ({ id: i + 1, level: 'info', message: 'line ' + i })));
+  const before = new Map(get('logs').querySelectorAll('.event-row').map(row => [row.dataset.id, row]));
+  get('viewport').scrollTop = 300;
+  app.table.renderWindow();
+  const children = get('logs').children;
+  const after = get('logs').querySelectorAll('.event-row');
+  assert.equal(children[0].className, 'virtual-spacer');
+  assert.equal(children.at(-1)!.className, 'virtual-spacer');
+  assert.deepEqual(after.map(row => Number(row.dataset.id)), Array.from({ length: after.length }, (_, i) => Number(after[0].dataset.id) + i));
+  assert.equal(after.filter(row => before.get(row.dataset.id) !== row).length, 2, 'two rows scrolled into view');
+  // A refresh that keeps the same row data keeps the rows; new data rebuilds them.
+  const current = get('logs').querySelectorAll('.event-row');
+  app.table.renderRows([...app.table.events]);
+  assert.deepEqual(get('logs').querySelectorAll('.event-row'), current);
+  app.table.renderRows(app.table.events.map(event => ({ ...event })));
+  assert.ok(get('logs').querySelectorAll('.event-row').every((row, index) => current[index] !== row));
+});
+
+test('keyboard navigation skips a collapsed Source column without measuring cells', () => {
+  const { get, app, dom } = viewer();
+  get('eventColumns').children.find(col => col.dataset.column === 'base:source')!.style.visibility = 'collapse';
+  const measure = Element.prototype.getBoundingClientRect;
+  let measured = 0;
+  Element.prototype.getBoundingClientRect = function (this: Element) { if (this.dataset.column) measured++; return measure.call(this); };
+  try {
+    app.table.renderRows([{ id: 1, level: 'info', message: 'first' }, { id: 2, level: 'info', message: 'second' }]);
+  } finally { Element.prototype.getBoundingClientRect = measure; }
+  assert.equal(measured, 0, 'a refresh does not force layout per cell');
+  const cells = get('logs').querySelectorAll('.event-row')[0].children;
+  const message = cells.find(cell => cell.dataset.column === 'base:message')!;
+  const source = cells.find(cell => cell.dataset.column === 'base:source')!;
+  message.focus();
+  get('logs').listeners.get('keydown')!({ target: message, key: 'ArrowRight', preventDefault() {} });
+  assert.equal(dom.activeElement, message, 'the collapsed Source cell is not a stop');
+  assert.equal(source.tabIndex, -1);
 });
 
 test('Columns exposes additional payload fields and requests their values when selected', () => {
@@ -1156,6 +1290,25 @@ test('rows show their code link and log doctor finding, with actions, and the to
   assert.deepEqual(JSON.parse(JSON.stringify(messages.at(-1))), { type: 'doctorAction', action: 'fix', siteId: finding.siteId });
 });
 
+test('a leak in output no statement accounts for names its source and opens an example locally', () => {
+  const { get, receive, messages } = viewer();
+  const finding = { code: 'secret', severity: 'warning', message: 'Vendor SDK logged a JSON Web Token.', source: 'Vendor SDK', eventId: 77 };
+  receive({
+    type: 'snapshot', generation: 1, newest: 101, status: 'Running', command: 'node server', running: true,
+    total: 101, retained: 101, discarded: 0, bytes: 1000, maxBytes: 10000, truncated: 0, events: [], columns: [], page: 0, pages: 1, matched: 0,
+    doctor: { revision: 1, findings: [finding], total: 1 }
+  });
+  const item = get('doctorList').querySelectorAll('.doctor-item')[0];
+  assert.equal(item.querySelector('.doctor-source')!.textContent, 'Vendor SDK');
+  assert.equal(item.querySelectorAll('.doctor-action').length, 1, 'nothing to open or fix in the editor');
+  const example = item.querySelector('.doctor-action')!;
+  assert.equal(example.dataset.doctorAction, 'example');
+  const sent = messages.length;
+  get('doctorPanel').listeners.get('click')!({ target: { closest: (wanted: string) => wanted === '[data-doctor-action]' ? example : undefined } });
+  assert.equal(get('contextDialog').open, true);
+  assert.deepEqual(messages.slice(sent).map(message => [message.type, message.id]), [['context', 77]]);
+});
+
 test('Got it hides the first-run tip for good', () => {
   const { get, receive, savedStates } = viewer();
   assert.equal(get('rowHint').hidden, false);
@@ -1184,7 +1337,7 @@ test('live rows hold while the pointer is over them and catch up when it leaves'
   assert.deepEqual(ids(), [42], 'rows do not move under the pointer');
   assert.match(get('mode').textContent, /held while you point at the table/);
   get('viewport').listeners.get('pointerleave')!();
-  assert.deepEqual(ids(), [42, 43]);
+  assert.deepEqual(ids(), [43, 42], 'the newest row is on top');
   assert.equal(get('mode').textContent, 'Live · newest 1,000');
 });
 
@@ -1211,9 +1364,9 @@ test('a pointer resting on the table stops holding live rows after two seconds',
   assert.deepEqual(ids(), [42], 'still held: the pointer moved 1.5 seconds ago');
   now += 600;
   runTimers();
-  assert.deepEqual(ids(), [42, 43], 'released after two seconds without movement');
+  assert.deepEqual(ids(), [43, 42], 'released after two seconds without movement');
   snapshot([43, 44]);
-  assert.deepEqual(ids(), [42, 43, 44], 'a resting pointer no longer holds new rows');
+  assert.deepEqual(ids(), [44, 43, 42], 'a resting pointer no longer holds new rows');
 });
 
 test('an expanded event explains log doctor findings on its statement', () => {

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { findSensitiveValues, uncaughtExceptionVariable } from './core/log-findings';
+import { findSensitiveValues, hasRequestContext, isQuietFailure, SensitiveScanner, uncaughtExceptionVariable } from './core/log-findings';
 import { parseLogLine } from './core/log-event';
 import { extractLogSites, LogSiteIndex, LogSiteTracker } from './core/log-sites';
 import { withVscode } from './test/vscode-mock';
@@ -146,5 +146,110 @@ test('log doctor reports runtime evidence on statements and offers fixes', async
   const site = index.sitesIn('src/checkout.ts')[0];
   assert.deepEqual(siteFindings(site, tracker.stats.get(site.id)!, tracker.total, 'security').map(finding => finding.code), ['secret']);
   assert.deepEqual(siteFindings(site, tracker.stats.get(site.id)!, tracker.total, 'off'), []);
+  doctor.dispose();
+});
+
+test('failures logged below warning are recognized, and denials of failure are not', () => {
+  const quiet = (line: string) => isQuietFailure(event(1, line));
+  assert.equal(quiet('{"level":"info","msg":"payment failed for order 12"}'), true);
+  assert.equal(quiet('{"level":"debug","msg":"upstream call","status":503}'), true);
+  assert.equal(quiet('{"level":"info","msg":"retrying","stack":"Error: boom\\n    at run (/srv/a.js:1:1)"}'), true);
+  assert.equal(quiet('{"level":"info","msg":"connection refused by db"}'), true);
+  for (const line of ['{"level":"info","msg":"batch done with no errors"}', '{"level":"info","msg":"sync complete, errors=0"}',
+    '{"level":"error","msg":"payment failed"}', '{"level":"warn","msg":"payment failed"}', '{"level":"info","msg":"terror alert level"}']) {
+    assert.equal(quiet(line), false, line);
+  }
+  assert.equal(hasRequestContext(event(1, '{"msg":"x","trace_id":"abc"}')), true);
+  assert.equal(hasRequestContext(event(1, '{"msg":"x","req":{"id":"r1"}}')), true, 'nested req.id');
+  assert.equal(hasRequestContext(event(1, '{"msg":"x","user":"u1"}')), false);
+});
+
+test('the sensitive scanner reports leaks per source, skips claimed events and follows retention', () => {
+  const scanner = new SensitiveScanner();
+  const at = (id: number, serverId: string, line: string) => ({ ...event(id, line), serverId, server: serverId.toUpperCase() });
+  const events = [
+    at(1, 'lib', `{"msg":"auth","token":"Bearer ${JWT}"}`),
+    at(2, 'lib', `{"msg":"auth","token":"Bearer ${JWT}"}`),
+    at(3, 'api', '{"msg":"signup ann@acme.io"}'),
+    at(4, 'api', '{"msg":"signup bob@acme.io"}')
+  ];
+  scanner.scan(events, item => item.id === 4);
+  const summary = () => scanner.findings.map(found => [found.server, found.value.kind, found.count, found.lastId]);
+  assert.deepEqual(summary(), [['LIB', 'jwt', 2, 2], ['API', 'email', 1, 3]], 'event 4 belongs to a statement finding');
+  const version = scanner.version;
+  scanner.scan(events);
+  assert.equal(scanner.version, version, 'events are scanned once');
+  scanner.evict(2);
+  assert.deepEqual(summary(), [['LIB', 'jwt', 1, 2], ['API', 'email', 1, 3]]);
+  scanner.evict(4);
+  assert.deepEqual(summary(), []);
+  scanner.reset();
+  assert.equal(scanner.watermark, 0);
+});
+
+test('log doctor flags quiet failures, oversized events and errors without request context, and leaks in unmatched output', async () => {
+  const source = [
+    'function handle(req) {',
+    '  logger.info("charge failed for order", { order: req.order });',
+    '  logger.debug("payload dump", { body: req.body });',
+    '  logger.error("lookup broke", { key: req.key });',
+    '}'
+  ].join('\n');
+  const uri = { path: '/w/src/handle.ts', toString: () => 'file:///w/src/handle.ts' };
+  const diagnostics = new Map<string, Diagnostic[]>();
+  let report = '';
+  const mock = {
+    Range, Position, Diagnostic, WorkspaceEdit, CodeAction,
+    CodeActionKind: { QuickFix: 'quickfix' }, DiagnosticSeverity: { Error: 0, Warning: 1, Information: 2, Hint: 3 },
+    languages: {
+      createDiagnosticCollection: () => ({ clear: () => diagnostics.clear(), set: (target: typeof uri, list: Diagnostic[]) => diagnostics.set(target.path, list), delete: () => undefined, dispose() { } }),
+      registerCodeActionsProvider: () => ({ dispose() { } })
+    },
+    commands: { registerCommand: () => ({ dispose() { } }) },
+    window: { showTextDocument: async () => undefined },
+    workspace: {
+      textDocuments: [{ uri, getText: () => source }],
+      onDidChangeConfiguration: () => ({ dispose() { } }), onDidChangeTextDocument: () => ({ dispose() { } }),
+      openTextDocument: async ({ content }: { content: string }) => { report = content; return {}; }
+    }
+  };
+  // The module binds the VS Code API it was first loaded with; load it against this mock.
+  delete require.cache[require.resolve('./vscode/log-doctor')];
+  const { LogDoctor } = withVscode(mock, () => require('./vscode/log-doctor') as typeof import('./vscode/log-doctor'));
+  const index = new LogSiteIndex();
+  index.setFile('src/handle.ts', extractLogSites('src/handle.ts', source));
+  const tracker = new LogSiteTracker(index);
+  tracker.findings = true;
+  let id = 0;
+  tracker.process([
+    // Most structured logs carry a request id; the errors below do not.
+    ...Array.from({ length: 60 }, () => event(++id, JSON.stringify({ level: 'info', msg: 'served', requestId: `r${id}` }))),
+    ...Array.from({ length: 4 }, () => event(++id, JSON.stringify({ level: 'info', msg: 'charge failed for order', order: id }))),
+    ...Array.from({ length: 3 }, () => event(++id, JSON.stringify({ level: 'debug', msg: 'payload dump', body: 'x'.repeat(9000) }))),
+    ...Array.from({ length: 3 }, () => event(++id, JSON.stringify({ level: 'error', msg: 'lookup broke', key: id })))
+  ]);
+  const scanner = new SensitiveScanner();
+  scanner.scan([{ ...event(++id, `{"msg":"vendor sdk auth","header":"Bearer ${JWT}"}`), serverId: 'vendor', server: 'Vendor SDK' }]);
+  const lens = { siteUri: () => uri, onDidChangeCodeLenses: () => ({ dispose() { } }), schedule() { } };
+  const doctor = new LogDoctor({ config: { get: <T>(_key: string, fallback: T) => fallback }, index, tracker, lens: lens as never,
+    askCopilot: async () => undefined, unclaimed: () => ({ findings: scanner.findings, version: scanner.version }) });
+  await doctor.refresh();
+  const byCode = new Map(diagnostics.get('/w/src/handle.ts')!.map(diagnostic => [diagnostic.code, diagnostic]));
+  assert.match(byCode.get('quiet-failure')!.message, /Logged 4 failures below warning level \(100% of its events\)/);
+  assert.match(byCode.get('oversized')!.message, /Logs 8\.8 KB per event on average/);
+  assert.match(byCode.get('contextless')!.message, /Logged 3 warnings or errors without a trace or request id, though 86% of structured logs carry one/);
+  const lines = source.split('\n');
+  const document = { uri, lineAt: (line: number) => ({ lineNumber: line, text: lines[line] }) };
+  const [raise] = doctor.provideCodeActions(document as never, undefined as never, { diagnostics: [byCode.get('quiet-failure')] } as never) as unknown as CodeAction[];
+  assert.equal(raise.title, 'Raise to error');
+  assert.equal(raise.edit!.edits[0].text, 'error');
+  // A leak in output no statement accounts for is listed first, with an example to open.
+  assert.equal(doctor.total, 4);
+  assert.deepEqual(doctor.views()[0], { code: 'secret', severity: 'warning', source: 'Vendor SDK', eventId: id,
+    message: 'Vendor SDK logged a JSON Web Token in field header in 1 event (eyJh…[jwt]), from code Logline has not matched to a log statement, such as a library, another repository, or imported logs.' });
+  await (doctor as unknown as { showHealth(): Promise<void> }).showHealth();
+  assert.match(report, /- \*\*1\*\* logged secrets such as tokens or keys/);
+  assert.match(report, /## In output not matched to a statement\n[\s\S]*\| Vendor SDK \| Vendor SDK logged a JSON Web Token/);
+  assert.match(report, /\*\*Failures logged below warning\.\*\* Error filters, alerts/);
   doctor.dispose();
 });

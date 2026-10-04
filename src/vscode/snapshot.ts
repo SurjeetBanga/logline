@@ -2,7 +2,7 @@ import type { Ingestion } from '../capture/ingestion';
 import type { RuntimeState } from '../capture/runtime-state';
 import type { SessionRegistry } from '../capture/session-registry';
 import type { LogStore } from '../core/log-store';
-import { getField } from '../core/query';
+import { getField, parseQuery } from '../core/query';
 import type { Settings } from '../core/settings';
 import type { LogEvent } from '../core/types';
 import type { DoctorFindingView, GuideStatus, RowEvent, Snapshot, ViewRequest } from '../protocol/messages';
@@ -36,9 +36,29 @@ export interface SnapshotSources {
   doctor?: { revision: number; total: number; findings?: DoctorFindingView[] };
   /** MCP clients such as Claude Code that called recently. */
   agentClients?: string[];
+  /** Changes whenever `rowLinks` could answer differently for an event already sent. */
+  rowLinksVersion?: string;
+}
+
+// The newest page only changes at its ends: matches are appended and the
+// oldest leave. So rows a view holds up to `have.last` are still the start of
+// the new page, unless the page is sorted, a deeper page that slides with new
+// events, or a `last:` window that moves with the clock.
+function keptRows(msg: Extract<ViewRequest, { type: 'snapshot'; }>, events: LogEvent[], rowsVersion: string): number | undefined {
+  const have = msg.have;
+  if (!have || have.version !== rowsVersion || msg.sort || (msg.page && msg.before === undefined)) return undefined;
+  if (parseQuery((msg.query ?? '').slice(0, 256)).some(group => group.some(token => token.canonical === 'last'))) return undefined;
+  let low = 0, high = events.length - 1;
+  while (low <= high) {
+    const middle = (low + high) >> 1;
+    const id = events[middle].id;
+    if (id === have.last) return middle + 1 <= have.count ? middle + 1 : undefined;
+    if (id < have.last) low = middle + 1; else high = middle - 1;
+  }
+  return undefined;
 }
 export function buildSnapshot(msg: Extract<ViewRequest, { type: 'snapshot'; }>,
-  { store, config, registry, state, ingestion, persistence, searches, running, guideStatus, agentAccess, terminalCapture, otlp, spans, rowLinks, doctor, agentClients }: SnapshotSources): Snapshot {
+  { store, config, registry, state, ingestion, persistence, searches, running, guideStatus, agentAccess, terminalCapture, otlp, spans, rowLinks, doctor, agentClients, rowLinksVersion }: SnapshotSources): Snapshot {
   const options = { query: msg.query, serverId: msg.serverId, sessionId: msg.sessionId, levels: msg.levels,
     page: msg.page, before: msg.before, sort: msg.sort, sortDirection: msg.sortDirection };
   const configured = config.get<string[]>('columns', []);
@@ -53,7 +73,9 @@ export function buildSnapshot(msg: Extract<ViewRequest, { type: 'snapshot'; }>,
   // payload can carry dozens of keys per event. Trimming here keeps the
   // refresh payload proportional to what is on screen rather than to how
   // wide the log records happen to be.
-  const events = pageResult?.events.map(event => {
+  const rowsVersion = JSON.stringify([state.generation, projectedColumns, rowLinksVersion ?? null]);
+  const keep = pageResult && keptRows(msg, pageResult.events, rowsVersion);
+  const events = pageResult?.events.slice(keep ?? 0).map(event => {
     const traceId = getField(event, 'traceId');
     return { ...event, fields: pickColumns(event, projectedColumns), ...(typeof traceId === 'string' && traceId ? { traceId } : {}), ...rowLinks?.(event) };
   });
@@ -69,7 +91,8 @@ export function buildSnapshot(msg: Extract<ViewRequest, { type: 'snapshot'; }>,
   }
   return {
     type: 'snapshot',
-    ...result, ...(events ? { events } : {}),
+    ...result, ...(events ? { events, rowsVersion } : {}),
+    ...(keep !== undefined ? { keep, keepFirst: pageResult!.events[0].id } : {}),
     columns,
     columnFields,
     fields: store.fieldNames(),
@@ -78,7 +101,7 @@ export function buildSnapshot(msg: Extract<ViewRequest, { type: 'snapshot'; }>,
     searches: { saved: searches.savedSearches() },
     newest: ingestion.sequence, generation: state.generation,
     persistDropped: persistence.persistDropped,
-    timezone: config.get('timezone', 'local'), guideStatus, agentSharing: agentAccess.status(),
+    timezone: config.get('timezone', 'local'), newestFirst: config.get('newestFirst', true), guideStatus, agentSharing: agentAccess.status(),
     captureTerminals: config.get('captureTerminals', false), captureStatus: terminalCapture?.status(), otlp: otlp?.status(),
     traceCount: spans?.traceCount ?? 0,
     ...(doctor ? { doctor } : {}),

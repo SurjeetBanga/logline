@@ -32,6 +32,8 @@ export class ViewerState {
   hiddenColumns: Set<string>;
   checkedLevels: Set<string>;
   displayTimezone = 'local';
+  /** Newest row at the top; the host setting arrives with each snapshot. */
+  newestFirst = true;
   cellHintDismissed: boolean;
   rowHintDismissed: boolean;
   constructor(saved: PersistedState = {}) {

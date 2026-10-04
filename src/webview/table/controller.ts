@@ -29,6 +29,12 @@ export function createTable(elements: Elements, scrollViewport: HTMLElement, sta
   // the page's up-to-1,000 events are retained.
   let virtualEvents: LogEvent[] = [];
 
+  // The page as received (chronological, or in the host's sort order);
+  // `virtualEvents` is the same rows in display order.
+  let sourceEvents: LogEvent[] = [];
+
+  let rowsVersion = 0;
+
   let rowHeight = 30;
 
   let rowHeightMeasured = false;
@@ -45,7 +51,29 @@ export function createTable(elements: Elements, scrollViewport: HTMLElement, sta
 
   let renderedWindow: string | undefined;
 
+  // Rows built for the current revision, by event id. A row only depends on
+  // its event object and on state that bumps the revision, so scrolling, and
+  // refreshes that keep the same row objects, build only the rows entering
+  // the window instead of the whole window again.
+  let rowCache = new Map<number, { event: LogEvent; row: HTMLTableRowElement; }>();
+
+  let rowCacheRevision = -1;
+
   const detailResizeObserver = scope.observer(() => scheduleRenderWindow());
+
+  // A snapshot updates the toolbar before the rows. Reading the viewport after
+  // those writes would force a layout of the half-updated page, so the viewer
+  // measures it first and rendering uses that measurement until released.
+  let measured: { top: number; height: number; } | undefined;
+  function viewportTop() { return measured?.top ?? scrollViewport.scrollTop; }
+  function viewportHeight() { return measured?.height ?? scrollViewport.clientHeight; }
+  function scrollViewportTo(top: number) {
+    scrollViewport.scrollTop = top;
+    // The browser clamps a position past the end; only zero is known without layout.
+    measured = top === 0 && measured ? { ...measured, top } : undefined;
+  }
+  function measureViewport() { measured = { top: scrollViewport.scrollTop, height: scrollViewport.clientHeight }; }
+  function releaseViewport() { measured = undefined; }
 
   function ensureSpacers() {
     if (topSpacer)
@@ -75,7 +103,9 @@ export function createTable(elements: Elements, scrollViewport: HTMLElement, sta
     }
   }
 
-  function renderWindow() {
+  // `atTail` lays the window out at the bottom of the list, as Live will
+  // scroll there, rather than first building rows for the old position.
+  function renderWindow(atTail = false) {
     ensureSpacers();
     ensureRowHeight();
     const total = virtualEvents.length;
@@ -88,11 +118,14 @@ export function createTable(elements: Elements, scrollViewport: HTMLElement, sta
         expandedHeight = detail.getBoundingClientRect().height;
     }
     const overscan = 8;
-    const visibleCount = Math.max(1, Math.ceil(scrollViewport.clientHeight / rowHeight)) + overscan * 2;
+    const top = viewportTop();
+    const height = viewportHeight();
+    const visibleCount = Math.max(1, Math.ceil(height / rowHeight)) + overscan * 2;
     const detailTop = (selectedIndex + 1) * rowHeight;
-    const offset = selectedIndex >= 0 && scrollViewport.scrollTop > detailTop
-      ? scrollViewport.scrollTop - Math.min(expandedHeight, scrollViewport.scrollTop - detailTop)
-      : scrollViewport.scrollTop;
+    const offset = atTail ? Math.max(0, total * rowHeight - height)
+      : selectedIndex >= 0 && top > detailTop
+      ? top - Math.min(expandedHeight, top - detailTop)
+      : top;
     let start = Math.floor(offset / rowHeight) - overscan;
     start = Math.max(0, Math.min(start, Math.max(0, total - visibleCount)));
     const end = Math.min(total, start + visibleCount);
@@ -101,7 +134,7 @@ export function createTable(elements: Elements, scrollViewport: HTMLElement, sta
     (topSpacer!.firstChild as HTMLTableCellElement).style.height = `${start * rowHeight + (selectedIndex >= 0 && selectedIndex < start ? expandedHeight : 0)}px`;
     (bottomSpacer!.firstChild as HTMLTableCellElement).colSpan = totalCols;
     (bottomSpacer!.firstChild as HTMLTableCellElement).style.height = `${(total - end) * rowHeight + (selectedIndex >= end ? expandedHeight : 0)}px`;
-    const windowKey = `${start}:${end}:${renderRevision}`;
+    const windowKey = `${start}:${end}:${renderRevision}:${rowsVersion}`;
     if (renderedWindow === windowKey)
       return;
     renderedWindow = windowKey;
@@ -113,10 +146,18 @@ export function createTable(elements: Elements, scrollViewport: HTMLElement, sta
     const refocusColumn = focused?.dataset.column;
     const detailScrollers = [...(expandedRow?.querySelectorAll<HTMLElement>('.event-details, pre') ?? [])]
       .map(element => ({ element, top: element.scrollTop, left: element.scrollLeft }));
-    const fragment = document.createDocumentFragment();
+    if (rowCacheRevision !== renderRevision) {
+      rowCache = new Map();
+      rowCacheRevision = renderRevision;
+    }
+    const builtRows = new Map<number, { event: LogEvent; row: HTMLTableRowElement; }>();
+    const wanted: HTMLTableRowElement[] = [];
     for (let i = start; i < end; i++) {
       const event = virtualEvents[i];
-      fragment.append(buildRow(event));
+      const cached = rowCache.get(event.id);
+      const row = cached?.event === event ? cached.row : buildRow(event);
+      builtRows.set(event.id, { event, row });
+      wanted.push(row);
       if (event.id === state.selected) {
         if (!expandedRow) {
           detailResizeObserver.disconnect();
@@ -124,13 +165,14 @@ export function createTable(elements: Elements, scrollViewport: HTMLElement, sta
           detailResizeObserver.observe(expandedRow);
         }
         (expandedRow.firstChild as HTMLTableCellElement).colSpan = totalCols;
-        fragment.append(expandedRow);
+        wanted.push(expandedRow);
       }
     }
     // Rebuilding replaces the focused button's element out from under it, which
     // (besides dropping keyboard focus) makes Chrome yank the scroll position
     // once focus falls back to <body>. Re-focus the same row's new button.
-    elements.logs.replaceChildren(topSpacer!, fragment, bottomSpacer!);
+    placeRows(wanted);
+    rowCache = builtRows;
     if (hoveredId !== undefined) {
       const hovered = [...elements.logs.querySelectorAll<HTMLElement>('.event-row')].find(row => row.dataset.id === hoveredId);
       if (hovered) fillQuickActions(hovered);
@@ -156,6 +198,24 @@ export function createTable(elements: Elements, scrollViewport: HTMLElement, sta
     }
   }
 
+  // Move only the rows entering or leaving the window. Rows that stay are not
+  // detached, so the browser does not lay the whole window out again.
+  function placeRows(wanted: HTMLTableRowElement[]) {
+    const logs = elements.logs;
+    // When every row is new, as with a busy live stream, one swap is cheaper.
+    if (topSpacer!.parentNode !== logs || bottomSpacer!.parentNode !== logs || !wanted.some(row => row.parentNode === logs)) {
+      logs.replaceChildren(topSpacer!, ...wanted, bottomSpacer!);
+      return;
+    }
+    const keep = new Set<Node>([topSpacer!, bottomSpacer!, ...wanted]);
+    for (const child of [...logs.children]) if (!keep.has(child)) logs.removeChild(child);
+    let cursor = topSpacer!.nextSibling;
+    for (const row of wanted) {
+      if (cursor === row) cursor = row.nextSibling;
+      else logs.insertBefore(row, cursor);
+    }
+  }
+
   let windowRenderQueued = false;
 
   let followTailRequested = false;
@@ -171,8 +231,11 @@ export function createTable(elements: Elements, scrollViewport: HTMLElement, sta
       followTailRequested = false;
       renderWindow();
       if (followTail && state.following && !state.paused && !state.selectedSort) {
-        scrollViewport.scrollTop = scrollViewport.scrollHeight;
-        renderWindow();
+        const edge = liveAtTop() ? 0 : scrollViewport.scrollHeight;
+        if (scrollViewport.scrollTop !== edge) {
+          scrollViewport.scrollTop = edge;
+          renderWindow();
+        }
       }
     });
   }
@@ -186,14 +249,32 @@ export function createTable(elements: Elements, scrollViewport: HTMLElement, sta
     scheduleRenderWindow(state.following && !state.paused && !state.selectedSort);
   }).observe(scrollViewport);
 
+  /** Newest first puts Live at the top; a sorted view keeps the host's order. */
+  function liveAtTop() { return state.newestFirst && !state.selectedSort; }
+
   function renderRows(events: LogEvent[]) {
-    virtualEvents = events;
-    renderRevision++;
-    renderWindow();
-    if (state.following && !state.paused && !state.selectedSort) {
+    const followTail = state.following && !state.paused && !state.selectedSort;
+    // Rows added above the reader would push what they are reading down, so
+    // keep the row at the top of the viewport where it is.
+    const anchorIndex = !followTail && liveAtTop() ? Math.floor(viewportTop() / rowHeight) : -1;
+    const anchor = anchorIndex > 0 ? virtualEvents[anchorIndex] : undefined;
+    sourceEvents = events;
+    virtualEvents = liveAtTop() ? [...events].reverse() : events;
+    rowsVersion++;
+    if (anchor) {
+      const index = virtualEvents.findIndex(event => event.id === anchor.id);
+      if (index >= 0 && index !== anchorIndex) scrollViewportTo(viewportTop() + (index - anchorIndex) * rowHeight);
+    }
+    if (followTail && liveAtTop()) {
+      if (viewportTop()) scrollViewportTo(0);
+      renderWindow();
+      return;
+    }
+    renderWindow(followTail);
+    if (followTail) {
       // Spacers above now size scrollHeight to the full list; scroll to the
       // true bottom, then re-render so the visible window matches.
-      scrollViewport.scrollTop = scrollViewport.scrollHeight;
+      scrollViewportTo(scrollViewport.scrollHeight);
       renderWindow();
       scheduleRenderWindow(true);
     }
@@ -238,7 +319,11 @@ export function createTable(elements: Elements, scrollViewport: HTMLElement, sta
     const known = new Map(allColumns.map(column => [column.key, column]));
     displayedColumns = [...state.columnOrder.map(key => known.get(key)).filter((column): column is { key: string; label: string; } => Boolean(column)), ...allColumns.filter(column => !state.columnOrder.includes(column.key))];
     state.columnOrder = displayedColumns.map(column => column.key);
-    columnElements = new Map(displayedColumns.map(column => [column.key, document.createElement('col')]));
+    columnElements = new Map(displayedColumns.map(column => {
+      const col = document.createElement('col');
+      col.dataset.column = column.key;
+      return [column.key, col];
+    }));
     element('eventColumns').replaceChildren(...columnElements.values());
     layoutColumns();
     const head = element('head-row');
@@ -476,6 +561,8 @@ export function createTable(elements: Elements, scrollViewport: HTMLElement, sta
         scrollViewport.scrollTop += newTop - viewportTop - rowOffset;
     }
   }
+  /** Rebuild rows whose content depends on display settings, such as the timezone. */
+  function invalidateRows() { renderRevision++; }
   function resetDetails() { expandedHeight = 0; expandedRow = undefined; detailResizeObserver.disconnect(); renderRevision++; }
   function receiveDetails(data: Extract<HostMessage, { type: 'details'; }>) {
     if (data.id !== state.selected) return;
@@ -485,8 +572,9 @@ export function createTable(elements: Elements, scrollViewport: HTMLElement, sta
   }
 
   return {
-    updateColumns, resetAutomaticColumns, lockAutomaticColumns, layoutColumns, renderFieldList, renderRows, renderWindow, scheduleRenderWindow, toggleExpand, resetDetails, receiveDetails,
+    updateColumns, resetAutomaticColumns, lockAutomaticColumns, layoutColumns, renderFieldList, renderRows, renderWindow, scheduleRenderWindow, toggleExpand, resetDetails, receiveDetails, invalidateRows,
+    measureViewport, releaseViewport,
     get currentColumns() { return currentColumns; }, get automaticColumns() { return automaticColumns; },
-    get events() { return virtualEvents; }, get expandedHeight() { return expandedHeight; }
+    get events() { return sourceEvents; }, get expandedHeight() { return expandedHeight; }
   };
 }

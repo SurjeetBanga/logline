@@ -74,3 +74,51 @@ test('following survives truncation, rotation and a file that does not exist yet
     await h.follower.dispose();
   } finally { await rm(dir, { recursive: true, force: true }); }
 });
+
+test('the poll timer cannot read a large file from its start before the tail position is known', async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), 'logline-follow-'));
+  const file = path.join(dir, 'big.log');
+  // The follower calls fs/promises through the module object, so a slow first
+  // stat stands in for a busy extension host during start-up.
+  const fsPromises: { stat: typeof import('node:fs/promises').stat } = require('node:fs/promises');
+  const stat = fsPromises.stat;
+  let calls = 0;
+  fsPromises.stat = (async (...args: Parameters<typeof stat>) => {
+    if (++calls === 1) await new Promise(resolve => setTimeout(resolve, 100));
+    return stat(...args);
+  }) as typeof stat;
+  try {
+    await writeFile(file, Array.from({ length: 5000 }, (_, i) => `line ${i}`).join('\n') + '\n');
+    const h = harness({ joinStackTraces: false });
+    await h.follower.follow(file, { tailBytes: 30, pollMs: 5 });
+    await new Promise(resolve => setTimeout(resolve, 50));
+    assert.deepEqual(h.messages(), ['line 4997', 'line 4998', 'line 4999']);
+    await h.follower.dispose();
+  } finally {
+    fsPromises.stat = stat;
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('stopping a file source stops only that file', async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), 'logline-follow-'));
+  const first = path.join(dir, 'first.log');
+  const second = path.join(dir, 'second.log');
+  try {
+    await writeFile(first, '');
+    await writeFile(second, '');
+    const h = harness();
+    const firstId = await h.follower.follow(first, { pollMs: 20 });
+    const secondId = await h.follower.follow(second, { pollMs: 20 });
+    h.follower.stopServer(`file:${first}`);
+    assert.equal(h.registry.records.get(firstId)!.status, 'exited');
+    assert.equal(h.registry.records.get(secondId)!.status, 'running');
+    assert.equal(h.follower.active, 1);
+    await appendFile(first, 'INFO ignored\n');
+    await appendFile(second, 'INFO kept\n');
+    await eventually(() => h.messages().includes('INFO kept'));
+    assert.ok(!h.messages().includes('INFO ignored'));
+    await h.follower.dispose();
+    assert.equal(h.follower.active, 0);
+  } finally { await rm(dir, { recursive: true, force: true }); }
+});

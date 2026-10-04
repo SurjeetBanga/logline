@@ -2,8 +2,23 @@
 "use strict";
 (() => {
   // src/webview/analysis/charts.ts
-  function createAnalysis(elements, state) {
+  function createAnalysis(elements, state, actions, scope) {
     const SVG_NS = "http://www.w3.org/2000/svg";
+    const numberFormat = new Intl.NumberFormat();
+    const count = (value) => numberFormat.format(value);
+    scope?.listen(elements.analysisContent, "click", (event) => {
+      const target = event.target.closest?.("[data-term], [data-source]");
+      if (!target || !actions) return;
+      if (target.dataset.source !== void 0) actions.selectSource(target.dataset.source);
+      else if (target.dataset.term) actions.drill(target.dataset.term);
+    });
+    scope?.listen(elements.analysisContent, "keydown", (event) => {
+      const target = event.target;
+      if ((event.key === "Enter" || event.key === " ") && target.dataset?.term && target.tagName?.toLowerCase() === "g") {
+        event.preventDefault();
+        actions?.drill(target.dataset.term);
+      }
+    });
     let formatterKey;
     let cachedFormatter;
     function svgEl(tag, attrs = {}) {
@@ -37,8 +52,8 @@
       return range.from + index * bucketSize;
     }
     function formatClock(ms, range) {
-      const span = range?.from !== void 0 && range?.to !== void 0 ? range.to - range.from : void 0;
-      const formatter = timeAxisFormatter(span);
+      const span2 = range?.from !== void 0 && range?.to !== void 0 ? range.to - range.from : void 0;
+      const formatter = timeAxisFormatter(span2);
       return formatter ? formatter.format(ms) : new Date(ms).toLocaleTimeString();
     }
     function chartLegend(items) {
@@ -55,15 +70,15 @@
       return legend;
     }
     function emptySection(title) {
-      const section = document.createElement("section");
-      section.className = "chart-section chart-wide";
+      const section2 = document.createElement("section");
+      section2.className = "chart-section chart-wide";
       const heading = document.createElement("h3");
       heading.textContent = title;
-      section.append(heading);
-      const empty = document.createElement("p");
-      empty.textContent = "No data in this range.";
-      section.append(empty);
-      return section;
+      section2.append(heading);
+      const empty2 = document.createElement("p");
+      empty2.textContent = "No data in this range.";
+      section2.append(empty2);
+      return section2;
     }
     function xAxisTicks(svg, bucketCount, range, xFor, height) {
       const tickEvery = Math.max(1, Math.round(bucketCount / 6));
@@ -80,11 +95,11 @@
       const bucketCount = rate.length;
       if (!bucketCount || !rate.some((item) => item.count > 0))
         return emptySection("Event volume");
-      const section = document.createElement("section");
-      section.className = "chart-section chart-wide";
+      const section2 = document.createElement("section");
+      section2.className = "chart-section chart-wide";
       const heading = document.createElement("h3");
       heading.textContent = "Event volume";
-      section.append(heading);
+      section2.append(heading);
       const width = 720, height = 130, padTop = 10, padBottom = 18;
       const plotHeight = height - padTop - padBottom;
       const max = Math.max(1, ...rate.map((item) => item.count));
@@ -102,13 +117,20 @@
         const errorHeight = errorCount / max * plotHeight;
         const anomalous = item.anomalous || errors[index]?.anomalous;
         const group = svgEl("g", { class: anomalous ? "volume-bar anomalous" : "volume-bar" });
+        const time = bucketTime(range, bucketCount, index);
+        if (time !== void 0 && item.count && range.to !== void 0 && range.from !== void 0) {
+          const end = time + Math.max(1, (range.to - range.from) / bucketCount);
+          group.dataset.term = `timestamp:[${new Date(time).toISOString()} TO ${new Date(end).toISOString()}]`;
+          group.setAttribute("tabindex", "0");
+          group.setAttribute("role", "button");
+          group.append(svgEl("rect", { x, width: barWidth + barGap, y: 0, height: padTop + plotHeight, class: "volume-hit" }));
+        }
         if (okHeight > 0)
           group.append(svgEl("rect", { x, width: barWidth, y: padTop + plotHeight - okHeight - errorHeight, height: okHeight, class: "volume-bar-ok" }));
         if (errorHeight > 0)
           group.append(svgEl("rect", { x, width: barWidth, y: padTop + plotHeight - errorHeight, height: Math.max(1, errorHeight), class: "volume-bar-error" }));
-        const time = bucketTime(range, bucketCount, index);
         const title = svgEl("title");
-        title.textContent = `${time !== void 0 ? formatClock(time, range) + "\n" : ""}${item.count} event${item.count === 1 ? "" : "s"}${errorCount ? `, ${errorCount} error${errorCount === 1 ? "" : "s"}` : ""}`;
+        title.textContent = `${time !== void 0 ? formatClock(time, range) + "\n" : ""}${count(item.count)} event${item.count === 1 ? "" : "s"}${errorCount ? `, ${count(errorCount)} error${errorCount === 1 ? "" : "s"}` : ""}${group.dataset.term ? "\nClick to show these events" : ""}`;
         group.append(title);
         if (anomalous) {
           const dot = svgEl("circle", { cx: x + barWidth / 2, cy: padTop - 5, r: 2.5, class: "anomaly-marker" });
@@ -120,18 +142,18 @@
         svg.append(group);
       });
       xAxisTicks(svg, bucketCount, range, (index) => index * (barWidth + barGap) + barWidth / 2, height);
-      section.append(svg, chartLegend([{ className: "swatch-ok", label: "events" }, { className: "swatch-error", label: "errors" }]));
-      return section;
+      section2.append(svg, chartLegend([{ className: "swatch-ok", label: "events" }, { className: "swatch-error", label: "errors" }]));
+      return section2;
     }
     function latencyChart(latency, range) {
       const bucketCount = latency.length;
       if (!bucketCount || !latency.some((item) => item.count > 0))
         return emptySection("Latency (ms)");
-      const section = document.createElement("section");
-      section.className = "chart-section chart-wide";
+      const section2 = document.createElement("section");
+      section2.className = "chart-section chart-wide";
       const heading = document.createElement("h3");
       heading.textContent = "Latency (ms)";
-      section.append(heading);
+      section2.append(heading);
       const width = 720, height = 110, padTop = 10, padBottom = 18;
       const plotHeight = height - padTop - padBottom;
       const max = Math.max(1, ...latency.map((item) => Math.max(item.average, item.p95)));
@@ -170,74 +192,249 @@
         svg.append(dot);
       });
       xAxisTicks(svg, bucketCount, range, (index) => index * step, height);
-      section.append(svg, chartLegend([{ className: "swatch-average", label: "average" }, { className: "swatch-p95", label: "p95" }]));
-      return section;
+      section2.append(svg, chartLegend([{ className: "swatch-average", label: "average" }, { className: "swatch-p95", label: "p95" }]));
+      return section2;
     }
     function sparkline(values) {
       const el = document.createElement("span");
       el.className = "sparkline";
+      el.setAttribute("aria-hidden", "true");
       const max = Math.max(1, ...values);
       for (const value of values) {
         const bar = document.createElement("span");
-        bar.className = "sparkline-bar";
+        bar.className = value ? "sparkline-bar" : "sparkline-bar empty";
         bar.style.height = `${Math.max(8, value / max * 100)}%`;
         el.append(bar);
       }
       return el;
     }
+    function section(title, className = "chart-section") {
+      const element2 = document.createElement("section");
+      element2.className = className;
+      const heading = document.createElement("h3");
+      heading.textContent = title;
+      element2.append(heading);
+      return element2;
+    }
+    function empty(text) {
+      const element2 = document.createElement("p");
+      element2.className = "analysis-empty";
+      element2.textContent = text;
+      return element2;
+    }
+    function tile(label, value, detail, tone) {
+      const element2 = document.createElement("div");
+      element2.className = tone ? `analysis-tile tone-${tone}` : "analysis-tile";
+      const name = document.createElement("span");
+      name.className = "tile-label";
+      name.textContent = label;
+      const number = document.createElement("strong");
+      number.className = "tile-value";
+      number.textContent = value;
+      element2.append(name, number);
+      if (detail) {
+        const note = document.createElement("span");
+        note.className = "tile-detail";
+        note.textContent = detail;
+        element2.append(note);
+      }
+      return element2;
+    }
+    function percent(part, whole) {
+      if (!whole || !part) return "0%";
+      const share = part / whole * 100;
+      return share < 0.1 ? "<0.1%" : share < 10 ? `${share.toFixed(1)}%` : `${Math.round(share)}%`;
+    }
+    function duration(ms) {
+      return ms >= 1e4 ? `${(ms / 1e3).toFixed(ms >= 1e5 ? 0 : 1)} s` : `${Math.round(ms)} ms`;
+    }
+    function span(range) {
+      if (range.from === void 0 || range.to === void 0) return void 0;
+      const ms = range.to - range.from;
+      const minutes = ms / 6e4;
+      const length = minutes < 1 ? `${Math.max(1, Math.round(ms / 1e3))} s` : minutes < 120 ? `${Math.round(minutes)} min` : `${(minutes / 60).toFixed(minutes < 600 ? 1 : 0)} h`;
+      return `${formatClock(range.from, range)} \u2013 ${formatClock(range.to, range)} \xB7 ${length}`;
+    }
+    function summaryTiles(analysis) {
+      const summary2 = analysis.summary;
+      const tiles = document.createElement("div");
+      tiles.className = "analysis-tiles chart-wide";
+      if (!summary2) return tiles;
+      tiles.append(tile("Events", count(summary2.events), span(analysis.range)));
+      tiles.append(tile("Errors", count(summary2.errors), `${percent(summary2.errors, summary2.events)} of events`, summary2.errors ? "error" : void 0));
+      if (summary2.latency) tiles.append(tile("Latency p95", duration(summary2.latency.p95), `p50 ${duration(summary2.latency.p50)} \xB7 p99 ${duration(summary2.latency.p99)}`));
+      if (summary2.sources > 1) tiles.append(tile("Sources", count(summary2.sources)));
+      return tiles;
+    }
+    function barRow(label, value, total, max, target, tone = "") {
+      const row = document.createElement("button");
+      row.type = "button";
+      row.className = "bar-row";
+      if (target.source !== void 0) row.dataset.source = target.source;
+      else if (target.term) row.dataset.term = target.term;
+      row.title = `${label}: ${count(value)} (${percent(value, total)}). Click to show these events.`;
+      const name = document.createElement("span");
+      name.className = "bar-label";
+      name.textContent = label;
+      const track = document.createElement("span");
+      track.className = "bar-track";
+      const fill = document.createElement("span");
+      fill.className = `bar-fill${tone ? ` ${tone}` : ""}`;
+      fill.style.width = `${Math.max(1, value / Math.max(1, max) * 100)}%`;
+      track.append(fill);
+      const amount = document.createElement("span");
+      amount.className = "bar-count";
+      amount.textContent = count(value);
+      row.append(name, track, amount);
+      return row;
+    }
+    function statusSection(statusCodes) {
+      const element2 = section("Status codes");
+      if (!statusCodes.length) {
+        element2.append(empty("No status codes in these logs."));
+        return element2;
+      }
+      const total = statusCodes.reduce((sum, item) => sum + item.count, 0);
+      const max = Math.max(...statusCodes.map((item) => item.count));
+      for (const item of statusCodes.slice(0, 8)) {
+        const tone = item.code.startsWith("5") ? "tone-error" : item.code.startsWith("4") ? "tone-warn" : "";
+        element2.append(barRow(item.code, item.count, total, max, { term: /^\d{3}$/.test(item.code) ? `status:${item.code}` : void 0 }, tone));
+      }
+      return element2;
+    }
+    function facetSection(facet) {
+      const element2 = section(facet.label === facet.field ? `Top ${facet.label}` : `Top ${facet.label.toLowerCase()}s`);
+      const max = Math.max(1, ...facet.values.map((item) => item.count));
+      for (const item of facet.values) {
+        const target = facet.field === "serverId" ? { source: item.value } : /^[A-Za-z_][A-Za-z0-9_.]*$/.test(facet.field) ? { term: `${facet.field}:${JSON.stringify(item.value)}` } : {};
+        element2.append(barRow(item.label ?? item.value, item.count, facet.total, max, target));
+      }
+      return element2;
+    }
+    function newBadge() {
+      const badge = document.createElement("span");
+      badge.className = "new-pattern";
+      badge.textContent = "New";
+      badge.title = "First seen in the last quarter of this range";
+      return badge;
+    }
+    function groupRow(item, total, max, extra) {
+      const row = document.createElement(item.query ? "button" : "div");
+      if (item.query) row.type = "button";
+      row.className = item.query ? "group-row" : "group-row static";
+      if (item.query) row.dataset.term = item.query;
+      row.title = `${item.pattern && item.pattern !== item.message ? `Example: ${item.message}` : item.message}${item.query ? "\nClick to show these events" : ""}`;
+      if (extra.level) {
+        const level = document.createElement("span");
+        level.className = `level ${extra.level}`;
+        level.textContent = extra.level;
+        row.append(level);
+      }
+      const amount = document.createElement("span");
+      amount.className = "group-count";
+      amount.textContent = count(item.count);
+      const share = document.createElement("span");
+      share.className = "group-share";
+      share.textContent = percent(item.count, total);
+      const shareBar = document.createElement("span");
+      shareBar.className = "group-share-bar";
+      shareBar.style.width = `${Math.max(2, item.count / Math.max(1, max) * 100)}%`;
+      share.append(shareBar);
+      const body = document.createElement("span");
+      body.className = "group-body";
+      const text = document.createElement("span");
+      text.className = "group-text";
+      text.textContent = item.pattern ?? item.message;
+      body.append(text);
+      if (extra.detail) {
+        const detail = document.createElement("span");
+        detail.className = "group-detail";
+        detail.textContent = extra.detail;
+        body.append(detail);
+      }
+      row.append(amount, share, body);
+      if (item.isNew) row.append(newBadge());
+      row.append(sparkline(item.trend ?? []));
+      return row;
+    }
+    function seen(group, range) {
+      const parts = [group.location];
+      if (group.first !== void 0 && group.last !== void 0)
+        parts.push(group.first === group.last ? `at ${formatClock(group.first, range)}` : `${formatClock(group.first, range)} \u2013 ${formatClock(group.last, range)}`);
+      return parts.filter(Boolean).join(" \xB7 ");
+    }
     function renderAnalysis(analysis) {
       if (!elements.analysisContent)
         return;
       const content = document.createDocumentFragment();
+      const total = analysis.summary?.events ?? analysis.rate.reduce((sum, item) => sum + item.count, 0);
+      content.append(summaryTiles(analysis));
+      if (analysis.summary?.outside) {
+        const note = empty(`${count(analysis.summary.outside)} event${analysis.summary.outside === 1 ? " has a timestamp" : "s have timestamps"} far from the rest, so the charts leave ${analysis.summary.outside === 1 ? "it" : "them"} out. Everything else counts ${analysis.summary.outside === 1 ? "it" : "them"}.`);
+        note.classList.add("chart-wide");
+        content.append(note);
+      }
       content.append(volumeChart(analysis.rate ?? [], analysis.errors ?? [], analysis.range));
       content.append(latencyChart(analysis.latency ?? [], analysis.range));
-      const status = document.createElement("section");
-      const heading = document.createElement("h3");
-      heading.textContent = "Status codes";
-      status.append(heading);
-      for (const item of analysis.statusCodes ?? []) {
-        const p = document.createElement("p");
-        p.textContent = `${item.code}: ${item.count}`;
-        status.append(p);
-      }
-      content.append(status);
-      const patterns = document.createElement("section");
-      const patternHeading = document.createElement("h3");
-      patternHeading.textContent = "Log patterns";
-      patterns.append(patternHeading);
-      for (const item of analysis.patterns ?? []) {
-        const row = document.createElement("div");
-        row.className = "pattern-row";
-        const level = document.createElement("span");
-        level.className = `level ${item.level}`;
-        level.textContent = item.level;
-        const text = document.createElement("span");
-        text.className = "pattern-text";
-        text.textContent = `${item.count} \xD7 ${item.message}`;
-        text.title = item.message;
-        row.append(level, text, sparkline(item.trend));
-        patterns.append(row);
-      }
-      if (!patterns.querySelector(".pattern-row")) {
-        const empty = document.createElement("p");
-        empty.textContent = "No data in this range.";
-        patterns.append(empty);
-      }
-      content.append(patterns);
-      const groups = document.createElement("section");
-      const groupHeading = document.createElement("h3");
-      groupHeading.textContent = "Error groups";
-      groups.append(groupHeading);
-      for (const item of analysis.errorGroups ?? []) {
-        const p = document.createElement("p");
-        p.textContent = item.location ? `${item.count} \xD7 ${item.message} \u2014 ${item.location}` : `${item.count} \xD7 ${item.message}`;
-        p.title = item.key;
-        groups.append(p);
-      }
+      const breakdowns = document.createElement("div");
+      breakdowns.className = "analysis-breakdowns chart-wide";
+      breakdowns.append(statusSection(analysis.statusCodes ?? []), ...(analysis.topValues ?? []).map(facetSection));
+      content.append(breakdowns);
+      const errorGroups = analysis.errorGroups ?? [];
+      const groups = section(`Error groups${errorGroups.length ? ` \xB7 ${count(errorGroups.length)}` : ""}`, "chart-section chart-wide");
+      const errorTotal = errorGroups.reduce((sum, item) => sum + item.count, 0);
+      const errorMax = Math.max(1, ...errorGroups.map((item) => item.count));
+      for (const item of errorGroups.slice(0, 20)) groups.append(groupRow(item, errorTotal, errorMax, { detail: seen(item, analysis.range) }));
+      if (!errorGroups.length) groups.append(empty("No errors in these logs."));
       content.append(groups);
+      const patterns = section("Log patterns", "chart-section chart-wide");
+      const patternMax = Math.max(1, ...(analysis.patterns ?? []).map((item) => item.count));
+      for (const item of analysis.patterns ?? []) patterns.append(groupRow(item, total, patternMax, { level: item.level }));
+      if (!analysis.patterns?.length) patterns.append(empty("No data in this range."));
+      content.append(patterns);
       elements.analysisContent.replaceChildren(content);
     }
     return { renderAnalysis };
+  }
+
+  // src/core/query-tokens.ts
+  function queryTokens(input) {
+    return input.match(/(?:"(?:\\.|[^"\\])*"?|\[[^\]"\r\n]*\]|[^\s"\[]|\[)+/g) ?? [];
+  }
+
+  // src/webview/search/cell-filter.ts
+  function valueForCell(event, column) {
+    switch (column) {
+      case "base:time":
+        return { field: "timestamp", value: event.timestamp };
+      case "base:level":
+        return { field: "level", value: event.level };
+      case "base:message":
+        return { field: "message", value: event.message };
+      case "base:source":
+        return { field: "stream", value: event.stream };
+    }
+    if (column.startsWith("field:")) {
+      const field = column.slice(6);
+      return { field, value: Object.hasOwn(event.fields ?? {}, field) ? event.fields[field] : void 0 };
+    }
+  }
+  function cellFilterQuery(input, cell2, exclude, limit = 256) {
+    if (!/^[A-Za-z_][A-Za-z0-9_.]*$/.test(cell2.field) || /^(exists|last)$/i.test(cell2.field))
+      return { reason: "This field name cannot be used in a field filter." };
+    if (cell2.value === void 0 || cell2.value === null || String(cell2.value) === "")
+      return { reason: "This cell has no value to filter." };
+    return addFilterTerm(input, `${exclude ? "-" : ""}${cell2.field}:${JSON.stringify(String(cell2.value))}`, limit);
+  }
+  function addFilterTerm(input, term, limit = 256) {
+    const groups = [[]];
+    for (const token of queryTokens(input)) {
+      if (token === "OR" || token === "or") groups.push([]);
+      else groups.at(-1).push(token);
+    }
+    const branches = groups.filter((group) => group.length);
+    const query = (branches.length ? branches : [[]]).map((group) => [...group, term].join(" ")).join(" OR ");
+    return query.length > limit ? { reason: `This filter would exceed the ${limit}-character search limit.` } : { query };
   }
 
   // src/webview/bridge.ts
@@ -259,6 +456,13 @@
     updateRequested = false;
     nextRequestId = 0;
     pendingRequestId;
+    // The newest page received for one set of request parameters. A refresh for
+    // the same parameters sends only the rows after it, so a busy stream costs
+    // the new rows instead of the whole page on every tick.
+    held;
+    pendingKey;
+    pendingHave;
+    answered;
     request(force = false) {
       if (document.hidden) return;
       if (this.pending) {
@@ -270,9 +474,7 @@
       const requestId = ++this.nextRequestId;
       this.pendingRequestId = requestId;
       const state = this.state;
-      this.api.postMessage({
-        type: "snapshot",
-        requestId,
+      const params = {
         query: this.query(),
         serverId: state.selectedServer || void 0,
         sessionId: state.selectedSession || void 0,
@@ -281,15 +483,66 @@
         before: state.before,
         sort: state.selectedSort || void 0,
         sortDirection: state.selectedSortDirection,
-        columns: this.columns(),
+        columns: this.columns()
+      };
+      const key = JSON.stringify([
+        params.query,
+        params.serverId,
+        params.sessionId,
+        params.levels,
+        params.page,
+        params.before,
+        params.sort,
+        params.sortDirection,
+        params.columns
+      ]);
+      const held = this.held?.key === key && this.held.rows.length ? this.held : void 0;
+      this.pendingKey = key;
+      this.pendingHave = held && { last: held.rows[held.rows.length - 1].id, count: held.rows.length, version: held.version };
+      this.api.postMessage({
+        type: "snapshot",
+        requestId,
+        ...params,
         statsOnly: state.paused && !force,
-        doctorRevision: this.doctorRevision()
+        doctorRevision: this.doctorRevision(),
+        ...this.pendingHave ? { have: this.pendingHave } : {}
       });
     }
     received(requestId) {
-      if (requestId !== void 0 && requestId !== this.pendingRequestId) return;
+      if (requestId !== void 0 && requestId !== this.pendingRequestId) {
+        this.answered = void 0;
+        return;
+      }
+      this.answered = requestId !== void 0 && this.pendingKey !== void 0 ? { key: this.pendingKey, have: this.pendingHave } : void 0;
       this.pending = false;
       this.pendingRequestId = void 0;
+    }
+    /**
+     * The complete page a snapshot describes. Rows the view already held are
+     * reused as the same objects, and the array itself when nothing changed.
+     * Returns undefined, and asks for a full refresh, if partial rows cannot be
+     * placed after the held ones.
+     */
+    rows(data) {
+      if (!data.events) return void 0;
+      const answered = this.answered;
+      let rows = data.events;
+      if (data.keep !== void 0) {
+        const held = this.held;
+        const kept = held && answered?.have && held.key === answered.key && held.rows[held.rows.length - 1].id === answered.have.last && data.keep <= held.rows.length && held.rows[held.rows.length - data.keep]?.id === data.keepFirst ? held : void 0;
+        if (!kept) {
+          this.held = void 0;
+          this.refreshRequested = true;
+          return void 0;
+        }
+        rows = data.keep === kept.rows.length && !data.events.length ? kept.rows : [...kept.rows.slice(kept.rows.length - data.keep), ...data.events];
+      }
+      this.held = answered && data.rowsVersion !== void 0 ? { key: answered.key, rows, version: data.rowsVersion } : void 0;
+      return rows;
+    }
+    /** Forget held rows, so the next refresh sends a whole page. */
+    forget() {
+      this.held = void 0;
     }
     failed(requestId) {
       if (requestId !== void 0 && requestId !== this.pendingRequestId) return false;
@@ -538,8 +791,11 @@
   var GROUPS = [
     { codes: ["secret"], title: "Secrets in logs" },
     { codes: ["personal"], title: "Personal data in logs" },
+    { codes: ["quiet-failure"], title: "Failures logged below warning" },
     { codes: ["missing-exception"], title: "Errors logged without the exception" },
+    { codes: ["contextless"], title: "Errors without a request or trace id" },
     { codes: ["noisy"], title: "Noisy statements" },
+    { codes: ["oversized"], title: "Oversized events" },
     { codes: ["unstructured"], title: "Values formatted into messages" }
   ];
   function siteLabel(file, line) {
@@ -560,7 +816,7 @@
     showEvents: "Filter the Logs panel to the events this statement logged",
     open: "Open the log statement in the editor"
   };
-  function createDoctor(button, count, panel, list, api, scope, closePanel) {
+  function createDoctor(button, count, panel, list, api, scope, closePanel, showExample = () => void 0) {
     let revision;
     let findings = [];
     function receive(doctor) {
@@ -579,7 +835,7 @@
       count.textContent = total.toLocaleString();
       const warnings = findings.filter((finding) => finding.severity === "warning").length;
       button.className = !total ? "doctor-chip is-clear" : warnings ? "doctor-chip has-warnings" : "doctor-chip";
-      button.title = total ? `Log doctor found ${total.toLocaleString()} problem${total === 1 ? "" : "s"} with log statements${warnings ? `, ${warnings.toLocaleString()} of them warnings` : ""}. Click to review.` : "Log doctor checks what your log statements actually logged: secrets, personal data, errors without the exception, and noisy statements. Nothing found so far.";
+      button.title = total ? `Log doctor found ${total.toLocaleString()} problem${total === 1 ? "" : "s"} with log statements${warnings ? `, ${warnings.toLocaleString()} of them warnings` : ""}. Click to review.` : "Log doctor checks what your logs actually contain: secrets and personal data in any source, and on matched log statements, failures logged below warning, errors without the exception or a request id, and noisy or oversized statements. Nothing found so far.";
       button.setAttribute("aria-label", `Log issues: ${total.toLocaleString()}`);
       if (changed) render(total);
     }
@@ -587,7 +843,7 @@
       if (!total) {
         const empty = document.createElement("p");
         empty.className = "popover-empty";
-        empty.textContent = "No problems found so far. Log doctor needs log lenses (logline.logLenses) to match events to the log statements in your workspace; imported logs from other projects are not checked.";
+        empty.textContent = "No problems found so far. Secrets and personal data are checked in every source. Checks on log statements need log lenses (logline.logLenses) to match events to the statements in your workspace.";
         list.replaceChildren(empty);
         return;
       }
@@ -613,6 +869,7 @@
     function item(finding) {
       const row = document.createElement("div");
       row.className = `doctor-item severity-${finding.severity}`;
+      if (finding.file === void 0 || finding.line === void 0 || finding.siteId === void 0) return sourceItem(finding, row);
       const location = document.createElement("button");
       location.type = "button";
       location.className = "doctor-location";
@@ -632,10 +889,32 @@
       row.append(location, message, actions);
       return row;
     }
+    function sourceItem(finding, row) {
+      const location = document.createElement("span");
+      location.className = "doctor-location doctor-source";
+      location.textContent = finding.source ?? "Unknown source";
+      const message = document.createElement("p");
+      message.className = "doctor-message";
+      message.textContent = finding.message;
+      const actions = document.createElement("div");
+      actions.className = "doctor-actions";
+      if (finding.eventId !== void 0) {
+        const example = doctorButton("example", "Show example", "Show the latest event that carried it, with the logs around it");
+        example.dataset.eventId = String(finding.eventId);
+        actions.append(example);
+      }
+      row.append(location, message, actions);
+      return row;
+    }
     function handleAction(event) {
       const target = event.target.closest("[data-doctor-action]");
       const action = target?.dataset.doctorAction;
       if (!target || !action) return false;
+      if (action === "example") {
+        if (panel.contains(target)) closePanel();
+        showExample(Number(target.dataset.eventId));
+        return true;
+      }
       api.postMessage({ type: "doctorAction", action, ...target.dataset.siteId ? { siteId: target.dataset.siteId } : {} });
       if (panel.contains(target)) closePanel();
       return true;
@@ -1242,11 +1521,6 @@ Trace ${trace.traceId}`;
     return options.filter((value) => value.length <= 256);
   }
 
-  // src/core/query-tokens.ts
-  function queryTokens(input) {
-    return input.match(/(?:"(?:\\.|[^"\\])*"?|\[[^\]"\r\n]*\]|[^\s"\[]|\[)+/g) ?? [];
-  }
-
   // src/core/query-validation.ts
   function queryError(input = "") {
     for (const token of queryTokens(input)) {
@@ -1295,6 +1569,8 @@ Trace ${trace.traceId}`;
     hiddenColumns;
     checkedLevels;
     displayTimezone = "local";
+    /** Newest row at the top; the host setting arrives with each snapshot. */
+    newestFirst = true;
     cellHintDismissed;
     rowHintDismissed;
     constructor(saved = {}) {
@@ -1884,6 +2160,8 @@ Trace ${trace.traceId}`;
       hoveredId = void 0;
     });
     let virtualEvents = [];
+    let sourceEvents = [];
+    let rowsVersion = 0;
     let rowHeight = 30;
     let rowHeightMeasured = false;
     let topSpacer;
@@ -1892,7 +2170,26 @@ Trace ${trace.traceId}`;
     let expandedRow;
     let renderRevision = 0;
     let renderedWindow;
+    let rowCache = /* @__PURE__ */ new Map();
+    let rowCacheRevision = -1;
     const detailResizeObserver = scope.observer(() => scheduleRenderWindow());
+    let measured;
+    function viewportTop() {
+      return measured?.top ?? scrollViewport.scrollTop;
+    }
+    function viewportHeight() {
+      return measured?.height ?? scrollViewport.clientHeight;
+    }
+    function scrollViewportTo(top) {
+      scrollViewport.scrollTop = top;
+      measured = top === 0 && measured ? { ...measured, top } : void 0;
+    }
+    function measureViewport() {
+      measured = { top: scrollViewport.scrollTop, height: scrollViewport.clientHeight };
+    }
+    function releaseViewport() {
+      measured = void 0;
+    }
     function ensureSpacers() {
       if (topSpacer)
         return;
@@ -1909,14 +2206,14 @@ Trace ${trace.traceId}`;
       const probe = buildRow({ id: -1, timestamp: "00:00:00.000", message: "sample", level: "info", stream: "", fields: {} });
       probe.style.visibility = "hidden";
       elements.logs.append(probe);
-      const measured = probe.getBoundingClientRect().height;
+      const measured2 = probe.getBoundingClientRect().height;
       probe.remove();
-      if (measured > 0) {
-        rowHeight = measured;
+      if (measured2 > 0) {
+        rowHeight = measured2;
         rowHeightMeasured = true;
       }
     }
-    function renderWindow() {
+    function renderWindow(atTail = false) {
       ensureSpacers();
       ensureRowHeight();
       const total = virtualEvents.length;
@@ -1929,9 +2226,11 @@ Trace ${trace.traceId}`;
           expandedHeight = detail.getBoundingClientRect().height;
       }
       const overscan = 8;
-      const visibleCount = Math.max(1, Math.ceil(scrollViewport.clientHeight / rowHeight)) + overscan * 2;
+      const top = viewportTop();
+      const height = viewportHeight();
+      const visibleCount = Math.max(1, Math.ceil(height / rowHeight)) + overscan * 2;
       const detailTop = (selectedIndex + 1) * rowHeight;
-      const offset = selectedIndex >= 0 && scrollViewport.scrollTop > detailTop ? scrollViewport.scrollTop - Math.min(expandedHeight, scrollViewport.scrollTop - detailTop) : scrollViewport.scrollTop;
+      const offset = atTail ? Math.max(0, total * rowHeight - height) : selectedIndex >= 0 && top > detailTop ? top - Math.min(expandedHeight, top - detailTop) : top;
       let start = Math.floor(offset / rowHeight) - overscan;
       start = Math.max(0, Math.min(start, Math.max(0, total - visibleCount)));
       const end = Math.min(total, start + visibleCount);
@@ -1940,7 +2239,7 @@ Trace ${trace.traceId}`;
       topSpacer.firstChild.style.height = `${start * rowHeight + (selectedIndex >= 0 && selectedIndex < start ? expandedHeight : 0)}px`;
       bottomSpacer.firstChild.colSpan = totalCols;
       bottomSpacer.firstChild.style.height = `${(total - end) * rowHeight + (selectedIndex >= end ? expandedHeight : 0)}px`;
-      const windowKey = `${start}:${end}:${renderRevision}`;
+      const windowKey = `${start}:${end}:${renderRevision}:${rowsVersion}`;
       if (renderedWindow === windowKey)
         return;
       renderedWindow = windowKey;
@@ -1949,10 +2248,18 @@ Trace ${trace.traceId}`;
       const refocusId = focusedRow?.classList.contains("event-row") ? focusedRow.dataset.id : void 0;
       const refocusColumn = focused?.dataset.column;
       const detailScrollers = [...expandedRow?.querySelectorAll(".event-details, pre") ?? []].map((element2) => ({ element: element2, top: element2.scrollTop, left: element2.scrollLeft }));
-      const fragment = document.createDocumentFragment();
+      if (rowCacheRevision !== renderRevision) {
+        rowCache = /* @__PURE__ */ new Map();
+        rowCacheRevision = renderRevision;
+      }
+      const builtRows = /* @__PURE__ */ new Map();
+      const wanted = [];
       for (let i = start; i < end; i++) {
         const event = virtualEvents[i];
-        fragment.append(buildRow(event));
+        const cached = rowCache.get(event.id);
+        const row = cached?.event === event ? cached.row : buildRow(event);
+        builtRows.set(event.id, { event, row });
+        wanted.push(row);
         if (event.id === state.selected) {
           if (!expandedRow) {
             detailResizeObserver.disconnect();
@@ -1960,17 +2267,18 @@ Trace ${trace.traceId}`;
             detailResizeObserver.observe(expandedRow);
           }
           expandedRow.firstChild.colSpan = totalCols;
-          fragment.append(expandedRow);
+          wanted.push(expandedRow);
         }
       }
-      elements.logs.replaceChildren(topSpacer, fragment, bottomSpacer);
+      placeRows(wanted);
+      rowCache = builtRows;
       if (hoveredId !== void 0) {
         const hovered = [...elements.logs.querySelectorAll(".event-row")].find((row) => row.dataset.id === hoveredId);
         if (hovered) fillQuickActions(hovered);
       }
       onRowsChanged();
-      for (const { element: element2, top, left } of detailScrollers) {
-        element2.scrollTop = top;
+      for (const { element: element2, top: top2, left } of detailScrollers) {
+        element2.scrollTop = top2;
         element2.scrollLeft = left;
       }
       if (focused && !!focused && elements.logs.contains(focused))
@@ -1980,10 +2288,24 @@ Trace ${trace.traceId}`;
         const target = refocusColumn ? [...row?.querySelectorAll("td[data-column]") ?? []].find((cell2) => cell2.dataset.column === refocusColumn) : row?.querySelector(".message-button");
         target?.focus({ preventScroll: true });
       }
-      const measured = elements.logs.querySelector(".detail-row")?.getBoundingClientRect().height;
-      if (measured !== void 0 && measured !== expandedHeight) {
-        expandedHeight = measured;
+      const measured2 = elements.logs.querySelector(".detail-row")?.getBoundingClientRect().height;
+      if (measured2 !== void 0 && measured2 !== expandedHeight) {
+        expandedHeight = measured2;
         scheduleRenderWindow();
+      }
+    }
+    function placeRows(wanted) {
+      const logs = elements.logs;
+      if (topSpacer.parentNode !== logs || bottomSpacer.parentNode !== logs || !wanted.some((row) => row.parentNode === logs)) {
+        logs.replaceChildren(topSpacer, ...wanted, bottomSpacer);
+        return;
+      }
+      const keep = /* @__PURE__ */ new Set([topSpacer, bottomSpacer, ...wanted]);
+      for (const child of [...logs.children]) if (!keep.has(child)) logs.removeChild(child);
+      let cursor = topSpacer.nextSibling;
+      for (const row of wanted) {
+        if (cursor === row) cursor = row.nextSibling;
+        else logs.insertBefore(row, cursor);
       }
     }
     let windowRenderQueued = false;
@@ -1999,8 +2321,11 @@ Trace ${trace.traceId}`;
         followTailRequested = false;
         renderWindow();
         if (followTail2 && state.following && !state.paused && !state.selectedSort) {
-          scrollViewport.scrollTop = scrollViewport.scrollHeight;
-          renderWindow();
+          const edge = liveAtTop() ? 0 : scrollViewport.scrollHeight;
+          if (scrollViewport.scrollTop !== edge) {
+            scrollViewport.scrollTop = edge;
+            renderWindow();
+          }
         }
       });
     }
@@ -2011,12 +2336,28 @@ Trace ${trace.traceId}`;
       layoutColumns();
       scheduleRenderWindow(state.following && !state.paused && !state.selectedSort);
     }).observe(scrollViewport);
+    function liveAtTop() {
+      return state.newestFirst && !state.selectedSort;
+    }
     function renderRows(events) {
-      virtualEvents = events;
-      renderRevision++;
-      renderWindow();
-      if (state.following && !state.paused && !state.selectedSort) {
-        scrollViewport.scrollTop = scrollViewport.scrollHeight;
+      const followTail = state.following && !state.paused && !state.selectedSort;
+      const anchorIndex = !followTail && liveAtTop() ? Math.floor(viewportTop() / rowHeight) : -1;
+      const anchor = anchorIndex > 0 ? virtualEvents[anchorIndex] : void 0;
+      sourceEvents = events;
+      virtualEvents = liveAtTop() ? [...events].reverse() : events;
+      rowsVersion++;
+      if (anchor) {
+        const index = virtualEvents.findIndex((event) => event.id === anchor.id);
+        if (index >= 0 && index !== anchorIndex) scrollViewportTo(viewportTop() + (index - anchorIndex) * rowHeight);
+      }
+      if (followTail && liveAtTop()) {
+        if (viewportTop()) scrollViewportTo(0);
+        renderWindow();
+        return;
+      }
+      renderWindow(followTail);
+      if (followTail) {
+        scrollViewportTo(scrollViewport.scrollHeight);
         renderWindow();
         scheduleRenderWindow(true);
       }
@@ -2050,7 +2391,11 @@ Trace ${trace.traceId}`;
       const known = new Map(allColumns.map((column) => [column.key, column]));
       displayedColumns = [...state.columnOrder.map((key) => known.get(key)).filter((column) => Boolean(column)), ...allColumns.filter((column) => !state.columnOrder.includes(column.key))];
       state.columnOrder = displayedColumns.map((column) => column.key);
-      columnElements = new Map(displayedColumns.map((column) => [column.key, document.createElement("col")]));
+      columnElements = new Map(displayedColumns.map((column) => {
+        const col = document.createElement("col");
+        col.dataset.column = column.key;
+        return [column.key, col];
+      }));
       element("eventColumns").replaceChildren(...columnElements.values());
       layoutColumns();
       const head = element("head-row");
@@ -2269,9 +2614,9 @@ Trace ${trace.traceId}`;
     }
     function toggleExpand(id) {
       const oldRow = elements.logs.querySelector(`tr.event-row[data-id="${id}"]`);
-      const viewportTop = scrollViewport.getBoundingClientRect().top;
+      const viewportTop2 = scrollViewport.getBoundingClientRect().top;
       const oldTop = oldRow?.getBoundingClientRect().top;
-      const rowOffset = oldTop === void 0 ? void 0 : oldTop - viewportTop;
+      const rowOffset = oldTop === void 0 ? void 0 : oldTop - viewportTop2;
       expandedHeight = 0;
       expandedRow = void 0;
       detailResizeObserver.disconnect();
@@ -2283,8 +2628,11 @@ Trace ${trace.traceId}`;
       if (rowOffset !== void 0 && Number.isFinite(rowOffset)) {
         const newTop = elements.logs.querySelector(`tr.event-row[data-id="${id}"]`)?.getBoundingClientRect().top;
         if (newTop !== void 0 && Number.isFinite(newTop))
-          scrollViewport.scrollTop += newTop - viewportTop - rowOffset;
+          scrollViewport.scrollTop += newTop - viewportTop2 - rowOffset;
       }
+    }
+    function invalidateRows() {
+      renderRevision++;
     }
     function resetDetails() {
       expandedHeight = 0;
@@ -2312,6 +2660,9 @@ Trace ${trace.traceId}`;
       toggleExpand,
       resetDetails,
       receiveDetails,
+      invalidateRows,
+      measureViewport,
+      releaseViewport,
       get currentColumns() {
         return currentColumns;
       },
@@ -2319,45 +2670,12 @@ Trace ${trace.traceId}`;
         return automaticColumns;
       },
       get events() {
-        return virtualEvents;
+        return sourceEvents;
       },
       get expandedHeight() {
         return expandedHeight;
       }
     };
-  }
-
-  // src/webview/search/cell-filter.ts
-  function valueForCell(event, column) {
-    switch (column) {
-      case "base:time":
-        return { field: "timestamp", value: event.timestamp };
-      case "base:level":
-        return { field: "level", value: event.level };
-      case "base:message":
-        return { field: "message", value: event.message };
-      case "base:source":
-        return { field: "stream", value: event.stream };
-    }
-    if (column.startsWith("field:")) {
-      const field = column.slice(6);
-      return { field, value: Object.hasOwn(event.fields ?? {}, field) ? event.fields[field] : void 0 };
-    }
-  }
-  function cellFilterQuery(input, cell2, exclude, limit = 256) {
-    if (!/^[A-Za-z_][A-Za-z0-9_.]*$/.test(cell2.field) || /^(exists|last)$/i.test(cell2.field))
-      return { reason: "This field name cannot be used in a field filter." };
-    if (cell2.value === void 0 || cell2.value === null || String(cell2.value) === "")
-      return { reason: "This cell has no value to filter." };
-    const term = `${exclude ? "-" : ""}${cell2.field}:${JSON.stringify(String(cell2.value))}`;
-    const groups = [[]];
-    for (const token of queryTokens(input)) {
-      if (token === "OR" || token === "or") groups.push([]);
-      else groups.at(-1).push(token);
-    }
-    const branches = groups.filter((group) => group.length);
-    const query = (branches.length ? branches : [[]]).map((group) => [...group, term].join(" ")).join(" OR ");
-    return query.length > limit ? { reason: `This filter would exceed the ${limit}-character search limit.` } : { query };
   }
 
   // src/webview/table/cell-actions.ts
@@ -2370,15 +2688,26 @@ Trace ${trace.traceId}`;
     function rows() {
       return [...elements.logs.querySelectorAll(".event-row")];
     }
-    function cells(row) {
-      return [...row.querySelectorAll("td[data-column]")].filter((cell2) => cell2.getBoundingClientRect().width > 0);
+    function collapsedColumns() {
+      const collapsed = /* @__PURE__ */ new Set();
+      for (const col of element("eventColumns").children) {
+        if (col.style.visibility === "collapse" && col.dataset.column) collapsed.add(col.dataset.column);
+      }
+      return collapsed;
+    }
+    function cells(row, collapsed = collapsedColumns()) {
+      return [...row.querySelectorAll("td[data-column]")].filter((cell2) => !collapsed.has(cell2.dataset.column));
+    }
+    function visibleCells() {
+      const collapsed = collapsedColumns();
+      return rows().flatMap((row) => cells(row, collapsed));
     }
     function identify(cell2) {
       return { id: cell2.closest("tr.event-row").dataset.id, column: cell2.dataset.column };
     }
     function setActive(cell2) {
       active = identify(cell2);
-      for (const row of rows()) for (const item of cells(row)) item.tabIndex = item === cell2 ? 0 : -1;
+      for (const item of visibleCells()) item.tabIndex = item === cell2 ? 0 : -1;
     }
     function close(restoreFocus = false) {
       const previous = origin;
@@ -2388,7 +2717,7 @@ Trace ${trace.traceId}`;
       origin = void 0;
       if (restoreFocus && previous && elements.logs.contains(previous)) previous.focus({ preventScroll: true });
       else if (focusedMenu) {
-        const fallback = rows().flatMap(cells).find((cell2) => cell2.tabIndex === 0);
+        const fallback = visibleCells().find((cell2) => cell2.tabIndex === 0);
         (fallback ?? elements.search).focus({ preventScroll: true });
       }
     }
@@ -2501,7 +2830,7 @@ Trace ${trace.traceId}`;
       if (!menu.hidden) close();
     });
     function rowsChanged() {
-      const all = rows().flatMap(cells);
+      const all = visibleCells();
       const current = all.find((cell2) => {
         const id = identify(cell2);
         return id.id === active?.id && id.column === active.column;
@@ -2549,13 +2878,28 @@ Trace ${trace.traceId}`;
     const scope = new EventScope();
     const elements = getElements();
     const scrollViewport = document.querySelector(".table-scroll");
+    const numberFormat = new Intl.NumberFormat();
     const saved = api.getState() ?? {};
     const state = new ViewerState(saved);
     elements.search.value = saved.query ?? "";
     const { popovers, createPopover } = createPopovers(scope);
     createTooltips(scope);
     const formatTimestamp = createTimestampFormatter(state);
-    const analysis = createAnalysis(elements, state);
+    const analysis = createAnalysis(elements, state, {
+      drill: (term) => {
+        const choice = addFilterTerm(search.query(), term);
+        if (choice.query === void 0) {
+          elements.analysisStatus.textContent = choice.reason;
+          return;
+        }
+        elements.analysisDialog.close();
+        search.setQuery(choice.query, true);
+      },
+      selectSource: (id) => {
+        elements.analysisDialog.close();
+        selectSource(id);
+      }
+    }, scope);
     const inspection = createInspection(elements, scrollViewport, api, formatTimestamp, scope, (traceId) => traceView.show(traceId));
     const search = createSearch(elements, state, api, popovers, { filterChanged, updateScopeSelection }, scope);
     const request = (force = false) => bridge.request(force);
@@ -2570,7 +2914,16 @@ Trace ${trace.traceId}`;
       startReceiver: () => api.postMessage({ type: "toggleOtlp", enabled: true }),
       receiver: () => ({ running: otlpRunning, endpoint: otlpEndpoint })
     });
-    const doctor = createDoctor(elements.doctor, elements.doctorCount, elements.doctorPanel, elements.doctorList, api, scope, () => doctorPopover.close());
+    const doctor = createDoctor(
+      elements.doctor,
+      elements.doctorCount,
+      elements.doctorPanel,
+      elements.doctorList,
+      api,
+      scope,
+      () => doctorPopover.close(),
+      (id) => inspection.showContext(id)
+    );
     let otlpRunning = false;
     let otlpEndpoint;
     let pointerOverRows = false;
@@ -2608,7 +2961,18 @@ Trace ${trace.traceId}`;
       elements.search.focus();
     }, scope);
     let minimumSnapshotGeneration = 0;
-    const onMessage = (event) => receive(event.data);
+    const onMessage = (event) => {
+      if (event.data?.type !== "snapshot") {
+        receive(event.data);
+        return;
+      }
+      table.measureViewport();
+      try {
+        receive(event.data);
+      } finally {
+        table.releaseViewport();
+      }
+    };
     scope.listen(window, "message", onMessage);
     function receive(data) {
       if (data.type === "guideStatus") {
@@ -2648,7 +3012,9 @@ Trace ${trace.traceId}`;
         return;
       }
       if (data.type === "analysis") {
-        elements.analysisStatus.textContent = "Analysis of the current retained filter";
+        const filter = search.query();
+        const source = state.selectedServer ? visibleSources.find((server) => server.id === state.selectedServer)?.label ?? state.selectedServer : "";
+        elements.analysisStatus.textContent = `${filter ? `Logs matching ${filter}` : "All retained logs"}${source ? ` from ${source}` : ""}${state.currentLevels() ? " at the selected levels" : ""}. Click a bar, value, pattern or error group to show its logs.`;
         analysis.renderAnalysis(data.analysis);
         return;
       }
@@ -2667,6 +3033,7 @@ Trace ${trace.traceId}`;
         return;
       if (data.guideStatus) updateGuideStatus(data.guideStatus);
       bridge.received(data.requestId);
+      const rows = bridge.rows(data);
       if (data.applyQuery !== void 0 && data.applyQuery !== search.query()) search.setQuery(data.applyQuery, true);
       if (data.openTrace) traceView.show(data.openTrace);
       const receiverWasRunning = otlpRunning;
@@ -2680,8 +3047,8 @@ Trace ${trace.traceId}`;
       }
       doctor.receive(data.doctor);
       elements.traceCount.hidden = !data.traceCount;
-      elements.traceCount.textContent = data.traceCount ? data.traceCount.toLocaleString() : "";
-      elements.traces.title = data.traceCount ? `${data.traceCount.toLocaleString()} traces received from OpenTelemetry. Show requests across services.` : "Requests across services, from OpenTelemetry spans and logs with a trace id";
+      elements.traceCount.textContent = data.traceCount ? numberFormat.format(data.traceCount) : "";
+      elements.traces.title = data.traceCount ? `${numberFormat.format(data.traceCount)} traces received from OpenTelemetry. Show requests across services.` : "Requests across services, from OpenTelemetry spans and logs with a trace id";
       elements.otlpToggle.textContent = otlpRunning ? "Stop OpenTelemetry receiver" : "Start OpenTelemetry receiver";
       elements.otlpToggle.title = otlpRunning ? `Receiving OpenTelemetry on ${data.otlp?.endpoint ?? "localhost"}${data.otlp?.error ? ` (${data.otlp.error})` : ""}` : "Receive OpenTelemetry logs and traces from instrumented apps on this machine";
       if (data.generation < minimumSnapshotGeneration) {
@@ -2699,6 +3066,7 @@ Trace ${trace.traceId}`;
         state.selectedExceptions = [];
         table.resetDetails();
         table.resetAutomaticColumns();
+        bridge.forget();
         table.renderRows([]);
         bridge.refreshRequested = true;
       }
@@ -2706,6 +3074,12 @@ Trace ${trace.traceId}`;
       if (data.timezone && data.timezone !== state.displayTimezone) {
         state.displayTimezone = data.timezone;
         state.lastRows = void 0;
+        table.invalidateRows();
+      }
+      if (data.newestFirst !== void 0 && data.newestFirst !== state.newestFirst) {
+        state.newestFirst = data.newestFirst;
+        state.lastRows = void 0;
+        table.renderRows(table.events);
       }
       state.newest = data.newest;
       if (!state.following && state.before === void 0)
@@ -2785,37 +3159,39 @@ Trace ${trace.traceId}`;
         updateCopyResultsControl();
         bridge.refreshRequested = true;
       }
-      const number = (value) => value.toLocaleString();
+      const number = (value) => numberFormat.format(value);
       const budget = Number.isFinite(data.maxBytes) ? (data.maxBytes / 1048576).toFixed(0) : "?";
       elements.counts.textContent = `${number(data.total)} received \xB7 ${number(data.retained)} retained \xB7 ${number(data.discarded)} discarded \xB7 ${(data.bytes / 1048576).toFixed(1)} / ${budget} MiB \xB7 ${data.truncated} truncated` + (data.persistDropped ? ` \xB7 ${number(data.persistDropped)} disk writes skipped` : "");
       updateModeLabel();
       if (Array.isArray(data.columnFields))
         state.columnFields = data.columnFields;
       table.updateColumns(data.columns ?? []);
-      if (data.events?.length)
+      if (rows?.length)
         table.lockAutomaticColumns();
       table.renderFieldList();
       if (Array.isArray(data.fields))
         state.allFields = data.fields;
       if (data.searches)
         search.renderSearchState(data.searches);
-      if (data.events && !bridge.refreshRequested && !state.paused && holdingLive()) {
-        heldEvents = data.events;
+      if (rows && !bridge.refreshRequested && !state.paused && holdingLive()) {
+        heldEvents = rows;
         updateModeLabel();
-      } else if (data.events && !bridge.refreshRequested && !state.paused) {
+      } else if (rows && !bridge.refreshRequested && !state.paused) {
         heldEvents = void 0;
         state.page = data.page ?? 0;
         state.pages = data.pages ?? 1;
         elements.page.textContent = `Page ${state.page + 1} of ${state.pages} \xB7 ${number(data.matched ?? 0)} matches`;
         elements.older.disabled = state.page >= state.pages - 1;
         elements.newer.disabled = state.page === 0;
-        const signature = data.events.map((event) => event.id).join(",");
-        if (signature !== state.lastRows) {
-          state.lastRows = signature;
-          table.renderRows(data.events);
+        if (rows !== table.events || state.lastRows === void 0) {
+          const signature = rows.map((event) => event.id).join(",");
+          if (signature !== state.lastRows) {
+            state.lastRows = signature;
+            table.renderRows(rows);
+          }
         }
-        elements.empty.hidden = data.events.length > 0;
-        elements.rowHint.hidden = state.rowHintDismissed || !data.events.length;
+        elements.empty.hidden = rows.length > 0;
+        elements.rowHint.hidden = state.rowHintDismissed || !rows.length;
         elements.empty.textContent = data.total ? "No matching events in retained history." : "Run a server command to see its logs here.";
         if (state.following && !state.paused && !state.selectedSort)
           table.scheduleRenderWindow(true);
@@ -2874,7 +3250,7 @@ Trace ${trace.traceId}`;
     function updateModeLabel() {
       elements.older.textContent = state.selectedSort ? "Next \u2192" : "\u2190 Older";
       elements.newer.textContent = state.selectedSort ? "\u2190 Previous" : "Newer \u2192";
-      elements.mode.textContent = state.paused ? "Paused \u2014 collection continues" : state.selectedSort ? `Sorted ${state.selectedSortDirection === "asc" ? "ascending" : "descending"}${state.following ? " \xB7 Live updates" : ""}` : state.following ? heldEvents ? "Live \xB7 new rows held while you point at the table" : "Live \xB7 newest 1,000" : "Browsing retained history";
+      elements.mode.textContent = state.paused ? "Paused \u2014 collection continues" : state.selectedSort ? `Sorted ${state.selectedSortDirection === "asc" ? "ascending" : "descending"}${state.following ? " \xB7 Live updates" : ""}` : state.following ? heldEvents ? "Live \xB7 new rows held while you point at the table" : "Live \xB7 newest 1,000" : state.newestFirst && state.page === 0 && state.before !== void 0 && state.newest > state.before ? "Browsing \xB7 newer logs arrived \u2014 scroll to the top for Live" : "Browsing retained history";
       elements.mode.className = state.following && !state.paused ? "live-mode" : "";
     }
     function setFollowing(value) {
@@ -3084,21 +3460,32 @@ Trace ${trace.traceId}`;
       api.postMessage({ type: "analysis", query: search.query(), levels: state.currentLevels(), serverId: state.selectedServer || void 0, sessionId: state.selectedSession || void 0 });
     });
     scope.listen(elements.analysisClose, "click", () => elements.analysisDialog.close());
+    function resumeLive() {
+      state.resume();
+      table.resetDetails();
+      saveState();
+      table.updateColumns(table.automaticColumns, true);
+      updateFollowControl();
+      updateModeLabel();
+      request(true);
+      table.scheduleRenderWindow(true);
+    }
     scope.listen(elements.follow, "click", () => {
-      if (state.paused || !state.following) {
-        state.resume();
-        table.resetDetails();
-        saveState();
-        table.updateColumns(table.automaticColumns, true);
-        updateFollowControl();
-        updateModeLabel();
-        request(true);
-        table.scheduleRenderWindow(true);
-      } else {
+      if (state.paused || !state.following) resumeLive();
+      else {
         setFollowing(false);
         updateFollowControl();
         request(true);
       }
+    });
+    let lastScrollTop = 0;
+    scope.listen(scrollViewport, "scroll", () => {
+      const top = scrollViewport.scrollTop;
+      const wasAtTop = lastScrollTop <= 1;
+      lastScrollTop = top;
+      if (!state.newestFirst || state.paused || state.selectedSort) return;
+      if (state.following && top > 1) setFollowing(false);
+      else if (!state.following && top <= 1 && !wasAtTop && state.page === 0) resumeLive();
     });
     scope.listen(elements.older, "click", () => {
       if (state.following && !state.paused)

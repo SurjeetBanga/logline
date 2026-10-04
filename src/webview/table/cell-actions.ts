@@ -1,5 +1,5 @@
 import type { LogEvent } from '../../core/types';
-import type { Elements } from '../dom';
+import { element, type Elements } from '../dom';
 import type { EventScope } from '../event-scope';
 import { cellFilterQuery, valueForCell, type CellValue } from '../search/cell-filter';
 
@@ -11,15 +11,28 @@ export function createCellActions(elements: Elements, events: () => LogEvent[], 
   let active: { id: string; column: string } | undefined;
 
   function rows() { return [...elements.logs.querySelectorAll<HTMLTableRowElement>('.event-row')]; }
-  function cells(row: HTMLTableRowElement) {
-    return [...row.querySelectorAll<HTMLTableCellElement>('td[data-column]')].filter(cell => cell.getBoundingClientRect().width > 0);
+  // A narrow panel collapses the Source column through its <col>. Reading that
+  // style instead of measuring each cell keeps a refresh free of forced layout.
+  function collapsedColumns() {
+    const collapsed = new Set<string>();
+    for (const col of element('eventColumns').children as HTMLCollectionOf<HTMLTableColElement>) {
+      if (col.style.visibility === 'collapse' && col.dataset.column) collapsed.add(col.dataset.column);
+    }
+    return collapsed;
+  }
+  function cells(row: HTMLTableRowElement, collapsed = collapsedColumns()) {
+    return [...row.querySelectorAll<HTMLTableCellElement>('td[data-column]')].filter(cell => !collapsed.has(cell.dataset.column!));
+  }
+  function visibleCells() {
+    const collapsed = collapsedColumns();
+    return rows().flatMap(row => cells(row, collapsed));
   }
   function identify(cell: HTMLTableCellElement) {
     return { id: cell.closest<HTMLTableRowElement>('tr.event-row')!.dataset.id!, column: cell.dataset.column! };
   }
   function setActive(cell: HTMLTableCellElement) {
     active = identify(cell);
-    for (const row of rows()) for (const item of cells(row)) item.tabIndex = item === cell ? 0 : -1;
+    for (const item of visibleCells()) item.tabIndex = item === cell ? 0 : -1;
   }
   function close(restoreFocus = false) {
     const previous = origin;
@@ -29,7 +42,7 @@ export function createCellActions(elements: Elements, events: () => LogEvent[], 
     origin = undefined;
     if (restoreFocus && previous && elements.logs.contains(previous)) previous.focus({ preventScroll: true });
     else if (focusedMenu) {
-      const fallback = rows().flatMap(cells).find(cell => cell.tabIndex === 0);
+      const fallback = visibleCells().find(cell => cell.tabIndex === 0);
       (fallback ?? elements.search).focus({ preventScroll: true });
     }
   }
@@ -142,7 +155,7 @@ export function createCellActions(elements: Elements, events: () => LogEvent[], 
   scope.listen(window, 'resize', () => { if (!menu.hidden) close(); });
 
   function rowsChanged() {
-    const all = rows().flatMap(cells);
+    const all = visibleCells();
     const current = all.find(cell => {
       const id = identify(cell);
       return id.id === active?.id && id.column === active.column;

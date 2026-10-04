@@ -17,6 +17,15 @@ export interface GuideRelease {
 
 export const GUIDE_RELEASES: GuideRelease[] = [
   {
+    version: '1.13.0',
+    date: '2026-10-04',
+    highlights: [
+      { title: 'Newest logs on top', text: 'New logs appear at the top. Scroll down to read and Live pauses so rows stay put; scroll back to the top to resume. Set logline.newestFirst to false for terminal order.', section: 'inspect' },
+      { title: 'Analyze, then click through', text: 'Analyze opens with error rate and p95 latency, adds top values of fields like service and path, and every bar, value, pattern, and error group filters your logs to it.', section: 'analyze' },
+      { title: 'Log doctor finds more', text: 'Log doctor flags failures logged at info, errors without a request id, and oversized events, and finds secrets and personal data in output from libraries, imports, and terminals too.', section: 'inspect' }
+    ]
+  },
+  {
     version: '1.12.0',
     date: '2026-10-04',
     highlights: [
