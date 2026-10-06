@@ -23,6 +23,7 @@ import { GUIDE_STATE_KEY, guideStatus as getGuideStatus } from './guide-content'
 import { AgentAccessError, AgentLogAccess } from './agent-access';
 import { eventLocation, LogSiteIndex, LogSiteTracker } from '../core/log-sites';
 import { getField } from '../core/query';
+import { extractExceptions } from '../core/exceptions';
 import type { LogEvent } from '../core/types';
 import type { DetailLinks, DoctorAction, RowEvent } from '../protocol/messages';
 import type { LogBreakpoints } from './log-breakpoints';
@@ -186,7 +187,11 @@ export class LogsController {
     const siteId = this.siteIdOf(event);
     const findings = siteId ? this.doctor?.findingsFor(siteId).map(finding => ({ siteId, code: finding.code, severity: finding.severity,
       message: finding.message, file: finding.site.file, line: finding.site.line })) : undefined;
-    return { ...(site ? { site } : {}), ...(typeof traceId === 'string' && traceId ? { traceId } : {}), ...(findings?.length ? { findings } : {}) };
+    const crash = this.store.attachedCrash(event.id);
+    const error = event.attachedTo === undefined ? undefined : this.store.find(event.attachedTo);
+    return { ...(site ? { site } : {}), ...(typeof traceId === 'string' && traceId ? { traceId } : {}), ...(findings?.length ? { findings } : {}),
+      ...(crash ? { crash: { id: crash.id, message: crash.message ?? '', exceptions: extractExceptions(crash) } } : {}),
+      ...(error ? { attachedTo: { id: error.id, message: error.message ?? '' } } : {}) };
   }
   /**
    * Scan new output for sensitive values that no statement reports. With log
@@ -260,6 +265,7 @@ export class LogsController {
   clear(): void {
     this.agentAccess.revoke();
     this.store.clear();
+    this.ingestion.crashes.clear();
     this.spans.clear();
     this.registry.clearCompleted();
     // A clear must also remove a completed import's status. Active capture is

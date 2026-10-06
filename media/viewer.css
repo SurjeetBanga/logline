@@ -467,6 +467,10 @@ footer { padding: 8px 14px; font-size: 12px; flex: none; }
 .event-finding > svg { flex: none; }
 .event-finding p { flex: 1; margin: 0; white-space: normal; overflow-wrap: anywhere; }
 .event-finding .doctor-actions { flex: none; }
+.event-attachment { display: flex; align-items: center; gap: 8px; margin: 8px 0; padding: 6px 10px; border-left: 2px solid var(--vscode-errorForeground, #f48771); border-radius: 2px; background: var(--vscode-inputValidation-errorBackground, rgba(244, 135, 113, .08)); font-family: var(--vscode-font-family, system-ui, sans-serif); }
+.event-attachment > svg { flex: none; }
+.event-attachment p { flex: 1; margin: 0; white-space: normal; overflow-wrap: anywhere; }
+.event-attachment .event-action { flex: none; }
 /* Toolbar icons, and the Live button's icon for its current mode. */
 .tb-icon { flex: none; vertical-align: -2px; margin-right: 5px; }
 #follow .tb-icon { display: none; }

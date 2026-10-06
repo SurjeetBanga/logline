@@ -1406,6 +1406,22 @@ test('event details link to the log statement and the trace', () => {
   assert.match(String(renderDetails(44, undefined, []).querySelector('.trace-button')!.dataset.unavailable), /Checking/, 'unknown while details load');
 });
 
+test('a JSON error shows the crash that followed it, and the crash links back', () => {
+  const { renderDetails } = viewer();
+  const exceptions = [{ title: 'Exception', lines: [{ text: 'TypeError: x' }, { text: '    at f (/srv/a.js:3:7)', source: { file: '/srv/a.js', line: 3, column: 7 } }] }];
+  const error = renderDetails(42, '{"level":"error"}', [], { crash: { id: 43, message: 'TypeError: x', exceptions } });
+  const note = error.querySelector('.event-attachment')!;
+  assert.equal(note.children[1].children[0].textContent, 'A crash followed this error: ');
+  assert.equal(note.querySelector('.context-button')!.dataset.id, '43');
+  // Frames open from the crash event, which owns them.
+  const frame = error.querySelector('.source-link')!;
+  assert.deepEqual([frame.dataset.id, frame.dataset.block, frame.dataset.line], ['43', '0', '1']);
+  const crash = renderDetails(43, 'TypeError: x', exceptions, { attachedTo: { id: 42, message: 'checkout failed' } });
+  const back = crash.querySelector('.event-attachment')!;
+  assert.equal(back.children[1].children[0].textContent, 'This crash followed a JSON error: ');
+  assert.equal(back.querySelector('.context-button')!.dataset.id, '42');
+});
+
 test('the trace dialog renders a waterfall with logs and opens their context', () => {
   const { get, app, receive, messages } = viewer();
   app.traceView.show('ABC123');

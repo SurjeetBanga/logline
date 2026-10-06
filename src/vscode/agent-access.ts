@@ -243,7 +243,8 @@ export class AgentLogAccess {
     return { events: selectedEvents, matched, hasMore };
   }
 
-  inspect(shareId: string, id: number, context = 25): { event: LogEvent; details: string; exceptions: ReturnType<typeof extractExceptions>; context: LogEvent[] } {
+  inspect(shareId: string, id: number, context = 25): { event: LogEvent; details: string; exceptions: ReturnType<typeof extractExceptions>; context: LogEvent[];
+    crash?: { event: LogEvent; exceptions: ReturnType<typeof extractExceptions> } } {
     if (typeof shareId !== 'string' || !Number.isSafeInteger(id) || id < 0 || !Number.isSafeInteger(context) || context < 0 || context > 25) throw new AgentAccessError('INVALID_INPUT', 'shareId, id, and context must be valid bounded values.');
     this.assertShare(shareId);
     const event = this.store.find(id);
@@ -254,7 +255,11 @@ export class AgentLogAccess {
     const anchorIndex = contextResult.events.findIndex(item => item.id === id);
     const count = Math.min(25, Math.max(0, context));
     const contextEvents = anchorIndex < 0 ? [] : contextResult.events.slice(Math.max(0, anchorIndex - count), anchorIndex + count + 1);
-    return { event: safe, details: this.redactor.text(details), exceptions: extractExceptions(safe), context: contextEvents.map(item => this.boundEvent(this.redactor.event(item))) };
+    // The crash that followed a JSON error is its own event from the same run, redacted on its own.
+    const crash = this.store.attachedCrash(id);
+    const safeCrash = crash && this.boundEvent(this.redactor.event(crash));
+    return { event: safe, details: this.redactor.text(details), exceptions: extractExceptions(safe), context: contextEvents.map(item => this.boundEvent(this.redactor.event(item))),
+      ...(safeCrash ? { crash: { event: safeCrash, exceptions: extractExceptions(safeCrash) } } : {}) };
   }
 
   /**

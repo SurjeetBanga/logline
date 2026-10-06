@@ -196,3 +196,18 @@ test('sharing legacy events without a session does not grant future named runs',
   const analysis = access.analyze({ shareId }) as { coverage: { matched: number } };
   assert.equal(analysis.coverage.matched, 1);
 });
+
+test('inspecting a JSON error includes the crash that followed it, redacted on its own', () => {
+  const store = new LogStore();
+  store.add({ id: 1, serverId: 'api', server: 'API', sessionId: 'a', level: 'error', message: 'checkout failed', raw: '{"level":"error","msg":"checkout failed"}', isJson: true });
+  const crash = 'TypeError: password=hunter2\n    at f (/srv/a.js:3:7)';
+  store.add({ id: 2, serverId: 'api', server: 'API', sessionId: 'a', level: 'error', message: 'TypeError: password=hunter2', raw: crash, attachedTo: 1 });
+  const access = new AgentLogAccess(store, new SessionRegistry(), () => 2);
+  const share = access.share(['api']);
+  const result = access.inspect(share.shareId!, 1);
+  assert.equal(result.crash?.event.id, 2);
+  assert.equal(result.crash?.event.attachedTo, 1);
+  assert.equal(result.crash?.exceptions[0].lines[1].source?.file, '/srv/a.js');
+  assert.doesNotMatch(JSON.stringify(result), /hunter2/);
+  assert.equal(access.inspect(share.shareId!, 2).event.attachedTo, 1);
+});

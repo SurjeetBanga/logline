@@ -14,10 +14,11 @@ interface Slot {
 }
 
 const pickFields = ({ id, timestamp, timestampMs, level, message, isJson, truncated, stream, fields,
-  serverId, server, sessionId, taskName, taskType, taskState, dependencies, dependencyState, exitReason, location }: LogEvent): LogEvent =>
+  serverId, server, sessionId, taskName, taskType, taskState, dependencies, dependencyState, exitReason, location, attachedTo }: LogEvent): LogEvent =>
 ({
   id, timestamp, timestampMs, level, message, isJson, truncated, stream, fields, serverId, server, sessionId,
-  taskName, taskType, taskState, dependencies, dependencyState, exitReason, ...(location ? { location } : {})
+  taskName, taskType, taskState, dependencies, dependencyState, exitReason, ...(location ? { location } : {}),
+  ...(attachedTo !== undefined ? { attachedTo } : {})
 });
 const identity = <T>(value: T): T => value;
 
@@ -158,6 +159,8 @@ export class LogStore {
   private pageCache: PageCache | undefined;
   private sortedCache?: SortedCache;
   private suggestionCache?: { key: string; counts: Map<string, number>; };
+  /** JSON error id to the id of the crash attached to it, while both are retained. */
+  private attached!: Map<number, number>;
 
   constructor(maxRows = 100000, maxBytes = 100 * 1024 * 1024) {
     this.maxRows = maxRows;
@@ -180,6 +183,7 @@ export class LogStore {
     this.pageCache = undefined;
     this.sortedCache = undefined;
     this.suggestionCache = undefined;
+    this.attached = new Map();
   }
 
   private evictOldest(): void {
@@ -199,6 +203,7 @@ export class LogStore {
     // Release cached event references immediately, even while the viewer is hidden.
     const cache = this.pageCache;
     if (cache?.matches[cache.start]?.id === evicted.event.id) cache.matches[cache.start++] = undefined;
+    if (evicted.event.attachedTo !== undefined) this.attached.delete(evicted.event.attachedTo);
     const sorted = this.sortedCache;
     if (sorted && ++sorted.stale * 4 > sorted.events.length) this.sortedCache = undefined;
     if (serverId !== undefined) {
@@ -236,6 +241,7 @@ export class LogStore {
       this.fieldCounts.set(key, (this.fieldCounts.get(key) ?? 0) + 1);
       if (index) index.fields.set(key, (index.fields.get(key) ?? 0) + 1);
     }
+    if (slot.event.attachedTo !== undefined) this.attached.set(slot.event.attachedTo, slot.event.id);
     this.size++;
     this.bytes += slot.bytes;
   }
@@ -274,6 +280,12 @@ export class LogStore {
       else high = middle - 1;
     }
     return undefined;
+  }
+
+  /** The retained crash or stack trace attached to an event, if any (see crash-attach.ts). */
+  attachedCrash(id: number): LogEvent | undefined {
+    const crash = this.attached.get(id);
+    return crash === undefined ? undefined : this.find(crash);
   }
 
   /** Retained events with an id above `id`, oldest first. */

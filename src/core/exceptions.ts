@@ -25,6 +25,12 @@ export function plainHeadline(text: string): string {
   return nodeCrash(lines)?.headline ?? lines[0].trimEnd();
 }
 
+/** Whether the text is a Node crash block that ends with the `Node.js v…` line Node prints as it exits. */
+export function isExitingCrash(text: string): boolean {
+  const lines = text.trimEnd().split(/\r?\n/);
+  return !!nodeCrash(lines) && /^Node\.js v\d+\.\d+\.\d+/.test(lines[lines.length - 1].trim());
+}
+
 /** Whether a joined plain-text event is an uncaught Node crash or a stack trace headed by an exception. */
 export function isPlainCrash(text: string): boolean {
   const lines = text.split(/\r?\n/);
