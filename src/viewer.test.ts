@@ -1422,6 +1422,29 @@ test('a JSON error shows the crash that followed it, and the crash links back', 
   assert.equal(back.querySelector('.context-button')!.dataset.id, '42');
 });
 
+test('an expanded JSON error in the table shows its crash, and the crash row links back', () => {
+  const { get, receive, messages } = viewer();
+  receive({
+    type: 'snapshot', generation: 1, newest: 2, status: 'Running', command: 'npm run dev', running: true,
+    total: 2, retained: 2, discarded: 0, bytes: 100, maxBytes: 10000, truncated: 0,
+    events: [{ id: 1, message: 'checkout failed', level: 'error', timestamp: '12:01', stream: 'terminal' },
+      { id: 2, message: 'TypeError: x', level: 'error', timestamp: '12:01', stream: 'terminal', attachedTo: 1 }],
+    columns: [], page: 0, pages: 1, matched: 2
+  });
+  const rows = get('logs').querySelectorAll('.event-row');
+  const crashRow = rows.find(item => String(item.dataset.id) === '2')!;
+  const back = crashRow.querySelector('.row-attached-button')!;
+  assert.equal(back.dataset.id, '1');
+  get('logs').listeners.get('click')!({ target: { closest: (wanted: string) => wanted === '.row-icon, .row-action' ? back : undefined } });
+  assert.deepEqual(JSON.parse(JSON.stringify(messages.at(-1))), { type: 'context', id: 1 });
+  const errorRow = rows.find(item => String(item.dataset.id) === '1')!;
+  get('logs').listeners.get('click')!({ target: { closest: (wanted: string) => wanted === '.message-button' ? errorRow.querySelector('.message-button') : undefined } });
+  const exceptions = [{ title: 'Exception', lines: [{ text: 'TypeError: x' }, { text: '    at f (/srv/a.js:3:7)', source: { file: '/srv/a.js', line: 3, column: 7 } }] }];
+  receive({ type: 'details', id: 1, text: '{"level":"error"}', target: 'main', exceptions: [], crash: { id: 2, message: 'TypeError: x', exceptions } });
+  assert.equal(get('logs').querySelector('.event-attachment')?.querySelector('.context-button')?.dataset.id, '2');
+  assert.equal(get('logs').querySelector('.source-link')?.dataset.id, '2');
+});
+
 test('the trace dialog renders a waterfall with logs and opens their context', () => {
   const { get, app, receive, messages } = viewer();
   app.traceView.show('ABC123');
