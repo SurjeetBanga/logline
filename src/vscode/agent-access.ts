@@ -10,6 +10,9 @@ import type { LogEvent, SessionSummary } from '../core/types';
 import type { Span } from '../core/otlp';
 import { buildTrace, traceLogs, type SpanStore, type TraceView } from '../core/traces';
 
+// Leaves room under the 64 KiB tool result limit (agent-tools.ts) for the envelope.
+const INSPECT_BUDGET_BYTES = 56 * 1024;
+
 export type AgentErrorCode = 'NOT_SHARED' | 'SHARE_CHANGED' | 'INVALID_INPUT' | 'EVENT_UNAVAILABLE' | 'CANCELLED' | 'BUSY';
 export class AgentAccessError extends Error {
   constructor(readonly code: AgentErrorCode, message: string) { super(message); this.name = 'AgentAccessError'; }
@@ -244,7 +247,7 @@ export class AgentLogAccess {
   }
 
   inspect(shareId: string, id: number, context = 25): { event: LogEvent; details: string; exceptions: ReturnType<typeof extractExceptions>; context: LogEvent[];
-    crash?: { event: LogEvent; exceptions: ReturnType<typeof extractExceptions> } } {
+    crash?: { id: number; message: string; exceptions?: ReturnType<typeof extractExceptions> } } {
     if (typeof shareId !== 'string' || !Number.isSafeInteger(id) || id < 0 || !Number.isSafeInteger(context) || context < 0 || context > 25) throw new AgentAccessError('INVALID_INPUT', 'shareId, id, and context must be valid bounded values.');
     this.assertShare(shareId);
     const event = this.store.find(id);
@@ -255,11 +258,17 @@ export class AgentLogAccess {
     const anchorIndex = contextResult.events.findIndex(item => item.id === id);
     const count = Math.min(25, Math.max(0, context));
     const contextEvents = anchorIndex < 0 ? [] : contextResult.events.slice(Math.max(0, anchorIndex - count), anchorIndex + count + 1);
-    // The crash that followed a JSON error is its own event from the same run, redacted on its own.
+    const result = { event: safe, details: this.redactor.text(details), exceptions: extractExceptions(safe), context: contextEvents.map(item => this.boundEvent(this.redactor.event(item))) };
+    // The crash that followed a JSON error is its own event from the same run,
+    // redacted on its own. Its frames already carry its text, so they are sent
+    // without the raw event, and only while the result stays within the tool
+    // budget; otherwise the agent can inspect the crash's id itself.
     const crash = this.store.attachedCrash(id);
-    const safeCrash = crash && this.boundEvent(this.redactor.event(crash));
-    return { event: safe, details: this.redactor.text(details), exceptions: extractExceptions(safe), context: contextEvents.map(item => this.boundEvent(this.redactor.event(item))),
-      ...(safeCrash ? { crash: { event: safeCrash, exceptions: extractExceptions(safeCrash) } } : {}) };
+    if (!crash) return result;
+    const safeCrash = this.boundEvent(this.redactor.event(crash));
+    const summary = { id: safeCrash.id, message: safeCrash.message ?? '' };
+    const full = { ...result, crash: { ...summary, exceptions: extractExceptions(safeCrash) } };
+    return Buffer.byteLength(JSON.stringify(full), 'utf8') <= INSPECT_BUDGET_BYTES ? full : { ...result, crash: summary };
   }
 
   /**
