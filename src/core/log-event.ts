@@ -1,4 +1,5 @@
 import type { LogEvent } from './types';
+import { isPlainCrash, plainHeadline } from './exceptions';
 import { parseLogfmt } from './logfmt';
 import { terminalLevel } from './terminal-level';
 
@@ -21,18 +22,28 @@ export function parseLogLine(line: string, stream: string, id: number, receivedA
     : value === undefined ? parseLogfmt(trimmed) : undefined;
   const severity = readValue(object, 'level', 'severity', 'log.level', 'severityText', 'SeverityText');
   const severityNumber = readValue(object, 'severityNumber', 'SeverityNumber');
+  // A joined stack trace keeps every frame in `raw`; its row shows the first
+  // line, or the error line of a Node crash block rather than its `path:line`.
+  const multiline = value === undefined && trimmed.includes('\n');
+  const headline = multiline ? plainHeadline(trimmed) : trimmed;
   const level = severity === undefined && typeof severityNumber === 'number' && severityNumber >= 1 && severityNumber <= 24
     ? LEVELS[Math.floor((severityNumber - 1) / 4)] : normalizeLevel(severity as string | number | undefined, stream,
-      stream === 'terminal' || stream === 'file' ? terminalLevel(trimmed) : undefined);
-  // A joined stack trace keeps every frame in `raw`; its row shows the first line.
-  const newline = trimmed.indexOf('\n');
-  const message = getMessage(object, value, newline === -1 ? trimmed : trimmed.slice(0, newline).trimEnd());
+      stream === 'terminal' || stream === 'file' ? plainLevel(headline, multiline ? trimmed : undefined) : undefined);
+  const message = getMessage(object, value, headline);
   const timestampInfo = getTimestamp(object, receivedAt);
   const fields = object ? extractFields(object) : {};
   return {
     id, timestamp: timestampInfo.text, timestampMs: timestampInfo.ms, level, message: message.slice(0, 512), stream,
     isJson: value !== undefined, raw: trimmed, fields
   };
+}
+
+// A leading severity wins. Without one, a joined stack trace headed by an
+// exception (`TypeError: x` plus frames) or a Node crash block is an error;
+// a single unlabelled line stays unclassified.
+function plainLevel(headline: string, joined: string | undefined): string {
+  const level = terminalLevel(headline);
+  return level === 'unclassified' && joined !== undefined && isPlainCrash(joined) ? 'error' : level;
 }
 
 // Accept both literal dotted keys (ECS) and the equivalent nested objects.

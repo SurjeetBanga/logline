@@ -2,6 +2,14 @@
 
 All notable changes to Logline are documented in this file.
 
+## Unreleased
+
+### Changes
+
+- An uncaught Node.js crash becomes one event: the `path:line` header, source line, caret, error, `at` frames, error properties, and the `Node.js v…` line are joined, and the row shows the error (`TypeError: …`) instead of the path.
+- Joined plain-text traces headed by an exception, and Node crash blocks, are errors instead of Unclassified when the line has no leading severity.
+- Frames of joined traces such as `TypeError: …` are clickable in the expanded event and anchor error grouping.
+
 ## 1.13.1 — 2026-10-04
 
 ### Changes

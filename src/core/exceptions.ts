@@ -4,6 +4,35 @@ export interface SourceLocation { file: string; line: number; column: number }
 export interface ExceptionLine { text: string; source?: SourceLocation }
 export interface ExceptionBlock { title: string; lines: ExceptionLine[] }
 
+// Node prints an uncaught exception as a fixed block: the throwing location as
+// `path:line` (an absolute path, `file://` URL, or `node:internal/...`), the
+// source line, a caret under the throw, then the error and its `at` frames.
+export const NODE_CRASH_LOCATION = /^(?:file:\/\/)?(?:\/|[A-Za-z]:[\\/]|node:)\S*:\d+$/;
+export const NODE_CRASH_CARET = /^\s*\^+\s*$/;
+const STACK_FRAME = /^\s+at\s+\S/m;
+// A first line naming an exception: `TypeError: x`, `java.lang.IllegalStateException: x`, `Uncaught Error: x`.
+const EXCEPTION_HEADLINE = /^(?:Uncaught\s+)?[\w$.]*(?:Error|Exception)\b/;
+
+/** Splits a Node crash block into its location header and the error line that follows the caret. */
+function nodeCrash(lines: string[]): { headline?: string } | undefined {
+  if (lines.length < 3 || !NODE_CRASH_LOCATION.test(lines[0].trim()) || !NODE_CRASH_CARET.test(lines[2])) return undefined;
+  return { headline: lines.slice(3).find(line => line.trim())?.trim() };
+}
+
+/** The line a multi-line plain-text event should show in its row: a Node crash's error line, otherwise its first line. */
+export function plainHeadline(text: string): string {
+  const lines = text.split(/\r?\n/);
+  return nodeCrash(lines)?.headline ?? lines[0].trimEnd();
+}
+
+/** Whether a joined plain-text event is an uncaught Node crash or a stack trace headed by an exception. */
+export function isPlainCrash(text: string): boolean {
+  const lines = text.split(/\r?\n/);
+  if (lines.length < 2) return false;
+  if (nodeCrash(lines)) return true;
+  return STACK_FRAME.test(text) && EXCEPTION_HEADLINE.test(lines[0].trim());
+}
+
 // Source locations are data, never command URIs. The host resolves them against
 // workspace files before opening an editor.
 export function parseSourceLocation(text: string): SourceLocation | undefined {
@@ -46,7 +75,9 @@ export function extractExceptions(event: LogEvent): ExceptionBlock[] {
     blocks.push({ title: title.slice(0, 512), lines });
   };
   if (!event.isJson) {
-    if (/\b(?:Error|Exception|Traceback|Caused by:)\b/.test(event.raw) || parseSourceLocation(event.raw)) add('Exception', event.raw);
+    // `TypeError: x` has no word boundary before `Error`, so joined traces and
+    // Node crash blocks are recognized by their shape too.
+    if (/\b(?:Error|Exception|Traceback|Caused by:)\b/.test(event.raw) || isPlainCrash(event.raw) || parseSourceLocation(event.raw)) add('Exception', event.raw);
     return blocks;
   }
   // A structured event can only yield a block through an exception-ish key, an

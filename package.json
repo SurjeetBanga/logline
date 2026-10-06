@@ -569,7 +569,7 @@
         "logline.joinStackTraces": {
           "type": "boolean",
           "default": true,
-          "description": "Join plain-text stack trace lines (Java and Node `at` frames, `Caused by:`, Python tracebacks) onto the line before them, so each trace becomes one searchable event. Applies to new captures and plain-text imports."
+          "description": "Join plain-text stack trace lines (Java and Node `at` frames, `Caused by:`, Python tracebacks, uncaught Node.js crash blocks) onto the line before them, so each trace becomes one searchable event. Applies to new captures and plain-text imports."
         },
         "logline.containerPrefixes": {
           "type": "string",
