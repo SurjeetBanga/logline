@@ -36,6 +36,8 @@ export interface LogEvent {
   exitReason?: string;
   /** The code location that emitted the event, when the capture source reports it (for example a debug adapter). */
   location?: { file: string; line: number; column?: number };
+  /** For a plain-text crash or stack trace, the id of the JSON error event it followed (see crash-attach.ts). */
+  attachedTo?: number;
 }
 
 export type SourceKind = 'process' | 'task' | 'terminal' | 'import' | 'file' | 'debug' | 'otel';

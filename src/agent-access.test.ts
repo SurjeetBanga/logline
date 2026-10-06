@@ -1,6 +1,9 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { AgentAccessError, AgentLogAccess } from './vscode/agent-access';
+import { withVscode } from './test/vscode-mock';
+
+const { boundedText } = withVscode({ lm: {}, MarkdownString: class { } }, () => require('./vscode/agent-tools') as typeof import('./vscode/agent-tools'));
 import { LogStore } from './core/log-store';
 import { SessionRegistry } from './capture/session-registry';
 
@@ -195,4 +198,37 @@ test('sharing legacy events without a session does not grant future named runs',
   assert.deepEqual(access.search({ shareId }).events.map(event => event.id), [1]);
   const analysis = access.analyze({ shareId }) as { coverage: { matched: number } };
   assert.equal(analysis.coverage.matched, 1);
+});
+
+test('inspecting a JSON error includes the crash that followed it, redacted on its own', () => {
+  const store = new LogStore();
+  store.add({ id: 1, serverId: 'api', server: 'API', sessionId: 'a', level: 'error', message: 'checkout failed', raw: '{"level":"error","msg":"checkout failed"}', isJson: true });
+  const crash = 'TypeError: password=hunter2\n    at f (/srv/a.js:3:7)';
+  store.add({ id: 2, serverId: 'api', server: 'API', sessionId: 'a', level: 'error', message: 'TypeError: password=hunter2', raw: crash, attachedTo: 1 });
+  const access = new AgentLogAccess(store, new SessionRegistry(), () => 2);
+  const share = access.share(['api']);
+  const result = access.inspect(share.shareId!, 1);
+  assert.equal(result.crash?.id, 2);
+  assert.equal(result.crash?.exceptions?.[0].lines[1].source?.file, '/srv/a.js');
+  assert.doesNotMatch(JSON.stringify(result), /hunter2/);
+  assert.equal(access.inspect(share.shareId!, 2).event.attachedTo, 1);
+});
+
+test('an attached crash never pushes an inspect result past the tool limit', () => {
+  const store = new LogStore();
+  const run = { serverId: 'api', server: 'API', sessionId: 'a' };
+  // Surrounding events already fill most of the budget.
+  const filler = 'x'.repeat(3000);
+  for (let id = 1; id <= 12; id++) store.add({ id, ...run, level: 'info', message: filler, raw: filler });
+  store.add({ id: 13, ...run, level: 'error', message: 'checkout failed', raw: '{"level":"error","msg":"checkout failed"}', isJson: true });
+  const frames = Array.from({ length: 200 }, (_, i) => `    at f${i} (/srv/app/module${i}.js:${i + 1}:1)`).join('\n');
+  store.add({ id: 14, ...run, level: 'error', message: 'TypeError: x', raw: `TypeError: x\n${frames}`, attachedTo: 13 });
+  const access = new AgentLogAccess(store, new SessionRegistry(), () => 14);
+  const share = access.share(['api']);
+  const result = access.inspect(share.shareId!, 13);
+  assert.deepEqual(result.crash, { id: 14, message: 'TypeError: x' }, 'only the summary fits');
+  assert.doesNotMatch(boundedText(result), /RESULT_TOO_LARGE/);
+  // With the crash's frames it would have been over the inspect budget.
+  const full = { ...result, crash: { ...result.crash, exceptions: access.inspect(share.shareId!, 14).exceptions } };
+  assert.ok(Buffer.byteLength(JSON.stringify(full), 'utf8') > 56 * 1024);
 });

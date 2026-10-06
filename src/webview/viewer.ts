@@ -425,7 +425,7 @@ export function createViewer(api: WebviewApi) {
     if (rowButton && Number.isSafeInteger(rowId)) {
       if (rowButton.classList.contains('row-site-button')) api.postMessage({ type: 'openLogSite', id: rowId });
       else if (rowButton.classList.contains('row-break-button')) api.postMessage({ type: 'breakOnEvent', id: rowId });
-      else if (rowButton.classList.contains('row-context-button')) inspection.showContext(rowId);
+      else if (rowButton.classList.contains('row-context-button') || rowButton.classList.contains('row-attached-button')) inspection.showContext(rowId);
       else if (rowButton.classList.contains('row-finding-button') && state.selected !== rowId) toggleExpand(rowId);
       return;
     }

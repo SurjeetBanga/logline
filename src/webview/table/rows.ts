@@ -55,6 +55,8 @@ export function createRows(state: ViewerState, columns: () => Column[], formatTi
     // What the row links to, visible without opening it.
     if (event.site)
       messageContent.append(rowIcon('row-site-button', 'code', 'Open code: open the log statement that logged this event', event.id));
+    if (event.attachedTo !== undefined)
+      messageContent.append(rowIcon('row-attached-button', 'attached', 'Follows a JSON error: show the error with the logs around it', event.attachedTo));
     if (event.finding) {
       const finding = rowIcon(`row-finding-button severity-${event.finding.severity}`, event.finding.severity, `Log doctor: ${event.finding.message} Click for details.`, event.id);
       messageContent.append(finding);

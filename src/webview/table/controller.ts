@@ -567,7 +567,7 @@ export function createTable(elements: Elements, scrollViewport: HTMLElement, sta
   function receiveDetails(data: Extract<HostMessage, { type: 'details'; }>) {
     if (data.id !== state.selected) return;
     state.selectedDetailText = data.text; state.selectedExceptions = data.exceptions;
-    state.selectedLinks = { site: data.site, traceId: data.traceId, findings: data.findings };
+    state.selectedLinks = { site: data.site, traceId: data.traceId, findings: data.findings, crash: data.crash, attachedTo: data.attachedTo };
     resetDetails(); renderWindow();
   }
 

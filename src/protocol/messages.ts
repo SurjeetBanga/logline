@@ -104,6 +104,10 @@ export interface DetailLinks {
   traceId?: string;
   /** Log doctor findings on that statement. */
   findings?: DoctorFindingView[];
+  /** The crash or stack trace that followed this JSON error, with its own frames. */
+  crash?: { id: number; message: string; exceptions: ExceptionBlock[] };
+  /** For a crash, the JSON error it followed. */
+  attachedTo?: { id: number; message: string };
 }
 export interface GuideStatus { version: string; unread: boolean; }
 export type HostMessage = Snapshot

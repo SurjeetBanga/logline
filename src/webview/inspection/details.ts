@@ -12,6 +12,7 @@ const ICONS: Record<string, IconPart[]> = {
   copy: [['rect', { x: '5.5', y: '5.5', width: '8', height: '8.5', rx: '1' }], ['path', { d: 'M3 10.5v-7a1 1 0 0 1 1-1h6' }]],
   agent: [['path', { d: 'M8 2l1.4 4.6L14 8l-4.6 1.4L8 14l-1.4-4.6L2 8l4.6-1.4z' }]],
   warning: [['path', { d: 'M8 2.5 14.5 13.5h-13zM8 6.5v3' }], ['circle', { cx: '8', cy: '11.6', r: '.4', fill: 'currentColor' }]],
+  attached: [['path', { d: 'M4 2.5v6h8M9.5 6 12 8.5 9.5 11' }]],
   information: [['circle', { cx: '8', cy: '8', r: '6' }], ['path', { d: 'M8 7.5v4' }], ['circle', { cx: '8', cy: '5', r: '.4', fill: 'currentColor' }]],
   hint: [['path', { d: 'M6 12.5h4M6.5 14.5h3M8 1.8a4.2 4.2 0 0 0-2.5 7.6c.5.4.8 1 .8 1.6h3.4c0-.6.3-1.2.8-1.6A4.2 4.2 0 0 0 8 1.8z' }]]
 };
@@ -58,6 +59,44 @@ export function eventAction(className: string, iconName: keyof typeof ICONS, lab
     button.setAttribute('aria-disabled', 'true');
   }
   return button;
+}
+
+function attachment(label: string, message: string, id: number, action: string, title: string): HTMLElement {
+  const note = document.createElement('div');
+  note.className = 'event-attachment';
+  note.setAttribute('role', 'note');
+  const text = document.createElement('p');
+  const strong = document.createElement('strong');
+  strong.textContent = label;
+  text.append(strong, document.createTextNode(message));
+  const show = eventAction('context-button', 'context', action, title);
+  show.dataset.id = String(id);
+  note.append(icon('attached'), text, show);
+  return note;
+}
+
+/** One exception's frames; `id` is the event the frames belong to, so a click opens the right source. */
+function exceptionSection(id: number, exception: ExceptionBlock, blockIndex: number): HTMLElement {
+  const section = document.createElement('section');
+  section.className = 'exception-block';
+  const title = document.createElement('strong');
+  title.textContent = exception.title;
+  const stack = document.createElement('div');
+  stack.className = 'exception-stack';
+  exception.lines.forEach((line, lineIndex) => {
+    const element = document.createElement(line.source ? 'button' : 'div');
+    element.textContent = line.text || ' ';
+    if (line.source) {
+      element.className = 'source-link';
+      element.dataset.id = String(id);
+      element.dataset.block = String(blockIndex);
+      element.dataset.line = String(lineIndex);
+      element.title = `Open ${line.source.file}:${line.source.line}`;
+    }
+    stack.append(element);
+  });
+  section.append(title, stack);
+  return section;
 }
 
 export function buildEventDetails(id: number, text: string | undefined, exceptions: ExceptionBlock[], links: DetailLinks = {}, leadingActions: HTMLElement[] = []) {
@@ -108,31 +147,19 @@ export function buildEventDetails(id: number, text: string | undefined, exceptio
     banner.append(icon(finding.severity), message, actions);
     container.append(banner);
   }
-  exceptions.forEach((exception, blockIndex) => {
-    const section = document.createElement('section');
-    section.className = 'exception-block';
-    const title = document.createElement('strong');
-    title.textContent = exception.title;
-    const stack = document.createElement('div');
-    stack.className = 'exception-stack';
-    exception.lines.forEach((line, lineIndex) => {
-      const element = document.createElement(line.source ? 'button' : 'div');
-      element.textContent = line.text || ' ';
-      if (line.source) {
-        element.className = 'source-link';
-        element.dataset.id = String(id);
-        element.dataset.block = String(blockIndex);
-        element.dataset.line = String(lineIndex);
-        element.title = `Open ${line.source.file}:${line.source.line}`;
-      }
-      stack.append(element);
-    });
-    section.append(title, stack);
-    container.append(section);
-  });
+  // A crash and the JSON error it followed stay separate events; each links to the other.
+  if (links.attachedTo)
+    container.append(attachment('This crash followed a JSON error: ', links.attachedTo.message, links.attachedTo.id, 'Show error',
+      'Show the JSON error this crash followed, with the logs around it'));
+  exceptions.forEach((exception, blockIndex) => container.append(exceptionSection(id, exception, blockIndex)));
+  if (links.crash) {
+    container.append(attachment('A crash followed this error: ', links.crash.message, links.crash.id, 'Show crash',
+      'Show the crash that followed this error, with the logs around it'));
+    links.crash.exceptions.forEach((exception, blockIndex) => container.append(exceptionSection(links.crash!.id, exception, blockIndex)));
+  }
   const pre = document.createElement('pre');
   pre.textContent = text ?? 'Loading…';
-  if (exceptions.length) {
+  if (exceptions.length || links.crash) {
     const raw = document.createElement('details');
     const summary = document.createElement('summary');
     summary.textContent = 'Original event';

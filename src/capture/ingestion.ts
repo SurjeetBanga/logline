@@ -1,4 +1,5 @@
 import type { ContainerTag } from '../core/container-prefix';
+import { CrashLinker } from '../core/crash-attach';
 import { parseLogLine } from '../core/log-event';
 import type { LogStore } from '../core/log-store';
 import type { LogEvent } from '../core/types';
@@ -23,6 +24,7 @@ export function containerSource(serverId: string, tag: ContainerTag): { serverId
 /** All capture sources share one monotonic ID sequence and retention path. */
 export class Ingestion {
   sequence = 0;
+  readonly crashes = new CrashLinker();
   constructor(readonly store: LogStore, private readonly persist: (raw: string) => void) { }
 
   create(raw: string, stream: string, receivedAt = new Date()): LogEvent {
@@ -51,6 +53,8 @@ export class Ingestion {
     event.truncated = metadata.truncated;
     if (event.truncated) event.isJson = false;
     if (metadata.location) event.location = metadata.location;
+    // Imported lines arrive all at once, so arrival time says nothing about them.
+    if (stream !== 'import') this.crashes.observe(event, Date.now());
     // Disk capture retains the physical line, including ANSI and surrounding whitespace.
     if (metadata.persist) this.persist(tag ? `${tag.container} | ${raw}` : raw);
     this.commit(event);
