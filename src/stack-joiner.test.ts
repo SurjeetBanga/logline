@@ -134,6 +134,26 @@ test('a path:line line that does not start a crash block is released line by lin
   assert.deepEqual(join(['starting', 'Node.js v22.22.0']), ['starting', 'Node.js v22.22.0']);
 });
 
+test('a JSON line after a path:line line is delivered at once', () => {
+  const out: string[] = [];
+  const joiner = new StackJoiner(line => out.push(line), undefined, 0);
+  joiner.write('/srv/app/server.js:12', false);
+  joiner.write('{"level":"info","msg":"ready"}', false);
+  assert.deepEqual(out, ['/srv/app/server.js:12', '{"level":"info","msg":"ready"}']);
+  // A source line that only starts with a bracket still forms a crash block.
+  const block = ['/srv/app/a.js:3', '[a, b] = pair();', '^', 'TypeError: pair is not a function', '    at /srv/app/a.js:3:10'];
+  assert.deepEqual(join(block), [block.join('\n')]);
+});
+
+test('lines replayed from an unconfirmed crash block keep their own metadata', () => {
+  const out: [string, string | undefined][] = [];
+  const joiner = new StackJoiner<string>((line, _truncated, meta) => out.push([line, meta]), undefined, 0);
+  joiner.write('/srv/app/server.js:12', false, 'first');
+  joiner.write('listening on 3000', false, 'second');
+  joiner.end();
+  assert.deepEqual(out, [['/srv/app/server.js:12', 'first'], ['listening on 3000', 'second']]);
+});
+
 test('an unconfirmed crash block is split when the flush timer fires', async () => {
   const out: string[] = [];
   const joiner = new StackJoiner(line => out.push(line), undefined, 10);

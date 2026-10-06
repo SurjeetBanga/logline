@@ -28,6 +28,12 @@ const NODE_VERSION = /^Node\.js v\d+\.\d+\.\d+/;
 const MAX_LINES = 1000;
 
 const looksStructured = (line: string) => /^\s*[[{]/.test(line);
+// A crash's source line is printed as written and may itself start with a
+// bracket, so only a line that parses releases a tentative header.
+const isJson = (line: string) => {
+  if (!looksStructured(line)) return false;
+  try { JSON.parse(line); return true; } catch { return false; }
+};
 
 /**
  * What the held text expects next. A Node crash block is matched as a unit:
@@ -45,7 +51,7 @@ interface Held<M> {
   /** Set once a frame or confirmed crash header is part of the text. */
   trace: boolean;
   /** The physical lines of a block that is not confirmed yet. */
-  tentative?: { text: string; truncated: boolean }[];
+  tentative?: { text: string; truncated: boolean; meta?: M }[];
   meta?: M;
 }
 
@@ -73,7 +79,7 @@ export class StackJoiner<M = undefined> {
         held.truncated ||= truncated;
         held.lines++;
         held.trace ||= FRAME.test(line) || mode === 'node-error';
-        if (mode === 'node-caret') held.tentative?.push({ text: line, truncated });
+        if (mode === 'node-caret') held.tentative?.push({ text: line, truncated, meta });
         else held.tentative = undefined;
         held.mode = mode;
         this.schedule();
@@ -90,7 +96,7 @@ export class StackJoiner<M = undefined> {
     this.held = {
       text: line, truncated, lines: 1, trace: false, meta,
       mode: TRACEBACK.test(line) ? 'traceback' : crash ? 'node-source' : 'trace',
-      tentative: crash ? [{ text: line, truncated }] : undefined
+      tentative: crash ? [{ text: line, truncated, meta }] : undefined
     };
     this.schedule();
   }
@@ -114,8 +120,8 @@ export class StackJoiner<M = undefined> {
     this.held = undefined;
     if (!held.tentative) { this.deliver(held.text, held.truncated, held.meta); return; }
     const [first, ...rest] = held.tentative;
-    this.deliver(first.text, first.truncated, held.meta);
-    for (const part of rest) this.write(part.text, part.truncated, held.meta);
+    this.deliver(first.text, first.truncated, first.meta);
+    for (const part of rest) this.write(part.text, part.truncated, part.meta);
   }
 
   private schedule(): void {
@@ -127,10 +133,11 @@ export class StackJoiner<M = undefined> {
 }
 
 /** The mode after appending `line`, or undefined when it does not continue the held text. */
-function next(held: Held<unknown>, line: string): Mode | undefined {
+function next<M>(held: Held<M>, line: string): Mode | undefined {
   switch (held.mode) {
-    // The source line is printed as written, so it can look like anything.
-    case 'node-source': return 'node-caret';
+    // The source line is printed as written, so it can look like anything
+    // except a JSON log line, which is never held.
+    case 'node-source': return isJson(line) ? undefined : 'node-caret';
     case 'node-caret': return NODE_CRASH_CARET.test(line) ? 'node-error' : undefined;
     // The error line itself: `Error: boom`, `TypeError: x`, or a thrown value.
     case 'node-error': return line.trim() && !looksStructured(line) ? 'trace' : undefined;
