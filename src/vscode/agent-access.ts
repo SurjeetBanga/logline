@@ -247,7 +247,7 @@ export class AgentLogAccess {
   }
 
   inspect(shareId: string, id: number, context = 25): { event: LogEvent; details: string; exceptions: ReturnType<typeof extractExceptions>; context: LogEvent[];
-    crash?: { id: number; message: string; exceptions?: ReturnType<typeof extractExceptions> } } {
+    limited?: boolean; crash?: { id: number; message: string; exceptions?: ReturnType<typeof extractExceptions> } } {
     if (typeof shareId !== 'string' || !Number.isSafeInteger(id) || id < 0 || !Number.isSafeInteger(context) || context < 0 || context > 25) throw new AgentAccessError('INVALID_INPUT', 'shareId, id, and context must be valid bounded values.');
     this.assertShare(shareId);
     const event = this.store.find(id);
@@ -258,7 +258,8 @@ export class AgentLogAccess {
     const anchorIndex = contextResult.events.findIndex(item => item.id === id);
     const count = Math.min(25, Math.max(0, context));
     const contextEvents = anchorIndex < 0 ? [] : contextResult.events.slice(Math.max(0, anchorIndex - count), anchorIndex + count + 1);
-    const result = { event: safe, details: this.redactor.text(details), exceptions: extractExceptions(safe), context: contextEvents.map(item => this.boundEvent(this.redactor.event(item))) };
+    const result = this.fitInspect({ event: safe, details: this.redactor.text(details), exceptions: extractExceptions(safe),
+      context: contextEvents.map(item => this.boundEvent(this.redactor.event(item))) }, contextEvents.findIndex(item => item.id === id));
     // The crash that followed a JSON error is its own event from the same run,
     // redacted on its own. Its frames already carry its text, so they are sent
     // without the raw event, and only while the result stays within the tool
@@ -266,7 +267,8 @@ export class AgentLogAccess {
     const crash = this.store.attachedCrash(id);
     if (!crash) return result;
     const safeCrash = this.boundEvent(this.redactor.event(crash));
-    const summary = { id: safeCrash.id, message: safeCrash.message ?? '' };
+    // A short summary always fits beside a result that is within the budget.
+    const summary = { id: safeCrash.id, message: (safeCrash.message ?? '').slice(0, 1024) };
     const full = { ...result, crash: { ...summary, exceptions: extractExceptions(safeCrash) } };
     return Buffer.byteLength(JSON.stringify(full), 'utf8') <= INSPECT_BUDGET_BYTES ? full : { ...result, crash: summary };
   }
@@ -377,6 +379,29 @@ export class AgentLogAccess {
   }
   private encodeCursor(before: number, lastId: number, key: string): string {
     return Buffer.from(JSON.stringify({ id: this.shareId, revision: this.revision, before, lastId, key })).toString('base64url');
+  }
+  /**
+   * Keep an inspect result within the tool budget. Wide structured events
+   * repeat every field in each neighbour, so the neighbours shrink first: to
+   * their summary, then to the nearest ones. Only then does the event itself
+   * lose its fields, which its details text still shows.
+   */
+  private fitInspect<T extends { event: LogEvent; details: string; exceptions: ReturnType<typeof extractExceptions>; context: LogEvent[] }>(
+    result: T, anchor: number): T & { limited?: boolean } {
+    const fits = (value: object) => Buffer.byteLength(JSON.stringify(value), 'utf8') <= INSPECT_BUDGET_BYTES;
+    if (fits(result)) return result;
+    const summary = ({ id, timestamp, timestampMs, level, message, stream, truncated, attachedTo }: LogEvent): LogEvent => ({
+      id, timestamp, timestampMs, level, message: message && message.length > 1024 ? message.slice(0, 1024) : message, stream,
+      truncated: truncated || (message?.length ?? 0) > 1024 || undefined, ...(attachedTo !== undefined ? { attachedTo } : {})
+    });
+    let limited: T & { limited: boolean } = { ...result, context: result.context.map(summary), limited: true };
+    for (let side = Math.max(anchor, result.context.length - anchor - 1); !fits(limited) && side > 0;) {
+      side = Math.floor(side / 2);
+      limited = { ...limited, context: result.context.slice(Math.max(0, anchor - side), anchor + side + 1).map(summary) };
+    }
+    if (!fits(limited)) limited = { ...limited, event: { ...limited.event, fields: undefined, truncated: true } };
+    if (!fits(limited)) limited = { ...limited, exceptions: [] };
+    return limited;
   }
   private boundEvent(event: LogEvent): LogEvent {
     const bound = { ...event };

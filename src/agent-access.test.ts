@@ -232,3 +232,26 @@ test('an attached crash never pushes an inspect result past the tool limit', () 
   const full = { ...result, crash: { ...result.crash, exceptions: access.inspect(share.shareId!, 14).exceptions } };
   assert.ok(Buffer.byteLength(JSON.stringify(full), 'utf8') > 56 * 1024);
 });
+
+test('inspecting an event among wide structured logs stays within the tool limit', () => {
+  const store = new LogStore();
+  const run = { serverId: 'api', server: 'API', sessionId: 'a' };
+  const fields: Record<string, string> = {};
+  for (let i = 0; i < 80; i++) fields[`req.header${i}`] = `value-${'x'.repeat(20)}${i}`;
+  for (let id = 1; id <= 60; id++) store.add({ id, ...run, level: 'info', message: `request ${id}`, raw: JSON.stringify(fields), isJson: true, fields });
+  const access = new AgentLogAccess(store, new SessionRegistry(), () => 60);
+  const share = access.share(['api']);
+  const result = access.inspect(share.shareId!, 30);
+  assert.doesNotMatch(boundedText(result), /RESULT_TOO_LARGE/);
+  assert.equal(result.limited, true);
+  assert.equal(result.event.fields?.['req.header0'], fields['req.header0'], 'the inspected event keeps its fields');
+  assert.ok(result.context.some(event => event.id === 29) && result.context.some(event => event.id === 31), 'the nearest neighbours are kept');
+  assert.ok(result.context.every(event => event.fields === undefined), 'neighbours are sent as summaries');
+});
+
+test('an inspect result that fits is sent whole', () => {
+  const { access } = fixture();
+  const share = access.share(['api']);
+  const result = access.inspect(share.shareId!, 1);
+  assert.equal(result.limited, undefined);
+});
