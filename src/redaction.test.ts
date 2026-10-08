@@ -91,3 +91,27 @@ test('redacts task dependency labels in event metadata', () => {
   const result = redactEvent({ id: 3, level: 'info', dependencies: ['safe', 'token=dependency-secret'] });
   assert.deepEqual(result.dependencies, ['safe', 'token=[REDACTED]']);
 });
+
+test('redacts only aliases of a sensitive path, not fields that share its value', () => {
+  const result = redactEvent({
+    id: 4, level: 'info', isJson: true,
+    raw: '{"user":{"password_reset":false},"success":false,"statusCode":200,"api_key_id":200}',
+    fields: { 'user.password_reset': false, password_reset: false, success: false, statusCode: 200, api_key_id: 200 }
+  });
+  assert.equal(result.fields?.['user.password_reset'], '[REDACTED]');
+  assert.equal(result.fields?.password_reset, '[REDACTED]');
+  assert.equal(result.fields?.api_key_id, '[REDACTED]');
+  assert.equal(result.fields?.success, false);
+  assert.equal(result.fields?.statusCode, 200);
+});
+
+test('redacts a deeper alias and the nested path of a sensitive parent', () => {
+  const result = redactEvent({
+    id: 5, level: 'info', isJson: true,
+    raw: '{"secret":{"inner":{"value":"deep-secret"}},"note":"value"}',
+    fields: { 'secret.inner.value': 'deep-secret', 'secret.inner': 'x', value: 'deep-secret', note: 'value' }
+  });
+  assert.equal(result.fields?.['secret.inner.value'], '[REDACTED]');
+  assert.equal(result.fields?.value, '[REDACTED]');
+  assert.equal(result.fields?.note, 'value');
+});

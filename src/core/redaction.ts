@@ -131,20 +131,23 @@ function redactAssignments(text: string, replacement: string, sensitive: (key: s
 /**
  * Parsed JSON payloads are flattened into `fields` with both dotted paths and
  * convenience aliases. A secret under `credentials.value` can therefore also
- * appear as a plain `value` key. Redact aliases whose primitive value is the
- * same as a value found under a sensitive path.
+ * appear as a plain `value` key. Redact a sensitive path and any alias that
+ * ends that path with the same value. Matching on the value alone would also
+ * blank unrelated fields that merely share it, such as `success: false` next
+ * to `password_reset: false`.
  */
 function redactFields(fields: Record<string, string | number | boolean>, replacement: string, configuredFields: string[], redactText: (text: string) => string): Record<string, string | number | boolean> {
-  const sensitiveValues = new Set<string | number | boolean>();
+  const sensitivePaths = new Map<string | number | boolean, string[]>();
   for (const [key, value] of Object.entries(fields)) {
     const parts = key.split('.');
     const sensitivePath = isSensitiveKey(key, configuredFields)
       || parts.slice(0, -1).some((_part, index) => isSensitiveKey(parts.slice(0, index + 1).join('.'), configuredFields));
-    if (sensitivePath) sensitiveValues.add(value);
+    if (sensitivePath) sensitivePaths.set(value, [...sensitivePaths.get(value) ?? [], key]);
   }
   const redacted: Record<string, string | number | boolean> = {};
   for (const [key, value] of Object.entries(fields)) {
-    const sensitive = isSensitiveKey(key, configuredFields) || sensitiveValues.has(value);
+    const sensitive = isSensitiveKey(key, configuredFields)
+      || (sensitivePaths.get(value)?.some(path => path === key || path.endsWith('.' + key)) ?? false);
     const safeValue = typeof value === 'string' ? redactText(value) : value;
     if (sensitive) {
       if (key === '__proto__') Object.defineProperty(redacted, key, { value: replacement, enumerable: true, writable: true, configurable: true });
