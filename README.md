@@ -1,16 +1,17 @@
 # Logline
 
-**Live tail for JSON logs, right inside VS Code.** Run your server, filter the noise, inspect errors, and let Copilot investigate them — without leaving the editor.
+**Your app's logs and traces, live inside VS Code.** Capture any terminal, debug session, Docker Compose service or OpenTelemetry app. Search and trace requests, catch secrets leaking from log statements, and let your AI agent debug from the same logs.
 
 ![Logline demo: a running service streams logs and traces into the Logs panel, the Traces list opens a failed request's waterfall, log doctor flags a token and a swallowed exception in the editor, Break when this logs again stops the debugger on a log statement, and Docker Compose output splits into one source per service.](media/demo.gif)
 
 *Logline running in VS Code with a [small demo app](samples/README.md) and [Docker Compose sample logs](samples/compose-demo.log).*
 
-- Searchable, sortable table for structured logs: Pino, Winston, Log4j2, ECS, OpenTelemetry, JSONL
-- Queries like `level:error status:5xx durationMs:>200`
-- Expand JSON, read nested exceptions, jump to stack-frame source
-- Capture terminal commands, VS Code tasks, debug sessions, or imported log files
-- Share redacted, read-only logs with Copilot agent mode, Claude Code, or Codex for live debugging
+- Capture anything: terminals, F5 debug sessions, tasks, files, Docker Compose and Kubernetes
+- OpenTelemetry logs and traces with waterfalls, no collector needed
+- Live hit counts above log statements, and break the debugger when a log fires
+- Log doctor catches secrets, personal data and swallowed exceptions
+- Share redacted logs with Copilot, Claude Code or Codex
+- Works with JSON, logfmt, plain text, Pino, Winston, Log4j2, ECS
 
 ## Get started
 
