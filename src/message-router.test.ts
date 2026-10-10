@@ -55,7 +55,7 @@ function services() {
     toggleTerminalCapture: async (enabled: boolean) => { calls.push({ name: 'terminalCapture', value: enabled }); },
     detailLinks: () => ({ site: 'src/app.ts:4', traceId: 'abc' }),
     openLogSite: async (id: number) => { calls.push({ name: 'openLogSite', value: id }); },
-    traceView: (traceId: string) => ({ traceId, durationMs: 0, services: [], spans: [], errors: 0, omitted: 0, logs: [] }),
+    traceView: (traceId: string) => ({ traceId, durationMs: 0, services: [], spans: [], errors: 0, omitted: 0, hotspots: [], logs: [] }),
     toggleOtlp: async (enabled: boolean) => { calls.push({ name: 'otlp', value: enabled }); }
   };
 }

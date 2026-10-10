@@ -88,6 +88,8 @@ export function getElements() {
     traceTitle: element<HTMLElement>('traceTitle'),
     traceStatus: element<HTMLElement>('traceStatus'),
     traceRows: element<HTMLTableSectionElement>('traceRows'),
+    traceHotspots: element<HTMLElement>('traceHotspots'),
+    traceHotspotList: element<HTMLOListElement>('traceHotspotList'),
     traceClose: element<HTMLButtonElement>('traceClose'),
     traceFilter: element<HTMLButtonElement>('traceFilter'),
     otlpToggle: element<HTMLButtonElement>('otlpToggle'),

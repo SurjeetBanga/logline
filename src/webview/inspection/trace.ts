@@ -1,4 +1,4 @@
-import type { TraceLog, TraceRow, TraceView } from '../../core/traces';
+import type { TraceHotspot, TraceLog, TraceRow, TraceView } from '../../core/traces';
 import type { Elements } from '../dom';
 import { cell } from '../dom';
 import type { EventScope } from '../event-scope';
@@ -23,13 +23,25 @@ export function createTraceView(elements: Elements, api: WebviewApi, scope: Even
     elements.traceTitle.title = current;
     elements.traceStatus.textContent = 'Loading…';
     elements.traceRows.replaceChildren();
+    elements.traceHotspots.hidden = true;
     if (!elements.traceDialog.open) elements.traceDialog.showModal();
     api.postMessage({ type: 'trace', traceId: current });
   }
 
   scope.listen(elements.traceClose, 'click', () => elements.traceDialog.close());
   scope.listen(elements.traceBack, 'click', () => { elements.traceDialog.close(); actions.showList(); });
-  scope.listen(elements.traceDialog, 'close', () => { current = undefined; elements.traceRows.replaceChildren(); });
+  scope.listen(elements.traceDialog, 'close', () => { current = undefined; elements.traceRows.replaceChildren(); elements.traceHotspotList.replaceChildren(); elements.traceHotspots.hidden = true; });
+  // A hotspot leads to the first span of its operation in the waterfall.
+  scope.listen(elements.traceHotspotList, 'click', event => {
+    const button = (event.target as HTMLElement).closest<HTMLElement>('.trace-hotspot');
+    const row = button && [...elements.traceRows.querySelectorAll<HTMLElement>('.trace-span')]
+      .find(row => row.dataset.service === button.dataset.service && row.dataset.name === button.dataset.name);
+    if (!row) return;
+    row.scrollIntoView({ block: 'center' });
+    row.classList.remove('trace-flash');
+    void row.offsetWidth; // restart the animation when the same hotspot is chosen again
+    row.classList.add('trace-flash');
+  });
   scope.listen(elements.traceFilter, 'click', () => {
     if (!current) return;
     const query = `traceId:${current}`;
@@ -46,6 +58,11 @@ export function createTraceView(elements: Elements, api: WebviewApi, scope: Even
   function receive(trace: TraceView) {
     if (!elements.traceDialog.open || trace.traceId !== current) return;
     elements.traceStatus.textContent = summary(trace);
+    // With one span, self time says nothing the waterfall does not.
+    const shownHotspots = trace.spans.length + trace.omitted > 1 ? trace.hotspots : [];
+    const top = shownHotspots[0]?.selfMs ?? 0;
+    elements.traceHotspotList.replaceChildren(...shownHotspots.map(hotspot => hotspotItem(hotspot, top)));
+    elements.traceHotspots.hidden = !shownHotspots.length;
     const total = Math.max(trace.durationMs, 0.001);
     const logsBySpan = new Map<string, TraceLog[]>();
     const unattached: TraceLog[] = [];
@@ -64,7 +81,7 @@ export function createTraceView(elements: Elements, api: WebviewApi, scope: Even
         const heading = document.createElement('tr');
         heading.className = 'trace-section';
         const label = cell('Logs not linked to a received span');
-        label.colSpan = 4;
+        label.colSpan = 5;
         heading.append(label);
         rows.push(heading);
       }
@@ -91,6 +108,37 @@ function summary(trace: TraceView): string {
   return `${parts.join(' · ')} · Highlighted spans are the critical path${trace.omitted ? ` · First ${trace.spans.length} spans shown` : ''}`;
 }
 
+function hotspotItem(hotspot: TraceHotspot, top: number): HTMLLIElement {
+  const item = document.createElement('li');
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = `trace-hotspot${hotspot.errors ? ' trace-hotspot-error' : ''}`;
+  button.dataset.service = hotspot.service;
+  button.dataset.name = hotspot.name;
+  const percent = Math.round(hotspot.share * 100);
+  const calls = hotspot.count > 1 ? ` across ${hotspot.count} spans` : '';
+  button.title = `${hotspot.name} in ${hotspot.service} spent ${formatDuration(hotspot.selfMs)} itself${calls}, ${percent}% of all self time`
+    + `${hotspot.errors ? `. ${hotspot.errors} failed` : ''}. Show in waterfall.`;
+  const name = document.createElement('span');
+  name.className = 'trace-hotspot-name';
+  const service = document.createElement('span');
+  service.className = 'trace-hotspot-service';
+  service.textContent = ` · ${hotspot.service}${hotspot.count > 1 ? ` · ×${hotspot.count}` : ''}`;
+  name.append(document.createTextNode(`${hotspot.errors ? '⚠ ' : ''}${hotspot.name}`), service);
+  const track = document.createElement('span');
+  track.className = 'trace-track';
+  const bar = document.createElement('span');
+  bar.className = 'trace-bar';
+  bar.style.width = `${Math.max(1, hotspot.selfMs / Math.max(top, 0.001) * 100)}%`;
+  track.append(bar);
+  const time = document.createElement('span');
+  time.className = 'trace-hotspot-time';
+  time.textContent = `${formatDuration(hotspot.selfMs)} · ${percent}%`;
+  button.append(name, track, time);
+  item.append(button);
+  return item;
+}
+
 function timeline(offset: number, duration: number | undefined, total: number, className: string): HTMLTableCellElement {
   const container = cell('', 'trace-timeline');
   const track = document.createElement('div');
@@ -108,6 +156,8 @@ function timeline(offset: number, duration: number | undefined, total: number, c
 function spanRow(span: TraceRow, total: number): HTMLTableRowElement {
   const row = document.createElement('tr');
   row.className = `trace-span${span.error ? ' trace-error' : ''}${span.critical ? ' trace-critical' : ''}`;
+  row.dataset.service = span.service;
+  row.dataset.name = span.name;
   const name = cell('', 'trace-name');
   const label = document.createElement('span');
   label.className = 'trace-indent';
@@ -115,13 +165,13 @@ function spanRow(span: TraceRow, total: number): HTMLTableRowElement {
   label.textContent = `${span.error ? '⚠ ' : ''}${span.name}`;
   name.append(label);
   name.title = [
-    `${span.name} (${span.kind})`, span.statusMessage ? `Error: ${span.statusMessage}` : undefined,
+    `${span.name} (${span.kind})`, `Self time: ${formatDuration(span.selfMs)} of ${formatDuration(span.durationMs)}`, span.statusMessage ? `Error: ${span.statusMessage}` : undefined,
     ...Object.entries(span.attributes).map(([key, value]) => `${key} = ${typeof value === 'string' ? value : JSON.stringify(value)}`),
     ...span.events.map(event => `event: ${event.name} at +${formatDuration(event.offsetMs)}`)
   ].filter(Boolean).join('\n');
   const bar = timeline(span.offsetMs, span.durationMs, total, 'trace-bar');
   bar.setAttribute('aria-label', `Starts at +${formatDuration(span.offsetMs)}`);
-  row.append(name, cell(span.service, 'trace-service'), bar, cell(formatDuration(span.durationMs), 'trace-duration'));
+  row.append(name, cell(span.service, 'trace-service'), bar, cell(formatDuration(span.durationMs), 'trace-duration'), cell(formatDuration(span.selfMs), 'trace-duration trace-self'));
   return row;
 }
 
@@ -140,6 +190,6 @@ function logRow(log: TraceLog, total: number, depth: number): HTMLTableRowElemen
   button.append(level, document.createTextNode(` ${log.message}`));
   name.append(button);
   row.append(name, cell(log.server ?? '', 'trace-service'),
-    timeline(log.offsetMs ?? 0, undefined, total, 'trace-log-mark'), cell(log.offsetMs === undefined ? '' : `${log.offsetMs < 0 ? '−' : '+'}${formatDuration(Math.abs(log.offsetMs))}`, 'trace-duration'));
+    timeline(log.offsetMs ?? 0, undefined, total, 'trace-log-mark'), cell(log.offsetMs === undefined ? '' : `${log.offsetMs < 0 ? '−' : '+'}${formatDuration(Math.abs(log.offsetMs))}`, 'trace-duration'), cell('', 'trace-self'));
   return row;
 }

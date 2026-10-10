@@ -650,6 +650,8 @@
       traceTitle: element("traceTitle"),
       traceStatus: element("traceStatus"),
       traceRows: element("traceRows"),
+      traceHotspots: element("traceHotspots"),
+      traceHotspotList: element("traceHotspotList"),
       traceClose: element("traceClose"),
       traceFilter: element("traceFilter"),
       otlpToggle: element("otlpToggle"),
@@ -1224,6 +1226,7 @@
       elements.traceTitle.title = current;
       elements.traceStatus.textContent = "Loading\u2026";
       elements.traceRows.replaceChildren();
+      elements.traceHotspots.hidden = true;
       if (!elements.traceDialog.open) elements.traceDialog.showModal();
       api.postMessage({ type: "trace", traceId: current });
     }
@@ -1235,6 +1238,17 @@
     scope.listen(elements.traceDialog, "close", () => {
       current = void 0;
       elements.traceRows.replaceChildren();
+      elements.traceHotspotList.replaceChildren();
+      elements.traceHotspots.hidden = true;
+    });
+    scope.listen(elements.traceHotspotList, "click", (event) => {
+      const button = event.target.closest(".trace-hotspot");
+      const row = button && [...elements.traceRows.querySelectorAll(".trace-span")].find((row2) => row2.dataset.service === button.dataset.service && row2.dataset.name === button.dataset.name);
+      if (!row) return;
+      row.scrollIntoView({ block: "center" });
+      row.classList.remove("trace-flash");
+      void row.offsetWidth;
+      row.classList.add("trace-flash");
     });
     scope.listen(elements.traceFilter, "click", () => {
       if (!current) return;
@@ -1251,6 +1265,10 @@
     function receive(trace) {
       if (!elements.traceDialog.open || trace.traceId !== current) return;
       elements.traceStatus.textContent = summary(trace);
+      const shownHotspots = trace.spans.length + trace.omitted > 1 ? trace.hotspots : [];
+      const top = shownHotspots[0]?.selfMs ?? 0;
+      elements.traceHotspotList.replaceChildren(...shownHotspots.map((hotspot) => hotspotItem(hotspot, top)));
+      elements.traceHotspots.hidden = !shownHotspots.length;
       const total = Math.max(trace.durationMs, 1e-3);
       const logsBySpan = /* @__PURE__ */ new Map();
       const unattached = [];
@@ -1269,7 +1287,7 @@
           const heading = document.createElement("tr");
           heading.className = "trace-section";
           const label = cell("Logs not linked to a received span");
-          label.colSpan = 4;
+          label.colSpan = 5;
           heading.append(label);
           rows.push(heading);
         }
@@ -1298,6 +1316,35 @@
     ];
     return `${parts.join(" \xB7 ")} \xB7 Highlighted spans are the critical path${trace.omitted ? ` \xB7 First ${trace.spans.length} spans shown` : ""}`;
   }
+  function hotspotItem(hotspot, top) {
+    const item = document.createElement("li");
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = `trace-hotspot${hotspot.errors ? " trace-hotspot-error" : ""}`;
+    button.dataset.service = hotspot.service;
+    button.dataset.name = hotspot.name;
+    const percent = Math.round(hotspot.share * 100);
+    const calls = hotspot.count > 1 ? ` across ${hotspot.count} spans` : "";
+    button.title = `${hotspot.name} in ${hotspot.service} spent ${formatDuration(hotspot.selfMs)} itself${calls}, ${percent}% of all self time${hotspot.errors ? `. ${hotspot.errors} failed` : ""}. Show in waterfall.`;
+    const name = document.createElement("span");
+    name.className = "trace-hotspot-name";
+    const service = document.createElement("span");
+    service.className = "trace-hotspot-service";
+    service.textContent = ` \xB7 ${hotspot.service}${hotspot.count > 1 ? ` \xB7 \xD7${hotspot.count}` : ""}`;
+    name.append(document.createTextNode(`${hotspot.errors ? "\u26A0 " : ""}${hotspot.name}`), service);
+    const track = document.createElement("span");
+    track.className = "trace-track";
+    const bar = document.createElement("span");
+    bar.className = "trace-bar";
+    bar.style.width = `${Math.max(1, hotspot.selfMs / Math.max(top, 1e-3) * 100)}%`;
+    track.append(bar);
+    const time = document.createElement("span");
+    time.className = "trace-hotspot-time";
+    time.textContent = `${formatDuration(hotspot.selfMs)} \xB7 ${percent}%`;
+    button.append(name, track, time);
+    item.append(button);
+    return item;
+  }
   function timeline(offset, duration, total, className) {
     const container = cell("", "trace-timeline");
     const track = document.createElement("div");
@@ -1313,6 +1360,8 @@
   function spanRow(span, total) {
     const row = document.createElement("tr");
     row.className = `trace-span${span.error ? " trace-error" : ""}${span.critical ? " trace-critical" : ""}`;
+    row.dataset.service = span.service;
+    row.dataset.name = span.name;
     const name = cell("", "trace-name");
     const label = document.createElement("span");
     label.className = "trace-indent";
@@ -1321,13 +1370,14 @@
     name.append(label);
     name.title = [
       `${span.name} (${span.kind})`,
+      `Self time: ${formatDuration(span.selfMs)} of ${formatDuration(span.durationMs)}`,
       span.statusMessage ? `Error: ${span.statusMessage}` : void 0,
       ...Object.entries(span.attributes).map(([key, value]) => `${key} = ${typeof value === "string" ? value : JSON.stringify(value)}`),
       ...span.events.map((event) => `event: ${event.name} at +${formatDuration(event.offsetMs)}`)
     ].filter(Boolean).join("\n");
     const bar = timeline(span.offsetMs, span.durationMs, total, "trace-bar");
     bar.setAttribute("aria-label", `Starts at +${formatDuration(span.offsetMs)}`);
-    row.append(name, cell(span.service, "trace-service"), bar, cell(formatDuration(span.durationMs), "trace-duration"));
+    row.append(name, cell(span.service, "trace-service"), bar, cell(formatDuration(span.durationMs), "trace-duration"), cell(formatDuration(span.selfMs), "trace-duration trace-self"));
     return row;
   }
   function logRow(log, total, depth) {
@@ -1348,7 +1398,8 @@
       name,
       cell(log.server ?? "", "trace-service"),
       timeline(log.offsetMs ?? 0, void 0, total, "trace-log-mark"),
-      cell(log.offsetMs === void 0 ? "" : `${log.offsetMs < 0 ? "\u2212" : "+"}${formatDuration(Math.abs(log.offsetMs))}`, "trace-duration")
+      cell(log.offsetMs === void 0 ? "" : `${log.offsetMs < 0 ? "\u2212" : "+"}${formatDuration(Math.abs(log.offsetMs))}`, "trace-duration"),
+      cell("", "trace-self")
     );
     return row;
   }

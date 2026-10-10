@@ -6,6 +6,7 @@ All notable changes to Logline are documented in this file.
 
 ### Changes
 
+- The trace waterfall shows each span's **self time**: its duration less the time its child spans cover, counting parallel children once. **Where the time went** above the waterfall ranks the operations that spent the most time themselves, per service, with how many spans each had and their share of the trace; choose one to jump to its first span. A slow request whose time is in its own code, rather than in a database call or downstream service, now stands out without reading the whole waterfall. `logline_get_trace` returns the same self times and ranking to agents.
 - An uncaught Node.js crash becomes one event: the `path:line` header, source line, caret, error, `at` frames, error properties, and the `Node.js v…` line are joined, and the row shows the error (`TypeError: …`) instead of the path.
 - Joined plain-text traces headed by an exception, and Node crash blocks, are errors instead of Unclassified when the line has no leading severity.
 - Frames of joined traces such as `TypeError: …` are clickable in the expanded event and anchor error grouping.
