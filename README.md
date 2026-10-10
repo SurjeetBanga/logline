@@ -2,7 +2,7 @@
 
 **Your app's logs and traces, live inside VS Code.** Capture any terminal, debug session, Docker Compose service or OpenTelemetry app. Search and trace requests, catch secrets leaking from log statements, and let your AI agent debug from the same logs.
 
-![Logline demo: a running service streams logs and traces into the Logs panel, the Traces list opens a failed request's waterfall, log doctor flags a token and a swallowed exception in the editor, Break when this logs again stops the debugger on a log statement, and Docker Compose output splits into one source per service.](media/demo.gif)
+![Logline demo: a running service streams logs and traces into the Logs panel, My changes narrows them to the line just edited, the Traces list opens a failed request's waterfall with where the time went, Metrics shows rates and p95, a log statement shows its hits and p95 in the editor, log doctor flags a leaked token, and Share with agent shares the logs with an AI agent.](media/demo.gif)
 
 *Logline running in VS Code with a [small demo app](samples/README.md) and [Docker Compose sample logs](samples/compose-demo.log).*
 

@@ -1,5 +1,6 @@
 const logger = require('./logger');
 const { span } = require('./tracing');
+const metrics = require('./metrics');
 
 const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
 
@@ -12,6 +13,7 @@ async function chargeCard(order) {
 }
 
 async function checkout(req) {
+  const started = performance.now();
   return span('checkout-api', 'POST /checkout', async () => {
     logger.info('auth ok', { userId: req.userId, headers: req.headers });
     await span('inventory', 'reserve items', () => wait(10 + Math.random() * 30), 3);
@@ -19,9 +21,13 @@ async function checkout(req) {
     try {
       const payment = await chargeCard(req.order);
       logger.info('payment captured', { orderId: req.order.id, durationMs: Math.round(40 + Math.random() * 90) });
+      metrics.countOrder('placed');
       return payment;
     } catch (err) {
       logger.error('payment failed for order', { orderId: req.order.id });
+      metrics.countOrder('declined');
+    } finally {
+      metrics.recordDuration(performance.now() - started);
     }
   });
 }
