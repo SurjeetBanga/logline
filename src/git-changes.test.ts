@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, realpathSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
@@ -67,6 +67,15 @@ test('git changes follow the working tree of each repository', async () => {
       saved.fire({ uri: uri('app.ts') });
       await ready;
       assert.equal(changes.contains('app.ts', 4), true);
+
+      // An agent or formatter rewrites the file without a save event; git reports a change and the file is diffed again.
+      ready = next();
+      writeFileSync(join(root, 'app.ts'), ['ONE', 'two', 'three', 'four'].join('\n') + '\n');
+      utimesSync(join(root, 'app.ts'), new Date(), new Date(Date.now() + 5000));
+      stateChanged.fire();
+      await ready;
+      assert.equal(changes.contains('app.ts', 1), true, 'the new edit counts');
+      assert.equal(changes.contains('app.ts', 4), false, 'the reverted edit no longer counts');
 
       // A commit leaves nothing changed.
       ready = next();

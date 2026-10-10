@@ -21,6 +21,8 @@ test('OpenTelemetry defaults never replace a configured destination or set value
   assert.equal(defaults.OTEL_EXPORTER_OTLP_ENDPOINT, 'http://127.0.0.1:4318');
   assert.deepEqual(Object.keys(missingOtelVariables({}, defaults)).sort(), Object.keys(defaults).sort());
   assert.deepEqual(missingOtelVariables({ OTEL_EXPORTER_OTLP_ENDPOINT: 'https://collector:4318' }, defaults), {});
+  assert.deepEqual(missingOtelVariables({ OTEL_METRICS_EXPORTER: 'prometheus' }, defaults), {}, 'a metrics destination is a destination too');
+  assert.deepEqual(missingOtelVariables({ OTEL_EXPORTER_OTLP_METRICS_ENDPOINT: 'https://collector:4318/v1/metrics' }, defaults), {});
   assert.deepEqual(missingOtelVariables({ OTEL_TRACES_EXPORTER: 'none' }, defaults), {});
   assert.deepEqual(missingOtelVariables({ OTEL_SDK_DISABLED: 'true' }, defaults), {});
   const kept = missingOtelVariables({ OTEL_SERVICE_NAME: 'mine', OTEL_EXPORTER_OTLP_PROTOCOL: '' }, defaults);

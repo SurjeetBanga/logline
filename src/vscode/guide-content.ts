@@ -17,6 +17,15 @@ export interface GuideRelease {
 
 export const GUIDE_RELEASES: GuideRelease[] = [
   {
+    version: '1.14.0',
+    date: '2026-10-10',
+    highlights: [
+      { title: 'Logs from your changes', text: 'My changes, next to the level filter, shows only logs from code you changed since the last commit, and combines with any search, such as level:error for the errors your edits caused.', section: 'search' },
+      { title: 'Where a slow request spends its time', text: 'The trace waterfall shows each span\'s self time and ranks the hotspots, log lenses show p50 and p95 durations, and Metrics lists OpenTelemetry metrics with their trends.', section: 'inspect' },
+      { title: 'Agent skills and Show Status', text: 'Connect Claude Code or Codex also installs skills to verify a change, triage errors, and explain a slow request. Logline: Show Status lists what is on, off, or broken, with the fix for each.', section: 'share' }
+    ]
+  },
+  {
     version: '1.13.0',
     date: '2026-10-04',
     highlights: [

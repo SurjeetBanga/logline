@@ -43,7 +43,7 @@ test('the MCP server offers the workflows as prompts', async () => {
 });
 
 test('skills install into each agent\'s folder and stay current without touching agents that were never connected', () => {
-  const { installSkills, refreshInstalledSkills, skillsDirectory } = setup();
+  const { installSkills, refreshInstalledSkills, skillsDirectory, agentsWithSkills } = setup();
   assert.equal(skillsDirectory('claude', {}, '/home/me'), join('/home/me', '.claude', 'skills'));
   assert.equal(skillsDirectory('claude', { CLAUDE_CONFIG_DIR: '/cfg' }, '/home/me'), join('/cfg', 'skills'));
   assert.equal(skillsDirectory('codex', {}, '/home/me'), join('/home/me', '.agents', 'skills'));
@@ -62,6 +62,7 @@ test('skills install into each agent\'s folder and stay current without touching
   refreshInstalledSkills([claude, untouched, join(temp(), 'missing')]);
   assert.equal(readFileSync(verify, 'utf8'), skillFile(AGENT_WORKFLOWS[0]), 'an older Logline skill is updated');
   assert.equal(existsSync(join(untouched, 'logline-verify')), false, 'a folder without Logline skills gets none');
+  assert.deepEqual(agentsWithSkills(agent => agent === 'claude' ? claude : untouched), ['Claude Code'], 'Show Status names only agents with Logline skills');
 });
 
 test('the editor\'s own agent is found by name, and Logline joins its MCP file without losing other servers', () => {

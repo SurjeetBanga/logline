@@ -198,7 +198,7 @@ header { padding: 10px 14px 6px; flex: none; }
 input, select, button { font: inherit; border: 1px solid var(--vscode-input-border, #555); border-radius: 3px; }
 input, select { height: 30px; padding: 3px 10px; color: var(--vscode-input-foreground, #ddd); background: var(--vscode-input-background, #333); }
 .popover-container { position: relative; }
-.search-group { display: flex; align-items: flex-start; flex: 1 1 320px; min-width: 240px; }
+.search-group { display: flex; align-items: flex-start; flex: 1 1 480px; min-width: 240px; }
 .search-editor { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: start; gap: 4px; width: 100%; min-height: 30px; padding: 2px 4px 2px 5px; color: var(--vscode-input-foreground, #ddd); background: var(--vscode-input-background, #333); border: 1px solid var(--vscode-input-border, #555); border-radius: 3px; }
 .search-terms { display: flex; align-items: center; flex-wrap: wrap; gap: 4px; min-width: 0; }
 .search-editor:focus-within { border-color: var(--vscode-focusBorder, #007acc); outline: 1px solid var(--vscode-focusBorder, #007acc); }
@@ -227,11 +227,15 @@ input, select { height: 30px; padding: 3px 10px; color: var(--vscode-input-foreg
 /* Secondary filter/tool controls stay quiet (no fill or border) until hovered
    or opened, so the search row reads as one light strip instead of a wall of
    boxes next to the primary Run/Live actions. */
-.search-toolbar .dropdown-button, .search-toolbar #analyze, .search-toolbar .copy-filter {
-  background: transparent; border-color: transparent; color: var(--vscode-foreground, #d4d4d4);
+.search-toolbar > button, .search-toolbar > .popover-container > button {
+  padding: 4px 8px; background: transparent; border-color: transparent; color: var(--vscode-foreground, #d4d4d4);
 }
-.search-toolbar .dropdown-button:hover, .search-toolbar #analyze:hover, .search-toolbar .copy-filter:hover {
+.search-toolbar > button:hover, .search-toolbar > .popover-container > button:hover {
   background: var(--vscode-list-hoverBackground, #2a2d2e);
+}
+/* My changes is a filter toggle: it reads as an applied filter while on. */
+.search-toolbar #changedOnly[aria-pressed="true"] {
+  border-color: var(--vscode-inputOption-activeBorder, #007acc); background: var(--vscode-inputOption-activeBackground, rgba(0, 122, 204, .2)); color: var(--vscode-foreground, #d4d4d4);
 }
 .search-toolbar button[aria-expanded="true"] { border-color: var(--vscode-focusBorder, #007acc); background: var(--vscode-list-hoverBackground, #2a2d2e); }
 .toolbar-divider { margin-left: 4px; padding-left: 14px; border-left: 1px solid var(--vscode-panel-border, #444); }
@@ -416,8 +420,9 @@ footer { padding: 8px 14px; font-size: 12px; flex: none; }
 .count-badge[hidden] { display: none; }
 .row-trace-button { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 18px; padding: 0; border: 1px solid transparent; border-radius: 3px; background: transparent; color: var(--vscode-charts-blue, #3794ff); opacity: .75; }
 .row-trace-button:hover, .row-trace-button:focus-visible { opacity: 1; border-color: var(--vscode-focusBorder, #007fd4); background: var(--vscode-toolbar-hoverBackground, rgba(90, 93, 94, .31)); }
-.otlp-chip { padding: 0 8px; border: 1px solid var(--vscode-charts-green, #89d185); border-radius: 10px; background: transparent; color: var(--vscode-charts-green, #89d185); font-size: 11px; line-height: 17px; }
-.otlp-chip::before { content: ''; display: inline-block; width: 6px; height: 6px; margin-right: 6px; border-radius: 50%; background: currentColor; vertical-align: 1px; }
+.otlp-chip { padding: 0 8px; border: 1px solid transparent; border-radius: 10px; background: transparent; color: var(--vscode-descriptionForeground, #aaa); font-size: 11px; line-height: 17px; }
+.otlp-chip:hover { border-color: var(--vscode-panel-border, #444); background: var(--vscode-list-hoverBackground, #2a2d2e); }
+.otlp-chip::before { color: var(--vscode-charts-green, #89d185); content: ''; display: inline-block; width: 6px; height: 6px; margin-right: 6px; border-radius: 50%; background: currentColor; vertical-align: 1px; }
 .otlp-chip[hidden] { display: none; }
 #tracesDialog, #metricsDialog { width: min(1100px, 96vw); max-width: 96vw; height: 82vh; max-height: 82vh; padding: 14px; color: inherit; background: var(--vscode-editor-background, #1e1e1e); border: 1px solid var(--vscode-panel-border, #555); border-radius: 6px; }
 #tracesDialog[open], #metricsDialog[open] { display: flex; flex-direction: column; }
@@ -483,6 +488,7 @@ footer { padding: 8px 14px; font-size: 12px; flex: none; }
 .doctor-container:has(> #doctor[hidden]) { display: none; }
 .doctor-chip svg { vertical-align: -2px; margin-right: 5px; }
 .doctor-chip.has-warnings svg { color: var(--vscode-editorWarning-foreground, #cca700); }
+.doctor-chip.has-warnings .count-badge { background: var(--vscode-editorWarning-foreground, #cca700); color: var(--vscode-editor-background, #1e1e1e); }
 .doctor-panel { width: min(520px, 92vw); overflow-y: auto; }
 .doctor-group h4 { margin: 12px 0 6px; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; color: var(--vscode-descriptionForeground, #aaa); }
 .doctor-item { display: grid; grid-template-columns: 1fr auto; gap: 2px 10px; padding: 6px 8px; border-left: 2px solid var(--vscode-descriptionForeground, #888); border-radius: 2px; }
@@ -510,12 +516,23 @@ footer { padding: 8px 14px; font-size: 12px; flex: none; }
 #follow[data-mode="live"] .tb-icon[data-mode="live"], #follow[data-mode="resume"] .tb-icon[data-mode="resume"], #follow[data-mode="browse"] .tb-icon[data-mode="browse"] { display: inline; }
 #follow[data-mode="live"] .tb-icon { color: var(--vscode-testing-iconPassed, #73c991); }
 #shareAgent[aria-pressed="true"] .tb-icon { color: var(--vscode-textLink-foreground, #3794ff); }
+#captureToggle[aria-pressed="true"] { border-color: var(--vscode-input-border, #555); color: var(--vscode-button-secondaryForeground, #ddd); }
+#captureToggle[aria-pressed="true"] .tb-icon { color: var(--vscode-textLink-foreground, #3794ff); }
 /* Quick tooltips, styled like editor hovers. */
 .tooltip { position: fixed; z-index: 1000; max-width: 320px; padding: 4px 8px; border: 1px solid var(--vscode-editorHoverWidget-border, #454545); border-radius: 3px; background: var(--vscode-editorHoverWidget-background, #252526); color: var(--vscode-editorHoverWidget-foreground, #ccc); box-shadow: 0 2px 8px var(--vscode-widget-shadow, rgba(0, 0, 0, .36)); font-family: var(--vscode-font-family, system-ui, sans-serif); font-size: 12px; line-height: 1.4; white-space: pre-line; overflow-wrap: anywhere; pointer-events: none; }
 /* On narrower panels, the least-used toolbar buttons show only their icon; their tooltips name them. */
+@media (max-width: 1440px) {
+  #searchTools .button-label, #fieldsButton .button-label, #copyResults .button-label { display: none; }
+  #searchTools .tb-icon, #fieldsButton .tb-icon, #copyResults .tb-icon { margin-right: 0; }
+}
 @media (max-width: 1100px) {
-  #clear .button-label, #stop .button-label, #copyResults .button-label, #searchTools .button-label, #fieldsButton .button-label { display: none; }
-  #clear .tb-icon, #stop .tb-icon, #copyResults .tb-icon, #searchTools .tb-icon, #fieldsButton .tb-icon { margin-right: 0; }
+  #clear .button-label, #stop .button-label { display: none; }
+  #clear .tb-icon, #stop .tb-icon { margin-right: 0; }
+}
+/* Narrow panels keep the counts of Traces, Metrics, and Log issues beside their icons. */
+@media (max-width: 1000px) {
+  #traces .button-label, #metrics .button-label, #doctor .button-label { display: none; }
+  #traces svg, #metrics svg, .doctor-chip svg { margin-right: 0; }
 }
 #copyResults[data-copied] .tb-icon { color: var(--vscode-testing-iconPassed, #73c991); }
 .doctor-chip.is-clear { color: var(--vscode-descriptionForeground, #aaa); }

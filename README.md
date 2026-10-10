@@ -2,7 +2,7 @@
 
 **Your app's logs and traces, live inside VS Code.** Capture any terminal, debug session, Docker Compose service or OpenTelemetry app. Search and trace requests, catch secrets leaking from log statements, and let your AI agent debug from the same logs.
 
-![Logline demo: a running service streams logs and traces into the Logs panel, the Traces list opens a failed request's waterfall, log doctor flags a token and a swallowed exception in the editor, Break when this logs again stops the debugger on a log statement, and Docker Compose output splits into one source per service.](media/demo.gif)
+![Logline demo: a running service streams logs and traces into the Logs panel, My changes narrows them to the line just edited, the Traces list opens a failed request's waterfall with where the time went, Metrics shows rates and p95, a log statement shows its hits and p95 in the editor, log doctor flags a leaked token, and Share with agent shares the logs with an AI agent.](media/demo.gif)
 
 *Logline running in VS Code with a [small demo app](samples/README.md) and [Docker Compose sample logs](samples/compose-demo.log).*
 
@@ -32,20 +32,20 @@
 
 Open **Help** in the toolbar for the offline visual guide, or run **Logline: What’s New** for release highlights. If something isn't working, run **Logline: Show Status** to see the receiver, agent connections, sharing, and capture, with a fix for anything off. See [Development](#development) to build and install from source.
 
-## Terminal capture and Copilot sharing
+## Terminal capture and agent sharing
 
 Logline turns structured logs into a searchable table in the bottom **Logs** panel and keeps plain-text output alongside them.
 
-Logline can also capture commands you run in supported VS Code terminals. Turn **Terminal capture: Off** to **Terminal capture: On** in the Logs panel, run the next command normally, and its output becomes searchable without wrapping the command. Commands already in progress cannot be backfilled. Completed terminal runs remain available while their logs are retained; empty stale terminal metadata is removed automatically. Use the combined source/run dropdown’s **Runs** tab to stop an individual Logline-owned process or task with its inline **Stop** action; externally captured terminal commands remain observe-only. Its **Sources** tab filters by server, task, terminal, or imported source. Choose **Share logs with agent** to make retained Logline sources and new runs in this VS Code window available to Copilot. The first use asks for confirmation and explains that redaction may not remove every sensitive value; later uses enable sharing immediately. The toolbar shows **Sharing logs · Stop**, with the sharing scope below it. Continue in your existing Copilot agent chat and ask it to check the logs. Use **More actions → Choose specific runs to share…** to limit access, or click **Stop** on the sharing button to revoke it. Sharing is held in memory and ends when logs are cleared or the window or workspace changes.
+Logline can also capture commands you run in supported VS Code terminals. Turn **Terminal capture: Off** to **Terminal capture: On** in the Logs panel, run the next command normally, and its output becomes searchable without wrapping the command. Commands already in progress cannot be backfilled. Completed terminal runs remain available while their logs are retained; empty stale terminal metadata is removed automatically. Use the combined source/run dropdown’s **Runs** tab to stop an individual Logline-owned process or task with its inline **Stop** action; externally captured terminal commands remain observe-only. Its **Sources** tab filters by server, task, terminal, or imported source. Choose **Share with agent** to make retained Logline sources and new runs in this VS Code window available to Copilot and any agent you connected. The first use asks for confirmation and explains that redaction may not remove every sensitive value; later uses enable sharing immediately. The toolbar shows **Sharing · Stop**, with the sharing scope and the agents that read the logs below it. Continue in your existing agent chat and ask it to check the logs. Use **More actions → Choose specific runs to share…** to limit access, or click **Stop** on the sharing button to revoke it. Sharing is held in memory and ends when logs are cleared or the window or workspace changes.
 
 ## What you can do
 
 | Workflow | Features |
 | --- | --- |
-| **Capture** | Capture supported terminal commands and debug sessions, run several servers at once, follow log files on disk like `tail -F`, split Docker Compose and Kubernetes output into one source per service, receive OpenTelemetry logs and traces, save commands with **Manage servers**, filter by source or run, and capture VS Code tasks. |
+| **Capture** | Capture supported terminal commands and debug sessions, run several servers at once, follow log files on disk like `tail -F`, split Docker Compose and Kubernetes output into one source per service, receive OpenTelemetry logs, traces, and metrics, save commands with **Manage servers**, filter by source or run, and capture VS Code tasks. |
 | **Search** | Field/value autocomplete, editable filter chips, right-click **Include value** / **Exclude value**, any combination of log levels, **My changes** for logs from code changed since the last commit, and up to 50 saved searches. |
-| **Inspect** | Expand JSON, read structured exceptions and nested causes, see multi-line plain-text stack traces as one event, open stack-frame source locations, share an event’s exact run, view up to 25 surrounding events on each side from the same run, browse recent traces, follow a request across services in a trace waterfall, and see OpenTelemetry metrics as rates, p95s, and trends. |
-| **Code** | See a CodeLens with live hit counts, errors, and recent values above the log statements in your editor, jump from any event to the statement that logged it, and find statements that never fired. |
+| **Inspect** | Expand JSON, read structured exceptions and nested causes, see multi-line plain-text stack traces as one event, open stack-frame source locations, share an event’s exact run, view up to 25 surrounding events on each side from the same run, browse recent traces, follow a request across services in a trace waterfall with each span's self time and the operations that took longest, see an uncaught crash linked to the JSON error before it, and see OpenTelemetry metrics as rates, p95s, and trends. |
+| **Code** | See a CodeLens with live hit counts, errors, p50 and p95 durations, and recent values above the log statements in your editor, jump from any event to the statement that logged it, and find statements that never fired. |
 | **Debug** | Stop the debugger on the statement that logged an event with **Break here** on an expanded event, or pause a debug session right after it logs anything that matches a search. |
 | **Fix** | **Log doctor** shows statements that logged secrets or personal data, failures logged at info, errors without their exception or request id, and noisy or oversized statements in the Problems panel, with masked evidence and quick fixes. It also finds secrets and personal data in output from libraries, imports, and terminals, and checks OpenTelemetry spans and metrics for unnamed services, ids in span names, unmarked 5xx errors, missing routes, and outdated attribute names. |
 | **Arrange** | Auto-detected fields, custom and nested columns, sorting, drag-to-reorder, and resizable column widths. |
@@ -54,7 +54,7 @@ Logline can also capture commands you run in supported VS Code terminals. Turn *
 
 **Live** follows the newest events, which appear at the top. Scroll down to read and Live pauses so rows stay put; scroll back to the top to resume. Turn it off to browse retained history in pages of up to 1,000 rows. Expanding an event holds your place while collection continues; changing filters, sorting, paging, or columns returns inspection to **Browse**. Choose **Live** or **Resume** to return to the newest rows.
 
-**New in 1.10.0:** capture debug sessions, follow log files on disk, split Docker Compose and Kubernetes output into one source per service, receive OpenTelemetry logs and traces with a Traces list and trace waterfalls, see live log lenses on the statements in your editor, break the debugger on logs, and let log doctor flag secrets, personal data, and missing exceptions in the Problems panel. See the [changelog](CHANGELOG.md) for the full release history.
+**New in 1.14.0:** **My changes** filters logs to code you changed since the last commit, the trace waterfall shows self time and hotspots, log lenses show durations, **Metrics** lists OpenTelemetry metrics, log doctor checks OpenTelemetry conventions, Claude Code and Codex get investigation skills, and **Logline: Show Status** explains what is off and how to fix it. See the [changelog](CHANGELOG.md) for the full release history.
 
 ## Find the logs you need
 
@@ -121,8 +121,9 @@ Open **Settings** in the toolbar for all options. A few useful defaults:
 | `logline.maxMemoryMb` | `100` | Estimated event-storage budget in MiB. |
 | `logline.persistLogs` | `false` | Write original logs to `.logline/latest.log`. |
 | `logline.redactExports` | `true` | Redact exports and **Copy results**. Agent sharing is always redacted. |
+| `logline.externalAgents` | `true` | Let Claude Code, Codex, and other MCP clients reach this window. They still read only what you share. |
 
-Older events are discarded when either retention limit is reached. Search, context, and analysis cover retained events only; the memory budget estimates event storage, not total VS Code memory. Add `.logline/` to `.gitignore` if you enable persistence.
+Older events are discarded when either retention limit is reached. Search, context, and analysis cover retained events only; the memory budget estimates event storage, not total VS Code memory. With persistence on, Logline adds a `.gitignore` to `.logline/` and makes `latest.log` readable only by you, since it is not redacted.
 
 **Copy** on an expanded event and disk persistence keep original content. **Copy results** and AI Markdown exports include the latest 1,000 matching events; full JSON/JSONL/CSV exports cover all matches in the retained snapshot. Use CSV when you want to export and re-import the original raw records—JSON/JSONL exports contain Logline event envelopes.
 

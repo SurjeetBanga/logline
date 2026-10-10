@@ -5,6 +5,7 @@ import type { EventScope } from '../event-scope';
 import type { WebviewApi } from '../types';
 import { formatDuration } from './trace';
 
+const REFRESH_MS = 5000;
 const MEASURE_LABELS: Record<MetricSeriesView['measure'], string> = { value: '', rate: 'rate', p95: 'p95', average: 'avg' };
 const DURATION_MS: Record<string, number> = { ns: 1e-6, us: 1e-3, 'μs': 1e-3, ms: 1, s: 1000, min: 60000, h: 3600000 };
 
@@ -85,11 +86,21 @@ export function createMetricList(elements: Elements, api: WebviewApi, scope: Eve
   let metrics: MetricSeriesView[] = [];
   let revision: number | undefined;
   let pending = false;
+  let loadedAt = -Infinity;
+  let refresh: ReturnType<typeof setTimeout> | undefined;
 
   function load() {
     if (pending) return;
     pending = true;
+    loadedAt = Date.now();
     api.postMessage({ type: 'metrics' });
+  }
+
+  // Apps export every few seconds, each series on its own, so an open list
+  // refreshes at most once per interval instead of once per data point.
+  function refreshSoon() {
+    if (refresh) return;
+    refresh = setTimeout(() => { refresh = undefined; if (elements.metricsDialog.open) load(); }, Math.max(0, loadedAt + REFRESH_MS - Date.now()));
   }
 
   function show() {
@@ -101,6 +112,7 @@ export function createMetricList(elements: Elements, api: WebviewApi, scope: Eve
 
   scope.listen(elements.metrics, 'click', show);
   scope.listen(elements.metricsClose, 'click', () => elements.metricsDialog.close());
+  scope.listen(elements.metricsDialog, 'close', () => { clearTimeout(refresh); refresh = undefined; });
   scope.listen(elements.metricsFilter, 'input', render);
 
   function receive(list: MetricSeriesView[]) {
@@ -118,7 +130,7 @@ export function createMetricList(elements: Elements, api: WebviewApi, scope: Eve
       : '';
     const changed = summary?.revision !== revision;
     revision = summary?.revision;
-    if (changed && elements.metricsDialog.open) load();
+    if (changed && elements.metricsDialog.open) refreshSoon();
   }
 
   function render() {

@@ -11,7 +11,7 @@ Files for trying Logline without an app of your own.
 
 ## Checkout demo
 
-A small Node.js app with no dependencies. It writes JSON logs like pino and, while the Logline OpenTelemetry receiver runs, sends spans for each request across a `checkout-api`, `inventory`, and `payments` service. It is the app shown in the README demo.
+A small Node.js app with no dependencies. It writes JSON logs like pino and, while the Logline OpenTelemetry receiver runs, sends spans for each request across a `checkout-api`, `inventory`, and `payments` service, plus an order counter and a checkout duration histogram as metrics. It is the app shown in the README demo.
 
 1. Open `samples/checkout-demo` as a workspace folder.
 2. Choose **More actions → Start OpenTelemetry receiver** in the Logs panel.
@@ -19,7 +19,9 @@ A small Node.js app with no dependencies. It writes JSON logs like pino and, whi
 
 Then try:
 
-- **Traces** shows each checkout request; every seventh order is declined, so its trace is marked as failed.
+- **Traces** shows each checkout request; every seventh order is declined, so its trace is marked as failed. Its waterfall shows where the time went.
+- **Metrics** shows orders per second by outcome and the p95 checkout duration.
+- In a git repository, edit a log statement such as `payment failed for order` and run again: **My changes** shows only the logs from your edit.
 - Open `src/checkout.js`. Log lenses count each statement's hits, and log doctor marks `auth ok` (it logs a bearer token) and `payment failed for order` (it drops the caught `err`). Press Ctrl+. on either line for fixes.
 - Expand a `payment failed for order` event and choose **Break when this logs again**, then debug the app with F5.
 

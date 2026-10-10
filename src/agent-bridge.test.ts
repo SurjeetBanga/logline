@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { agentLabel, type BridgeWindow } from './protocol/agent-bridge';
-import { callWindow, createMcpServer, mcpTools, pickWindow, readWindows } from './mcp/server';
+import { callWindow, createMcpServer, mcpTools, pickWindow, readWindows, workspaceArgument } from './mcp/server';
 import { AgentBridge, installMcpScript } from './vscode/agent-bridge';
 import { withVscode } from './test/vscode-mock';
 
@@ -105,6 +105,14 @@ test('an agent reaches the window whose workspace contains its working directory
   assert.equal(pickWindow([empty], '/elsewhere').window, empty, 'a single window without folders is the one');
   assert.equal(pickWindow([api, web], '/elsewhere', '/work/web').window, web, 'LOGLINE_WORKSPACE chooses explicitly');
   assert.match(pickWindow([], '/work/api').error!, /No VS Code window with Logline is running/);
+});
+
+test('the workspace comes from --workspace, unless the editor left its variable unexpanded', () => {
+  assert.equal(workspaceArgument(['node', 'mcp.js', '--workspace', '/work/api'], { LOGLINE_WORKSPACE: '/work/web' }), '/work/api');
+  assert.equal(workspaceArgument(['node', 'mcp.js', '--workspace', '${workspaceFolder}'], { LOGLINE_WORKSPACE: '/work/web' }), '/work/web');
+  assert.equal(workspaceArgument(['node', 'mcp.js', '--workspace', '${workspaceFolder}'], {}), undefined, 'an unexpanded variable names no folder');
+  assert.equal(workspaceArgument(['node', 'mcp.js', '--workspace'], {}), undefined);
+  assert.equal(workspaceArgument(['node', 'mcp.js'], { LOGLINE_WORKSPACE: '' }), undefined);
 });
 
 test('the MCP server speaks the protocol and forwards tool calls', async () => {

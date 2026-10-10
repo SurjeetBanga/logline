@@ -1546,6 +1546,7 @@ Trace ${trace.traceId}`;
   }
 
   // src/webview/inspection/metrics.ts
+  var REFRESH_MS = 5e3;
   var MEASURE_LABELS = { value: "", rate: "rate", p95: "p95", average: "avg" };
   var DURATION_MS = { ns: 1e-6, us: 1e-3, "\u03BCs": 1e-3, ms: 1, s: 1e3, min: 6e4, h: 36e5 };
   function number(value) {
@@ -1612,10 +1613,20 @@ Trace ${trace.traceId}`;
     let metrics = [];
     let revision;
     let pending = false;
+    let loadedAt = -Infinity;
+    let refresh;
     function load() {
       if (pending) return;
       pending = true;
+      loadedAt = Date.now();
       api.postMessage({ type: "metrics" });
+    }
+    function refreshSoon() {
+      if (refresh) return;
+      refresh = setTimeout(() => {
+        refresh = void 0;
+        if (elements.metricsDialog.open) load();
+      }, Math.max(0, loadedAt + REFRESH_MS - Date.now()));
     }
     function show() {
       elements.metricsStatus.textContent = "Loading\u2026";
@@ -1625,6 +1636,10 @@ Trace ${trace.traceId}`;
     }
     scope.listen(elements.metrics, "click", show);
     scope.listen(elements.metricsClose, "click", () => elements.metricsDialog.close());
+    scope.listen(elements.metricsDialog, "close", () => {
+      clearTimeout(refresh);
+      refresh = void 0;
+    });
     scope.listen(elements.metricsFilter, "input", render);
     function receive(list) {
       pending = false;
@@ -1637,7 +1652,7 @@ Trace ${trace.traceId}`;
       elements.metrics.title = summary2 ? `${summary2.series.toLocaleString()} OpenTelemetry metric series. Show their latest values and trends.` : "";
       const changed = summary2?.revision !== revision;
       revision = summary2?.revision;
-      if (changed && elements.metricsDialog.open) load();
+      if (changed && elements.metricsDialog.open) refreshSoon();
     }
     function render() {
       const terms = elements.metricsFilter.value.trim().toLowerCase().split(/\s+/).filter(Boolean);
@@ -3312,7 +3327,7 @@ Trace ${trace.traceId}`;
       elements.otlpStatus.hidden = !otlpRunning;
       if (otlpRunning) {
         elements.otlpStatus.textContent = `OpenTelemetry ${data.otlp?.endpoint?.replace(/^https?:\/\//, "") ?? ""}`.trim();
-        elements.otlpStatus.title = `Receiving OpenTelemetry logs and traces on ${data.otlp?.endpoint ?? "localhost"}. Click to see traces.`;
+        elements.otlpStatus.title = `Receiving OpenTelemetry logs, traces, and metrics on ${data.otlp?.endpoint ?? "localhost"}. Click to see traces.`;
       }
       doctor.receive(data.doctor);
       changedFiles = data.changes?.files;
@@ -3322,7 +3337,7 @@ Trace ${trace.traceId}`;
       elements.traceCount.textContent = data.traceCount ? numberFormat.format(data.traceCount) : "";
       elements.traces.title = data.traceCount ? `${numberFormat.format(data.traceCount)} traces received from OpenTelemetry. Show requests across services.` : "Requests across services, from OpenTelemetry spans and logs with a trace id";
       elements.otlpToggle.textContent = otlpRunning ? "Stop OpenTelemetry receiver" : "Start OpenTelemetry receiver";
-      elements.otlpToggle.title = otlpRunning ? `Receiving OpenTelemetry on ${data.otlp?.endpoint ?? "localhost"}${data.otlp?.error ? ` (${data.otlp.error})` : ""}` : "Receive OpenTelemetry logs and traces from instrumented apps on this machine";
+      elements.otlpToggle.title = otlpRunning ? `Receiving OpenTelemetry on ${data.otlp?.endpoint ?? "localhost"}${data.otlp?.error ? ` (${data.otlp.error})` : ""}` : "Receive OpenTelemetry logs, traces, and metrics from instrumented apps on this machine";
       if (data.generation < minimumSnapshotGeneration) {
         bridge.flush();
         return;
