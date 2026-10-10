@@ -34,8 +34,10 @@ try {
   if (vsix) {
     const unpacked = path.join(root, 'package');
     await mkdir(unpacked);
-    // A VSIX is a zip archive with the extension under extension/. GNU tar cannot read zip; bsdtar on macOS and Windows can.
-    const [command, ...args] = process.platform === 'linux' ? ['unzip', '-q', path.resolve(vsix), '-d', unpacked] : ['tar', '-xf', path.resolve(vsix), '-C', unpacked];
+    // A VSIX is a zip archive with the extension under extension/. GNU tar cannot read zip; the bsdtar in macOS and in
+    // Windows' System32 can, named in full on Windows so Git Bash's GNU tar is not found first.
+    const tar = process.platform === 'win32' ? path.join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'tar.exe') : 'tar';
+    const [command, ...args] = process.platform === 'linux' ? ['unzip', '-q', path.resolve(vsix), '-d', unpacked] : [tar, '-xf', path.resolve(vsix), '-C', unpacked];
     const extracted = spawnSync(command, args, { stdio: 'inherit' });
     if (extracted.status !== 0) throw new Error(`Could not unpack ${vsix}`);
     extensionPath = path.join(unpacked, 'extension');
