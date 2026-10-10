@@ -238,6 +238,20 @@ test('statements sharing common words still match their own messages', () => {
   assert.equal(index.match(event(2, 'Processing request 9 for tenant99 completed')), undefined);
 });
 
+test('statements told apart only by numbers or short words match their own messages', () => {
+  const index = new LogSiteIndex();
+  // 40 statements whose words are all shared: only the attempt number and the queue name differ.
+  const source = Array.from(
+    { length: 40 },
+    (_, i) => `logger.warn(\`retry ${i % 10} of 9 failed on ${['a', 'b', 'c', 'd'][Math.floor(i / 10)]} for \${job}\`)`,
+  ).join('\n');
+  index.setFile('queue.ts', extractLogSites('queue.ts', source));
+  assert.equal(index.match(event(1, 'retry 7 of 9 failed on c for job-17'))?.site.line, 28);
+  assert.equal(index.match(event(2, 'retry 0 of 9 failed on a for job-3'))?.site.line, 1);
+  assert.equal(index.match(event(3, 'retry 12 of 9 failed on a for job-3')), undefined, 'no statement logs attempt 12');
+  assert.equal(index.match(event(4, 'retry 7 of 9 failed on e for job-17')), undefined, 'no statement logs queue e');
+});
+
 test('index changes invalidate cached matches', () => {
   const index = new LogSiteIndex();
   assert.equal(index.match(event(1, 'worker started successfully')), undefined);

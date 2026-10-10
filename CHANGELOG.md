@@ -4,6 +4,10 @@ All notable changes to Logline are documented in this file.
 
 ## Unreleased
 
+### Performance
+
+- Log lenses, log doctor, and agent inspection find the statement that logged an event about 30 times faster in code where many statements share their words and differ only in numbers or short words, such as `retry ${n} of 5 failed`: 1,000 events among 4,000 such statements took 386 ms and now take 12 ms.
+
 ### Fixes
 
 - **Logline: Connect Claude Code or Codex** quotes paths in the PowerShell setup command with single quotes, so a path with `$` or a backtick is no longer expanded, and quotes in Command Prompt are escaped the way programs read them.
