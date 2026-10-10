@@ -1,6 +1,6 @@
 // Compare the performance of two builds on this machine, and fail when the second is slower or larger.
 //
-//   node scripts/perf-compare.mjs --base <dir> --head <dir>
+//   node scripts/perf-compare.mjs --base <dir> --head <dir> [--report report.md] [--json results.json]
 //
 // Both builds run this checkout's scripts/benchmark.mjs, in fresh processes that alternate between them,
 // so the machine's speed and load affect both alike. A timed case regresses when its median is more than
@@ -8,7 +8,7 @@
 // fails only if the slowdown holds. A size case (bytes sent, memory retained) is deterministic and fails
 // when it grows by more than --size-threshold.
 import { spawnSync } from 'node:child_process';
-import { appendFileSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { appendFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -22,6 +22,8 @@ const { values: args } = parseArgs({
     threshold: { type: 'string', default: '0.25' },
     'size-threshold': { type: 'string', default: '0.05' },
     floor: { type: 'string', default: '0.02' },
+    report: { type: 'string' },
+    json: { type: 'string' },
   },
 });
 if (!args.base) {
@@ -134,4 +136,13 @@ const report = [
 ].join('\n');
 console.log(report);
 if (process.env.GITHUB_STEP_SUMMARY) appendFileSync(process.env.GITHUB_STEP_SUMMARY, report);
+// For the pull request comment and the run's artifact.
+for (const [file, text] of [
+  [args.report, report],
+  [args.json, JSON.stringify({ node: process.version, rounds, threshold, sizeThreshold, cases: final }, null, 2)],
+]) {
+  if (!file) continue;
+  mkdirSync(path.dirname(path.resolve(file)), { recursive: true });
+  writeFileSync(file, text);
+}
 process.exit(failures.length ? 1 : 0);

@@ -207,6 +207,31 @@ timed('sites', 'Index 200 source files and attribute 1,000 events', async () => 
   };
 });
 
+timed('sites-shared', 'Attribute 1,000 events among 4,000 statements that share their words', async () => {
+  const { LogSiteIndex, extractLogSites } = await load('core/log-sites.js');
+  const { parseLogLine } = await load('core/log-event.js');
+  // Statements told apart only by numbers and short words, such as `retry 2 of 5 failed`.
+  const files = Array.from({ length: 200 }, (_, f) => [
+    `src/step${f}.ts`,
+    Array.from(
+      { length: 20 },
+      (_, s) => `function f${s}() {\n  logger.info(\`module ${f} step ${s} done for \${id}\`);\n}`,
+    ).join('\n'),
+  ]);
+  const events = Array.from({ length: 1000 }, (_, i) =>
+    parseLogLine(`module ${i % 200} step ${i % 20} done for ${i}`, 'stdout', i + 1, receivedAt),
+  );
+  const index = new LogSiteIndex();
+  for (const [file, text] of files) index.setFile(file, extractLogSites(file, text));
+  const extra = extractLogSites('src/extra.ts', 'logger.info(`an unrelated statement for ${id}`);');
+  let toggle = false;
+  return () => {
+    // Adding or removing a statement anywhere clears the match cache, so every message is matched afresh.
+    index.setFile('src/extra.ts', (toggle = !toggle) ? extra : []);
+    for (const event of events) index.match(event);
+  };
+});
+
 // Reading retained history: what the Logs panel, search, and agents ask for.
 timed('page', 'Newest page of 50,000 retained events', async () => {
   const { store } = await retained();
