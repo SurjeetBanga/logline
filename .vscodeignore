@@ -22,3 +22,6 @@ CLAUDE.md
 out/mcp/**
 .vscode-test/**
 .oxlintrc.json
+.prettierrc.json
+.prettierignore
+.git-blame-ignore-revs

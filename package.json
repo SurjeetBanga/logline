@@ -809,7 +809,7 @@
   "scripts": {
     "compile": "node scripts/build.mjs",
     "watch": "node scripts/build.mjs --watch",
-    "check": "npm run compile && npm run typecheck && npm run lint && npm test",
+    "check": "npm run compile && npm run typecheck && npm run lint && npm run format:check && npm test",
     "vscode:prepublish": "npm run compile",
     "package": "vsce package",
     "typecheck": "tsc --noEmit && tsc -p tsconfig.webview.json && tsc -p tsconfig.test.json --noEmit",
@@ -817,7 +817,9 @@
     "benchmark": "npm run compile && node --expose-gc scripts/benchmark.mjs",
     "smoke": "npm run compile && tsc -p tsconfig.test.json && node scripts/smoke.mjs",
     "publish:ovsx": "ovsx publish -p $OVSX_PAT",
-    "lint": "oxlint --type-aware --tsconfig tsconfig.test.json src"
+    "lint": "oxlint --type-aware --tsconfig tsconfig.test.json src",
+    "format": "prettier --write .",
+    "format:check": "prettier --check ."
   },
   "devDependencies": {
     "@types/node": "^20.19.43",
@@ -828,6 +830,7 @@
     "ovsx": "^1.2.0",
     "oxlint": "^1.85.0",
     "oxlint-tsgolint": "^7.0.2002",
+    "prettier": "^3.9.10",
     "typescript": "^7.0.2"
   },
   "dependencies": {
