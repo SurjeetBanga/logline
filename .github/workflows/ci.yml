@@ -115,15 +115,43 @@ jobs:
           if [ "$RUNNER_OS" = Linux ]; then xvfb-run -a node scripts/smoke.mjs --vsix "$vsix"; else node scripts/smoke.mjs --vsix "$vsix"; fi
 
   # The one check branch protection requires, so the matrix above can change without editing repository settings.
+  # Compares this build with the one it changes, on the same runner, and fails when a hot path is slower or a
+  # payload or retained memory is larger. Scheduled and manual runs have nothing to compare with.
+  performance:
+    if: github.event_name == 'pull_request' || github.event_name == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run compile
+      - name: Build the base for comparison
+        env:
+          BASE: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          git worktree add "$RUNNER_TEMP/base" "$BASE"
+          cd "$RUNNER_TEMP/base"
+          npm ci
+          npm run compile
+      - name: Compare performance with the base
+        run: node scripts/perf-compare.mjs --base "$RUNNER_TEMP/base"
+
   ci-passed:
     name: CI passed
     if: always()
-    needs: [audit, dependency-review, build, smoke]
+    needs: [audit, dependency-review, build, smoke, performance]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
       - name: Fail unless every job succeeded
-        # Dependency review runs only on pull requests, so it may be skipped; every other job must succeed.
+        # Dependency review runs only on pull requests, and performance only on pull requests and pushes, so either may
+        # be skipped; every other job must succeed.
         run: |
           echo '${{ toJSON(needs) }}'
-          [ "${{ needs.audit.result == 'success' && needs.build.result == 'success' && needs.smoke.result == 'success' && contains(fromJSON('["success", "skipped"]'), needs['dependency-review'].result) }}" = true ]
+          [ "${{ needs.audit.result == 'success' && needs.build.result == 'success' && needs.smoke.result == 'success' && contains(fromJSON('["success", "skipped"]'), needs['dependency-review'].result) && contains(fromJSON('["success", "skipped"]'), needs.performance.result) }}" = true ]

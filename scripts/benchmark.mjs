@@ -1,112 +1,315 @@
+// Performance benchmarks for the extension host's hot paths.
+//
+//   node --expose-gc scripts/benchmark.mjs                 print a table for this build
+//   node --expose-gc scripts/benchmark.mjs --root <dir>    measure the build in <dir>/out
+//   node --expose-gc scripts/benchmark.mjs --json <file>   also write the results as JSON
+//   node --expose-gc scripts/benchmark.mjs --only a,b      measure only these cases
+//
+// scripts/perf-compare.mjs runs this against two builds on the same machine and fails on regressions.
+// Each case is independent: one that cannot load in an older build is reported as unavailable.
 import assert from 'node:assert/strict';
+import { writeFileSync } from 'node:fs';
+import path from 'node:path';
 import { performance } from 'node:perf_hooks';
-import { LogStore } from '../out/core/log-store.js';
-import { parseLogLine } from '../out/core/log-event.js';
-import { redactEvent } from '../out/core/redaction.js';
-import { AgentLogAccess } from '../out/vscode/agent-access.js';
-import { SessionRegistry } from '../out/capture/session-registry.js';
-import { RuntimeState } from '../out/capture/runtime-state.js';
-import { buildSnapshot } from '../out/vscode/snapshot.js';
+import { pathToFileURL } from 'node:url';
+import { parseArgs } from 'node:util';
 
-// Diagnostic microbenchmark, not a timing assertion in the test suite.
-globalThis.gc?.();
-const heapBefore = process.memoryUsage().heapUsed;
-const store = new LogStore(50000, 100 * 1024 * 1024);
-const receivedAt = new Date('2026-09-14T12:00:00Z');
-const start = performance.now();
-for (let id = 1; id <= 50000; id++) {
-  const event = parseLogLine(
-    JSON.stringify({
-      level: 'info',
-      message: `request ${id}`,
-      service: 'api',
-      status: 200,
-      durationMs: id % 200,
-      token: 'synthetic-secret',
-      requestId: `req-${id}`,
-    }),
-    'stdout',
-    id,
-    receivedAt,
-  );
-  event.serverId = 'api';
-  store.add(event);
-}
-assert.equal(store.size, 50000);
-console.log(`Node ${process.version}, ${process.platform}/${process.arch}`);
-console.log(
-  `Parsed and retained 50,000 events: ${(performance.now() - start).toFixed(1)} ms; estimated storage ${(store.bytes / 1048576).toFixed(1)} MiB`,
-);
-if (globalThis.gc) {
-  gc();
-  // The retention budget is an estimate; compare it with what the heap actually holds.
-  console.log(
-    `Measured heap for retained events: ${((process.memoryUsage().heapUsed - heapBefore) / 1048576).toFixed(1)} MiB`,
-  );
-}
-
-function measure(label, action) {
-  action(); // warm up
-  const times = [];
-  for (let i = 0; i < 5; i++) {
-    const start = performance.now();
-    action();
-    times.push(performance.now() - start);
-  }
-  times.sort((a, b) => a - b);
-  console.log(`${label}: ${times[2].toFixed(2)} ms (median of 5)`);
-}
-
-const request = { serverId: 'api' };
-const oldSelection = () =>
-  store
-    .all(request)
-    .map((event) => redactEvent(event))
-    .slice(-1000);
-const boundedSelection = () => store.page(request).events.map((row) => redactEvent(store.find(row.id)));
-assert.deepEqual(boundedSelection(), oldSelection());
-measure('Previous clipboard pipeline: clone/redact all matches, then limit', oldSelection);
-measure('Bounded clipboard pipeline: page, then clone/redact', boundedSelection);
-measure('Indexed latest page', () => store.page(request));
-measure('Cached filtered page', () => store.page({ query: 'service:api status:200' }));
-measure('Indexed autocomplete', () => store.fieldSuggestions('service:'));
-const access = new AgentLogAccess(store, new SessionRegistry(), () => 50000);
-const share = access.shareAll();
-measure('Agent search page', () => access.search({ shareId: share.shareId, limit: 200 }));
-measure('Agent analysis newest 10,000', () => access.analyze({ shareId: share.shareId }));
-measure('Retained analysis', () => store.analysis());
-measure('Sort retained events by durationMs', () => store.all({ sort: 'durationMs' }));
-measure('Repeated autocomplete keystrokes', () => {
-  for (const value of ['r', 're', 'req', 'req-']) store.fieldSuggestions(`requestId:${value}`);
+const { values: args } = parseArgs({
+  options: { root: { type: 'string', default: '.' }, json: { type: 'string' }, only: { type: 'string' } },
 });
-let streamed = 50000;
-measure('Streaming sorted page (+50 events per refresh)', () => {
-  for (let i = 0; i < 50; i++) {
+const root = path.resolve(args.root);
+const only = args.only ? new Set(args.only.split(',')) : undefined;
+const load = (module) => import(pathToFileURL(path.join(root, 'out', module)).href);
+const gc = globalThis.gc ?? (() => {});
+
+const RETAINED = 50000;
+const receivedAt = new Date('2026-09-14T12:00:00Z');
+// A credential-shaped value, built at runtime: secret-shaped literals are refused by push protection.
+const bearer = ['Bearer', 'synthetic'.repeat(3)].join(' ');
+const line = (id) =>
+  JSON.stringify({
+    level: id % 50 ? 'info' : 'error',
+    message: `request ${id}`,
+    service: 'api',
+    status: id % 50 ? 200 : 500,
+    durationMs: id % 200,
+    token: 'synthetic-secret',
+    requestId: `req-${id}`,
+    traceId: (id % 100).toString(16).padStart(32, '0'),
+  });
+
+/**
+ * Time one operation: warm it up, repeat it in batches of at least 10 ms so fast operations are measurable,
+ * and return the median time per operation over the batches.
+ */
+function time(operation) {
+  const warmUntil = performance.now() + 50;
+  let calls = 0;
+  while (calls < 3 || performance.now() < warmUntil) {
+    operation();
+    calls++;
+  }
+  let start = performance.now();
+  operation();
+  const single = Math.max(performance.now() - start, 0.001);
+  const perBatch = Math.max(1, Math.ceil(10 / single));
+  const batches = Math.max(5, Math.min(15, Math.floor(1000 / (single * perBatch))));
+  const samples = [];
+  for (let batch = 0; batch < batches; batch++) {
+    start = performance.now();
+    for (let i = 0; i < perBatch; i++) operation();
+    samples.push((performance.now() - start) / perBatch);
+  }
+  samples.sort((a, b) => a - b);
+  return samples[Math.floor(samples.length / 2)];
+}
+
+const results = {};
+const cases = [];
+/** A timed case: `prepare` loads modules and builds fixtures, and returns the operation to time. */
+const timed = (name, label, prepare) => cases.push({ name, label, unit: 'ms', prepare, measure: time });
+/** A size case: `measure` returns a deterministic quantity, such as bytes sent or memory retained. */
+const sized = (name, label, unit, measure) =>
+  cases.push({ name, label, unit, prepare: async () => measure, measure: (value) => value() });
+
+/** The shared fixture: 50,000 parsed events retained in a store. */
+let fixture;
+async function retained() {
+  if (fixture) return fixture;
+  const { LogStore } = await load('core/log-store.js');
+  const { parseLogLine } = await load('core/log-event.js');
+  gc();
+  const heapBefore = process.memoryUsage().heapUsed;
+  const store = new LogStore(RETAINED, 100 * 1024 * 1024);
+  for (let id = 1; id <= RETAINED; id++) {
+    const event = parseLogLine(line(id), 'stdout', id, receivedAt);
+    event.serverId = 'api';
+    store.add(event);
+  }
+  gc();
+  const heap = process.memoryUsage().heapUsed - heapBefore;
+  assert.equal(store.size, RETAINED);
+  fixture = { store, heap, parseLogLine, next: RETAINED };
+  return fixture;
+}
+
+async function snapshotSources() {
+  const { store } = await retained();
+  const { SessionRegistry } = await load('capture/session-registry.js');
+  const { RuntimeState } = await load('capture/runtime-state.js');
+  const { buildSnapshot } = await load('vscode/snapshot.js');
+  const sources = {
+    store,
+    config: { get: (_key, fallback) => fallback },
+    registry: new SessionRegistry(),
+    state: new RuntimeState(() => {}),
+    ingestion: { sequence: fixture.next },
+    persistence: { persistDropped: 0 },
+    searches: { savedSearches: () => [] },
+    running: true,
+    guideStatus: { version: '', unread: false },
+    agentAccess: { status: () => ({ active: false, sources: [] }) },
+  };
+  return { sources, buildSnapshot };
+}
+
+function addEvents(count) {
+  const { store, parseLogLine } = fixture;
+  for (let i = 0; i < count; i++) {
+    const id = ++fixture.next;
     const event = parseLogLine(
-      JSON.stringify({ level: 'info', message: 'tick', durationMs: ++streamed % 200 }),
+      JSON.stringify({ level: 'info', message: 'tick', durationMs: id % 200 }),
       'stdout',
-      streamed,
+      id,
       receivedAt,
     );
     event.serverId = 'api';
     store.add(event);
   }
-  store.page({ sort: 'durationMs', sortDirection: 'desc' });
+}
+
+// Ingestion: what every captured line costs.
+timed('ingest', 'Parse and retain 10,000 JSON lines', async () => {
+  const { LogStore } = await load('core/log-store.js');
+  const { parseLogLine } = await load('core/log-event.js');
+  const lines = Array.from({ length: 10000 }, (_, i) => line(i + 1));
+  return () => {
+    const store = new LogStore(10000, 100 * 1024 * 1024);
+    for (let i = 0; i < lines.length; i++) {
+      const event = parseLogLine(lines[i], 'stdout', i + 1, receivedAt);
+      event.serverId = 'api';
+      store.add(event);
+    }
+  };
 });
-// What each live refresh costs the extension host, and how much crosses to the webview.
-const snapshotSources = {
-  store,
-  config: { get: (_key, fallback) => fallback },
-  registry: new SessionRegistry(),
-  state: new RuntimeState(() => {}),
-  ingestion: { sequence: streamed },
-  persistence: { persistDropped: 0 },
-  searches: { savedSearches: () => [] },
-  running: true,
-  guideStatus: { version: '', unread: false },
-  agentAccess: { status: () => ({ active: false, sources: [] }) },
-};
-measure('Live snapshot of the newest page', () => buildSnapshot({ type: 'snapshot' }, snapshotSources));
-console.log(
-  `Live snapshot message: ${(JSON.stringify(buildSnapshot({ type: 'snapshot' }, snapshotSources)).length / 1024).toFixed(0)} KiB`,
-);
+timed('frame', 'Frame 10,000 lines with stack traces and Compose prefixes', async () => {
+  const { LinePipeline } = await load('capture/line-pipeline.js');
+  const lines = Array.from({ length: 10000 }, (_, i) =>
+    i % 10 === 9 ? `api-1  |     at handler (/srv/app.js:${i}:5)` : `api-1  | {"level":"info","msg":"request ${i}"}`,
+  );
+  return () => {
+    let count = 0;
+    const pipeline = new LinePipeline(() => count++, { join: true, containers: true, limit: 65536 });
+    for (const text of lines) pipeline.write(text, false);
+    pipeline.end();
+  };
+});
+timed('otlp', 'Read an OTLP/JSON request of 2,000 log records', async () => {
+  const { readLogs } = await load('core/otlp.js');
+  const request = {
+    resourceLogs: [
+      {
+        resource: { attributes: [{ key: 'service.name', value: { stringValue: 'api' } }] },
+        scopeLogs: [
+          {
+            logRecords: Array.from({ length: 2000 }, (_, i) => ({
+              timeUnixNano: String(1_700_000_000_000_000_000n + BigInt(i)),
+              severityNumber: 9,
+              body: { stringValue: `request ${i}` },
+              attributes: [{ key: 'http.route', value: { stringValue: '/orders/:id' } }],
+              traceId: i.toString(16).padStart(32, '0'),
+            })),
+          },
+        ],
+      },
+    ],
+  };
+  return () => readLogs(request, 0);
+});
+timed('redact', 'Redact 1,000 lines that carry credentials', async () => {
+  const { createRedactor } = await load('core/redaction.js');
+  const redactor = createRedactor();
+  const lines = Array.from({ length: 1000 }, (_, i) => `call ${i} with ${bearer} for user ${i}@example.com`);
+  return () => {
+    for (const text of lines) redactor.text(text);
+  };
+});
+timed('sites', 'Index 200 source files and attribute 1,000 events', async () => {
+  const { LogSiteIndex, extractLogSites } = await load('core/log-sites.js');
+  const { parseLogLine } = await load('core/log-event.js');
+  // Each statement has a word of its own, as in real code; the index finds candidates by their longest word.
+  const files = Array.from({ length: 200 }, (_, f) => [
+    `src/module${f}.ts`,
+    Array.from(
+      { length: 20 },
+      (_, s) => `function f${s}() {\n  logger.info(\`handler${f}stage${s} finished for \${id}\`);\n}`,
+    ).join('\n'),
+  ]);
+  const events = Array.from({ length: 1000 }, (_, i) =>
+    parseLogLine(`handler${i % 200}stage${i % 20} finished for ${i}`, 'stdout', i + 1, receivedAt),
+  );
+  return () => {
+    const index = new LogSiteIndex();
+    for (const [file, text] of files) index.setFile(file, extractLogSites(file, text));
+    let matched = 0;
+    for (const event of events) if (index.match(event)) matched++;
+    assert.equal(matched, events.length);
+  };
+});
+
+// Reading retained history: what the Logs panel, search, and agents ask for.
+timed('page', 'Newest page of 50,000 retained events', async () => {
+  const { store } = await retained();
+  return () => store.page({ serverId: 'api' });
+});
+timed('query', 'Evaluate a search over 50,000 events', async () => {
+  const { store } = await retained();
+  const { parseQuery, matchesQuery } = await load('core/query.js');
+  const parsed = parseQuery('level:error status:500 message:"request 4"');
+  const events = store.all();
+  return () => {
+    let matched = 0;
+    for (const event of events) if (matchesQuery(event, parsed)) matched++;
+    return matched;
+  };
+});
+timed('suggest', 'Autocomplete four keystrokes of a field value', async () => {
+  const { store } = await retained();
+  return () => {
+    for (const value of ['r', 're', 'req', 'req-']) store.fieldSuggestions(`requestId:${value}`);
+  };
+});
+timed('copy', 'Copy the newest 1,000 matching events, redacted', async () => {
+  const { store } = await retained();
+  const { redactEvent } = await load('core/redaction.js');
+  return () => store.page({ serverId: 'api' }).events.map((row) => redactEvent(store.find(row.id)));
+});
+timed('analysis', 'Analyze 50,000 retained events', async () => {
+  const { store } = await retained();
+  return () => store.analysis();
+});
+timed('sort', 'Sort 50,000 events by durationMs', async () => {
+  const { store } = await retained();
+  return () => store.all({ sort: 'durationMs' });
+});
+timed('agent-search', 'Agent search page of 200', async () => {
+  const { store } = await retained();
+  const { AgentLogAccess } = await load('vscode/agent-access.js');
+  const { SessionRegistry } = await load('capture/session-registry.js');
+  const access = new AgentLogAccess(store, new SessionRegistry(), () => RETAINED);
+  const { shareId } = access.shareAll();
+  return () => access.search({ shareId, limit: 200 });
+});
+timed('agent-analyze', 'Agent analysis of the newest 10,000', async () => {
+  const { store } = await retained();
+  const { AgentLogAccess } = await load('vscode/agent-access.js');
+  const { SessionRegistry } = await load('capture/session-registry.js');
+  const access = new AgentLogAccess(store, new SessionRegistry(), () => RETAINED);
+  const { shareId } = access.shareAll();
+  return () => access.analyze({ shareId });
+});
+timed('traces', 'List traces from 50,000 events', async () => {
+  const { store } = await retained();
+  const { summarizeTraces } = await load('core/traces.js');
+  return () => summarizeTraces([], store.reversePage({ query: 'exists:traceId' }, 5000).events);
+});
+timed('snapshot', 'Live snapshot of the newest page', async () => {
+  const { sources, buildSnapshot } = await snapshotSources();
+  return () => buildSnapshot({ type: 'snapshot' }, sources);
+});
+
+// Sizes and memory: deterministic, so any growth is real.
+sized('heap', 'Heap retained by 50,000 events', 'MiB', async () => (await retained()).heap / 1048576);
+sized('estimate', 'Retention estimate for 50,000 events', 'MiB', async () => (await retained()).store.bytes / 1048576);
+sized('snapshot-full', 'Full snapshot message', 'KiB', async () => {
+  const { sources, buildSnapshot } = await snapshotSources();
+  return JSON.stringify(buildSnapshot({ type: 'snapshot' }, sources)).length / 1024;
+});
+sized('snapshot-refresh', 'Live refresh message after 50 new events', 'KiB', async () => {
+  const { sources, buildSnapshot } = await snapshotSources();
+  const full = buildSnapshot({ type: 'snapshot' }, sources);
+  addEvents(50);
+  sources.ingestion.sequence = fixture.next;
+  const have = { last: full.events.at(-1).id, count: full.events.length, version: full.rowsVersion };
+  const refresh = buildSnapshot({ type: 'snapshot', have }, sources);
+  assert.equal(refresh.events.length, 50, 'a live refresh sends only the new rows');
+  return JSON.stringify(refresh).length / 1024;
+});
+
+// Last, because it adds events to the shared store.
+timed('stream', 'Sorted page while 50 events stream in', async () => {
+  await retained();
+  return () => {
+    addEvents(50);
+    fixture.store.page({ sort: 'durationMs', sortDirection: 'desc' });
+  };
+});
+
+for (const { name, label, unit, prepare, measure } of cases) {
+  if (only && !only.has(name)) continue;
+  try {
+    const value = await measure(await prepare());
+    results[name] = { label, unit, value };
+  } catch (error) {
+    results[name] = { label, unit, error: String(error instanceof Error ? error.message : error).split('\n')[0] };
+  }
+}
+
+if (args.json) writeFileSync(args.json, JSON.stringify({ node: process.version, results }, null, 2));
+else {
+  console.log(
+    `Node ${process.version}, ${process.platform}/${process.arch}${globalThis.gc ? '' : ' (run with --expose-gc for heap)'}`,
+  );
+  for (const { label, unit, value, error } of Object.values(results))
+    console.log(`${label}: ${error ? `unavailable (${error})` : `${value.toFixed(unit === 'ms' ? 3 : 1)} ${unit}`}`);
+}

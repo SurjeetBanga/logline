@@ -140,7 +140,7 @@ npm run package     # build an installable .vsix
 
 Press **F5** to launch an Extension Development Host. To install a packaged build, run **Extensions: Install from VSIX…** in VS Code and select the generated `.vsix` file.
 
-Host code lives in `src/` and compiles to `out/`. The webview entry point is `src/webview/main.ts`; `npm run compile` generates `media/viewer.js`. Run `npm run smoke` for the isolated VS Code activation/task smoke test, or `npm run benchmark` for diagnostic performance measurements.
+Host code lives in `src/` and compiles to `out/`. The webview entry point is `src/webview/main.ts`; `npm run compile` generates `media/viewer.js`. Run `npm run smoke` for the isolated VS Code activation/task smoke test, `npm run benchmark` to measure performance, or `npm run perf:compare` to compare it with another build (see [Contributing](CONTRIBUTING.md)).
 
 - [Contributing](CONTRIBUTING.md): setup, checks, tests, and pull requests.
 - [Architecture](ARCHITECTURE.md): modules, state ownership, and testing.
