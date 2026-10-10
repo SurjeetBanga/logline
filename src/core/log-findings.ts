@@ -246,7 +246,7 @@ function callText(lines: string[], start: number): string {
 }
 
 const mentions = (call: string, name: string) =>
-  new RegExp(`(?<![\\w$])${name.replace(/\$/g, '\\$')}(?![\\w$])`).test(call);
+  new RegExp(`(?<![\\w$])${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![\\w$])`).test(call);
 
 // Words a failure is described with. A message that denies one ("no errors",
 // "0 failures") is not a failure.

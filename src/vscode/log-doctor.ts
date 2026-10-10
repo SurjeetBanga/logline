@@ -193,6 +193,14 @@ export function siteFindings(
   return findings;
 }
 
+/** Text for a Markdown table cell: log-derived text cannot end the cell or the row. */
+export function tableCell(text: string): string {
+  return text
+    .replace(/\\/g, '\\\\')
+    .replace(/\|/g, '\\|')
+    .replace(/\s*[\r\n]+\s*/g, ' ');
+}
+
 /** Whether a source line or the line above it suppresses a finding with `logline-ignore`. */
 export function isIgnored(lines: readonly string[], line: number, code: FindingCode): boolean {
   for (const text of [lines[line - 1], lines[line - 2]]) {
@@ -658,8 +666,7 @@ export class LogDoctor implements vscode.Disposable, vscode.CodeActionProvider {
         '| Source | Finding |',
         '| --- | --- |',
       );
-      for (const finding of unclaimed)
-        lines.push(`| ${finding.server.replace(/\|/g, '\\|')} | ${finding.message.replace(/\|/g, '\\|')} |`);
+      for (const finding of unclaimed) lines.push(`| ${tableCell(finding.server)} | ${tableCell(finding.message)} |`);
     }
     if (telemetry.length) {
       lines.push(
@@ -671,13 +678,12 @@ export class LogDoctor implements vscode.Disposable, vscode.CodeActionProvider {
         '| Service | Finding |',
         '| --- | --- |',
       );
-      for (const finding of telemetry)
-        lines.push(`| ${finding.service.replace(/\|/g, '\\|')} | ${finding.message.replace(/\|/g, '\\|')} |`);
+      for (const finding of telemetry) lines.push(`| ${tableCell(finding.service)} | ${tableCell(finding.message)} |`);
     }
     if (findings.length) {
       lines.push('', '## On log statements', '', '| Statement | Finding |', '| --- | --- |');
       for (const finding of findings)
-        lines.push(`| \`${finding.site.file}:${finding.site.line}\` | ${finding.message.replace(/\|/g, '\\|')} |`);
+        lines.push(`| \`${finding.site.file}:${finding.site.line}\` | ${tableCell(finding.message)} |`);
     }
     const found = REPORT.filter((rule) => count([rule.code]));
     if (found.length) {

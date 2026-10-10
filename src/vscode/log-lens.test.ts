@@ -55,7 +55,7 @@ class MarkdownString {
     return this;
   }
   appendText(text: string) {
-    this.value += text.replace(/[*_`[\]]/g, '\\$&');
+    this.value += text.replace(/[\\*_`[\]]/g, '\\$&');
     return this;
   }
 }

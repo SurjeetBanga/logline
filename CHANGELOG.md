@@ -2,6 +2,13 @@
 
 All notable changes to Logline are documented in this file.
 
+## Unreleased
+
+### Fixes
+
+- **Logline: Connect Claude Code or Codex** quotes paths in the PowerShell setup command with single quotes, so a path with `$` or a backtick is no longer expanded, and quotes in Command Prompt are escaped the way programs read them.
+- The log doctor health report keeps a source name or finding that contains `|`, `\`, or a line break inside its table cell.
+
 ## 1.14.0 — 2026-10-10
 
 ### Changes

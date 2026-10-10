@@ -91,7 +91,7 @@ test('a joined trace shows its first line and feeds exception grouping', () => {
   const event = parseLogLine(raw, 'stderr', 1, new Date());
   assert.equal(event.message, 'Error: request failed');
   assert.equal(event.raw, raw);
-  const [group] = groupErrors([event, { ...parseLogLine(raw.replace('12:5', '12:5'), 'stderr', 2, new Date()) }]);
+  const [group] = groupErrors([event, { ...parseLogLine(raw.replace('12:5', '12:9'), 'stderr', 2, new Date()) }]);
   assert.equal(group.count, 2);
   assert.equal(group.location, '/srv/app.js:12');
 });
