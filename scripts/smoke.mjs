@@ -43,11 +43,17 @@ try {
     extensionPath = path.join(unpacked, 'extension');
   }
   const resultFile = path.join(root, 'result.json');
-  const env = { ...process.env, LOGLINE_SMOKE_RESULT: resultFile, LOGLINE_SMOKE_OTLP_PORT: String(otlpPort) };
+  // The extension installs its MCP server and agent discovery files under the home folder: keep them in this run's.
+  const home = path.join(root, 'home');
+  await mkdir(home);
+  const env = { ...process.env, HOME: home, USERPROFILE: home, LOGLINE_SMOKE_RESULT: resultFile, LOGLINE_SMOKE_OTLP_PORT: String(otlpPort) };
   for (const key of Object.keys(env)) if (key.startsWith('VSCODE_') || key === 'ELECTRON_RUN_AS_NODE') delete env[key];
   const args = [
     '--user-data-dir', path.join(root, 'profile'), '--extensions-dir', path.join(root, 'extensions'),
     '--extensionDevelopmentPath', extensionPath, '--extensionTestsPath', path.join(process.cwd(), 'out-tests/test/extension-smoke.js'),
+    // With HOME moved, macOS cannot find the login keychain and asks to create one: keep secrets in memory instead.
+    // The Chromium switch goes before a known option, or VS Code reads the next argument as its value.
+    '--use-inmemory-secretstorage', ...(process.platform === 'darwin' ? ['--use-mock-keychain'] : []),
     '--disable-workspace-trust', '--skip-welcome', '--skip-release-notes', workspace,
   ];
   let executable = process.env.VSCODE_CLI ?? 'code';
@@ -68,4 +74,4 @@ try {
   const result = JSON.parse(await readFile(resultFile, 'utf8'));
   if (!result.passed) throw new Error(result.error);
   console.log('Extension smoke passed:', result.checks.join(', '));
-} finally { await rm(root, { recursive: true, force: true }); }
+} finally { await rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 }); }

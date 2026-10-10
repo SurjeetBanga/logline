@@ -1,6 +1,9 @@
 import assert from 'node:assert/strict';
+import { spawn } from 'node:child_process';
 import { readFile, writeFile } from 'node:fs/promises';
 import { request } from 'node:http';
+import { homedir } from 'node:os';
+import { join } from 'node:path';
 import * as vscode from 'vscode';
 
 /** Run inside a temporary VS Code Extension Development Host. */
@@ -92,8 +95,36 @@ export async function run(): Promise<void> {
     assert.match(await persistedText('smoke otel record'), /smoke otel record/, 'received telemetry is captured');
     await vscode.commands.executeCommand('logline.showTrace', traceId);
     await vscode.commands.executeCommand('logline.stopOtlpReceiver');
+
+    // Agents: the installed MCP server runs on the editor's runtime, as Connect Claude Code or Codex registers it, finds
+    // this window, and gets its answer. Nothing is shared, so only the window can reply NOT_SHARED; a broken bridge says NOT_CONNECTED.
+    const requests = [
+      { jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'smoke', version: '1' } } },
+      { jsonrpc: '2.0', method: 'notifications/initialized' },
+      { jsonrpc: '2.0', id: 2, method: 'tools/list' },
+      { jsonrpc: '2.0', id: 3, method: 'tools/call', params: { name: 'logline_list_shared_sources', arguments: {} } }
+    ];
+    const output = await new Promise<string>((resolve, reject) => {
+      const server = spawn(process.execPath, [join(homedir(), '.logline', 'mcp.js'), '--workspace', folder.uri.fsPath], { env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' } });
+      let stdout = '';
+      const timeout = setTimeout(() => { server.kill(); reject(new Error(`MCP server did not exit: ${stdout}`)); }, 15000);
+      server.stdout.on('data', chunk => { stdout += chunk; });
+      server.once('error', reject);
+      server.once('exit', () => { clearTimeout(timeout); resolve(stdout); });
+      server.stdin.end(requests.map(message => JSON.stringify(message)).join('\n') + '\n');
+    });
+    const replies = new Map(output.trim().split('\n').map(line => JSON.parse(line) as { id: number; result: any }).map(reply => [reply.id, reply.result]));
+    assert.equal(replies.get(2)?.tools?.length, 6, `the MCP server lists the six tools (${output})`);
+    assert.match(replies.get(3)?.content?.[0]?.text ?? '', /NOT_SHARED/, `the window answers the MCP server (${output})`);
+
+    // Show Status reads every part of the running controller before it shows the list.
+    const status = vscode.commands.executeCommand('logline.showStatus');
+    await new Promise(resolve => setTimeout(resolve, 500));
+    await vscode.commands.executeCommand('workbench.action.closeQuickOpen');
+    await status;
+
     await writeFile(result, JSON.stringify({ passed: true, checks: ['activation', 'commands', 'webview focus', 'task discovery', 'captured task completion', 'captured task output', 'stop',
-      'debug capture', 'log lens', 'OpenTelemetry receiver', 'metrics', 'trace command'] }));
+      'debug capture', 'log lens', 'OpenTelemetry receiver', 'metrics', 'trace command', 'MCP agent bridge', 'status'] }));
   } catch (error) {
     await writeFile(result, JSON.stringify({ passed: false, error: String(error) }));
     throw error;
