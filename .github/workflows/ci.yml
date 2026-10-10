@@ -4,6 +4,9 @@ on:
   pull_request:
   push:
     branches: [main]
+  # Weekly, so advisories published against unchanged dependencies still fail the build.
+  schedule:
+    - cron: '0 6 * * 1'
   workflow_dispatch:
 
 permissions:
@@ -14,6 +17,21 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Fail on any known vulnerability, including dev dependencies
+        run: npm audit --audit-level=low
+      - name: Verify registry signatures and provenance of installed packages
+        run: npm audit signatures
+
   build:
     runs-on: ubuntu-latest
     timeout-minutes: 15
