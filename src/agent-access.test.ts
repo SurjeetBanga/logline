@@ -255,3 +255,15 @@ test('an inspect result that fits is sent whole', () => {
   const result = access.inspect(share.shareId!, 1);
   assert.equal(result.limited, undefined);
 });
+
+test('several agents can wait at once, up to a bound', async () => {
+  const store = new LogStore();
+  let newest = 0;
+  const access = new AgentLogAccess(store, new SessionRegistry(), () => newest);
+  const shareId = access.shareAll().shareId!;
+  const waits = [access.wait({ shareId }, 0, 1000), access.wait({ shareId }, 0, 1000), access.wait({ shareId }, 0, 1000), access.wait({ shareId }, 0, 1000)];
+  await assert.rejects(access.wait({ shareId }, 0, 1000), (error: Error & { code?: string }) => error.code === 'BUSY');
+  store.add({ id: ++newest, serverId: 'api', sessionId: 'a', level: 'info' });
+  for (const result of await Promise.all(waits)) assert.deepEqual(result.events.map(event => event.id), [1]);
+  assert.deepEqual((await access.wait({ shareId }, 0, 100)).events.map(event => event.id), [1], 'finished waits free their slot');
+});

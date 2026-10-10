@@ -12,6 +12,8 @@ import { buildTrace, traceLogs, type SpanStore, type TraceView } from '../core/t
 
 // Leaves room under the 64 KiB tool result limit (agent-tools.ts) for the envelope.
 const INSPECT_BUDGET_BYTES = 56 * 1024;
+// Concurrent wait_for_logs calls, for example from Copilot and Claude Code.
+const MAX_WAITS = 4;
 
 export type AgentErrorCode = 'NOT_SHARED' | 'SHARE_CHANGED' | 'INVALID_INPUT' | 'EVENT_UNAVAILABLE' | 'CANCELLED' | 'BUSY';
 export class AgentAccessError extends Error {
@@ -35,7 +37,7 @@ export class AgentLogAccess {
   private anchor?: number;
   private readonly redaction: RedactionOptions;
   private redactor: Redactor;
-  private activeWait?: symbol;
+  private readonly activeWaits = new Set<symbol>();
   constructor(private readonly store: LogStore, private readonly registry: SessionRegistry,
     private readonly nextId: () => number = () => 0, redaction: RedactionOptions = {}, private readonly spans?: SpanStore) {
     this.redaction = { enabled: true, replacement: '[REDACTED]', ...redaction };
@@ -143,7 +145,7 @@ export class AgentLogAccess {
     this.shared = selected;
   }
 
-  revoke(): void { this.shareAllRuns = false; this.shared.clear(); this.shareId = undefined; this.anchor = undefined; this.revision++; this.activeWait = undefined; }
+  revoke(): void { this.shareAllRuns = false; this.shared.clear(); this.shareId = undefined; this.anchor = undefined; this.revision++; this.activeWaits.clear(); }
   isSharedSource(id: string | undefined): boolean { this.refreshAllRuns(); return Boolean(id && this.shared.has(id)); }
   getAnchor(): number | undefined { return this.anchor; }
 
@@ -320,14 +322,20 @@ export class AgentLogAccess {
     this.validate(input);
     if (!Number.isSafeInteger(watermark) || watermark < 0) throw new AgentAccessError('INVALID_INPUT', 'watermark must be a non-negative event id.');
     if (!Number.isFinite(timeoutMs)) throw new AgentAccessError('INVALID_INPUT', 'timeoutMs must be a finite number.');
-    if (this.activeWait) throw new AgentAccessError('BUSY', 'A wait is already active for this share.');
+    // Copilot and MCP clients may each wait at once; the cap bounds the polling.
+    if (this.activeWaits.size >= MAX_WAITS) throw new AgentAccessError('BUSY', `${MAX_WAITS} log waits are already active for this share.`);
     const waitToken = Symbol('logline-wait');
-    this.activeWait = waitToken;
+    this.activeWaits.add(waitToken);
     const end = Date.now() + Math.min(10000, Math.max(0, timeoutMs));
+    let searched: string | undefined;
     try {
       while (Date.now() < end) {
         if (signal?.aborted || signal?.isCancellationRequested) throw new AgentAccessError('CANCELLED', 'The log wait was cancelled.');
         this.assertShare(input.shareId);
+        // Search again only after events arrived or the share changed.
+        const state = `${this.nextId()}:${this.store.total}:${this.revision}`;
+        if (state === searched) { await new Promise(resolve => setTimeout(resolve, 100)); continue; }
+        searched = state;
         const result = this.search({ ...input, before: undefined, limit: 200 });
         const events = result.events.filter(event => event.id > watermark);
         if (events.length) {
@@ -342,7 +350,7 @@ export class AgentLogAccess {
       this.assertShare(input.shareId);
       const newest = this.nextId();
       return { events: [], matched: 0, newest, partial: false, hasMore: false, retention: { newest } };
-    } finally { if (this.activeWait === waitToken) this.activeWait = undefined; }
+    } finally { this.activeWaits.delete(waitToken); }
   }
 
   private assertShare(id?: string): void {

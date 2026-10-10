@@ -115,3 +115,30 @@ test('redacts a deeper alias and the nested path of a sensitive parent', () => {
   assert.equal(result.fields?.value, '[REDACTED]');
   assert.equal(result.fields?.note, 'value');
 });
+
+test('redacts credentials recognizable by value even without a sensitive key', () => {
+  const github = 'ghp_' + 'a'.repeat(36);
+  assert.equal(redactText(`calling github with ${github} now`), 'calling github with [REDACTED] now');
+  // Fixtures are assembled at runtime so secret scanners do not mistake them for real keys.
+  assert.equal(redactText(`aws key ${'AKIA' + 'ABCDEFGHIJKLMNOP'} used`), 'aws key [REDACTED] used');
+  assert.equal(redactText('jwt eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkw.abcdefghijklmnop ok'), 'jwt [REDACTED] ok');
+  assert.equal(redactText(`stripe ${'sk_' + 'live_' + 'a'.repeat(24)}`), 'stripe [REDACTED]');
+  assert.equal(redactText(`slack ${'xox' + 'b-' + '1'.repeat(10)}-abcdef`), 'slack [REDACTED]');
+  assert.equal(redactText('sent Bearer abcdefghijklmnopqrstuv upstream'), 'sent Bearer [REDACTED] upstream');
+  assert.equal(redactText('-----BEGIN RSA PRIVATE KEY-----\\nMIIEowIBAAKCAQEA\\n-----END RSA PRIVATE KEY----- loaded'), '[REDACTED] loaded');
+});
+
+test('redacts the password in a URL and keeps the rest of it', () => {
+  assert.equal(redactText('connect postgres://admin:hunter2@db:5432/app'), 'connect postgres://admin:[REDACTED]@db:5432/app');
+  assert.equal(redactText('GET https://example.com:8443/path?q=1'), 'GET https://example.com:8443/path?q=1');
+  assert.equal(redactText('mailto user@example.com at http://host/a@b'), 'mailto user@example.com at http://host/a@b');
+});
+
+test('value-pattern redaction reaches structured fields and raw JSON', () => {
+  const token = 'ghp_' + 'b'.repeat(36);
+  const event = redactEvent({ id: 1, level: 'info', message: `using ${token}`, fields: { note: `token was ${token}` },
+    raw: JSON.stringify({ msg: `using ${token}`, url: 'redis://default:s3cret@cache:6379' }) });
+  assert.equal(event.message, 'using [REDACTED]');
+  assert.equal(event.fields!.note, 'token was [REDACTED]');
+  assert.doesNotMatch(event.raw!, /ghp_|s3cret/);
+});

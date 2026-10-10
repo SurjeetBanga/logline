@@ -11,6 +11,18 @@ All notable changes to Logline are documented in this file.
 - Frames of joined traces such as `TypeError: …` are clickable in the expanded event and anchor error grouping.
 - A plain-text crash or stack trace that follows a JSON error from the same source and run, within 2 seconds (30 seconds for a Node crash that ends the process), is linked to it. The error's details show the crash's stack, and the crash row leads back to the error. Both stay separate events in capture order, and agent `inspect` of the error includes the crash, redacted on its own.
 
+### Security
+
+- Logs shared with agents, and redacted exports, now also hide credentials that appear without a sensitive key name: GitHub, AWS, Slack, Google and Stripe keys, JSON Web Tokens, bearer tokens, private keys, and passwords in URLs such as `postgres://user:password@host`.
+- An MCP agent started outside a window's workspace folders can no longer read that window's shared logs because it happens to be the only one open. Set `LOGLINE_WORKSPACE` to choose a window explicitly.
+- `.logline/latest.log`, which is unredacted, is readable only by your user. Folders and files written by earlier versions are tightened on the next write.
+
+### Fixes
+
+- Copilot and an MCP agent such as Claude Code can both wait for new logs at once (up to four waits) instead of the second failing as busy, and waiting searches again only when new events arrive.
+- Turning `logline.externalAgents` off and on quickly no longer leaves an extra agent listener running.
+- The OpenTelemetry receiver no longer decompresses a request body it already refused as too large.
+
 ## 1.13.1 — 2026-10-04
 
 ### Changes
