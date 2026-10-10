@@ -73,7 +73,7 @@ Add a message to `ViewRequest`/`HostMessage`, validate it in `parseViewRequest`,
 - `npm run watch` watches host compilation, browser type checking, and browser bundling.
 - `npm run check` checks both runtimes and tests, builds, and runs the test suite.
 - `npm test` compiles tests into `out-tests/` and runs only `*.test.js`. Run `npm run compile` first when browser sources have changed.
-- `npm run smoke` launches an isolated VS Code development host with temporary settings and a captured task. It requires an installed desktop VS Code CLI; `VSCODE_CLI` can select its path.
+- `npm run smoke` launches an isolated VS Code development host with temporary settings and a captured task. It uses the installed desktop VS Code CLI (`VSCODE_CLI` can select its path), or downloads the build named by `VSCODE_VERSION` (`1.99.0`, `stable`) into `.vscode-test/`. `node scripts/smoke.mjs --vsix <file>` runs a packaged extension instead of this folder; CI runs it on the VSIX it built, on Linux, Windows, and macOS, in the oldest supported VS Code and the latest stable.
 - `npm run benchmark` builds and measures parsing/retention (with the measured heap next to the retention estimate), paging, analysis, the old versus bounded clipboard selection pipeline, and the cost and size of a live snapshot on 50,000 synthetic events. It checks identical selected output and reports medians, without machine-dependent timing assertions.
 - `npm run package` builds a VSIX without source files, build scripts, test code, or test output.
 

@@ -20,3 +20,4 @@ scripts/**
 .claude/**
 CLAUDE.md
 out/mcp/**
+.vscode-test/**
