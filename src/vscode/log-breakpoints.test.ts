@@ -176,3 +176,151 @@ test('breakpoints go on the statement that logged an event, and matching debug o
   assert.match(messages.at(-1)!, /paused Launch API after it logged “upstream timeout after 3s”/);
   controller.dispose();
 });
+
+test('log breakpoints explain what they cannot do, and are managed from notices and the status bar', async () => {
+  const commands = new Map<string, (...args: unknown[]) => unknown>();
+  const breakpoints: SourceBreakpoint[] = [];
+  const messages: string[] = [];
+  const answers: { input?: string; notice?: string; pick?: (items: { label: string; id?: number }[]) => unknown } = {};
+  let breakpointsChanged: ((change: { removed: SourceBreakpoint[] }) => void) | undefined;
+  const status = { text: '', shown: false };
+  const mock = {
+    Uri,
+    Position,
+    Range,
+    Location,
+    SourceBreakpoint,
+    StatusBarAlignment: { Left: 1 },
+    commands: {
+      registerCommand(name: string, callback: (...args: unknown[]) => unknown) {
+        commands.set(name, callback);
+        return { dispose() {} };
+      },
+    },
+    debug: {
+      get breakpoints() {
+        return breakpoints;
+      },
+      addBreakpoints(added: SourceBreakpoint[]) {
+        breakpoints.push(...added);
+      },
+      onDidChangeBreakpoints: (listener: typeof breakpointsChanged) => {
+        breakpointsChanged = listener;
+        return { dispose() {} };
+      },
+    },
+    window: {
+      createStatusBarItem: () => ({
+        set text(value: string) {
+          status.text = value;
+        },
+        tooltip: '',
+        name: '',
+        command: '',
+        show() {
+          status.shown = true;
+        },
+        hide() {
+          status.shown = false;
+        },
+        dispose() {},
+      }),
+      showInformationMessage: async (message: string, ...actions: string[]) => {
+        messages.push(message);
+        return actions.includes(answers.notice!) ? answers.notice : undefined;
+      },
+      showWarningMessage: async (message: string) => {
+        messages.push(message);
+        return undefined;
+      },
+      showInputBox: async () => answers.input,
+      showQuickPick: async (items: { label: string; id?: number }[]) => answers.pick?.(items),
+      showTextDocument: async () => undefined,
+    },
+    workspace: {
+      asRelativePath: (uri: Uri) => uri.path.replace(/^\/w\//, ''),
+      openTextDocument: async () => {
+        throw new Error('deleted since');
+      },
+    },
+  };
+  delete require.cache[require.resolve('./log-breakpoints')];
+  const { LogBreakpoints } = withVscode(mock, () => require('./log-breakpoints') as typeof import('./log-breakpoints'));
+  const store = new LogStore();
+  const index = new LogSiteIndex();
+  index.setFile(
+    'src/pay.ts',
+    extractLogSites('src/pay.ts', 'function pay(id) {\n  log.error(`payment failed for order ${id}`);\n}\n'),
+  );
+  const lens = { enabled: false, siteUri: () => Uri.file('/w/src/pay.ts') };
+  const shown: number[] = [];
+  const controller = new LogBreakpoints({
+    store,
+    index,
+    lens: () => lens as never,
+    showEvent: async (id) => {
+      shown.push(id);
+    },
+  });
+  const settle = () => new Promise((resolve) => setImmediate(resolve));
+
+  // Events Logline can no longer place.
+  await controller.breakOnEvent(99);
+  assert.equal(messages.at(-1), 'This event has been discarded from retained history.');
+  store.add(event(1, '{"level":"error","msg":"payment failed for order 7"}'));
+  await controller.breakOnEvent(1);
+  assert.match(messages.at(-1)!, /^Logline could not find the log statement for this event/);
+  assert.equal(breakpoints.length, 0);
+
+  // Break on matching logs from the command palette: closed, invalid, then a search with known statements.
+  await commands.get('logline.breakOnMatchingLogs')!();
+  answers.input = 'message:/(/';
+  await commands.get('logline.breakOnMatchingLogs')!();
+  assert.match(messages.at(-1)!, /^Logline: /, 'an invalid search is explained');
+  assert.equal(status.shown, false);
+  lens.enabled = true;
+  answers.input = '"payment failed"';
+  await commands.get('logline.breakOnMatchingLogs')!(undefined, ['error', 7]);
+  assert.equal(breakpoints.length, 1, 'the statement that logged a match gets a breakpoint');
+  assert.match(messages.at(-1)!, /^Added breakpoints on 1 log statement that logged matching events\./);
+  assert.equal(status.text, '$(debug-breakpoint-log) Break on log');
+
+  // Removing that breakpoint in VS Code lets its statement pause the session again.
+  let pauses = 0;
+  const session = { id: 'd', name: 'Launch API', type: 'node', pause: async () => (++pauses, true) };
+  controller.onDebugEvent(event(2, '{"level":"error","msg":"payment failed for order 8"}'), session);
+  await settle();
+  assert.equal(pauses, 0, 'a statement with a breakpoint already stops there');
+  breakpointsChanged?.({ removed: [breakpoints[0]] });
+  answers.notice = 'Show event';
+  controller.onDebugEvent(event(3, '{"level":"error","msg":"payment failed for order 9"}'), session);
+  await settle();
+  await settle();
+  assert.equal(pauses, 1);
+  assert.deepEqual(shown, [3], 'Show event opens the event that paused the session');
+
+  // Remove log breakpoint, from the pause notice.
+  await controller.breakOnMatchingLogs('timeout');
+  assert.equal(status.text, '$(debug-breakpoint-log) Break on log (2)');
+  answers.notice = 'Remove log breakpoint';
+  controller.onDebugEvent(event(4, '{"level":"warn","msg":"upstream timeout"}'), session);
+  await settle();
+  await settle();
+  assert.equal(status.text, '$(debug-breakpoint-log) Break on log');
+
+  // Manage: remove the one that is left, then there is nothing to manage.
+  answers.notice = undefined;
+  answers.pick = (items) => items[0];
+  await commands.get('logline.manageLogBreakpoints')!();
+  assert.equal(status.shown, false);
+  await commands.get('logline.manageLogBreakpoints')!();
+  assert.match(messages.at(-1)!, /^No log breakpoints are set\./);
+
+  // Remove all, after choosing Manage from the notice that confirms a new rule.
+  answers.notice = 'Manage';
+  answers.pick = (items) => items.at(-1);
+  await controller.breakOnMatchingLogs('alpha');
+  await settle();
+  assert.equal(status.shown, false, 'Remove all log breakpoints clears every rule');
+  controller.dispose();
+});

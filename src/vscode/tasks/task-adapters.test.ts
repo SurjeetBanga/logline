@@ -11,6 +11,9 @@ let tasks: unknown[] = [];
 let onPick = () => {};
 let provider: vscode.TaskProvider;
 const errors: string[] = [];
+const notices: string[] = [];
+let trusted = true;
+let fetchError: Error | undefined;
 const disposable = () => ({ dispose() {} });
 const mock = {
   Task: class {
@@ -30,7 +33,9 @@ const mock = {
     fire() {}
   },
   workspace: {
-    isTrusted: true,
+    get isTrusted() {
+      return trusted;
+    },
     get workspaceFolders() {
       return folders;
     },
@@ -40,11 +45,15 @@ const mock = {
       onPick();
       return items[0];
     },
-    showInformationMessage() {},
+    showInformationMessage: (message: string) => notices.push(message),
+    showWarningMessage: (message: string) => notices.push(message),
     showErrorMessage: (message: string) => errors.push(message),
   },
   tasks: {
-    fetchTasks: async () => tasks,
+    fetchTasks: async () => {
+      if (fetchError) throw fetchError;
+      return tasks;
+    },
     registerTaskProvider: (_type: string, value: vscode.TaskProvider) => {
       provider = value;
       return disposable();
@@ -79,6 +88,9 @@ function setup() {
   ];
   onPick = () => {};
   errors.length = 0;
+  notices.length = 0;
+  trusted = true;
+  fetchError = undefined;
   return { root, file: path.join(folders[1].uri.fsPath, '.vscode/tasks.json') };
 }
 
@@ -203,4 +215,112 @@ test('task provider rejects unsupported definitions and pseudo terminals stop th
   terminal.handleInput();
   terminal.close();
   assert.equal(stopped, 'session-1');
+});
+
+/** A process task in a workspace folder, as VS Code reports it. */
+const processTask = (name: string, scope: unknown, dependsOn?: string | string[]) => ({
+  name,
+  source: 'Workspace',
+  scope,
+  definition: { type: 'process', label: name, ...(dependsOn ? { dependsOn } : {}) },
+  execution: { process: process.execPath, args: [name.toLowerCase()], options: {} },
+});
+const written = (file: string) =>
+  (JSON.parse(readFileSync(file, 'utf8')).tasks as { label: string; dependsOn?: unknown }[]).filter((task) =>
+    task.label.startsWith('Logline: '),
+  );
+
+test('conversion explains why it cannot start or has nothing to do', async () => {
+  const { root, file } = setup();
+  try {
+    trusted = false;
+    await convertTask();
+    trusted = true;
+    const saved = folders;
+    folders = [];
+    await convertTask();
+    folders = saved;
+    fetchError = new Error('the task system is busy');
+    await convertTask();
+    fetchError = undefined;
+    tasks = [{ name: 'Custom', source: 'Workspace', scope: folders[1], definition: { type: 'custom' } }];
+    await convertTask();
+    assert.deepEqual(notices, [
+      'Trust this workspace before converting a task.',
+      'Open a workspace before converting a task.',
+      'No shell, process, node-terminal, or launch pre-task was found.',
+    ]);
+    assert.deepEqual(errors, ['Could not read VS Code tasks: the task system is busy']);
+
+    // A shell task with shellArgs is offered, so the user learns why it is refused.
+    tasks = [
+      {
+        name: 'Quoted',
+        source: 'Workspace',
+        scope: folders[1],
+        definition: { type: 'shell' },
+        execution: { commandLine: 'echo hi', options: { shellArgs: ['-c'] } },
+      },
+    ];
+    await convertTask();
+    assert.match(errors[1], /uses shellArgs/);
+
+    // Converting the same task twice adds it once.
+    tasks = [processTask('Run', folders[1])];
+    await convertTask();
+    await convertTask();
+    assert.equal(written(file).length, 1);
+    assert.equal(notices.at(-1), 'Logline task already exists for Run.');
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('conversion brings dependencies in the same folder along, and keeps others by name', async () => {
+  const { root, file } = setup();
+  try {
+    const [api, worker] = folders;
+    tasks = [
+      processTask('Start', worker, ['Build', 'Migrate', 'Lint']),
+      processTask('Build', worker, 'Start'), // a cycle must not recurse forever
+      processTask('Migrate', api), // another folder: kept by name
+      processTask('Lint', worker),
+      processTask('Lint', worker), // two tasks share the name: ambiguous, kept by name
+    ];
+    writeFileSync(file, '{"version":"2.0.0","tasks":[]}');
+    await convertTask();
+    assert.deepEqual(errors, []);
+    assert.deepEqual(
+      written(file).map((task) => [task.label, task.dependsOn]),
+      [
+        ['Logline: Start', ['Logline: Build', 'Migrate', 'Lint']],
+        ['Logline: Build', 'Logline: Start'],
+      ],
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('a dependsOn written only in tasks.json is followed', async () => {
+  const { root, file } = setup();
+  try {
+    const worker = folders[1];
+    // VS Code's task omits dependsOn; the folder's tasks.json declares it.
+    tasks = [processTask('Serve', worker), processTask('Compile', worker)];
+    writeFileSync(
+      file,
+      JSON.stringify({ version: '2.0.0', tasks: [{ label: 'Serve', type: 'process', dependsOn: 'Compile' }] }),
+    );
+    await convertTask();
+    assert.deepEqual(
+      written(file).map((task) => [task.label, task.dependsOn]),
+      [
+        ['Logline: Serve', 'Logline: Compile'],
+        ['Logline: Compile', undefined],
+      ],
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });

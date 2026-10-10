@@ -24,7 +24,7 @@ const mock = {
     showInformationMessage: (message: string) => calls.push({ name: 'info', value: message }),
     showInputBox: async () => input,
     showWorkspaceFolderPick: async () => undefined,
-    showQuickPick: async () => undefined,
+    showQuickPick: async (_items?: unknown): Promise<unknown> => undefined,
     showOpenDialog: async () => [{ scheme: 'file', fsPath: '/workspace/app.log' }],
   },
   commands: {
@@ -152,4 +152,113 @@ test('auto-start runs only trusted eligible saved servers with resolved cwd', ()
   trusted = false;
   startAutoServers(controller);
   assert.ok(calls.some((call) => call.name === 'warning' && String(call.value).includes('auto-start')));
+});
+
+test('commands stop at untrusted workspaces, cancelled pickers, and files Logline cannot follow', async () => {
+  const ran: unknown[][] = [];
+  const followed: string[] = [];
+  const traces: string[] = [];
+  const toggled: unknown[] = [];
+  const toggledSources: string[] = [];
+  const controller = {
+    runner: { run: (...args: unknown[]) => ran.push(args) },
+    files: { follow: async (file: string) => followed.push(file) },
+    showTrace: async (id: string) => traces.push(id),
+    toggleOtlp: (enabled: boolean) => toggled.push(enabled),
+    connectAgent: async () => toggled.push('connect'),
+    terminalCapture: {
+      availableTerminals: () => [
+        { id: 'zsh', label: 'zsh', ignored: false },
+        { id: 'bash', label: 'bash', ignored: true },
+      ],
+      toggleSource: (id: string) => toggledSources.push(id),
+    },
+  } as any;
+  const saved = { ...mock.window, folders: mock.workspace.workspaceFolders, findFiles: mock.workspace.findFiles };
+  const run = (name: string, ...args: unknown[]) => handlers.get(name)!(...args);
+  const warnings = () => calls.filter((call) => call.name === 'warning').map((call) => String(call.value));
+  try {
+    handlers.clear();
+    calls.length = 0;
+    registerCommands(controller);
+
+    // Untrusted: nothing runs, is followed, or is opened.
+    trusted = false;
+    await run('logline.followFile');
+    await run('logline.followCompose');
+    assert.deepEqual(warnings(), [
+      'Trust this workspace before following a log file.',
+      'Trust this workspace before following a Docker Compose project.',
+    ]);
+    trusted = true;
+
+    // Run command: a blank command, and a cancelled folder pick with several folders, run nothing.
+    input = '   ';
+    await run('logline.runCommand');
+    input = 'npm start';
+    mock.workspace.workspaceFolders = [{ uri: { fsPath: '/a' } }, { uri: { fsPath: '/b' } }];
+    mock.window.showWorkspaceFolderPick = async () => undefined;
+    await run('logline.runCommand');
+    assert.equal(ran.length, 0);
+    mock.window.showWorkspaceFolderPick = async () => ({ uri: { fsPath: '/b' } }) as any;
+    await run('logline.runCommand');
+    assert.deepEqual(ran.pop()!.slice(0, 2), ['npm start', '/b']);
+
+    // Follow file: remote files are refused, and a cancelled dialog does nothing.
+    mock.window.showOpenDialog = async () => [{ scheme: 'vscode-remote', fsPath: '/remote.log' }] as any;
+    await run('logline.followFile');
+    assert.equal(warnings().at(-1), 'Logline can only follow files on the local filesystem.');
+    mock.window.showOpenDialog = async () => undefined as any;
+    await run('logline.followFile');
+    assert.deepEqual(followed, []);
+
+    // Follow Compose: none found, several to choose from, and a cancelled choice.
+    mock.workspace.findFiles = async () => [];
+    await run('logline.followCompose');
+    assert.equal(warnings().at(-1), 'Logline found no compose.yaml or docker-compose.yml in this workspace.');
+    mock.workspace.findFiles = async () =>
+      [
+        { scheme: 'file', fsPath: '/workspace/compose.yaml' },
+        { scheme: 'file', fsPath: '/workspace/api/docker-compose.yml' },
+      ] as any;
+    mock.window.showQuickPick = async (items: any) => items[1];
+    await run('logline.followCompose');
+    assert.deepEqual(ran.pop()!.slice(0, 2), ['docker', '/workspace/api']);
+    mock.window.showQuickPick = async () => undefined;
+    await run('logline.followCompose');
+    assert.equal(ran.length, 0);
+
+    // Show trace: an id from a link, one typed in, and one that is not a trace id.
+    await run('logline.showTrace', '4bf92f3577b34da6a3ce929d0e0e4736');
+    input = ' abc-123 ';
+    await run('logline.showTrace');
+    input = 'not a trace';
+    await run('logline.showTrace');
+    assert.deepEqual(traces, ['4bf92f3577b34da6a3ce929d0e0e4736', 'abc-123']);
+
+    // The receiver and agent commands delegate to the controller.
+    await run('logline.startOtlpReceiver');
+    await run('logline.stopOtlpReceiver');
+    await run('logline.connectAgent');
+    assert.deepEqual(toggled, [true, false, 'connect']);
+
+    // Manage terminal capture offers the opposite of each terminal's state and reports the change.
+    let offered: { label: string }[] = [];
+    mock.window.showQuickPick = async (items: any) => {
+      offered = items;
+      return items[1];
+    };
+    await run('logline.manageTerminalCapture');
+    assert.deepEqual(
+      offered.map((item) => item.label),
+      ['Ignore · zsh', 'Enable · bash'],
+    );
+    assert.deepEqual(toggledSources, ['bash']);
+    assert.ok(calls.some((call) => call.name === 'info' && call.value === 'Terminal capture enabled for bash.'));
+  } finally {
+    Object.assign(mock.window, saved);
+    mock.workspace.workspaceFolders = saved.folders;
+    mock.workspace.findFiles = saved.findFiles;
+    trusted = true;
+  }
 });
