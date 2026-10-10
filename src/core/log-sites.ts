@@ -436,8 +436,11 @@ export function eventLocation(event: LogEvent): { file: string; line: number } |
 
 const basename = (file: string) => file.slice(file.lastIndexOf('/') + 1);
 const normalizePath = (file: string) => file.replace(/\\/g, '/');
-const WORD = /[A-Za-z][A-Za-z0-9_]{3,}/g;
-const KEY_WORD = /(?<![\w…])[A-Za-z][A-Za-z0-9_]{3,}(?![\w…])/g;
+// Words and numbers, so statements told apart only by a number or a short word (`retry 2 of 5`) still get
+// a key of their own. A key needs real boundaries in the template: a word touching a placeholder
+// (`cache_miss_` in `cache_miss_{key}`) tokenizes differently in the logged message.
+const TOKEN = /[A-Za-z0-9][A-Za-z0-9_]*/g;
+const KEY_TOKEN = /(?<![\w…])[A-Za-z0-9][A-Za-z0-9_]*(?![\w…])/g;
 
 interface Compiled {
   site: LogSite;
@@ -557,7 +560,7 @@ export class LogSiteIndex {
   }
 
   private byMessage(message: string): Compiled | undefined {
-    const words = new Set(message.match(WORD) ?? []);
+    const words = new Set(message.match(TOKEN) ?? []);
     let best: Compiled | undefined;
     let tied = false;
     const seen = new Set<Compiled>();
@@ -590,10 +593,10 @@ export class LogSiteIndex {
     return (this.byBasename = index);
   }
 
-  // Each matchable site is filed under the rarest word in its literals, so a
-  // message only tests the sites whose key word it contains. Keying on a
-  // common word ("Processing", "completed") would put thousands of statements
-  // in one bucket and test every message against all of them.
+  // Each matchable site is filed under the rarest token in its literals, so a
+  // message only tests the sites whose key it contains. Keying on a common
+  // word ("Processing", "completed") would put thousands of statements in one
+  // bucket and test every message against all of them.
   private wordIndex(): Map<string, Compiled[]> {
     if (this.byWord) return this.byWord;
     const keyed: [LogSite, string[]][] = [];
@@ -601,10 +604,7 @@ export class LogSiteIndex {
     for (const sites of this.files.values())
       for (const site of sites) {
         if (!site.matchable) continue;
-        // A word touching a placeholder (`cache_miss_` in `cache_miss_{key}`)
-        // tokenizes differently in the logged message, so only words with real
-        // boundaries in the template can be keys.
-        const words = [...new Set(site.template.match(KEY_WORD)?.map((word) => word.toLowerCase()))];
+        const words = [...new Set(site.template.match(KEY_TOKEN)?.map((word) => word.toLowerCase()))];
         if (!words.length) continue;
         keyed.push([site, words]);
         for (const word of words) frequency.set(word, (frequency.get(word) ?? 0) + 1);
