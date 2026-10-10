@@ -18,7 +18,7 @@ All notable changes to Logline are documented in this file.
 - Joined plain-text traces headed by an exception, and Node crash blocks, are errors instead of Unclassified when the line has no leading severity.
 - Frames of joined traces such as `TypeError: …` are clickable in the expanded event and anchor error grouping.
 - A plain-text crash or stack trace that follows a JSON error from the same source and run, within 2 seconds (30 seconds for a Node crash that ends the process), is linked to it. The error's details show the crash's stack, and the crash row leads back to the error. Both stay separate events in capture order, and agent `inspect` of the error includes the crash, redacted on its own.
-- The Logs toolbar is quieter: the search row's controls have no border until hovered, opened, or on, the filter box gets more room, **My changes** looks like an applied filter while on, only **Live** keeps a colored outline, and **Log issues** shows its count in the warning color. On narrow panels, **Saved searches**, **Columns**, **Traces**, **Metrics**, and **Log issues** show only their icon and count.
+- The Logs toolbar is quieter: the search row's controls have no border until hovered, opened, or on, the filter box gets more room, **My changes** looks like an applied filter while on, only **Live** keeps a colored outline, and **Log issues** shows its count in the warning color. On narrow panels, **Saved searches**, **Columns**, **Copy results**, **Traces**, **Metrics**, and **Log issues** show only their icon and count, so an applied filter keeps the search box usable.
 
 ### Security
 
