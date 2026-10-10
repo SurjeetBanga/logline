@@ -56,11 +56,11 @@ export class LogBreakpointRules {
    * The rule that should pause the debugger for a newly captured event, if
    * any. Every matching rule counts the hit; at most one asks for a pause.
    */
-  check(event: LogEvent, now = Date.now()): LogBreakpointRule | undefined {
+  check(event: LogEvent, now = Date.now(), changed?: (event: LogEvent) => boolean): LogBreakpointRule | undefined {
     let pause: (typeof this.rules)[number] | undefined;
     for (const rule of this.rules) {
       if (rule.levels.length && !rule.levels.includes(String(event.level).toLowerCase())) continue;
-      if (!matchesQuery(event, rule.parsed, now)) continue;
+      if (!matchesQuery(event, rule.parsed, now, changed)) continue;
       rule.hits++;
       if (!pause && now - rule.pausedAt >= PAUSE_INTERVAL_MS) pause = rule;
     }

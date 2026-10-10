@@ -77,6 +77,8 @@ export interface Snapshot extends Stats {
   doctor?: { revision: number; total: number; findings?: DoctorFindingView[]; };
   /** MCP clients such as Claude Code and Codex that read shared logs recently. */
   agentClients?: string[];
+  /** Files changed since the last commit, while the workspace is a git repository. */
+  changes?: { files: number; };
 }
 /**
  * A table row: the event with its displayed fields, plus what the row links

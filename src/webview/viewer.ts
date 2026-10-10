@@ -1,6 +1,7 @@
 import type { HostMessage, Snapshot } from '../protocol/messages';
 import { createAnalysis } from './analysis/charts';
 import { addFilterTerm } from './search/cell-filter';
+import { hasChangedScope, withChangedScope } from '../core/changed-query';
 import { SnapshotBridge } from './bridge';
 import { getElements, setLabel } from './dom';
 import { createTooltips } from './tooltip';
@@ -56,6 +57,8 @@ export function createViewer(api: WebviewApi) {
   const doctor = createDoctor(elements.doctor, elements.doctorCount, elements.doctorPanel, elements.doctorList, api, scope, () => doctorPopover.close(),
     id => inspection.showContext(id));
   let otlpRunning = false;
+  // Files changed since the last commit; undefined outside a git repository.
+  let changedFiles: number | undefined;
   let otlpEndpoint: string | undefined;
   let pointerOverRows = false;
   let heldEvents: Snapshot['events'];
@@ -162,6 +165,8 @@ export function createViewer(api: WebviewApi) {
       elements.otlpStatus.title = `Receiving OpenTelemetry logs and traces on ${data.otlp?.endpoint ?? 'localhost'}. Click to see traces.`;
     }
     doctor.receive(data.doctor);
+    changedFiles = data.changes?.files;
+    updateChangesControl();
     elements.traceCount.hidden = !data.traceCount;
     elements.traceCount.textContent = data.traceCount ? numberFormat.format(data.traceCount) : '';
     elements.traces.title = data.traceCount
@@ -397,6 +402,18 @@ export function createViewer(api: WebviewApi) {
     setLabel(elements.copyResults, 'Copy results');
     delete elements.copyResults.dataset.copied;
   }
+  // Shown in a git repository, and whenever the filter already uses it so it can be turned off.
+  function updateChangesControl() {
+    const on = hasChangedScope(search.query());
+    const button = elements.changedOnly;
+    button.hidden = changedFiles === undefined && !on;
+    button.setAttribute('aria-pressed', String(on));
+    const tooLong = !on && withChangedScope(search.query(), true).length > 256;
+    button.disabled = tooLong;
+    button.title = tooLong ? 'The filter is too long to add changed:true. Remove a filter first.'
+      : changedFiles === undefined ? 'Not in a git repository, so no code counts as changed. Click to remove the filter.'
+      : `${on ? 'Showing' : 'Show'} only logs from code changed since the last commit (${numberFormat.format(changedFiles)} ${changedFiles === 1 ? 'file' : 'files'}): the statement that logged them, or a stack frame in their exception, is on a changed line`;
+  }
   function updateGuideStatus(status: { unread: boolean; version: string }) {
     guideUnread = status.unread;
     elements.helpBadge.hidden = !status.unread;
@@ -407,7 +424,7 @@ export function createViewer(api: WebviewApi) {
     if (state.paused) { state.browseFromInspection(); table.resetDetails(); table.renderWindow(); }
     updateFollowControl(); updateModeLabel(); request(true);
   }
-  function filterChanged() { state.filterChanged(); updateCopyResultsControl(); saveState(); requestInteraction(); }
+  function filterChanged() { state.filterChanged(); updateCopyResultsControl(); updateChangesControl(); saveState(); requestInteraction(); }
 
   scope.listen(elements.logs, 'click', event => {
     const target = event.target as HTMLElement;
@@ -588,6 +605,9 @@ export function createViewer(api: WebviewApi) {
     api.postMessage({ type: 'saveSearch', name, query: search.query(), levels: state.currentLevels(), serverId: state.selectedServer || undefined });
   });
 
+  scope.listen(elements.changedOnly, 'click', () => {
+    search.setQuery(withChangedScope(search.query(), !hasChangedScope(search.query())), true);
+  });
   scope.listen(elements.analyze, 'click', () => {
     elements.analysisDialog.showModal();
     elements.analysisStatus.textContent = 'Loading analysis…';

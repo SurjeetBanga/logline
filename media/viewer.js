@@ -381,12 +381,12 @@
       breakdowns.append(statusSection(analysis.statusCodes ?? []), ...(analysis.topValues ?? []).map(facetSection));
       content.append(breakdowns);
       const errorGroups = analysis.errorGroups ?? [];
-      const groups = section(`Error groups${errorGroups.length ? ` \xB7 ${count(errorGroups.length)}` : ""}`, "chart-section chart-wide");
+      const groups2 = section(`Error groups${errorGroups.length ? ` \xB7 ${count(errorGroups.length)}` : ""}`, "chart-section chart-wide");
       const errorTotal = errorGroups.reduce((sum, item) => sum + item.count, 0);
       const errorMax = Math.max(1, ...errorGroups.map((item) => item.count));
-      for (const item of errorGroups.slice(0, 20)) groups.append(groupRow(item, errorTotal, errorMax, { detail: seen(item, analysis.range) }));
-      if (!errorGroups.length) groups.append(empty("No errors in these logs."));
-      content.append(groups);
+      for (const item of errorGroups.slice(0, 20)) groups2.append(groupRow(item, errorTotal, errorMax, { detail: seen(item, analysis.range) }));
+      if (!errorGroups.length) groups2.append(empty("No errors in these logs."));
+      content.append(groups2);
       const patterns = section("Log patterns", "chart-section chart-wide");
       const patternMax = Math.max(1, ...(analysis.patterns ?? []).map((item) => item.count));
       for (const item of analysis.patterns ?? []) patterns.append(groupRow(item, total, patternMax, { level: item.level }));
@@ -427,14 +427,38 @@
     return addFilterTerm(input, `${exclude ? "-" : ""}${cell2.field}:${JSON.stringify(String(cell2.value))}`, limit);
   }
   function addFilterTerm(input, term, limit = 256) {
-    const groups = [[]];
+    const groups2 = [[]];
     for (const token of queryTokens(input)) {
-      if (token === "OR" || token === "or") groups.push([]);
-      else groups.at(-1).push(token);
+      if (token === "OR" || token === "or") groups2.push([]);
+      else groups2.at(-1).push(token);
     }
-    const branches = groups.filter((group) => group.length);
+    const branches = groups2.filter((group) => group.length);
     const query = (branches.length ? branches : [[]]).map((group) => [...group, term].join(" ")).join(" OR ");
     return query.length > limit ? { reason: `This filter would exceed the ${limit}-character search limit.` } : { query };
+  }
+
+  // src/core/changed-query.ts
+  var CHANGED_TERM = "changed:true";
+  var isOr = (token) => token === "OR" || token === "or";
+  var isChangedTerm = (token) => token.toLowerCase() === CHANGED_TERM;
+  function groups(query) {
+    const result = [[]];
+    for (const token of queryTokens(query.trim())) {
+      if (isOr(token)) result.push([]);
+      else result.at(-1).push(token);
+    }
+    return result.filter((group) => group.length);
+  }
+  function hasChangedScope(query) {
+    const parts = groups(query);
+    return parts.length > 0 && parts.every((group) => group.some(isChangedTerm));
+  }
+  function withChangedScope(query, on) {
+    const parts = groups(query).map((group) => group.filter((token) => !isChangedTerm(token)));
+    const kept = parts.filter((group) => group.length);
+    if (!on) return kept.map((group) => group.join(" ")).join(" OR ");
+    if (!kept.length) return CHANGED_TERM;
+    return kept.map((group) => [...group, CHANGED_TERM].join(" ")).join(" OR ");
   }
 
   // src/webview/bridge.ts
@@ -598,6 +622,7 @@
       analysisStatus: element("analysisStatus"),
       analysisContent: element("analysisContent"),
       levelButton: element("levelButton"),
+      changedOnly: element("changedOnly"),
       levelMenu: element("levelMenu"),
       server: element("server"),
       scopeMenu: element("scopeMenu"),
@@ -3011,6 +3036,7 @@ Trace ${trace.traceId}`;
       (id) => inspection.showContext(id)
     );
     let otlpRunning = false;
+    let changedFiles;
     let otlpEndpoint;
     let pointerOverRows = false;
     let heldEvents;
@@ -3132,6 +3158,8 @@ Trace ${trace.traceId}`;
         elements.otlpStatus.title = `Receiving OpenTelemetry logs and traces on ${data.otlp?.endpoint ?? "localhost"}. Click to see traces.`;
       }
       doctor.receive(data.doctor);
+      changedFiles = data.changes?.files;
+      updateChangesControl();
       elements.traceCount.hidden = !data.traceCount;
       elements.traceCount.textContent = data.traceCount ? numberFormat.format(data.traceCount) : "";
       elements.traces.title = data.traceCount ? `${numberFormat.format(data.traceCount)} traces received from OpenTelemetry. Show requests across services.` : "Requests across services, from OpenTelemetry spans and logs with a trace id";
@@ -3355,6 +3383,15 @@ Trace ${trace.traceId}`;
       setLabel(elements.copyResults, "Copy results");
       delete elements.copyResults.dataset.copied;
     }
+    function updateChangesControl() {
+      const on = hasChangedScope(search.query());
+      const button = elements.changedOnly;
+      button.hidden = changedFiles === void 0 && !on;
+      button.setAttribute("aria-pressed", String(on));
+      const tooLong = !on && withChangedScope(search.query(), true).length > 256;
+      button.disabled = tooLong;
+      button.title = tooLong ? "The filter is too long to add changed:true. Remove a filter first." : changedFiles === void 0 ? "Not in a git repository, so no code counts as changed. Click to remove the filter." : `${on ? "Showing" : "Show"} only logs from code changed since the last commit (${numberFormat.format(changedFiles)} ${changedFiles === 1 ? "file" : "files"}): the statement that logged them, or a stack frame in their exception, is on a changed line`;
+    }
     function updateGuideStatus(status) {
       guideUnread = status.unread;
       elements.helpBadge.hidden = !status.unread;
@@ -3374,6 +3411,7 @@ Trace ${trace.traceId}`;
     function filterChanged() {
       state.filterChanged();
       updateCopyResultsControl();
+      updateChangesControl();
       saveState();
       requestInteraction();
     }
@@ -3539,6 +3577,9 @@ Trace ${trace.traceId}`;
       const name = elements.saveSearchName.value;
       elements.saveSearchDialog.close();
       api.postMessage({ type: "saveSearch", name, query: search.query(), levels: state.currentLevels(), serverId: state.selectedServer || void 0 });
+    });
+    scope.listen(elements.changedOnly, "click", () => {
+      search.setQuery(withChangedScope(search.query(), !hasChangedScope(search.query())), true);
     });
     scope.listen(elements.analyze, "click", () => {
       elements.analysisDialog.showModal();

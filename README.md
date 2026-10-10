@@ -43,7 +43,7 @@ Logline can also capture commands you run in supported VS Code terminals. Turn *
 | Workflow | Features |
 | --- | --- |
 | **Capture** | Capture supported terminal commands and debug sessions, run several servers at once, follow log files on disk like `tail -F`, split Docker Compose and Kubernetes output into one source per service, receive OpenTelemetry logs and traces, save commands with **Manage servers**, filter by source or run, and capture VS Code tasks. |
-| **Search** | Field/value autocomplete, editable filter chips, right-click **Include value** / **Exclude value**, any combination of log levels, and up to 50 saved searches. |
+| **Search** | Field/value autocomplete, editable filter chips, right-click **Include value** / **Exclude value**, any combination of log levels, **My changes** for logs from code changed since the last commit, and up to 50 saved searches. |
 | **Inspect** | Expand JSON, read structured exceptions and nested causes, see multi-line plain-text stack traces as one event, open stack-frame source locations, share an eventâ€™s exact run, view up to 25 surrounding events on each side from the same run, browse recent traces, and follow a request across services in a trace waterfall. |
 | **Code** | See a CodeLens with live hit counts, errors, and recent values above the log statements in your editor, jump from any event to the statement that logged it, and find statements that never fired. |
 | **Debug** | Stop the debugger on the statement that logged an event with **Break here** on an expanded event, or pause a debug session right after it logs anything that matches a search. |
@@ -70,6 +70,7 @@ Type a term and press **Enter** to apply it. Click a chip to edit it, or its **Ã
 | Events with a request ID | `exists:requestId` |
 | Messages matching a regex | `message:/time.?out/i` |
 | Recent events | `last:15m` |
+| Errors from code you changed since the last commit | `level:error changed:true` |
 | An absolute time range | `timestamp:[2026-09-14 TO 2026-09-15]` |
 
 Right-click a cell to include or exclude its value without typing a query. Keyboard users can focus a cell and press **Shift+F10**. Server and level selections stay active.

@@ -21,6 +21,7 @@ import { ViewNotifications } from './view-notifications';
 import { TerminalCapture } from './terminal-capture';
 import { GUIDE_STATE_KEY, guideStatus as getGuideStatus } from './guide-content';
 import { AgentAccessError, AgentLogAccess } from './agent-access';
+import { ChangedLines, ChangeScope } from '../core/changed-lines';
 import { eventLocation, LogSiteIndex, LogSiteTracker } from '../core/log-sites';
 import { getField } from '../core/query';
 import { extractExceptions } from '../core/exceptions';
@@ -29,6 +30,7 @@ import type { DetailLinks, DoctorAction, RowEvent } from '../protocol/messages';
 import type { LogBreakpoints } from './log-breakpoints';
 import { doctorMode, type LogDoctor } from './log-doctor';
 import { SensitiveScanner, type SourceSensitive } from '../core/log-findings';
+import type { GitChanges } from './git-changes';
 import type { LogLens } from './log-lens';
 import type { AgentBridge } from './agent-bridge';
 import { agentLaunch, connectAgent } from './agent-setup';
@@ -60,6 +62,10 @@ export class LogsController {
   }, this.spans);
   readonly logSites = new LogSiteIndex();
   readonly siteTracker = new LogSiteTracker(this.logSites);
+  /** Lines changed since the last commit, for `changed:true`. */
+  readonly changedLines = new ChangedLines();
+  /** Keeps `changedLines` up to date from git; attached at activation. */
+  gitChanges?: GitChanges;
   /** Sensitive values in output that no indexed statement accounts for. */
   readonly sensitiveScanner = new SensitiveScanner();
   private scannerBasis?: string;
@@ -85,6 +91,8 @@ export class LogsController {
 
   constructor(context: Pick<vscode.ExtensionContext, 'globalState'> & Partial<Pick<vscode.ExtensionContext, 'environmentVariableCollection'>>) {
     this.globalState = context.globalState;
+    this.store.changeScope = new ChangeScope(this.changedLines, this.logSites);
+    this.agentAccess.changes = () => this.gitChanges?.status();
     this.otel = new OtelIntegration(this.config, this.otlp, () => this.notifications.send({ type: 'update' }), context.environmentVariableCollection);
     this.runner.environment = (server, env) => this.otel.processEnvironment(server, env);
     this.searches = new SavedSearches(context.globalState);
@@ -131,6 +139,7 @@ export class LogsController {
       rowLinks: event => this.rowLinks(event),
       rowLinksVersion: `${this.lens?.enabled ?? false}:${this.logSites.version}:${this.siteTracker.generation}:${this.doctor?.revision ?? 0}`,
       agentClients: this.agentBridge?.recentClients() ?? [],
+      changes: this.gitChanges?.status(),
       doctor: this.doctor && doctorMode(this.config) !== 'off' ? {
         revision: this.doctor.revision, total: this.doctor.total,
         // The list only travels when the view does not have this revision yet.

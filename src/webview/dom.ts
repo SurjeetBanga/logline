@@ -36,6 +36,7 @@ export function getElements() {
     analysisStatus: element<HTMLElement>('analysisStatus'),
     analysisContent: element<HTMLElement>('analysisContent'),
     levelButton: element<HTMLButtonElement>('levelButton'),
+    changedOnly: element<HTMLButtonElement>('changedOnly'),
     levelMenu: element<HTMLElement>('levelMenu'),
     server: element<HTMLButtonElement>('server'),
     scopeMenu: element<HTMLElement>('scopeMenu'),

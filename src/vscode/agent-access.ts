@@ -2,6 +2,7 @@ import { createHash, randomBytes } from 'node:crypto';
 import { extractExceptions } from '../core/exceptions';
 import { formatDetails } from '../core/format-details';
 import { analyzeEvents } from '../core/log-analysis';
+import { withChangedScope } from '../core/changed-query';
 import { createRedactor, type RedactionOptions, type Redactor } from '../core/redaction';
 import type { LogStore, PageOptions } from '../core/log-store';
 import type { AgentRunStatus, AgentShareStatus } from '../core/agent-types';
@@ -22,8 +23,16 @@ export class AgentAccessError extends Error {
 
 export type { AgentRunStatus, AgentShareStatus } from '../core/agent-types';
 
-export interface AgentSearchInput extends PageOptions { shareId: string; sourceIds?: string[]; sessionIds?: string[]; limit?: number; cursor?: string; }
-export interface AgentSearchResult { events: LogEvent[]; matched: number; nextCursor?: string; newest: number; partial: boolean; hasMore: boolean; retention?: { oldest?: number; newest: number; } }
+export interface AgentSearchInput extends PageOptions {
+  shareId: string; sourceIds?: string[]; sessionIds?: string[]; limit?: number; cursor?: string;
+  /** Only events from code changed since the last commit: adds `changed:true` to every alternative of the query. */
+  changedOnly?: boolean;
+}
+export interface AgentSearchResult {
+  events: LogEvent[]; matched: number; nextCursor?: string; newest: number; partial: boolean; hasMore: boolean; retention?: { oldest?: number; newest: number; };
+  /** With `changedOnly`: files changed since the last commit, or null when the workspace is not a git repository. */
+  changedFiles?: number | null;
+}
 
 interface DecodedCursor { before?: number; lastId?: number; }
 interface MergedRead { events: LogEvent[]; matched: number; hasMore: boolean; }
@@ -38,6 +47,8 @@ export class AgentLogAccess {
   private readonly redaction: RedactionOptions;
   private redactor: Redactor;
   private readonly activeWaits = new Set<symbol>();
+  /** Files changed since the last commit, or undefined outside a git repository. */
+  changes?: () => { files: number } | undefined;
   constructor(private readonly store: LogStore, private readonly registry: SessionRegistry,
     private readonly nextId: () => number = () => 0, redaction: RedactionOptions = {}, private readonly spans?: SpanStore) {
     this.redaction = { enabled: true, replacement: '[REDACTED]', ...redaction };
@@ -157,7 +168,7 @@ export class AgentLogAccess {
   search(input: AgentSearchInput): AgentSearchResult {
     if (!input || typeof input !== 'object' || typeof input.shareId !== 'string') throw new AgentAccessError('INVALID_INPUT', 'A search input with a string shareId is required.');
     this.assertShare(input.shareId);
-    this.validate(input);
+    input = this.validate(input);
     const sources = this.sources(input.sourceIds);
     const sessions = this.sessions(input.sessionIds);
     const limit = Math.max(1, Math.min(200, Number.isFinite(input.limit) ? Math.floor(input.limit!) : 100));
@@ -187,7 +198,8 @@ export class AgentLogAccess {
     const continuationBefore = selected.length ? selected[selected.length - 1].id - 1 : before;
     return { events: selected, matched: read.matched, newest, partial: hasMore, hasMore,
       retention: { oldest: selected.length ? selected[selected.length - 1].id : undefined, newest },
-      nextCursor: hasMore ? this.encodeCursor(snapshotBefore, continuationBefore, cursorKey) : undefined };
+      nextCursor: hasMore ? this.encodeCursor(snapshotBefore, continuationBefore, cursorKey) : undefined,
+      ...this.changedFiles(input) };
   }
 
   // Each source contributes one bounded page at a time. Pages are merged by
@@ -303,7 +315,7 @@ export class AgentLogAccess {
   analyze(input: AgentSearchInput): unknown {
     if (!input || typeof input !== 'object' || typeof input.shareId !== 'string') throw new AgentAccessError('INVALID_INPUT', 'An analysis input with a string shareId is required.');
     this.assertShare(input.shareId);
-    this.validate(input);
+    input = this.validate(input);
     const sources = this.sources(input.sourceIds);
     const sessions = this.sessions(input.sessionIds);
     // Analysis historically considered the whole retained snapshot when no
@@ -313,13 +325,13 @@ export class AgentLogAccess {
     const read = this.readMerged(input, sources, sessions, before, before, 10000);
     const chronological = read.events.slice().reverse();
     const analysis = analyzeEvents(chronological, { from: input.from, to: input.to });
-    return this.redactor.value({ ...analysis, coverage: { matched: read.matched, analyzed: chronological.length, limited: read.matched > chronological.length } });
+    return this.redactor.value({ ...analysis, coverage: { matched: read.matched, analyzed: chronological.length, limited: read.matched > chronological.length }, ...this.changedFiles(input) });
   }
 
   async wait(input: AgentSearchInput, watermark: number, timeoutMs = 5000, signal?: { aborted?: boolean; isCancellationRequested?: boolean }): Promise<AgentSearchResult> {
     if (!input || typeof input !== 'object' || typeof input.shareId !== 'string') throw new AgentAccessError('INVALID_INPUT', 'A wait input with a string shareId is required.');
     this.assertShare(input.shareId);
-    this.validate(input);
+    input = this.validate(input);
     if (!Number.isSafeInteger(watermark) || watermark < 0) throw new AgentAccessError('INVALID_INPUT', 'watermark must be a non-negative event id.');
     if (!Number.isFinite(timeoutMs)) throw new AgentAccessError('INVALID_INPUT', 'timeoutMs must be a finite number.');
     // Copilot and MCP clients may each wait at once; the cap bounds the polling.
@@ -349,8 +361,13 @@ export class AgentLogAccess {
       if (signal?.aborted || signal?.isCancellationRequested) throw new AgentAccessError('CANCELLED', 'The log wait was cancelled.');
       this.assertShare(input.shareId);
       const newest = this.nextId();
-      return { events: [], matched: 0, newest, partial: false, hasMore: false, retention: { newest } };
+      return { events: [], matched: 0, newest, partial: false, hasMore: false, retention: { newest }, ...this.changedFiles(input) };
     } finally { this.activeWaits.delete(waitToken); }
+  }
+
+  // An empty changedOnly result means something different when there is no diff to compare with.
+  private changedFiles(input: AgentSearchInput): Pick<AgentSearchResult, 'changedFiles'> {
+    return input.changedOnly ? { changedFiles: this.changes?.()?.files ?? null } : {};
   }
 
   private assertShare(id?: string): void {
@@ -358,7 +375,8 @@ export class AgentLogAccess {
     if (id !== undefined && id !== this.shareId) throw new AgentAccessError('SHARE_CHANGED', 'The Logline sharing grant has changed.');
     this.refreshAllRuns();
   }
-  private validate(input: AgentSearchInput): void {
+  /** Check a search input, and return it with `changedOnly` folded into its query. */
+  private validate(input: AgentSearchInput): AgentSearchInput {
     if (!input || typeof input !== 'object') throw new AgentAccessError('INVALID_INPUT', 'A search input object is required.');
     if (input.query !== undefined && (typeof input.query !== 'string' || input.query.length > 256)) throw new AgentAccessError('INVALID_INPUT', 'query must be at most 256 characters.');
     if (input.sessionId !== undefined && typeof input.sessionId !== 'string') throw new AgentAccessError('INVALID_INPUT', 'sessionId must be a string.');
@@ -369,6 +387,11 @@ export class AgentLogAccess {
     if (input.sessionIds !== undefined && (!Array.isArray(input.sessionIds) || input.sessionIds.some(id => typeof id !== 'string'))) throw new AgentAccessError('INVALID_INPUT', 'sessionIds must be an array of strings.');
     if (input.limit !== undefined && (!Number.isFinite(input.limit) || input.limit < 1)) throw new AgentAccessError('INVALID_INPUT', 'limit must be a positive number.');
     if (input.before !== undefined && (!Number.isSafeInteger(input.before) || input.before < 0)) throw new AgentAccessError('INVALID_INPUT', 'before must be a non-negative event id.');
+    if (input.changedOnly !== undefined && typeof input.changedOnly !== 'boolean') throw new AgentAccessError('INVALID_INPUT', 'changedOnly must be a boolean.');
+    if (!input.changedOnly) return input;
+    const query = withChangedScope(input.query ?? '', true);
+    if (query.length > 256) throw new AgentAccessError('INVALID_INPUT', 'query must be at most 256 characters including the changed:true that changedOnly adds.');
+    return { ...input, query };
   }
   private sources(ids?: string[]): string[] {
     const requested = ids?.length ? ids : [...this.shared.keys()];

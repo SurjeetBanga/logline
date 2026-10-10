@@ -1565,3 +1565,32 @@ test('snapshots apply editor requests once and reflect the OpenTelemetry receive
   assert.equal(get('traceCount').hidden, true);
   assert.equal(get('otlpToggle').textContent, 'Start OpenTelemetry receiver');
 });
+
+test('My changes appears in a git repository and adds or removes changed:true', () => {
+  const { get, app, receive } = viewer();
+  const snapshot = (extra: Record<string, unknown>) => receive({
+    type: 'snapshot', generation: 1, newest: 100, status: 'Running', command: '', running: false, total: 0, retained: 0, discarded: 0, bytes: 0,
+    maxBytes: 1, truncated: 0, events: [], columns: [], page: 0, pages: 1, matched: 0, ...extra
+  });
+  snapshot({});
+  assert.equal(get('changedOnly').hidden, true, 'outside a git repository there is nothing to compare with');
+  snapshot({ changes: { files: 3 } });
+  assert.equal(get('changedOnly').hidden, false);
+  assert.equal(get('changedOnly').attributes['aria-pressed'], 'false');
+  assert.match(get('changedOnly').title, /3 files/);
+  app.search.setQuery('level:error OR timeout', true);
+  get('changedOnly').listeners.get('click')!();
+  assert.equal(app.search.query(), 'level:error changed:true OR timeout changed:true');
+  assert.equal(get('changedOnly').attributes['aria-pressed'], 'true');
+  // The term shows as chips in the search box, so it can be seen, edited, and removed there too.
+  assert.deepEqual(get('searchChips').children.map(chip => chip.title).filter(Boolean),
+    ['level:error', 'changed:true', 'timeout', 'changed:true']);
+  get('changedOnly').listeners.get('click')!();
+  assert.equal(app.search.query(), 'level:error OR timeout');
+  assert.equal(get('changedOnly').attributes['aria-pressed'], 'false');
+  // A filter that already uses it keeps the button, so it can be turned off.
+  app.search.setQuery('changed:true', true);
+  snapshot({});
+  assert.equal(get('changedOnly').hidden, false);
+  assert.equal(get('changedOnly').attributes['aria-pressed'], 'true');
+});
