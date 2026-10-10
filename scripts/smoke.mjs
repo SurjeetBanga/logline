@@ -1,8 +1,14 @@
 import { mkdtemp, mkdir, writeFile, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { createServer } from 'node:net';
+import { parseArgs } from 'node:util';
+
+// --vsix tests a packaged extension instead of this folder, so a file missing from the package fails here.
+// VSCODE_VERSION (such as 1.99.0 or stable) downloads that build instead of using the installed `code` CLI.
+const { values: { vsix } } = parseArgs({ options: { vsix: { type: 'string' } } });
+const version = process.env.VSCODE_VERSION;
 
 // A free port for the OpenTelemetry receiver, so the smoke test never meets a real collector.
 const otlpPort = await new Promise((resolve, reject) => {
@@ -24,14 +30,37 @@ try {
   }] }));
   await writeFile(path.join(workspace, '.vscode', 'settings.json'), JSON.stringify({ 'logline.otlp.port': otlpPort }));
   await writeFile(path.join(workspace, 'app.js'), 'console.log("smoke debug statement ready");\n');
+  let extensionPath = process.cwd();
+  if (vsix) {
+    const unpacked = path.join(root, 'package');
+    await mkdir(unpacked);
+    // A VSIX is a zip archive with the extension under extension/. GNU tar cannot read zip; the bsdtar in macOS and in
+    // Windows' System32 can, named in full on Windows so Git Bash's GNU tar is not found first.
+    const tar = process.platform === 'win32' ? path.join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'tar.exe') : 'tar';
+    const [command, ...args] = process.platform === 'linux' ? ['unzip', '-q', path.resolve(vsix), '-d', unpacked] : [tar, '-xf', path.resolve(vsix), '-C', unpacked];
+    const extracted = spawnSync(command, args, { stdio: 'inherit' });
+    if (extracted.status !== 0) throw new Error(`Could not unpack ${vsix}`);
+    extensionPath = path.join(unpacked, 'extension');
+  }
   const resultFile = path.join(root, 'result.json');
   const env = { ...process.env, LOGLINE_SMOKE_RESULT: resultFile, LOGLINE_SMOKE_OTLP_PORT: String(otlpPort) };
   for (const key of Object.keys(env)) if (key.startsWith('VSCODE_') || key === 'ELECTRON_RUN_AS_NODE') delete env[key];
-  const child = spawn(process.env.VSCODE_CLI ?? 'code', [
+  const args = [
     '--user-data-dir', path.join(root, 'profile'), '--extensions-dir', path.join(root, 'extensions'),
-    '--extensionDevelopmentPath', process.cwd(), '--extensionTestsPath', path.join(process.cwd(), 'out-tests/test/extension-smoke.js'),
-    '--wait', '--disable-workspace-trust', '--skip-welcome', '--skip-release-notes', workspace,
-  ], { env, stdio: 'inherit' });
+    '--extensionDevelopmentPath', extensionPath, '--extensionTestsPath', path.join(process.cwd(), 'out-tests/test/extension-smoke.js'),
+    '--disable-workspace-trust', '--skip-welcome', '--skip-release-notes', workspace,
+  ];
+  let executable = process.env.VSCODE_CLI ?? 'code';
+  if (version) {
+    const { downloadAndUnzipVSCode } = await import('@vscode/test-electron');
+    executable = await downloadAndUnzipVSCode({ version, cachePath: path.resolve('.vscode-test') });
+    // The application runs the tests and exits; CI containers have no sandbox support.
+    args.unshift('--no-sandbox', '--disable-gpu-sandbox');
+  } else {
+    // The CLI returns at once unless it waits for the window to close.
+    args.push('--wait');
+  }
+  const child = spawn(executable, args, { env, stdio: 'inherit' });
   const timeout = setTimeout(() => child.kill(), 120000);
   try {
     await new Promise((resolve, reject) => { child.once('error', reject); child.once('exit', code => code === 0 ? resolve() : reject(new Error(`VS Code exited with ${code}`))); });

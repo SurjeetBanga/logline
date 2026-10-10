@@ -6,3 +6,4 @@ out/
 !.env.example
 .logline/
 out-tests/
+.vscode-test/
