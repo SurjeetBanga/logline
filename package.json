@@ -2,7 +2,7 @@
   "name": "logline",
   "displayName": "Logline — Logs, Traces & AI Debugging",
   "description": "Capture logs from terminals, debug sessions, Docker and OpenTelemetry in one searchable live view. Trace requests, catch leaked secrets, and debug with Copilot, Claude Code or Codex.",
-  "version": "1.13.1",
+  "version": "1.14.0",
   "publisher": "surjeetbanga",
   "license": "MIT",
   "repository": {

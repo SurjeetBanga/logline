@@ -2,7 +2,7 @@
 
 All notable changes to Logline are documented in this file.
 
-## Unreleased
+## 1.14.0 — 2026-10-10
 
 ### Changes
 
@@ -11,14 +11,14 @@ All notable changes to Logline are documented in this file.
 - Log doctor checks OpenTelemetry spans and metrics against the semantic conventions: services without a name, ids in span names, 5xx responses not marked as errors, HTTP server spans without `http.route`, attribute names replaced in the stable conventions, and units in metric names. Findings are listed per service under **OpenTelemetry conventions** in **Log issues** and the health report, with **Show trace**.
 - **Logline: Show Status** (also **More actions → Status and troubleshooting…**) shows the OpenTelemetry receiver, agent connections and skills, sharing, capture, retention, and editor features in one list. Each item that is off or broken offers its fix, such as choosing another receiver port when 4318 was taken, and **Copy status** copies it for a bug report.
 - In Cursor, Windsurf, and Kiro, **Connect Claude Code or Codex** offers the editor's own agent first and adds Logline to its MCP settings file. Without GitHub Copilot Chat, **Fix with Copilot** and the **Ask Copilot** button are not offered, and investigation prompts are copied for another agent.
-
-- **My changes**, next to the level filter in a git repository, shows only logs from code you changed since the last commit: the statement that logged them, the location they report, or a frame in their stack trace is on a changed line, and new files count throughout. It adds `changed:true` to every `OR` branch, so it combines with any search (`level:error changed:true` for errors your edits caused) and works in Analyze, exports, saved searches, and **Break on matching logs**. Agent searches, analysis, and waits take `changedOnly` for the same filter, and say how many files changed.
+- **My changes**, next to the level filter in a git repository, shows only logs from code you changed since the last commit: the statement that logged them, the location they report, or a frame in their stack trace is on a changed line, and new files count throughout. It adds `changed:true` to every `OR` branch, so it combines with any search (`level:error changed:true` for errors your edits caused) and works in Analyze, exports, saved searches, and **Break on matching logs**. Edits count once saved or written to disk, including by an agent or formatter. Agent searches, analysis, and waits take `changedOnly` for the same filter, and say how many files changed.
 - The trace waterfall shows each span's **self time**: its duration less the time its child spans cover, counting parallel children once. **Where the time went** above the waterfall ranks the operations that spent the most time themselves, per service, with how many spans each had and their share of the trace; choose one to jump to its first span. A slow request whose time is in its own code, rather than in a database call or downstream service, now stands out without reading the whole waterfall. `logline_get_trace` returns the same self times and ranking to agents.
 - Log lenses show how long a statement's work takes when its events report a duration (`durationMs`, `duration`, `duration_ms`, or `responseTime`): **1,204 hits · p50 12 ms · p95 180 ms**, from its latest 256 retained events. Hover for p99 and the maximum.
 - An uncaught Node.js crash becomes one event: the `path:line` header, source line, caret, error, `at` frames, error properties, and the `Node.js v…` line are joined, and the row shows the error (`TypeError: …`) instead of the path.
 - Joined plain-text traces headed by an exception, and Node crash blocks, are errors instead of Unclassified when the line has no leading severity.
 - Frames of joined traces such as `TypeError: …` are clickable in the expanded event and anchor error grouping.
 - A plain-text crash or stack trace that follows a JSON error from the same source and run, within 2 seconds (30 seconds for a Node crash that ends the process), is linked to it. The error's details show the crash's stack, and the crash row leads back to the error. Both stay separate events in capture order, and agent `inspect` of the error includes the crash, redacted on its own.
+- The Logs toolbar is quieter: the search row's controls have no border until hovered, opened, or on, the filter box gets more room, **My changes** looks like an applied filter while on, only **Live** keeps a colored outline, and **Log issues** shows its count in the warning color. On narrow panels, **Saved searches**, **Columns**, **Traces**, **Metrics**, and **Log issues** show only their icon and count.
 
 ### Security
 
