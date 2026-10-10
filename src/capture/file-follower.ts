@@ -91,7 +91,7 @@ export class FileFollower {
     // Change notices start only now: a read before the tail position is known
     // would ingest the whole existing file from its first byte.
     if (!follow.stopped) {
-      follow.poll = setInterval(() => this.pump(follow), pollMs);
+      follow.poll = setInterval(() => { void this.pump(follow); }, pollMs);
       follow.poll.unref?.();
     }
     this.watch(follow);
@@ -142,6 +142,10 @@ export class FileFollower {
           follow.again = false;
           await this.readAppended(follow);
         } while (follow.again && !follow.stopped);
+      } catch (error) {
+        // Timers and watchers start pumps without awaiting them: report the failure here, and the next poll retries.
+        this.state.status = `Could not read ${path.basename(follow.file)}: ${error instanceof Error ? error.message : String(error)}`;
+        this.state.notify();
       } finally { follow.pumping = undefined; }
     })();
     return follow.pumping;

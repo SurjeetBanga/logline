@@ -15,7 +15,7 @@ function harness(settings: Record<string, unknown> = {}) {
   const state = new RuntimeState(() => undefined);
   const config = { get: <T>(key: string, fallback: T) => (key in settings ? settings[key] : fallback) as T };
   const follower = new FileFollower(config, registry, new Ingestion(store, () => undefined), state);
-  return { store, registry, follower, messages: () => store.all().map(event => event.message) };
+  return { store, registry, state, follower, messages: () => store.all().map(event => event.message) };
 }
 
 async function eventually(check: () => boolean, timeout = 3000): Promise<void> {
@@ -120,5 +120,23 @@ test('stopping a file source stops only that file', async () => {
     assert.ok(!h.messages().includes('INFO ignored'));
     await h.follower.dispose();
     assert.equal(h.follower.active, 0);
+  } finally { await rm(dir, { recursive: true, force: true }); }
+});
+
+test('a failed read is reported in the status and following continues', async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), 'logline-follow-'));
+  const file = path.join(dir, 'app.log');
+  try {
+    await writeFile(file, '');
+    const h = harness({ joinStackTraces: false });
+    const add = h.store.add.bind(h.store);
+    h.store.add = event => { if (event.message === 'poison') throw new Error('store failed'); return add(event); };
+    await h.follower.follow(file, { pollMs: 20 });
+    await appendFile(file, 'poison\n');
+    await eventually(() => h.state.status.startsWith('Could not read app.log'));
+    assert.match(h.state.status, /store failed/);
+    await appendFile(file, 'after\n');
+    await eventually(() => h.messages().includes('after'));
+    await h.follower.dispose();
   } finally { await rm(dir, { recursive: true, force: true }); }
 });

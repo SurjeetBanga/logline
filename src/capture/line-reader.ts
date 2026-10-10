@@ -33,9 +33,11 @@ export class LineReader {
 
   emit(): void {
     const line = this.pending.replace(/\r$/, '');
-    if (line || this.truncated) this.onLine(line, this.truncated);
+    const truncated = this.truncated;
+    // Reset first: a callback that throws must not leave its line to be glued onto the next one.
     this.pending = '';
     this.truncated = false;
+    if (line || truncated) this.onLine(line, truncated);
   }
 
   end(): void { this.consume(this.decoder.end()); this.emit(); }
