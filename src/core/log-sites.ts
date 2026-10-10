@@ -472,6 +472,27 @@ export interface SiteStats {
   truncated?: number;
   /** Structured warnings and errors without a trace or request id. */
   contextless?: number;
+  /** The durations the latest events reported (`durationMs` and its aliases), oldest first. */
+  durations?: { id: number; ms: number }[];
+}
+
+const MAX_DURATIONS = 256;
+
+/** Duration percentiles of a statement's recent events, when they report one. */
+export interface SiteDurations { count: number; min: number; p50: number; p95: number; p99: number; max: number; }
+
+export function siteDurations(stats: SiteStats): SiteDurations | undefined {
+  if (!stats.durations?.length) return undefined;
+  const sorted = stats.durations.map(entry => entry.ms).sort((a, b) => a - b);
+  const at = (share: number) => sorted[Math.min(sorted.length - 1, Math.ceil(sorted.length * share) - 1)];
+  return { count: sorted.length, min: sorted[0], p50: at(0.5), p95: at(0.95), p99: at(0.99), max: sorted[sorted.length - 1] };
+}
+
+function eventDuration(event: LogEvent): number | undefined {
+  const value = getField(event, 'durationMs');
+  if (value === undefined || value === null || value === '' || typeof value === 'boolean') return undefined;
+  const ms = typeof value === 'number' ? value : Number(value);
+  return Number.isFinite(ms) && ms >= 0 ? ms : undefined;
 }
 
 /** Per-site counts of retained and newly captured events. */
@@ -532,6 +553,8 @@ export class LogSiteTracker {
       if (!stats) continue;
       changed = true;
       if (!--stats.hits) { this.stats.delete(entry.site); continue; }
+      // Durations are kept oldest first, so evicted events leave from the front.
+      while (stats.durations?.length && stats.durations[0].id < oldestId) stats.durations.shift();
       if (entry.exact) stats.exact--;
       if (entry.error) stats.errors--;
       if (entry.bareError) stats.bareErrors!--;
@@ -574,6 +597,11 @@ export class LogSiteTracker {
       stats.lastSeen = event.timestampMs ?? stats.lastSeen;
       stats.samples.push({ id: event.id, level: event.level, message: (event.message ?? '').slice(0, 200), time: event.timestampMs });
       if (stats.samples.length > 3) stats.samples.shift();
+      const ms = eventDuration(event);
+      if (ms !== undefined) {
+        (stats.durations ??= []).push({ id: event.id, ms });
+        if (stats.durations.length > MAX_DURATIONS) stats.durations.shift();
+      }
       if (this.findings) collectFindings(stats, event, entry);
       this.counted.push(entry);
       changed = true;

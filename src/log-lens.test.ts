@@ -86,21 +86,22 @@ const add = (store: LogStore, id: number, line: string) => store.add(parseLogLin
 test('log lenses count events per statement and filter the Logs panel', async () => {
   const h = await harness();
   assert.equal(h.index.size, 3);
-  add(h.store, 1, '{"level":"info","msg":"user 41 logged in"}');
-  add(h.store, 2, '{"level":"info","msg":"user 42 logged in"}');
+  add(h.store, 1, '{"level":"info","msg":"user 41 logged in","durationMs":30}');
+  add(h.store, 2, '{"level":"info","msg":"user 42 logged in","durationMs":12}');
   add(h.store, 3, '{"level":"error","msg":"login failed for user bob"}');
   add(h.store, 4, '{"level":"info","msg":"unrelated"}');
   h.lens.refresh(Date.now() + 5000);
   const document = { uri: Uri.file('/w/src/auth.ts'), lineCount: 6 };
   const lenses = h.lens.provideCodeLenses(document as never) as unknown as CodeLens[];
   assert.deepEqual(lenses.map(lens => [lens.range.startLine, lens.command.title.replace(/ · last .*$/, '')]), [
-    [1, '$(pulse) 2 hits'], [2, '$(pulse) 1 hit · 1 error']
+    [1, '$(pulse) 2 hits · 12 ms–30 ms'], [2, '$(pulse) 1 hit · 1 error']
   ]);
   assert.deepEqual(decorations.map(range => range.startLine), [2], 'gutter marks only statements that logged errors');
   await commands.get('logline.showLogSite')!(lenses[0].command.arguments[0]);
   assert.deepEqual(h.queries, ['message:/user.*logged\\s+in/']);
   const hover = h.lens.provideHover(document as never, new Position(1, 4) as never) as unknown as Hover;
-  assert.match(hover.contents.value, /2 hits · last .* matched by message text/);
+  assert.match(hover.contents.value, /2 hits · 12 ms–30 ms · last .* matched by message text/);
+  assert.match(hover.contents.value, /Duration 12 ms–30 ms, from the latest 2 events with `durationMs`/);
   assert.match(hover.contents.value, /user 42 logged in[^]*user 41 logged in/);
   assert.equal(h.lens.provideHover(document as never, new Position(3, 4) as never), undefined);
 
@@ -128,6 +129,10 @@ test('quiet statements lists log calls without retained events and opens the cho
 test('lens titles summarize counts and age', () => {
   const { lensTitle, formatAgo } = withVscode(mock, () => require('./vscode/log-lens') as typeof import('./vscode/log-lens'));
   assert.equal(lensTitle({ hits: 1200, errors: 0, samples: [], exact: 0, lastSeen: 1000 }, 4000), '$(pulse) 1,200 hits · last 3s ago');
+  const timed = (...values: number[]) => ({ hits: values.length, errors: 1, samples: [], exact: 0, durations: values.map((ms, id) => ({ id, ms })) });
+  assert.equal(lensTitle(timed(42)), '$(pulse) 1 hit · 42 ms · 1 error');
+  assert.equal(lensTitle(timed(8, 1500)), '$(pulse) 2 hits · 8 ms–1.5 s · 1 error', 'a range until percentiles mean something');
+  assert.equal(lensTitle(timed(0.25, 10, 12, 14, 900)), '$(pulse) 5 hits · p50 12 ms · p95 900 ms · 1 error');
   assert.equal(formatAgo(125000), '2m ago');
   assert.equal(formatAgo(7200000), '2h ago');
 });

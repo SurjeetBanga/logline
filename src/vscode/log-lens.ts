@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { extractLogSites, LOG_SITE_EXTENSIONS, siteQuery, type LogSite, type LogSiteIndex, type LogSiteTracker, type SiteStats } from '../core/log-sites';
+import { extractLogSites, LOG_SITE_EXTENSIONS, siteDurations, siteQuery, type LogSite, type LogSiteIndex, type LogSiteTracker, type SiteDurations, type SiteStats } from '../core/log-sites';
 import type { LogStore } from '../core/log-store';
 import type { Settings } from '../core/settings';
 import { openSourceLocation } from './source-navigation';
@@ -37,8 +37,23 @@ export function formatAgo(ms: number): string {
   return `${Math.floor(seconds / 86400)}d ago`;
 }
 
+export function formatMs(ms: number): string {
+  if (ms < 1) return `${Math.round(ms * 100) / 100} ms`;
+  if (ms < 1000) return `${Math.round(ms * 10) / 10} ms`;
+  return `${Math.round(ms / 10) / 100} s`;
+}
+
+/** Durations as a lens shows them: percentiles once there are enough to mean something. */
+export function durationText(durations: SiteDurations): string {
+  if (durations.count >= 5) return `p50 ${formatMs(durations.p50)} · p95 ${formatMs(durations.p95)}`;
+  if (durations.min === durations.max) return formatMs(durations.min);
+  return `${formatMs(durations.min)}–${formatMs(durations.max)}`;
+}
+
 export function lensTitle(stats: SiteStats, now = Date.now()): string {
   const parts = [`$(pulse) ${stats.hits.toLocaleString()} ${stats.hits === 1 ? 'hit' : 'hits'}`];
+  const durations = siteDurations(stats);
+  if (durations) parts.push(durationText(durations));
   if (stats.errors) parts.push(`${stats.errors.toLocaleString()} ${stats.errors === 1 ? 'error' : 'errors'}`);
   if (stats.lastSeen !== undefined) parts.push(`last ${formatAgo(now - stats.lastSeen)}`);
   return parts.join(' · ');
@@ -166,6 +181,13 @@ export class LogLens implements vscode.CodeLensProvider, vscode.HoverProvider, v
     const how = stats.exact === stats.hits ? 'matched by the code location in each event'
       : stats.exact ? 'matched by code location and message text' : 'matched by message text';
     markdown.appendMarkdown(`**Logline** · ${lensTitle(stats).replace('$(pulse) ', '')} · ${how}\n\n`);
+    const durations = siteDurations(stats);
+    if (durations) {
+      const spread = durations.count >= 5
+        ? `p50 ${formatMs(durations.p50)} · p95 ${formatMs(durations.p95)} · p99 ${formatMs(durations.p99)} · max ${formatMs(durations.max)}`
+        : durationText(durations);
+      markdown.appendMarkdown(`Duration ${spread}, from the latest ${durations.count.toLocaleString()} ${durations.count === 1 ? 'event' : 'events'} with \`durationMs\` or a similar field\n\n`);
+    }
     for (const sample of [...stats.samples].reverse()) {
       markdown.appendMarkdown(`- \`${sample.level.toUpperCase()}\` `);
       markdown.appendText(sample.message);

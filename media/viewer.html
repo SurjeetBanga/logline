@@ -142,8 +142,9 @@
   <dialog id="traceDialog" aria-labelledby="traceTitle">
     <div class="context-header"><strong id="traceTitle">Trace</strong><span><button id="traceBack" hidden>All traces</button><button id="traceFilter" title="Show every retained event with this trace id">Filter logs by trace</button><button id="traceClose" autofocus>Back to results</button></span></div>
     <p id="traceStatus" role="status">Loading…</p>
+    <section id="traceHotspots" class="trace-hotspots" aria-labelledby="traceHotspotsTitle" hidden><h3 id="traceHotspotsTitle">Where the time went</h3><ol id="traceHotspotList"></ol></section>
     <div class="trace-scroll">
-      <table class="trace-table" aria-label="Spans and logs in this trace"><thead><tr><th>Operation</th><th>Service</th><th>Timeline</th><th>Duration</th></tr></thead><tbody id="traceRows"></tbody></table>
+      <table class="trace-table" aria-label="Spans and logs in this trace"><thead><tr><th>Operation</th><th>Service</th><th>Timeline</th><th>Duration</th><th title="Time not spent in child spans">Self</th></tr></thead><tbody id="traceRows"></tbody></table>
     </div>
   </dialog>
   <dialog id="tracesDialog" aria-labelledby="tracesTitle">

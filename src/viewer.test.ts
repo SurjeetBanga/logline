@@ -37,7 +37,14 @@ class Element {
   scrollIntoViewCalls: unknown[] = [];
   onFocus?: (options?: { preventScroll?: boolean; }) => void;
   get firstChild() { return this.children[0]; }
-  get classList() { return { contains: (name: string) => this.className.split(' ').includes(name) }; }
+  get classList() {
+    const names = () => this.className.split(' ').filter(Boolean);
+    return {
+      contains: (name: string) => names().includes(name),
+      add: (name: string) => { if (!names().includes(name)) this.className = [...names(), name].join(' '); },
+      remove: (name: string) => { this.className = names().filter(item => item !== name).join(' '); }
+    };
+  }
   append(...children: Element[]) { for (const child of children) child.parent = this; this.children.push(...children); }
   replaceChildren(...children: Element[]) { this.children = []; this.append(...children); }
   get parentNode() { return this.parent; }
@@ -1449,11 +1456,12 @@ test('the trace dialog renders a waterfall with logs and opens their context', (
   const { get, app, receive, messages } = viewer();
   app.traceView.show('ABC123');
   assert.equal(get('traceStatus').textContent, 'Loading…');
-  const span = (spanId: string, depth: number, extra: Record<string, unknown> = {}) => ({ spanId, name: `op ${spanId}`, service: 'api', kind: 'server', offsetMs: depth * 10, durationMs: 40, depth, error: false, critical: depth === 0, attributes: { 'http.route': '/x' }, events: [], ...extra });
-  receive({ type: 'trace', trace: { traceId: 'other', spans: [], logs: [], services: [], durationMs: 0, errors: 0, omitted: 0 } });
+  const span = (spanId: string, depth: number, extra: Record<string, unknown> = {}) => ({ spanId, name: `op ${spanId}`, service: 'api', kind: 'server', offsetMs: depth * 10, durationMs: 40, selfMs: 40 - depth * 25, depth, error: false, critical: depth === 0, attributes: { 'http.route': '/x' }, events: [], ...extra });
+  receive({ type: 'trace', trace: { traceId: 'other', spans: [], logs: [], services: [], durationMs: 0, errors: 0, omitted: 0, hotspots: [] } });
   assert.equal(get('traceStatus').textContent, 'Loading…', 'responses for another trace are ignored');
   receive({ type: 'trace', trace: {
     traceId: 'abc123', durationMs: 50, services: ['api', 'db'], errors: 1, omitted: 0,
+    hotspots: [{ service: 'api', name: 'op a', count: 1, selfMs: 40, share: 0.727, errors: 0 }, { service: 'db', name: 'op b', count: 1, selfMs: 15, share: 0.273, errors: 1 }],
     spans: [span('a', 0), span('b', 1, { error: true, service: 'db', statusMessage: 'timeout' })],
     logs: [{ id: 7, level: 'warn', message: 'slow query', offsetMs: 12, spanId: 'b', server: 'OTel · db' }, { id: 8, level: 'info', message: 'stdout line', offsetMs: 30 }]
   } });
@@ -1464,6 +1472,18 @@ test('the trace dialog renders a waterfall with logs and opens their context', (
   assert.equal(rows[1].children[2].children[0].children[0].style.left, '20%');
   assert.equal(rows[1].children[2].children[0].children[0].style.width, '80%');
   assert.match(rows[1].children[0].attributes.title ?? (rows[1].children[0] as any).title, /Error: timeout/);
+  assert.deepEqual([rows[0].children[4].textContent, rows[1].children[4].textContent], ['40 ms', '15 ms'], 'self time excludes children');
+  assert.equal(rows[2].children.length, 5, 'log rows keep the column count');
+
+  // Hotspots rank operations by self time and lead to their span.
+  assert.equal(get('traceHotspots').hidden, false);
+  const hotspots = get('traceHotspotList').children.map(item => item.children[0]);
+  assert.deepEqual(hotspots.map(button => button.children[2].textContent), ['40 ms · 73%', '15 ms · 27%']);
+  assert.equal(hotspots[1].className, 'trace-hotspot trace-hotspot-error');
+  assert.equal(hotspots[1].children[1].children[0].style.width, '37.5%');
+  get('traceHotspotList').listeners.get('click')!({ target: { closest: () => hotspots[1] } });
+  assert.equal(rows[1].className, 'trace-span trace-error trace-flash');
+  assert.equal(rows[1].scrollIntoViewCalls.length, 1);
   const log = rows[2].children[0].children[0];
   get('traceRows').listeners.get('click')!({ target: { closest: (selector: string) => selector === '.trace-log-button' ? log : undefined } });
   assert.equal(get('traceDialog').open, false);
@@ -1474,7 +1494,8 @@ test('the trace dialog renders a waterfall with logs and opens their context', (
 test('a trace without spans explains how to collect them, and Filter logs by trace applies a query', () => {
   const { get, app, receive, messages } = viewer();
   app.traceView.show('abc123');
-  receive({ type: 'trace', trace: { traceId: 'abc123', durationMs: 0, services: [], errors: 0, omitted: 0, spans: [], logs: [] } });
+  receive({ type: 'trace', trace: { traceId: 'abc123', durationMs: 0, services: [], errors: 0, omitted: 0, hotspots: [], spans: [], logs: [] } });
+  assert.equal(get('traceHotspots').hidden, true);
   assert.match(get('traceStatus').textContent, /Turn on the OpenTelemetry receiver/);
   get('traceFilter').listeners.get('click')!();
   assert.equal(get('traceDialog').open, false);

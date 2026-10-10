@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { eventLocation, extractLogSites, LogSiteIndex, LogSiteTracker, siteQuery } from './core/log-sites';
+import { eventLocation, extractLogSites, LogSiteIndex, LogSiteTracker, siteDurations, siteQuery } from './core/log-sites';
 import { LogStore } from './core/log-store';
 import { parseLogLine } from './core/log-event';
 import type { LogEvent } from './core/types';
@@ -102,6 +102,26 @@ test('tracks hits, errors, and recent samples per site', () => {
   assert.equal(tracker.process([event(5, 'payment 4 declined')]), false, 'already counted');
   tracker.reset();
   assert.equal(tracker.stats.size, 0);
+});
+
+test('statements keep the durations their recent events reported', () => {
+  const index = new LogSiteIndex();
+  index.setFile('a.ts', extractLogSites('a.ts', 'logger.info(`priced cart ${id}`)'));
+  const tracker = new LogSiteTracker(index);
+  const priced = (id: number, fields: Record<string, string | number | boolean>) => event(id, `priced cart ${id}`, { fields });
+  tracker.process([priced(1, { durationMs: 40 }), priced(2, { duration_ms: '12.5' }), priced(3, {}), priced(4, { responseTime: 7 }),
+    priced(5, { durationMs: -1 }), priced(6, { durationMs: 'slow' }), priced(7, { durationMs: true })]);
+  const stats = () => [...tracker.stats.values()][0];
+  assert.deepEqual(stats().durations?.map(entry => entry.ms), [40, 12.5, 7], 'aliases count; missing, negative and non-numeric values do not');
+  assert.deepEqual(siteDurations(stats()), { count: 3, min: 7, p50: 12.5, p95: 40, p99: 40, max: 40 });
+  tracker.evict(2);
+  assert.deepEqual(stats().durations?.map(entry => entry.ms), [12.5, 7], 'evicted events take their durations with them');
+
+  tracker.reset();
+  tracker.process(Array.from({ length: 300 }, (_, i) => priced(i + 1, { durationMs: i + 1 })));
+  const recent = siteDurations(stats())!;
+  assert.deepEqual([recent.count, recent.min, recent.p50, recent.p95, recent.max], [256, 45, 172, 288, 300], 'only the latest 256 are kept');
+  assert.equal(siteDurations({ hits: 1, errors: 0, samples: [], exact: 0 }), undefined);
 });
 
 test('evicting events subtracts what they counted', () => {

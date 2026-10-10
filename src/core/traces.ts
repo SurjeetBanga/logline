@@ -86,6 +86,8 @@ export interface TraceRow {
   /** Milliseconds from the start of the trace. */
   offsetMs: number;
   durationMs: number;
+  /** Time not covered by any child span: work the operation did itself. */
+  selfMs: number;
   depth: number;
   error: boolean;
   statusMessage?: string;
@@ -98,6 +100,17 @@ export interface TraceRow {
 export interface TraceLogInput { id: number; level: string; message: string; timeMs?: number; spanId?: string; server?: string; }
 export interface TraceLog { id: number; level: string; message: string; offsetMs?: number; spanId?: string; server?: string; }
 
+/** Spans of one operation in one service, ranked by the time they spent themselves. */
+export interface TraceHotspot {
+  service: string;
+  name: string;
+  count: number;
+  selfMs: number;
+  /** Share of the self time of every span in the trace, from 0 to 1. */
+  share: number;
+  errors: number;
+}
+
 export interface TraceView {
   traceId: string;
   startMs?: number;
@@ -107,10 +120,34 @@ export interface TraceView {
   errors: number;
   /** Spans beyond the display limit. */
   omitted: number;
+  /** Operations that spent the most time themselves, most first. */
+  hotspots: TraceHotspot[];
   logs: TraceLog[];
 }
 
 const MAX_ROW_ATTRIBUTES = 24;
+const MAX_HOTSPOTS = 8;
+
+const roundMs = (ms: number) => Math.round(ms * 1000) / 1000;
+
+/**
+ * A span's duration less the time its children cover. Children are clipped
+ * to the span and overlapping ones count once, so parallel calls are not
+ * subtracted twice and work that outlives its parent is not subtracted at all.
+ */
+export function selfTimeMs(span: Span, children: readonly Span[]): number {
+  const intervals = children
+    .map(child => [Math.max(child.startMs, span.startMs), Math.min(child.endMs, span.endMs)] as const)
+    .filter(([start, end]) => end > start)
+    .sort((a, b) => a[0] - b[0]);
+  let covered = 0, start = -Infinity, end = -Infinity;
+  for (const [childStart, childEnd] of intervals) {
+    if (childStart > end) { if (end > start) covered += end - start; start = childStart; end = childEnd; }
+    else if (childEnd > end) end = childEnd;
+  }
+  if (end > start) covered += end - start;
+  return roundMs(Math.max(0, span.endMs - span.startMs - covered));
+}
 
 /**
  * Log entries for a trace view, oldest first, from events matching a trace
@@ -166,6 +203,7 @@ export function buildTrace(traceId: string, spans: readonly Span[], logs: TraceL
     if (startMs === undefined || log.timeMs < startMs) startMs = log.timeMs;
     if (endMs === undefined || log.timeMs > endMs) endMs = log.timeMs;
   }
+  const selfMs = new Map(spans.map(span => [span.spanId, selfTimeMs(span, children.get(span.spanId) ?? [])]));
   const rows: TraceRow[] = [];
   const visited = new Set<string>();
   // An explicit stack keeps malformed, deeply nested traces from overflowing the call stack.
@@ -176,7 +214,7 @@ export function buildTrace(traceId: string, spans: readonly Span[], logs: TraceL
     visited.add(span.spanId);
     if (rows.length < limit) rows.push({
       spanId: span.spanId, parentSpanId: span.parentSpanId, name: span.name, service: span.service, kind: SPAN_KINDS[span.kind] ?? 'unspecified',
-      offsetMs: span.startMs - (startMs ?? span.startMs), durationMs: spanDurationMs(span), depth, error: span.status.code === 2,
+      offsetMs: span.startMs - (startMs ?? span.startMs), durationMs: spanDurationMs(span), selfMs: selfMs.get(span.spanId) ?? 0, depth, error: span.status.code === 2,
       statusMessage: span.status.message, critical: critical.has(span.spanId),
       attributes: Object.fromEntries(Object.entries(span.attributes).slice(0, MAX_ROW_ATTRIBUTES)),
       events: span.events.slice(0, 16).map(event => ({ offsetMs: event.timeMs - (startMs ?? event.timeMs), name: event.name }))
@@ -187,8 +225,30 @@ export function buildTrace(traceId: string, spans: readonly Span[], logs: TraceL
     traceId, startMs, durationMs: startMs === undefined || endMs === undefined ? 0 : Math.round((endMs - startMs) * 1000) / 1000,
     services: [...new Set(spans.map(span => span.service))].sort(),
     spans: rows, errors: spans.filter(span => span.status.code === 2).length, omitted: Math.max(0, visited.size - rows.length),
+    hotspots: hotspots(spans, selfMs),
     logs: logs.map(({ timeMs, ...log }) => ({ ...log, offsetMs: timeMs === undefined || startMs === undefined ? undefined : timeMs - startMs }))
   };
+}
+
+/** Spans grouped by service and operation, covering every span, including those beyond the display limit. */
+function hotspots(spans: readonly Span[], selfMs: ReadonlyMap<string, number>): TraceHotspot[] {
+  const groups = new Map<string, TraceHotspot>();
+  let total = 0;
+  for (const span of spans) {
+    const self = selfMs.get(span.spanId) ?? 0;
+    total += self;
+    const key = `${span.service}\u0000${span.name}`;
+    const group = groups.get(key) ?? { service: span.service, name: span.name, count: 0, selfMs: 0, share: 0, errors: 0 };
+    group.count++;
+    group.selfMs += self;
+    if (span.status.code === 2) group.errors++;
+    groups.set(key, group);
+  }
+  return [...groups.values()]
+    .filter(group => group.selfMs > 0)
+    .sort((a, b) => b.selfMs - a.selfMs || a.name.localeCompare(b.name))
+    .slice(0, MAX_HOTSPOTS)
+    .map(group => ({ ...group, selfMs: roundMs(group.selfMs), share: total > 0 ? Math.round(group.selfMs / total * 1000) / 1000 : 0 }));
 }
 
 /** One row of the trace list: a request across services, from its spans or its logs. */

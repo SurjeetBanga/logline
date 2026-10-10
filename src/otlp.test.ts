@@ -3,7 +3,7 @@ import test from 'node:test';
 import { anyValue, isEntrySpan, logLine, nanosToMs, normalizeId, readLogs, readSpans, spanLine } from './core/otlp';
 import { decodeLogsRequest, decodeTraceRequest, ProtoError } from './core/otlp-proto';
 import type { LogEvent } from './core/types';
-import { buildTrace, requestOperation, SpanStore, summarizeTraces } from './core/traces';
+import { buildTrace, requestOperation, selfTimeMs, SpanStore, summarizeTraces } from './core/traces';
 import { parseLogLine } from './core/log-event';
 import { extractExceptions } from './core/exceptions';
 import { getField } from './core/query';
@@ -150,6 +150,29 @@ test('builds a depth-first waterfall with the critical path and orphan roots', (
   assert.equal(buildTrace(TRACE, spans, [], 2).omitted, 3);
   const logsOnly = buildTrace(TRACE, [], [{ id: 1, level: 'info', message: 'x', timeMs: 50 }, { id: 2, level: 'info', message: 'y', timeMs: 80 }]);
   assert.deepEqual([logsOnly.durationMs, logsOnly.logs.map(log => log.offsetMs)], [30, [0, 30]]);
+});
+
+test('self time leaves out time covered by children, counting overlaps once', () => {
+  const parent = span('a', undefined, 0, 100);
+  assert.equal(selfTimeMs(parent, []), 100);
+  // Parallel children overlap from 10 to 50; a child that outlives its parent is clipped.
+  assert.equal(selfTimeMs(parent, [span('b', 'a', 10, 40), span('c', 'a', 20, 50), span('d', 'a', 90, 130)]), 50);
+  assert.equal(selfTimeMs(parent, [span('b', 'a', -10, 200)]), 0);
+  assert.equal(selfTimeMs(parent, [span('b', 'a', 150, 160)]), 100, 'children outside the span cover none of it');
+});
+
+test('trace hotspots rank operations by the time they spent themselves', () => {
+  const spans = [
+    span('a', undefined, 0, 100, { name: 'GET /cart', service: 'web' }),
+    span('b', 'a', 5, 25, { name: 'SELECT', service: 'db' }), span('c', 'a', 30, 50, { name: 'SELECT', service: 'db', status: { code: 2 } }),
+    span('d', 'a', 60, 95, { name: 'render', service: 'web' }), span('e', 'd', 60, 95, { name: 'template', service: 'web' })
+  ];
+  const view = buildTrace(TRACE, spans, [], 2);
+  assert.deepEqual(view.spans.map(row => [row.name, row.selfMs]), [['GET /cart', 25], ['SELECT', 20]]);
+  assert.deepEqual(view.hotspots.map(item => [item.service, item.name, item.count, item.selfMs, item.share, item.errors]), [
+    ['db', 'SELECT', 2, 40, 0.4, 1], ['web', 'template', 1, 35, 0.35, 0], ['web', 'GET /cart', 1, 25, 0.25, 0]
+  ], 'spans beyond the display limit count, and spans with no self time are left out');
+  assert.deepEqual(buildTrace(TRACE, []).hotspots, []);
 });
 
 test('trace summaries list span traces and log-only traces, newest first', () => {

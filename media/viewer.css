@@ -47,6 +47,22 @@
 .trace-table th:nth-child(1) { width: 34%; }
 .trace-table th:nth-child(2) { width: 14%; }
 .trace-table th:nth-child(4) { width: 96px; text-align: right; }
+#traceDialog .trace-table th:nth-child(5) { width: 80px; text-align: right; }
+.trace-self { color: var(--vscode-descriptionForeground, #aaa); }
+.trace-hotspots { margin: 0 0 10px; }
+.trace-hotspots h3 { margin: 0 0 4px; font-size: 12px; font-weight: 600; color: var(--vscode-descriptionForeground, #aaa); }
+.trace-hotspots ol { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
+.trace-hotspot { display: grid; grid-template-columns: minmax(0, 1fr) 120px 150px; align-items: center; gap: 8px; width: 100%; padding: 2px 4px; text-align: left; font: inherit; color: inherit; background: transparent; border: 1px solid transparent; border-radius: 3px; }
+.trace-hotspot:hover, .trace-hotspot:focus-visible { background: var(--vscode-list-hoverBackground, rgba(90, 93, 94, .31)); }
+.trace-hotspot-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.trace-hotspot-service { color: var(--vscode-descriptionForeground, #aaa); }
+.trace-hotspot-error .trace-hotspot-name { color: var(--vscode-errorForeground, #f48771); }
+.trace-hotspot-time { font-variant-numeric: tabular-nums; white-space: nowrap; color: var(--vscode-descriptionForeground, #aaa); font-size: 12px; text-align: right; }
+.trace-hotspot .trace-track { height: 8px; }
+.trace-hotspot .trace-bar { top: 1px; height: 6px; left: 0; }
+.trace-span.trace-flash { animation: trace-flash 1.2s ease-out; }
+@keyframes trace-flash { from { background: var(--vscode-editor-findMatchHighlightBackground, rgba(234, 92, 0, .33)); } to { background: transparent; } }
+@media (prefers-reduced-motion: reduce) { .trace-span.trace-flash { animation: none; outline: 1px solid var(--vscode-focusBorder, #007fd4); } }
 .trace-name, .trace-service { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .trace-indent { display: inline-block; }
 .trace-duration { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
@@ -66,6 +82,9 @@
   /* Collapsed rather than hidden, so rows spanning every column keep the table's column count. */
   .trace-table th:nth-child(2), .trace-service { width: 0; padding: 0; overflow: hidden; font-size: 0; }
   .trace-table th:nth-child(4) { width: 72px; }
+  #traceDialog .trace-table th:nth-child(5), .trace-self { width: 0; padding: 0; overflow: hidden; font-size: 0; }
+  .trace-hotspot { grid-template-columns: minmax(0, 1fr) 96px; }
+  .trace-hotspot .trace-track { display: none; }
   #contextDialog { padding: 8px; }
   #contextDialog th:nth-child(1) { width: 86px; }
   #contextDialog th:nth-child(2), #contextDialog th:nth-child(4) { width: 48px; }
