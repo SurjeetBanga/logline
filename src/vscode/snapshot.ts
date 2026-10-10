@@ -2,7 +2,7 @@ import type { Ingestion } from '../capture/ingestion';
 import type { RuntimeState } from '../capture/runtime-state';
 import type { SessionRegistry } from '../capture/session-registry';
 import type { LogStore } from '../core/log-store';
-import { getField, parseQuery } from '../core/query';
+import { getField, parseQuery, usesChangedScope } from '../core/query';
 import type { Settings } from '../core/settings';
 import type { LogEvent } from '../core/types';
 import type { DoctorFindingView, GuideStatus, RowEvent, Snapshot, ViewRequest } from '../protocol/messages';
@@ -38,6 +38,8 @@ export interface SnapshotSources {
   agentClients?: string[];
   /** Changes whenever `rowLinks` could answer differently for an event already sent. */
   rowLinksVersion?: string;
+  /** Files changed since the last commit, while the workspace is a git repository. */
+  changes?: { files: number };
 }
 
 // The newest page only changes at its ends: matches are appended and the
@@ -58,7 +60,7 @@ function keptRows(msg: Extract<ViewRequest, { type: 'snapshot'; }>, events: LogE
   return undefined;
 }
 export function buildSnapshot(msg: Extract<ViewRequest, { type: 'snapshot'; }>,
-  { store, config, registry, state, ingestion, persistence, searches, running, guideStatus, agentAccess, terminalCapture, otlp, spans, rowLinks, doctor, agentClients, rowLinksVersion }: SnapshotSources): Snapshot {
+  { store, config, registry, state, ingestion, persistence, searches, running, guideStatus, agentAccess, terminalCapture, otlp, spans, rowLinks, doctor, agentClients, rowLinksVersion, changes }: SnapshotSources): Snapshot {
   const options = { query: msg.query, serverId: msg.serverId, sessionId: msg.sessionId, levels: msg.levels,
     page: msg.page, before: msg.before, sort: msg.sort, sortDirection: msg.sortDirection };
   const configured = config.get<string[]>('columns', []);
@@ -73,7 +75,10 @@ export function buildSnapshot(msg: Extract<ViewRequest, { type: 'snapshot'; }>,
   // payload can carry dozens of keys per event. Trimming here keeps the
   // refresh payload proportional to what is on screen rather than to how
   // wide the log records happen to be.
-  const rowsVersion = JSON.stringify([state.generation, projectedColumns, rowLinksVersion ?? null]);
+  // Rows matched by `changed:true` stop matching when the diff changes, so
+  // held rows only continue while the diff they were matched against holds.
+  const changeVersion = usesChangedScope(parseQuery((msg.query ?? '').slice(0, 256))) ? store.changeScope?.version ?? null : null;
+  const rowsVersion = JSON.stringify([state.generation, projectedColumns, rowLinksVersion ?? null, changeVersion]);
   const keep = pageResult && keptRows(msg, pageResult.events, rowsVersion);
   const events = pageResult?.events.slice(keep ?? 0).map(event => {
     const traceId = getField(event, 'traceId');
@@ -105,7 +110,8 @@ export function buildSnapshot(msg: Extract<ViewRequest, { type: 'snapshot'; }>,
     captureTerminals: config.get('captureTerminals', false), captureStatus: terminalCapture?.status(), otlp: otlp?.status(),
     traceCount: spans?.traceCount ?? 0,
     ...(doctor ? { doctor } : {}),
-    ...(agentClients?.length ? { agentClients } : {})
+    ...(agentClients?.length ? { agentClients } : {}),
+    ...(changes ? { changes } : {})
   };
 
 }

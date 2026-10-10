@@ -9,7 +9,7 @@ import type { LogLens } from './log-lens';
 import { resolveSourceUri } from './source-navigation';
 
 export interface LogBreakpointSources {
-  store: Pick<LogStore, 'find' | 'reversePage'>;
+  store: Pick<LogStore, 'find' | 'reversePage' | 'changeScope'>;
   index: LogSiteIndex;
   lens(): LogLens | undefined;
   /** Show one event in the Logs panel. */
@@ -100,7 +100,8 @@ export class LogBreakpoints implements vscode.Disposable {
     if (!this.rules.size || !session.pause) return;
     const site = this.sources.index.match(event)?.site;
     if (site && this.siteBreakpoints.has(this.key(site.file, site.line))) return;
-    const rule = this.rules.check(event);
+    const scope = this.sources.store.changeScope;
+    const rule = this.rules.check(event, Date.now(), scope && (changed => scope.matches(changed)));
     this.render();
     if (!rule) return;
     void session.pause().then(paused => {

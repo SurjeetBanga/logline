@@ -1,6 +1,6 @@
 import { fieldValue, mergeSortedEvents, sortEvents } from './event-order';
 import { analyzeEvents, findPatterns, groupErrors, type AnalysisResult, type ErrorGroup, type LogPattern } from './log-analysis';
-import { canonicalField, matchesQuery, parseQuery, type ParsedQuery } from './query';
+import { canonicalField, matchesQuery, parseQuery, usesChangedScope, type ParsedQuery } from './query';
 import type { LogEvent } from './types';
 import { completionTarget } from './query-completion';
 
@@ -72,6 +72,9 @@ function upperBound(length: number, eventAt: (offset: number) => LogEvent, id: n
   }
   return low;
 }
+
+/** Answers `changed:true`, and changes its version whenever an answer could. */
+export interface ChangeScopeLike { readonly version: string; matches(event: LogEvent): boolean; }
 
 export interface Stats {
   total: number;
@@ -161,6 +164,8 @@ export class LogStore {
   private suggestionCache?: { key: string; counts: Map<string, number>; };
   /** JSON error id to the id of the crash attached to it, while both are retained. */
   private attached!: Map<number, number>;
+  /** Which events came from changed code; without one, none did. */
+  changeScope?: ChangeScopeLike;
 
   constructor(maxRows = 100000, maxBytes = 100 * 1024 * 1024) {
     this.maxRows = maxRows;
@@ -377,9 +382,11 @@ export class LogStore {
     // carried between refreshes; every other filter is a pure function of the
     // retained events and is safe to keep.
     const relative = parsedQuery.some(group => group.some(token => token.canonical === 'last'));
+    // A `changed:` term answers differently once the diff changes, so its
+    // version is part of what the cached matches were computed for.
     const key = JSON.stringify([query, serverId?.toLowerCase() ?? null, levels ? [...levels].sort() : null,
       sessionId ?? null, sessionIds ? [...sessionIds].sort() : null, from ?? null, to ?? null,
-      Number.isFinite(before) ? before : null]);
+      Number.isFinite(before) ? before : null, usesChangedScope(parsedQuery) ? this.changeScope?.version ?? null : null]);
     const { matches, start } = this.matchingEvents(key, !relative,
       this.filterFor({ before, sessionId, sessionIds, from, to, serverId, levelMatches, parsedQuery }), serverId);
     const matched = matches.length - start;
@@ -459,13 +466,15 @@ export class LogStore {
     const wantedServer = serverId?.toLowerCase();
     const wantedSessions = sessionIds === undefined ? undefined : new Set(sessionIds);
     const queryNow = parsedQuery.some(group => group.some(token => token.canonical === 'last')) ? Date.now() : undefined;
+    const scope = this.changeScope;
+    const changed = scope && ((event: LogEvent) => scope.matches(event));
     return event => event.id <= before
       && (sessionId === undefined || event.sessionId === sessionId)
       && (wantedSessions === undefined || wantedSessions.has(event.sessionId ?? '*'))
       && (from === undefined || (event.timestampMs ?? 0) >= from)
       && (to === undefined || (event.timestampMs ?? 0) <= to)
       && (wantedServer === undefined || event.serverId?.toLowerCase() === wantedServer)
-      && levelMatches(event.level) && matchesQuery(event, parsedQuery, queryNow);
+      && levelMatches(event.level) && matchesQuery(event, parsedQuery, queryNow, changed);
   }
 
   // The retained set only ever changes at its two ends: new events are appended

@@ -45,6 +45,8 @@ export interface Token {
   timestampRange?: [number, number];
   /** Precomputed duration for `last:` filters. */
   relativeMs?: number;
+  /** For `changed:true` or `changed:false`, which answer the event must give. */
+  changed?: boolean;
 }
 export type TokenGroup = Token[];
 export type ParsedQuery = TokenGroup[];
@@ -129,8 +131,9 @@ function parseToken(token: string): Token {
     : undefined;
   const last = canonical === 'last' ? value.match(/^(\d+)(s|m|h|d)$/) : null;
   const relativeMs = last ? Number(last[1]) * ({ s: 1000, m: 60000, h: 3600000, d: 86400000 } as Record<string, number>)[last[2]] : undefined;
+  const changed = canonical === 'changed' && /^(?:true|false)$/.test(value) ? value === 'true' : undefined;
   return { negate, field, canonical, value, regex, regexError, search, compare, numericComparison, numericRange,
-    timestampRange: parsedTimestampRange, relativeMs };
+    timestampRange: parsedTimestampRange, relativeMs, changed };
 }
 
 /** Return a user-facing parse error for a query before it reaches the store. */
@@ -139,10 +142,24 @@ export function queryError(input = ''): string | undefined {
   return undefined;
 }
 
-export function matchesQuery(event: LogEvent, input: string | ParsedQuery, queryNow?: number): boolean {
+/** Whether a query has a `changed:` term, whose answer depends on the working tree rather than the event alone. */
+export function usesChangedScope(query: ParsedQuery): boolean {
+  return query.some(group => group.some(token => token.changed !== undefined));
+}
+
+/**
+ * Whether an event matches a query. `changed` answers `changed:true` (the
+ * event came from code changed since the last commit); without it, no event
+ * came from changed code.
+ */
+export function matchesQuery(event: LogEvent, input: string | ParsedQuery, queryNow?: number, changed?: (event: LogEvent) => boolean): boolean {
   const groups = Array.isArray(input) ? input : parseQuery(input);
   if (!groups.length) return true;
   return groups.some(group => group.every(token => {
+    if (token.changed !== undefined) {
+      const matched = (changed?.(event) ?? false) === token.changed;
+      return token.negate ? !matched : matched;
+    }
     if (token.canonical === 'last') {
       const matched = token.relativeMs !== undefined && (event.timestampMs ?? 0) >= (queryNow ?? Date.now()) - token.relativeMs;
       return token.negate ? !matched : matched;

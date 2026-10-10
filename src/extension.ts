@@ -11,6 +11,7 @@ import { registerDebugCapture } from './vscode/debug-capture';
 import { LogBreakpoints } from './vscode/log-breakpoints';
 import { LogDoctor } from './vscode/log-doctor';
 import { LogLens } from './vscode/log-lens';
+import { GitChanges } from './vscode/git-changes';
 
 let controller: LogsController | undefined;
 
@@ -47,6 +48,12 @@ export function activate(context: vscode.ExtensionContext): { provider: LogsProv
       });
       context.subscriptions.push(controller.doctor);
     }
+  }
+  // Changed lines come from the built-in git extension; without it, no code counts as changed.
+  if (typeof vscode.extensions?.getExtension === 'function') {
+    const logController = controller;
+    controller.gitChanges = new GitChanges(logController.changedLines, () => logController.notifications.notify());
+    context.subscriptions.push(controller.gitChanges);
   }
   if (typeof vscode.debug?.addBreakpoints === 'function') {
     const logController = controller;
