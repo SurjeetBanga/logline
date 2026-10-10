@@ -45,10 +45,16 @@ export interface FollowOptions {
  */
 export class FileFollower {
   readonly follows = new Map<string, Follow>();
-  constructor(private readonly config: Settings, private readonly registry: SessionRegistry,
-    private readonly ingestion: Ingestion, private readonly state: RuntimeState) { }
+  constructor(
+    private readonly config: Settings,
+    private readonly registry: SessionRegistry,
+    private readonly ingestion: Ingestion,
+    private readonly state: RuntimeState,
+  ) {}
 
-  get active(): number { return this.follows.size; }
+  get active(): number {
+    return this.follows.size;
+  }
 
   async follow(file: string, { tailBytes = 64 * 1024, pollMs = 500 }: FollowOptions = {}): Promise<string> {
     file = path.resolve(file);
@@ -62,20 +68,45 @@ export class FileFollower {
     const serverId = `file:${file}`;
     const label = `File · ${path.basename(file)}`;
     const record: SessionSummary = {
-      id: randomBytes(8).toString('hex'), serverId, server: label, status: 'running', startedAt: Date.now(), events: 0,
-      sourceKind: 'file', owned: true, canStop: true, captureComplete: false, command: `tail -F ${file}`, cwd: path.dirname(file)
+      id: randomBytes(8).toString('hex'),
+      serverId,
+      server: label,
+      status: 'running',
+      startedAt: Date.now(),
+      events: 0,
+      sourceKind: 'file',
+      owned: true,
+      canStop: true,
+      captureComplete: false,
+      command: `tail -F ${file}`,
+      cwd: path.dirname(file),
     };
     const limit = this.config.get('maxLineLength', 65536);
     const ingest = (line: string, truncated: boolean, container?: ContainerTag) => {
       if (follow.stopped) return;
-      const event = this.ingestion.accept(line, 'file', { serverId, server: label, sessionId: record.id, truncated, container });
+      const event = this.ingestion.accept(line, 'file', {
+        serverId,
+        server: label,
+        sessionId: record.id,
+        truncated,
+        container,
+      });
       if (!event) return;
       record.events++;
       this.state.notify();
     };
     const joiner = new LinePipeline(ingest, linePipelineOptions(this.config, limit));
     const reader = new LineReader((line, truncated) => joiner.write(line, truncated), limit);
-    const follow: Follow = { record, file, position: 0, fingerprint: Buffer.alloc(0), reader, joiner, again: false, stopped: false };
+    const follow: Follow = {
+      record,
+      file,
+      position: 0,
+      fingerprint: Buffer.alloc(0),
+      reader,
+      joiner,
+      again: false,
+      stopped: false,
+    };
     this.registry.records.set(record.id, record);
     this.follows.set(record.id, follow);
 
@@ -86,12 +117,18 @@ export class FileFollower {
       follow.inode = info.ino;
       // The file can disappear between stat and open; then wait for it like a missing file.
       follow.position = await this.lineStartNear(file, Math.max(0, info.size - Math.max(0, tailBytes))).catch(() => 0);
-      follow.fingerprint = await this.readAt(file, Math.max(0, follow.position - FINGERPRINT), Math.min(FINGERPRINT, follow.position));
+      follow.fingerprint = await this.readAt(
+        file,
+        Math.max(0, follow.position - FINGERPRINT),
+        Math.min(FINGERPRINT, follow.position),
+      );
     }
     // Change notices start only now: a read before the tail position is known
     // would ingest the whole existing file from its first byte.
     if (!follow.stopped) {
-      follow.poll = setInterval(() => { void this.pump(follow); }, pollMs);
+      follow.poll = setInterval(() => {
+        void this.pump(follow);
+      }, pollMs);
       follow.poll.unref?.();
     }
     this.watch(follow);
@@ -110,10 +147,12 @@ export class FileFollower {
     for (const follow of [...this.follows.values()]) if (follow.record.serverId === serverId) this.finish(follow);
   }
 
-  stop(): void { for (const follow of [...this.follows.values()]) this.finish(follow); }
+  stop(): void {
+    for (const follow of [...this.follows.values()]) this.finish(follow);
+  }
 
   async dispose(): Promise<void> {
-    const pending = [...this.follows.values()].map(follow => follow.pumping);
+    const pending = [...this.follows.values()].map((follow) => follow.pumping);
     this.stop();
     await Promise.all(pending);
   }
@@ -127,15 +166,23 @@ export class FileFollower {
       follow.watcher = watch(path.dirname(follow.file), { persistent: false }, (_event, name) => {
         if (!name || name.toString() === path.basename(follow.file)) void this.pump(follow);
       });
-      follow.watcher.on('error', () => { follow.watcher?.close(); follow.watcher = undefined; });
-    } catch { follow.watcher = undefined; }
+      follow.watcher.on('error', () => {
+        follow.watcher?.close();
+        follow.watcher = undefined;
+      });
+    } catch {
+      follow.watcher = undefined;
+    }
   }
 
   // Reads are serialized per file; a change notice during a read schedules
   // exactly one more pass instead of overlapping reads at different offsets.
   private pump(follow: Follow): Promise<void> {
     if (follow.stopped) return Promise.resolve();
-    if (follow.pumping) { follow.again = true; return follow.pumping; }
+    if (follow.pumping) {
+      follow.again = true;
+      return follow.pumping;
+    }
     follow.pumping = (async () => {
       try {
         do {
@@ -146,7 +193,9 @@ export class FileFollower {
         // Timers and watchers start pumps without awaiting them: report the failure here, and the next poll retries.
         this.state.status = `Could not read ${path.basename(follow.file)}: ${error instanceof Error ? error.message : String(error)}`;
         this.state.notify();
-      } finally { follow.pumping = undefined; }
+      } finally {
+        follow.pumping = undefined;
+      }
     })();
     return follow.pumping;
   }
@@ -157,8 +206,13 @@ export class FileFollower {
     const rotated = follow.inode !== undefined && info.ino !== follow.inode;
     // `> app.log && echo more >> app.log` can leave the file larger than
     // before on the same inode, so size alone cannot reveal the rewrite.
-    const rewritten = !rotated && info.size >= follow.position && follow.fingerprint.length > 0
-      && !(await this.readAt(follow.file, follow.position - follow.fingerprint.length, follow.fingerprint.length)).equals(follow.fingerprint);
+    const rewritten =
+      !rotated &&
+      info.size >= follow.position &&
+      follow.fingerprint.length > 0 &&
+      !(await this.readAt(follow.file, follow.position - follow.fingerprint.length, follow.fingerprint.length)).equals(
+        follow.fingerprint,
+      );
     if (follow.stopped) return;
     if (rotated || rewritten || info.size < follow.position) {
       // The old file's unterminated last line is complete as far as it goes.
@@ -171,29 +225,49 @@ export class FileFollower {
     follow.inode = info.ino;
     if (info.size <= follow.position) return;
     let handle;
-    try { handle = await open(follow.file, 'r'); } catch { return; }
+    try {
+      handle = await open(follow.file, 'r');
+    } catch {
+      return;
+    }
     try {
       const buffer = Buffer.allocUnsafe(CHUNK);
       while (!follow.stopped && follow.position < info.size) {
-        const { bytesRead } = await handle.read(buffer, 0, Math.min(CHUNK, info.size - follow.position), follow.position);
+        const { bytesRead } = await handle.read(
+          buffer,
+          0,
+          Math.min(CHUNK, info.size - follow.position),
+          follow.position,
+        );
         if (!bytesRead) break;
         follow.position += bytesRead;
         const read = buffer.subarray(0, bytesRead);
-        follow.fingerprint = Buffer.concat([follow.fingerprint, read.subarray(Math.max(0, bytesRead - FINGERPRINT))]).subarray(-FINGERPRINT);
+        follow.fingerprint = Buffer.concat([
+          follow.fingerprint,
+          read.subarray(Math.max(0, bytesRead - FINGERPRINT)),
+        ]).subarray(-FINGERPRINT);
         follow.reader.write(read);
       }
-    } finally { await handle.close(); }
+    } finally {
+      await handle.close();
+    }
   }
 
   private async readAt(file: string, position: number, length: number): Promise<Buffer> {
     if (length <= 0) return Buffer.alloc(0);
     let handle;
-    try { handle = await open(file, 'r'); } catch { return Buffer.alloc(0); }
+    try {
+      handle = await open(file, 'r');
+    } catch {
+      return Buffer.alloc(0);
+    }
     try {
       const buffer = Buffer.alloc(length);
       const { bytesRead } = await handle.read(buffer, 0, length, position);
       return buffer.subarray(0, bytesRead);
-    } finally { await handle.close(); }
+    } finally {
+      await handle.close();
+    }
   }
 
   private async lineStartNear(file: string, offset: number): Promise<number> {
@@ -207,7 +281,9 @@ export class FileFollower {
         const newline = buffer.subarray(0, bytesRead).indexOf(10);
         if (newline !== -1) return position + newline + 1;
       }
-    } finally { await handle.close(); }
+    } finally {
+      await handle.close();
+    }
   }
 
   private finish(follow: Follow): void {

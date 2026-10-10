@@ -41,7 +41,8 @@ export function splitContainerPrefix(line: string): { tag: ContainerTag; payload
     const container = compose[1];
     let service = container.replace(REPLICA, '');
     // Compose v1 names containers `<project>_<service>_<n>`.
-    if (container.includes('_') && !container.includes('-')) service = service.slice(service.indexOf('_') + 1) || service;
+    if (container.includes('_') && !container.includes('-'))
+      service = service.slice(service.indexOf('_') + 1) || service;
     tag = { service, container };
     rest = text.slice(compose[0].length);
   }
@@ -49,7 +50,10 @@ export function splitContainerPrefix(line: string): { tag: ContainerTag; payload
   if (time) {
     // Date parses at most millisecond precision.
     const parsed = Date.parse(`${time[1]}.${(time[2] ?? '').padEnd(3, '0').slice(0, 3)}${time[3]}`);
-    if (Number.isFinite(parsed)) { tag.time = parsed; rest = rest.slice(time[0].length); }
+    if (Number.isFinite(parsed)) {
+      tag.time = parsed;
+      rest = rest.slice(time[0].length);
+    }
   }
   return { tag, payload: rest };
 }

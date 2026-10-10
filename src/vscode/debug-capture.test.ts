@@ -11,11 +11,25 @@ function harness(settings: Record<string, unknown> = {}, terminalCapture = false
   const store = new LogStore();
   const registry = new SessionRegistry();
   const persisted: string[] = [];
-  const capture = new DebugCapture({ get<T>(key: string, fallback: T): T { return (key in settings ? settings[key] : fallback) as T; } },
-    registry, new Ingestion(store, raw => persisted.push(raw)), new RuntimeState(() => { }), () => terminalCapture);
+  const capture = new DebugCapture(
+    {
+      get<T>(key: string, fallback: T): T {
+        return (key in settings ? settings[key] : fallback) as T;
+      },
+    },
+    registry,
+    new Ingestion(store, (raw) => persisted.push(raw)),
+    new RuntimeState(() => {}),
+    () => terminalCapture,
+  );
   return { capture, store, registry, persisted };
 }
-const session = (overrides: Partial<DebugSessionInfo> = {}): DebugSessionInfo => ({ id: 's1', name: 'Launch API', type: 'node', ...overrides });
+const session = (overrides: Partial<DebugSessionInfo> = {}): DebugSessionInfo => ({
+  id: 's1',
+  name: 'Launch API',
+  type: 'node',
+  ...overrides,
+});
 
 test('debug output chunks are framed into lines per category', () => {
   const h = harness({ joinStackTraces: false });
@@ -26,9 +40,15 @@ test('debug output chunks are framed into lines per category', () => {
   h.capture.output('s1', { category: 'telemetry', output: 'ignored\n' });
   h.capture.output('s1', { output: 'Debugger attached.\n' });
   const events = h.store.all();
-  assert.deepEqual(events.map(event => [event.message, event.stream, event.level]), [
-    ['server listening on 3000', 'stdout', 'info'], ['slow', 'stdout', 'warn'], ['boom', 'stderr', 'error'], ['Debugger attached.', 'console', 'info']
-  ]);
+  assert.deepEqual(
+    events.map((event) => [event.message, event.stream, event.level]),
+    [
+      ['server listening on 3000', 'stdout', 'info'],
+      ['slow', 'stdout', 'warn'],
+      ['boom', 'stderr', 'error'],
+      ['Debugger attached.', 'console', 'info'],
+    ],
+  );
   assert.equal(events[0].serverId, 'debug:Launch API');
   assert.equal(events[0].server, 'Debug · Launch API');
   assert.deepEqual(h.persisted.length, 4);
@@ -50,7 +70,10 @@ test('a debug run is created on first output and completed when the session ends
   assert.equal(record.status, 'failed');
   assert.equal(record.exitReason, 'exit code 3');
   assert.equal(record.events, 1);
-  assert.deepEqual(h.store.all().map(event => event.message), ['unterminated']);
+  assert.deepEqual(
+    h.store.all().map((event) => event.message),
+    ['unterminated'],
+  );
   h.capture.output('child', { category: 'stdout', output: 'late\n' });
   assert.equal(h.store.all().length, 1);
 });
@@ -58,8 +81,19 @@ test('a debug run is created on first output and completed when the session ends
 test('adapter-reported code locations are attached and survive stack joining', () => {
   const h = harness();
   h.capture.start(session());
-  h.capture.output('s1', { category: 'stdout', output: 'user 42 logged in\n', source: { path: '/work/src/auth.ts' }, line: 18, column: 5 });
-  h.capture.output('s1', { category: 'stderr', output: 'Error: nope\n', source: { path: 'file:///work/src/db.ts' }, line: 7 });
+  h.capture.output('s1', {
+    category: 'stdout',
+    output: 'user 42 logged in\n',
+    source: { path: '/work/src/auth.ts' },
+    line: 18,
+    column: 5,
+  });
+  h.capture.output('s1', {
+    category: 'stderr',
+    output: 'Error: nope\n',
+    source: { path: 'file:///work/src/db.ts' },
+    line: 7,
+  });
   h.capture.output('s1', { category: 'stderr', output: '    at query (/work/src/db.ts:7:9)\n' });
   h.capture.end('s1');
   const [login, error] = h.store.all();
@@ -96,7 +130,13 @@ test('debug capture respects the setting and avoids terminal duplicates', () => 
 test('stopping a debug run asks VS Code to stop the session once', () => {
   let stops = 0;
   const h = harness();
-  h.capture.start(session({ stop: () => { stops++; } }));
+  h.capture.start(
+    session({
+      stop: () => {
+        stops++;
+      },
+    }),
+  );
   h.capture.output('s1', { category: 'stdout', output: 'x\n' });
   const [record] = h.registry.records.values();
   assert.equal(record.canStop, true);
@@ -110,20 +150,45 @@ test('stopping a debug run asks VS Code to stop the session once', () => {
 
 test('the tracker adapter forwards output and lifecycle events for every debug type', () => {
   let factoryType: string | undefined;
-  let factory: { createDebugAdapterTracker(session: unknown): { onDidSendMessage(message: unknown): void; onExit(): void } } | undefined;
+  let factory:
+    | { createDebugAdapterTracker(session: unknown): { onDidSendMessage(message: unknown): void; onExit(): void } }
+    | undefined;
   let terminate: ((session: { id: string }) => void) | undefined;
   const stopped: unknown[] = [];
-  const mock = { debug: {
-    registerDebugAdapterTrackerFactory(type: string, value: typeof factory) { factoryType = type; factory = value; return { dispose() { } }; },
-    onDidTerminateDebugSession(listener: typeof terminate) { terminate = listener; return { dispose() { } }; },
-    stopDebugging(value: unknown) { stopped.push(value); return Promise.resolve(); }
-  } };
+  const mock = {
+    debug: {
+      registerDebugAdapterTrackerFactory(type: string, value: typeof factory) {
+        factoryType = type;
+        factory = value;
+        return { dispose() {} };
+      },
+      onDidTerminateDebugSession(listener: typeof terminate) {
+        terminate = listener;
+        return { dispose() {} };
+      },
+      stopDebugging(value: unknown) {
+        stopped.push(value);
+        return Promise.resolve();
+      },
+    },
+  };
   const loaded = withVscode(mock, () => require('./debug-capture') as typeof import('./debug-capture'));
   const h = harness();
   assert.equal(loaded.registerDebugCapture(h.capture).length, 2);
   assert.equal(factoryType, '*');
-  const parent = { id: 'p', name: 'Launch API', type: 'pwa-node', configuration: { name: 'Launch API', program: '/w/app.js' } };
-  const child = { id: 'c', name: 'app.js [123]', type: 'pwa-node', configuration: { name: 'app.js [123]', program: '/w/app.js', cwd: '/w' }, parentSession: parent };
+  const parent = {
+    id: 'p',
+    name: 'Launch API',
+    type: 'pwa-node',
+    configuration: { name: 'Launch API', program: '/w/app.js' },
+  };
+  const child = {
+    id: 'c',
+    name: 'app.js [123]',
+    type: 'pwa-node',
+    configuration: { name: 'app.js [123]', program: '/w/app.js', cwd: '/w' },
+    parentSession: parent,
+  };
   const tracker = factory!.createDebugAdapterTracker(child);
   tracker.onDidSendMessage({ type: 'event', event: 'output', body: { category: 'stdout', output: 'hello\n' } });
   tracker.onDidSendMessage({ type: 'response', command: 'threads' });
@@ -165,7 +230,12 @@ test('a line split across output events keeps the location where it started', ()
   const h = harness();
   h.capture.start(session());
   h.capture.output('s1', { category: 'stdout', output: 'first half ', source: { path: '/work/a.ts' }, line: 3 });
-  h.capture.output('s1', { category: 'stdout', output: 'second half\nnext line\n', source: { path: '/work/b.ts' }, line: 9 });
+  h.capture.output('s1', {
+    category: 'stdout',
+    output: 'second half\nnext line\n',
+    source: { path: '/work/b.ts' },
+    line: 9,
+  });
   h.capture.end('s1');
   const [split, next] = h.store.all();
   assert.equal(split.message, 'first half second half');

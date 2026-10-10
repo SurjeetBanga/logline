@@ -11,18 +11,19 @@
 
 import { NODE_CRASH_CARET, NODE_CRASH_LOCATION } from '../core/exceptions';
 
-const FRAME = /^\s+at\s+\S/;                                    // Java `\tat a.B(C.java:1)`, Node `    at fn (file.js:1:2)`
+const FRAME = /^\s+at\s+\S/; // Java `\tat a.B(C.java:1)`, Node `    at fn (file.js:1:2)`
 const OMITTED = /^\s*\.\.\. \d+ (?:more|common frames omitted)/;
 const CAUSE = /^\s*(?:Caused by|Suppressed):\s/;
 const TRACEBACK = /^Traceback \(most recent call last\):/;
-const CHAINED = /^(?:During handling of the above exception, another exception occurred:|The above exception was the direct cause of the following exception:)/;
+const CHAINED =
+  /^(?:During handling of the above exception, another exception occurred:|The above exception was the direct cause of the following exception:)/;
 const INDENTED = /^\s+\S/;
 // The final line of a Python traceback: `ValueError: bad input`, `KeyboardInterrupt`.
 const PYTHON_RAISE = /^[A-Za-z_][\w.]*(?:Error|Exception|Exit|Interrupt|Warning|Iteration)\b/;
 // What Node prints after a crash's frames: the error's own properties
 // (`    at f (x.js:1:1) {` … `}`), a hint for thrown non-errors, and its version.
 const OPENS_PROPERTIES = /\s\{$/;
-const CLOSES_PROPERTIES = /^\}\s*$/;                             // nested objects close indented
+const CLOSES_PROPERTIES = /^\}\s*$/; // nested objects close indented
 const NODE_HINT = /^\(Use `node --trace-/;
 const NODE_VERSION = /^Node\.js v\d+\.\d+\.\d+/;
 const MAX_LINES = 1000;
@@ -32,7 +33,12 @@ const looksStructured = (line: string) => /^\s*[[{]/.test(line);
 // bracket, so only a line that parses releases a tentative header.
 const isJson = (line: string) => {
   if (!looksStructured(line)) return false;
-  try { JSON.parse(line); return true; } catch { return false; }
+  try {
+    JSON.parse(line);
+    return true;
+  } catch {
+    return false;
+  }
 };
 
 /**
@@ -67,13 +73,17 @@ export class StackJoiner<M = undefined> {
    * @param flushMs How long a held line may wait for a continuation. Zero
    *   disables the timer, for sources that call end() themselves (imports).
    */
-  constructor(private readonly deliver: (line: string, truncated: boolean, meta?: M) => void,
-    private readonly limit = 64 * 1024, private readonly flushMs = 100) { }
+  constructor(
+    private readonly deliver: (line: string, truncated: boolean, meta?: M) => void,
+    private readonly limit = 64 * 1024,
+    private readonly flushMs = 100,
+  ) {}
 
   write(line: string, truncated: boolean, meta?: M): void {
     const held = this.held;
     if (held) {
-      const mode = held.lines < MAX_LINES && held.text.length + 1 + line.length <= this.limit ? next(held, line) : undefined;
+      const mode =
+        held.lines < MAX_LINES && held.text.length + 1 + line.length <= this.limit ? next(held, line) : undefined;
       if (mode) {
         held.text += '\n' + line;
         held.truncated ||= truncated;
@@ -91,24 +101,39 @@ export class StackJoiner<M = undefined> {
       this.write(line, truncated, meta);
       return;
     }
-    if (looksStructured(line)) { this.deliver(line, truncated, meta); return; }
+    if (looksStructured(line)) {
+      this.deliver(line, truncated, meta);
+      return;
+    }
     const crash = NODE_CRASH_LOCATION.test(line);
     this.held = {
-      text: line, truncated, lines: 1, trace: false, meta,
+      text: line,
+      truncated,
+      lines: 1,
+      trace: false,
+      meta,
       mode: TRACEBACK.test(line) ? 'traceback' : crash ? 'node-source' : 'trace',
-      tentative: crash ? [{ text: line, truncated, meta }] : undefined
+      tentative: crash ? [{ text: line, truncated, meta }] : undefined,
     };
     this.schedule();
   }
 
   /** Release held lines, if any. */
   flush(): void {
-    if (this.timer !== undefined) { clearTimeout(this.timer); this.timer = undefined; }
+    if (this.timer !== undefined) {
+      clearTimeout(this.timer);
+      this.timer = undefined;
+    }
     while (this.held) this.release();
-    if (this.timer !== undefined) { clearTimeout(this.timer); this.timer = undefined; }
+    if (this.timer !== undefined) {
+      clearTimeout(this.timer);
+      this.timer = undefined;
+    }
   }
 
-  end(): void { this.flush(); }
+  end(): void {
+    this.flush();
+  }
 
   /**
    * Deliver the held text. An unconfirmed crash block delivers its first line
@@ -118,7 +143,10 @@ export class StackJoiner<M = undefined> {
     const held = this.held;
     if (!held) return;
     this.held = undefined;
-    if (!held.tentative) { this.deliver(held.text, held.truncated, held.meta); return; }
+    if (!held.tentative) {
+      this.deliver(held.text, held.truncated, held.meta);
+      return;
+    }
     const [first, ...rest] = held.tentative;
     this.deliver(first.text, first.truncated, first.meta);
     for (const part of rest) this.write(part.text, part.truncated, part.meta);
@@ -127,7 +155,10 @@ export class StackJoiner<M = undefined> {
   private schedule(): void {
     if (!this.flushMs) return;
     if (this.timer !== undefined) clearTimeout(this.timer);
-    this.timer = setTimeout(() => { this.timer = undefined; this.flush(); }, this.flushMs);
+    this.timer = setTimeout(() => {
+      this.timer = undefined;
+      this.flush();
+    }, this.flushMs);
     this.timer.unref?.();
   }
 }
@@ -137,10 +168,13 @@ function next<M>(held: Held<M>, line: string): Mode | undefined {
   switch (held.mode) {
     // The source line is printed as written, so it can look like anything
     // except a JSON log line, which is never held.
-    case 'node-source': return isJson(line) ? undefined : 'node-caret';
-    case 'node-caret': return NODE_CRASH_CARET.test(line) ? 'node-error' : undefined;
+    case 'node-source':
+      return isJson(line) ? undefined : 'node-caret';
+    case 'node-caret':
+      return NODE_CRASH_CARET.test(line) ? 'node-error' : undefined;
     // The error line itself: `Error: boom`, `TypeError: x`, or a thrown value.
-    case 'node-error': return line.trim() && !looksStructured(line) ? 'trace' : undefined;
+    case 'node-error':
+      return line.trim() && !looksStructured(line) ? 'trace' : undefined;
     case 'properties':
       if (CLOSES_PROPERTIES.test(line)) return 'trace';
       return INDENTED.test(line) ? 'properties' : undefined;
@@ -149,12 +183,17 @@ function next<M>(held: Held<M>, line: string): Mode | undefined {
   if (FRAME.test(line) && OPENS_PROPERTIES.test(line)) return 'properties';
   if (held.trace && (NODE_VERSION.test(line) || NODE_HINT.test(line))) return 'trace';
   const traceback = held.mode === 'traceback' || CHAINED.test(line);
-  const continues = FRAME.test(line) || OMITTED.test(line) || CAUSE.test(line) || TRACEBACK.test(line) || CHAINED.test(line)
-    || (traceback && (INDENTED.test(line) || PYTHON_RAISE.test(line)));
+  const continues =
+    FRAME.test(line) ||
+    OMITTED.test(line) ||
+    CAUSE.test(line) ||
+    TRACEBACK.test(line) ||
+    CHAINED.test(line) ||
+    (traceback && (INDENTED.test(line) || PYTHON_RAISE.test(line)));
   if (!continues) return undefined;
   // A traceback stays open until its exception line; a chained cause
   // reopens it for the following `Traceback` block.
-  const open = TRACEBACK.test(line) || CHAINED.test(line) ? true
-    : traceback && !(PYTHON_RAISE.test(line) && !INDENTED.test(line));
+  const open =
+    TRACEBACK.test(line) || CHAINED.test(line) ? true : traceback && !(PYTHON_RAISE.test(line) && !INDENTED.test(line));
   return open ? 'traceback' : 'trace';
 }

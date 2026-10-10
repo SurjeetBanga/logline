@@ -15,7 +15,8 @@ export function parseLogfmt(line: string): Record<string, string | number> | und
   // Cheap rejection before tokenizing: no `=`, or it cannot start with a key.
   if (!line.includes('=')) return undefined;
   const first = line.charCodeAt(0);
-  if (!(first === 64 || first === 95 || (first >= 65 && first <= 90) || (first >= 97 && first <= 122))) return undefined;
+  if (!(first === 64 || first === 95 || (first >= 65 && first <= 90) || (first >= 97 && first <= 122)))
+    return undefined;
   const result: Record<string, string | number> = {};
   let pairs = 0;
   let i = 0;
@@ -59,7 +60,8 @@ export function parseLogfmt(line: string): Record<string, string | number> | und
     }
     pairs++;
     if (Object.hasOwn(result, key)) continue;
-    if (key === '__proto__') Object.defineProperty(result, key, { value, enumerable: true, writable: true, configurable: true });
+    if (key === '__proto__')
+      Object.defineProperty(result, key, { value, enumerable: true, writable: true, configurable: true });
     else result[key] = value;
   }
   // A single pair (`PATH=/usr/bin`) is as likely to be shell output as a log.

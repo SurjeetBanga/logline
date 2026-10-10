@@ -23,8 +23,7 @@
     let cachedFormatter;
     function svgEl(tag, attrs = {}) {
       const el = document.createElementNS(SVG_NS, tag);
-      for (const [key, value] of Object.entries(attrs))
-        el.setAttribute(key, String(value));
+      for (const [key, value] of Object.entries(attrs)) el.setAttribute(key, String(value));
       return el;
     }
     function timeAxisFormatter(spanMs) {
@@ -32,12 +31,9 @@
       if (key === formatterKey) return cachedFormatter;
       formatterKey = key;
       const options = { hour: "2-digit", minute: "2-digit", hour12: false };
-      if (spanMs !== void 0 && spanMs < 3 * 60 * 1e3)
-        options.second = "2-digit";
-      if (state.displayTimezone === "utc")
-        options.timeZone = "UTC";
-      else if (state.displayTimezone && state.displayTimezone !== "local")
-        options.timeZone = state.displayTimezone;
+      if (spanMs !== void 0 && spanMs < 3 * 60 * 1e3) options.second = "2-digit";
+      if (state.displayTimezone === "utc") options.timeZone = "UTC";
+      else if (state.displayTimezone && state.displayTimezone !== "local") options.timeZone = state.displayTimezone;
       try {
         cachedFormatter = new Intl.DateTimeFormat(void 0, options);
       } catch {
@@ -46,8 +42,7 @@
       return cachedFormatter;
     }
     function bucketTime(range, bucketCount, index) {
-      if (range?.from === void 0 || range?.to === void 0 || !bucketCount)
-        return void 0;
+      if (range?.from === void 0 || range?.to === void 0 || !bucketCount) return void 0;
       const bucketSize = Math.max(1, (range.to - range.from) / bucketCount);
       return range.from + index * bucketSize;
     }
@@ -84,8 +79,7 @@
       const tickEvery = Math.max(1, Math.round(bucketCount / 6));
       for (let index = 0; index < bucketCount; index += tickEvery) {
         const time = bucketTime(range, bucketCount, index);
-        if (time === void 0)
-          continue;
+        if (time === void 0) continue;
         const label = svgEl("text", { x: xFor(index), y: height - 4, class: "chart-axis-label" });
         label.textContent = formatClock(time, range);
         svg.append(label);
@@ -93,8 +87,7 @@
     }
     function volumeChart(rate, errors, range) {
       const bucketCount = rate.length;
-      if (!bucketCount || !rate.some((item) => item.count > 0))
-        return emptySection("Event volume");
+      if (!bucketCount || !rate.some((item) => item.count > 0)) return emptySection("Event volume");
       const section2 = document.createElement("section");
       section2.className = "chart-section chart-wide";
       const heading = document.createElement("h3");
@@ -105,7 +98,12 @@
       const max = Math.max(1, ...rate.map((item) => item.count));
       const barGap = 2;
       const barWidth = Math.max(1, width / bucketCount - barGap);
-      const svg = svgEl("svg", { viewBox: `0 0 ${width} ${height}`, class: "volume-chart", role: "img", "aria-label": "Event volume over time, with errors highlighted" });
+      const svg = svgEl("svg", {
+        viewBox: `0 0 ${width} ${height}`,
+        class: "volume-chart",
+        role: "img",
+        "aria-label": "Event volume over time, with errors highlighted"
+      });
       const maxLabel = svgEl("text", { x: 2, y: padTop, class: "chart-axis-label" });
       maxLabel.textContent = String(max);
       svg.append(maxLabel);
@@ -123,12 +121,30 @@
           group.dataset.term = `timestamp:[${new Date(time).toISOString()} TO ${new Date(end).toISOString()}]`;
           group.setAttribute("tabindex", "0");
           group.setAttribute("role", "button");
-          group.append(svgEl("rect", { x, width: barWidth + barGap, y: 0, height: padTop + plotHeight, class: "volume-hit" }));
+          group.append(
+            svgEl("rect", { x, width: barWidth + barGap, y: 0, height: padTop + plotHeight, class: "volume-hit" })
+          );
         }
         if (okHeight > 0)
-          group.append(svgEl("rect", { x, width: barWidth, y: padTop + plotHeight - okHeight - errorHeight, height: okHeight, class: "volume-bar-ok" }));
+          group.append(
+            svgEl("rect", {
+              x,
+              width: barWidth,
+              y: padTop + plotHeight - okHeight - errorHeight,
+              height: okHeight,
+              class: "volume-bar-ok"
+            })
+          );
         if (errorHeight > 0)
-          group.append(svgEl("rect", { x, width: barWidth, y: padTop + plotHeight - errorHeight, height: Math.max(1, errorHeight), class: "volume-bar-error" }));
+          group.append(
+            svgEl("rect", {
+              x,
+              width: barWidth,
+              y: padTop + plotHeight - errorHeight,
+              height: Math.max(1, errorHeight),
+              class: "volume-bar-error"
+            })
+          );
         const title = svgEl("title");
         title.textContent = `${time !== void 0 ? formatClock(time, range) + "\n" : ""}${count(item.count)} event${item.count === 1 ? "" : "s"}${errorCount ? `, ${count(errorCount)} error${errorCount === 1 ? "" : "s"}` : ""}${group.dataset.term ? "\nClick to show these events" : ""}`;
         group.append(title);
@@ -142,13 +158,18 @@
         svg.append(group);
       });
       xAxisTicks(svg, bucketCount, range, (index) => index * (barWidth + barGap) + barWidth / 2, height);
-      section2.append(svg, chartLegend([{ className: "swatch-ok", label: "events" }, { className: "swatch-error", label: "errors" }]));
+      section2.append(
+        svg,
+        chartLegend([
+          { className: "swatch-ok", label: "events" },
+          { className: "swatch-error", label: "errors" }
+        ])
+      );
       return section2;
     }
     function latencyChart(latency, range) {
       const bucketCount = latency.length;
-      if (!bucketCount || !latency.some((item) => item.count > 0))
-        return emptySection("Latency (ms)");
+      if (!bucketCount || !latency.some((item) => item.count > 0)) return emptySection("Latency (ms)");
       const section2 = document.createElement("section");
       section2.className = "chart-section chart-wide";
       const heading = document.createElement("h3");
@@ -158,7 +179,12 @@
       const plotHeight = height - padTop - padBottom;
       const max = Math.max(1, ...latency.map((item) => Math.max(item.average, item.p95)));
       const step = bucketCount > 1 ? width / (bucketCount - 1) : 0;
-      const svg = svgEl("svg", { viewBox: `0 0 ${width} ${height}`, class: "latency-chart", role: "img", "aria-label": "Average and p95 latency over time" });
+      const svg = svgEl("svg", {
+        viewBox: `0 0 ${width} ${height}`,
+        class: "latency-chart",
+        role: "img",
+        "aria-label": "Average and p95 latency over time"
+      });
       const maxLabel = svgEl("text", { x: 2, y: padTop, class: "chart-axis-label" });
       maxLabel.textContent = `${Math.round(max)}ms`;
       svg.append(maxLabel);
@@ -180,11 +206,15 @@
       svg.append(svgEl("path", { d: pathFor("p95"), class: "latency-line latency-p95" }));
       svg.append(svgEl("path", { d: pathFor("average"), class: "latency-line latency-average" }));
       latency.forEach((item, index) => {
-        if (item.count === 0)
-          return;
+        if (item.count === 0) return;
         const x = index * step;
         const y = padTop + plotHeight - item.average / max * plotHeight;
-        const dot = svgEl("circle", { cx: x, cy: y, r: item.anomalous ? 2.5 : 1.5, class: item.anomalous ? "latency-point anomalous" : "latency-point" });
+        const dot = svgEl("circle", {
+          cx: x,
+          cy: y,
+          r: item.anomalous ? 2.5 : 1.5,
+          class: item.anomalous ? "latency-point anomalous" : "latency-point"
+        });
         const time = bucketTime(range, bucketCount, index);
         const title = svgEl("title");
         title.textContent = `${time !== void 0 ? formatClock(time, range) + "\n" : ""}average ${Math.round(item.average)}ms, p95 ${Math.round(item.p95)}ms`;
@@ -192,7 +222,13 @@
         svg.append(dot);
       });
       xAxisTicks(svg, bucketCount, range, (index) => index * step, height);
-      section2.append(svg, chartLegend([{ className: "swatch-average", label: "average" }, { className: "swatch-p95", label: "p95" }]));
+      section2.append(
+        svg,
+        chartLegend([
+          { className: "swatch-average", label: "average" },
+          { className: "swatch-p95", label: "p95" }
+        ])
+      );
       return section2;
     }
     function sparkline2(values) {
@@ -261,8 +297,22 @@
       tiles.className = "analysis-tiles chart-wide";
       if (!summary2) return tiles;
       tiles.append(tile("Events", count(summary2.events), span(analysis.range)));
-      tiles.append(tile("Errors", count(summary2.errors), `${percent(summary2.errors, summary2.events)} of events`, summary2.errors ? "error" : void 0));
-      if (summary2.latency) tiles.append(tile("Latency p95", duration(summary2.latency.p95), `p50 ${duration(summary2.latency.p50)} \xB7 p99 ${duration(summary2.latency.p99)}`));
+      tiles.append(
+        tile(
+          "Errors",
+          count(summary2.errors),
+          `${percent(summary2.errors, summary2.events)} of events`,
+          summary2.errors ? "error" : void 0
+        )
+      );
+      if (summary2.latency)
+        tiles.append(
+          tile(
+            "Latency p95",
+            duration(summary2.latency.p95),
+            `p50 ${duration(summary2.latency.p50)} \xB7 p99 ${duration(summary2.latency.p99)}`
+          )
+        );
       if (summary2.sources > 1) tiles.append(tile("Sources", count(summary2.sources)));
       return tiles;
     }
@@ -298,7 +348,16 @@
       const max = Math.max(...statusCodes.map((item) => item.count));
       for (const item of statusCodes.slice(0, 8)) {
         const tone = item.code.startsWith("5") ? "tone-error" : item.code.startsWith("4") ? "tone-warn" : "";
-        element2.append(barRow(item.code, item.count, total, max, { term: /^\d{3}$/.test(item.code) ? `status:${item.code}` : void 0 }, tone));
+        element2.append(
+          barRow(
+            item.code,
+            item.count,
+            total,
+            max,
+            { term: /^\d{3}$/.test(item.code) ? `status:${item.code}` : void 0 },
+            tone
+          )
+        );
       }
       return element2;
     }
@@ -360,17 +419,20 @@
     function seen(group, range) {
       const parts = [group.location];
       if (group.first !== void 0 && group.last !== void 0)
-        parts.push(group.first === group.last ? `at ${formatClock(group.first, range)}` : `${formatClock(group.first, range)} \u2013 ${formatClock(group.last, range)}`);
+        parts.push(
+          group.first === group.last ? `at ${formatClock(group.first, range)}` : `${formatClock(group.first, range)} \u2013 ${formatClock(group.last, range)}`
+        );
       return parts.filter(Boolean).join(" \xB7 ");
     }
     function renderAnalysis(analysis) {
-      if (!elements.analysisContent)
-        return;
+      if (!elements.analysisContent) return;
       const content = document.createDocumentFragment();
       const total = analysis.summary?.events ?? analysis.rate.reduce((sum, item) => sum + item.count, 0);
       content.append(summaryTiles(analysis));
       if (analysis.summary?.outside) {
-        const note = empty(`${count(analysis.summary.outside)} event${analysis.summary.outside === 1 ? " has a timestamp" : "s have timestamps"} far from the rest, so the charts leave ${analysis.summary.outside === 1 ? "it" : "them"} out. Everything else counts ${analysis.summary.outside === 1 ? "it" : "them"}.`);
+        const note = empty(
+          `${count(analysis.summary.outside)} event${analysis.summary.outside === 1 ? " has a timestamp" : "s have timestamps"} far from the rest, so the charts leave ${analysis.summary.outside === 1 ? "it" : "them"} out. Everything else counts ${analysis.summary.outside === 1 ? "it" : "them"}.`
+        );
         note.classList.add("chart-wide");
         content.append(note);
       }
@@ -381,15 +443,20 @@
       breakdowns.append(statusSection(analysis.statusCodes ?? []), ...(analysis.topValues ?? []).map(facetSection));
       content.append(breakdowns);
       const errorGroups = analysis.errorGroups ?? [];
-      const groups2 = section(`Error groups${errorGroups.length ? ` \xB7 ${count(errorGroups.length)}` : ""}`, "chart-section chart-wide");
+      const groups2 = section(
+        `Error groups${errorGroups.length ? ` \xB7 ${count(errorGroups.length)}` : ""}`,
+        "chart-section chart-wide"
+      );
       const errorTotal = errorGroups.reduce((sum, item) => sum + item.count, 0);
       const errorMax = Math.max(1, ...errorGroups.map((item) => item.count));
-      for (const item of errorGroups.slice(0, 20)) groups2.append(groupRow(item, errorTotal, errorMax, { detail: seen(item, analysis.range) }));
+      for (const item of errorGroups.slice(0, 20))
+        groups2.append(groupRow(item, errorTotal, errorMax, { detail: seen(item, analysis.range) }));
       if (!errorGroups.length) groups2.append(empty("No errors in these logs."));
       content.append(groups2);
       const patterns = section("Log patterns", "chart-section chart-wide");
       const patternMax = Math.max(1, ...(analysis.patterns ?? []).map((item) => item.count));
-      for (const item of analysis.patterns ?? []) patterns.append(groupRow(item, total, patternMax, { level: item.level }));
+      for (const item of analysis.patterns ?? [])
+        patterns.append(groupRow(item, total, patternMax, { level: item.level }));
       if (!analysis.patterns?.length) patterns.append(empty("No data in this range."));
       content.append(patterns);
       elements.analysisContent.replaceChildren(content);
@@ -522,7 +589,11 @@
       ]);
       const held = this.held?.key === key && this.held.rows.length ? this.held : void 0;
       this.pendingKey = key;
-      this.pendingHave = held && { last: held.rows[held.rows.length - 1].id, count: held.rows.length, version: held.version };
+      this.pendingHave = held && {
+        last: held.rows[held.rows.length - 1].id,
+        count: held.rows.length,
+        version: held.version
+      };
       this.api.postMessage({
         type: "snapshot",
         requestId,
@@ -709,8 +780,7 @@
   function cell(text, className) {
     const element2 = document.createElement("td");
     element2.textContent = String(text ?? "");
-    if (className)
-      element2.className = className;
+    if (className) element2.className = className;
     return element2;
   }
   function emptyMessage(text) {
@@ -740,7 +810,8 @@
     function adopt(element2) {
       if (element2.title) {
         element2.dataset.tip = element2.title;
-        if (!element2.getAttribute("aria-label") && !element2.textContent?.trim()) element2.setAttribute("aria-label", element2.title);
+        if (!element2.getAttribute("aria-label") && !element2.textContent?.trim())
+          element2.setAttribute("aria-label", element2.title);
         else element2.setAttribute("aria-description", element2.title);
         element2.removeAttribute("title");
       }
@@ -763,7 +834,10 @@
       const box = tip.getBoundingClientRect();
       const margin = 6;
       const below = anchor.bottom + margin + box.height <= window.innerHeight;
-      const left = Math.max(margin, Math.min(anchor.left + anchor.width / 2 - box.width / 2, window.innerWidth - box.width - margin));
+      const left = Math.max(
+        margin,
+        Math.min(anchor.left + anchor.width / 2 - box.width / 2, window.innerWidth - box.width - margin)
+      );
       tip.style.left = `${left}px`;
       tip.style.top = `${below ? anchor.bottom + margin : Math.max(margin, anchor.top - margin - box.height)}px`;
     }
@@ -794,9 +868,13 @@
     frames = /* @__PURE__ */ new Set();
     listen(target, type, handler, options = {}) {
       if (target.isConnected === false) {
-        target.addEventListener(type, ((event) => {
-          if (!this.abort.signal.aborted) handler(event);
-        }), options);
+        target.addEventListener(
+          type,
+          ((event) => {
+            if (!this.abort.signal.aborted) handler(event);
+          }),
+          options
+        );
       } else target.addEventListener(type, handler, { ...options, signal: this.abort.signal });
     }
     track(dispose) {
@@ -832,7 +910,10 @@
     { codes: ["noisy"], title: "Noisy statements" },
     { codes: ["oversized"], title: "Oversized events" },
     { codes: ["unstructured"], title: "Values formatted into messages" },
-    { codes: ["unnamed-service", "span-name-ids", "unmarked-error", "missing-route", "old-attributes", "unit-in-name"], title: "OpenTelemetry conventions" }
+    {
+      codes: ["unnamed-service", "span-name-ids", "unmarked-error", "missing-route", "old-attributes", "unit-in-name"],
+      title: "OpenTelemetry conventions"
+    }
   ];
   function siteLabel(file, line) {
     return `${file.slice(file.lastIndexOf("/") + 1)}:${line}`;
@@ -905,7 +986,8 @@
     function item(finding) {
       const row = document.createElement("div");
       row.className = `doctor-item severity-${finding.severity}`;
-      if (finding.file === void 0 || finding.line === void 0 || finding.siteId === void 0) return sourceItem(finding, row);
+      if (finding.file === void 0 || finding.line === void 0 || finding.siteId === void 0)
+        return sourceItem(finding, row);
       const location = document.createElement("button");
       location.type = "button";
       location.className = "doctor-location";
@@ -935,7 +1017,11 @@
       const actions = document.createElement("div");
       actions.className = "doctor-actions";
       if (finding.eventId !== void 0) {
-        const example = doctorButton("example", "Show example", "Show the latest event that carried it, with the logs around it");
+        const example = doctorButton(
+          "example",
+          "Show example",
+          "Show the latest event that carried it, with the logs around it"
+        );
         example.dataset.eventId = String(finding.eventId);
         actions.append(example);
       }
@@ -961,7 +1047,11 @@
         showTrace(target.dataset.traceId);
         return true;
       }
-      api.postMessage({ type: "doctorAction", action, ...target.dataset.siteId ? { siteId: target.dataset.siteId } : {} });
+      api.postMessage({
+        type: "doctorAction",
+        action,
+        ...target.dataset.siteId ? { siteId: target.dataset.siteId } : {}
+      });
       if (panel.contains(target)) closePanel();
       return true;
     }
@@ -975,12 +1065,29 @@
     trace: [["path", { d: "M2 3.5h6M5 8h7M9 12.5h5" }]],
     code: [["path", { d: "M5.5 4.5 2 8l3.5 3.5M10.5 4.5 14 8l-3.5 3.5" }]],
     breakpoint: [["circle", { cx: "8", cy: "8", r: "4", fill: "currentColor", stroke: "none" }]],
-    copy: [["rect", { x: "5.5", y: "5.5", width: "8", height: "8.5", rx: "1" }], ["path", { d: "M3 10.5v-7a1 1 0 0 1 1-1h6" }]],
+    copy: [
+      ["rect", { x: "5.5", y: "5.5", width: "8", height: "8.5", rx: "1" }],
+      ["path", { d: "M3 10.5v-7a1 1 0 0 1 1-1h6" }]
+    ],
     agent: [["path", { d: "M8 2l1.4 4.6L14 8l-4.6 1.4L8 14l-1.4-4.6L2 8l4.6-1.4z" }]],
-    warning: [["path", { d: "M8 2.5 14.5 13.5h-13zM8 6.5v3" }], ["circle", { cx: "8", cy: "11.6", r: ".4", fill: "currentColor" }]],
+    warning: [
+      ["path", { d: "M8 2.5 14.5 13.5h-13zM8 6.5v3" }],
+      ["circle", { cx: "8", cy: "11.6", r: ".4", fill: "currentColor" }]
+    ],
     attached: [["path", { d: "M4 2.5v6h8M9.5 6 12 8.5 9.5 11" }]],
-    information: [["circle", { cx: "8", cy: "8", r: "6" }], ["path", { d: "M8 7.5v4" }], ["circle", { cx: "8", cy: "5", r: ".4", fill: "currentColor" }]],
-    hint: [["path", { d: "M6 12.5h4M6.5 14.5h3M8 1.8a4.2 4.2 0 0 0-2.5 7.6c.5.4.8 1 .8 1.6h3.4c0-.6.3-1.2.8-1.6A4.2 4.2 0 0 0 8 1.8z" }]]
+    information: [
+      ["circle", { cx: "8", cy: "8", r: "6" }],
+      ["path", { d: "M8 7.5v4" }],
+      ["circle", { cx: "8", cy: "5", r: ".4", fill: "currentColor" }]
+    ],
+    hint: [
+      [
+        "path",
+        {
+          d: "M6 12.5h4M6.5 14.5h3M8 1.8a4.2 4.2 0 0 0-2.5 7.6c.5.4.8 1 .8 1.6h3.4c0-.6.3-1.2.8-1.6A4.2 4.2 0 0 0 8 1.8z"
+        }
+      ]
+    ]
   };
   var iconTemplates = /* @__PURE__ */ new Map();
   function icon(name) {
@@ -991,7 +1098,17 @@
   function buildIcon(name) {
     const namespace = "http://www.w3.org/2000/svg";
     const svg = document.createElementNS(namespace, "svg");
-    for (const [key, value] of Object.entries({ viewBox: "0 0 16 16", width: "14", height: "14", "aria-hidden": "true", fill: "none", stroke: "currentColor", "stroke-width": "1.3", "stroke-linecap": "round", "stroke-linejoin": "round" }))
+    for (const [key, value] of Object.entries({
+      viewBox: "0 0 16 16",
+      width: "14",
+      height: "14",
+      "aria-hidden": "true",
+      fill: "none",
+      stroke: "currentColor",
+      "stroke-width": "1.3",
+      "stroke-linecap": "round",
+      "stroke-linejoin": "round"
+    }))
       svg.setAttribute(key, value);
     for (const [tag, attributes] of ICONS[name]) {
       const part = document.createElementNS(namespace, tag);
@@ -1093,7 +1210,12 @@
     site.dataset.id = breakpoint.dataset.id = String(id);
     investigate.append(...leadingActions, trace, site, breakpoint);
     const copy = eventAction("copy-button", "copy", "Copy", "Copy the original event to the clipboard");
-    const share = eventAction("share-source-button", "agent", "Share with agent", "Share the logs of this event's source with agents, such as Copilot, Claude Code, or Codex, so they can read them");
+    const share = eventAction(
+      "share-source-button",
+      "agent",
+      "Share with agent",
+      "Share the logs of this event's source with agents, such as Copilot, Claude Code, or Codex, so they can read them"
+    );
     copy.dataset.id = share.dataset.id = String(id);
     output.append(copy, share);
     for (const finding of links.findings ?? []) {
@@ -1114,23 +1236,29 @@
       container.append(banner);
     }
     if (links.attachedTo)
-      container.append(attachment(
-        "This crash followed a JSON error: ",
-        links.attachedTo.message,
-        links.attachedTo.id,
-        "Show error",
-        "Show the JSON error this crash followed, with the logs around it"
-      ));
+      container.append(
+        attachment(
+          "This crash followed a JSON error: ",
+          links.attachedTo.message,
+          links.attachedTo.id,
+          "Show error",
+          "Show the JSON error this crash followed, with the logs around it"
+        )
+      );
     exceptions.forEach((exception, blockIndex) => container.append(exceptionSection(id, exception, blockIndex)));
     if (links.crash) {
-      container.append(attachment(
-        "A crash followed this error: ",
-        links.crash.message,
-        links.crash.id,
-        "Show crash",
-        "Show the crash that followed this error, with the logs around it"
-      ));
-      links.crash.exceptions.forEach((exception, blockIndex) => container.append(exceptionSection(links.crash.id, exception, blockIndex)));
+      container.append(
+        attachment(
+          "A crash followed this error: ",
+          links.crash.message,
+          links.crash.id,
+          "Show crash",
+          "Show the crash that followed this error, with the logs around it"
+        )
+      );
+      links.crash.exceptions.forEach(
+        (exception, blockIndex) => container.append(exceptionSection(links.crash.id, exception, blockIndex))
+      );
     }
     const pre = document.createElement("pre");
     pre.textContent = text ?? "Loading\u2026";
@@ -1140,8 +1268,7 @@
       summary2.textContent = "Original event";
       raw.append(summary2, pre);
       container.append(raw);
-    } else
-      container.append(pre);
+    } else container.append(pre);
     return container;
   }
 
@@ -1171,7 +1298,11 @@
       api.postMessage({ type: "details", id, target: "context" });
     }
     scope.listen(elements.contextClose, "click", () => elements.contextDialog.close());
-    scope.listen(elements.contextExport, "click", () => api.postMessage({ type: "exportContext", ids: contextEvents.map((event) => event.id) }));
+    scope.listen(
+      elements.contextExport,
+      "click",
+      () => api.postMessage({ type: "exportContext", ids: contextEvents.map((event) => event.id) })
+    );
     scope.listen(elements.contextDialog, "close", () => {
       contextAnchor = void 0;
       contextSelected = void 0;
@@ -1182,15 +1313,19 @@
     });
     scope.listen(elements.contextLogs, "click", (event) => {
       const button = event.target.closest(".context-event");
-      if (button)
-        selectContextEvent(Number(button.dataset.id));
+      if (button) selectContextEvent(Number(button.dataset.id));
     });
     scope.listen(elements.contextDetails, "click", handleDetailAction);
     function handleDetailAction(event) {
       if (event.target.closest(".event-action")?.dataset.unavailable) return true;
       const source = event.target.closest(".source-link");
       if (source) {
-        api.postMessage({ type: "openSource", id: Number(source.dataset.id), block: Number(source.dataset.block), line: Number(source.dataset.line) });
+        api.postMessage({
+          type: "openSource",
+          id: Number(source.dataset.id),
+          block: Number(source.dataset.block),
+          line: Number(source.dataset.line)
+        });
         return true;
       }
       const copy = event.target.closest(".copy-button");
@@ -1227,30 +1362,36 @@
       return false;
     }
     function receiveContext(data) {
-      if (!elements.contextDialog.open || data.id !== contextAnchor)
-        return;
+      if (!elements.contextDialog.open || data.id !== contextAnchor) return;
       elements.contextStatus.textContent = data.missing ? "This event has been discarded from retained history. Close this view to return to your results." : `${data.server || "Source"} \xB7 Same session \xB7 All levels and captured streams \xB7 Up to 25 retained events before and after \xB7 Snapshot in capture order`;
       contextEvents = data.events ?? [];
-      elements.contextLogs.replaceChildren(...data.events.map((event) => {
-        const row = document.createElement("tr");
-        row.dataset.id = String(event.id);
-        row.className = event.id === contextAnchor ? "context-anchor" : "";
-        const message = cell("");
-        const button = document.createElement("button");
-        button.className = "context-event";
-        button.dataset.id = String(event.id);
-        button.textContent = `${event.id === contextAnchor ? "Selected: " : ""}${event.message ?? ""}${event.truncated ? " [truncated]" : ""}`;
-        message.append(button);
-        row.append(cell(formatTimestamp(event), "time"), cell(event.level, `level ${event.level}`), message, cell(event.stream, "source"));
-        return row;
-      }));
+      elements.contextLogs.replaceChildren(
+        ...data.events.map((event) => {
+          const row = document.createElement("tr");
+          row.dataset.id = String(event.id);
+          row.className = event.id === contextAnchor ? "context-anchor" : "";
+          const message = cell("");
+          const button = document.createElement("button");
+          button.className = "context-event";
+          button.dataset.id = String(event.id);
+          button.textContent = `${event.id === contextAnchor ? "Selected: " : ""}${event.message ?? ""}${event.truncated ? " [truncated]" : ""}`;
+          message.append(button);
+          row.append(
+            cell(formatTimestamp(event), "time"),
+            cell(event.level, `level ${event.level}`),
+            message,
+            cell(event.stream, "source")
+          );
+          return row;
+        })
+      );
       elements.contextLogs.querySelector(".context-anchor")?.scrollIntoView({ block: "center" });
-      if (!data.missing)
-        selectContextEvent(contextAnchor);
+      if (!data.missing) selectContextEvent(contextAnchor);
       return;
     }
     function receiveDetails(data) {
-      if (elements.contextDialog.open && data.id === contextSelected) elements.contextDetails.replaceChildren(buildEventDetails(data.id, data.text, data.exceptions, data));
+      if (elements.contextDialog.open && data.id === contextSelected)
+        elements.contextDetails.replaceChildren(buildEventDetails(data.id, data.text, data.exceptions, data));
     }
     return { showContext, selectContextEvent, handleDetailAction, receiveContext, receiveDetails };
   }
@@ -1287,7 +1428,9 @@
     });
     scope.listen(elements.traceHotspotList, "click", (event) => {
       const button = event.target.closest(".trace-hotspot");
-      const row = button && [...elements.traceRows.querySelectorAll(".trace-span")].find((row2) => row2.dataset.service === button.dataset.service && row2.dataset.name === button.dataset.name);
+      const row = button && [...elements.traceRows.querySelectorAll(".trace-span")].find(
+        (row2) => row2.dataset.service === button.dataset.service && row2.dataset.name === button.dataset.name
+      );
       if (!row) return;
       row.scrollIntoView({ block: "center" });
       row.classList.remove("trace-flash");
@@ -1318,7 +1461,8 @@
       const unattached = [];
       const spanIds = new Set(trace.spans.map((span) => span.spanId));
       for (const log of trace.logs) {
-        if (log.spanId && spanIds.has(log.spanId)) logsBySpan.set(log.spanId, [...logsBySpan.get(log.spanId) ?? [], log]);
+        if (log.spanId && spanIds.has(log.spanId))
+          logsBySpan.set(log.spanId, [...logsBySpan.get(log.spanId) ?? [], log]);
         else unattached.push(log);
       }
       const rows = [];
@@ -1339,9 +1483,13 @@
       }
       elements.traceRows.replaceChildren(...rows);
     }
-    return { show, receive, get open() {
-      return elements.traceDialog.open;
-    } };
+    return {
+      show,
+      receive,
+      get open() {
+        return elements.traceDialog.open;
+      }
+    };
   }
   function summary(trace) {
     if (!trace.spans.length && !trace.logs.length) {
@@ -1416,12 +1564,20 @@
       `${span.name} (${span.kind})`,
       `Self time: ${formatDuration(span.selfMs)} of ${formatDuration(span.durationMs)}`,
       span.statusMessage ? `Error: ${span.statusMessage}` : void 0,
-      ...Object.entries(span.attributes).map(([key, value]) => `${key} = ${typeof value === "string" ? value : JSON.stringify(value)}`),
+      ...Object.entries(span.attributes).map(
+        ([key, value]) => `${key} = ${typeof value === "string" ? value : JSON.stringify(value)}`
+      ),
       ...span.events.map((event) => `event: ${event.name} at +${formatDuration(event.offsetMs)}`)
     ].filter(Boolean).join("\n");
     const bar = timeline(span.offsetMs, span.durationMs, total, "trace-bar");
     bar.setAttribute("aria-label", `Starts at +${formatDuration(span.offsetMs)}`);
-    row.append(name, cell(span.service, "trace-service"), bar, cell(formatDuration(span.durationMs), "trace-duration"), cell(formatDuration(span.selfMs), "trace-duration trace-self"));
+    row.append(
+      name,
+      cell(span.service, "trace-service"),
+      bar,
+      cell(formatDuration(span.durationMs), "trace-duration"),
+      cell(formatDuration(span.selfMs), "trace-duration trace-self")
+    );
     return row;
   }
   function logRow(log, total, depth) {
@@ -1442,7 +1598,10 @@
       name,
       cell(log.server ?? "", "trace-service"),
       timeline(log.offsetMs ?? 0, void 0, total, "trace-log-mark"),
-      cell(log.offsetMs === void 0 ? "" : `${log.offsetMs < 0 ? "\u2212" : "+"}${formatDuration(Math.abs(log.offsetMs))}`, "trace-duration"),
+      cell(
+        log.offsetMs === void 0 ? "" : `${log.offsetMs < 0 ? "\u2212" : "+"}${formatDuration(Math.abs(log.offsetMs))}`,
+        "trace-duration"
+      ),
       cell("", "trace-self")
     );
     return row;
@@ -1500,58 +1659,75 @@
       const failed = traces.filter((trace) => trace.errors).length;
       elements.tracesStatus.textContent = `${traces.length.toLocaleString()} recent ${traces.length === 1 ? "trace" : "traces"} \xB7 ${failed.toLocaleString()} with errors` + (withSpans < traces.length ? ` \xB7 ${(traces.length - withSpans).toLocaleString()} from logs only` : "") + " \xB7 Choose one to see its waterfall";
       const longest = Math.max(1, ...shown.map((trace) => trace.durationMs));
-      elements.tracesRows.replaceChildren(...shown.map((trace) => {
-        const row = document.createElement("tr");
-        row.className = `traces-row${trace.errors ? " trace-error" : ""}`;
-        row.dataset.traceId = trace.traceId;
-        row.tabIndex = 0;
-        row.setAttribute("aria-label", `${trace.name}, ${formatDuration(trace.durationMs)}${trace.errors ? `, ${trace.errors} errors` : ""}`);
-        const name = cell("", "trace-name");
-        const nameText = document.createElement("span");
-        nameText.className = "trace-name-text";
-        nameText.textContent = `${trace.errors ? "\u26A0 " : ""}${trace.name || trace.traceId}`;
-        name.append(nameText);
-        name.title = `${trace.name || trace.traceId}
+      elements.tracesRows.replaceChildren(
+        ...shown.map((trace) => {
+          const row = document.createElement("tr");
+          row.className = `traces-row${trace.errors ? " trace-error" : ""}`;
+          row.dataset.traceId = trace.traceId;
+          row.tabIndex = 0;
+          row.setAttribute(
+            "aria-label",
+            `${trace.name}, ${formatDuration(trace.durationMs)}${trace.errors ? `, ${trace.errors} errors` : ""}`
+          );
+          const name = cell("", "trace-name");
+          const nameText = document.createElement("span");
+          nameText.className = "trace-name-text";
+          nameText.textContent = `${trace.errors ? "\u26A0 " : ""}${trace.name || trace.traceId}`;
+          name.append(nameText);
+          name.title = `${trace.name || trace.traceId}
 Trace ${trace.traceId}`;
-        const services = cell("", "traces-services");
-        for (const service of trace.services.slice(0, 4)) {
-          const chip = document.createElement("span");
-          chip.className = "service-chip";
-          chip.textContent = service;
-          chip.title = service;
-          services.append(chip);
-        }
-        if (trace.services.length > 4) services.append(document.createTextNode(` +${trace.services.length - 4}`));
-        const duration = cell("", "traces-duration");
-        const durationContent = document.createElement("div");
-        durationContent.className = "traces-duration-content";
-        const track = document.createElement("div");
-        track.className = "trace-track";
-        const bar = document.createElement("div");
-        bar.className = "trace-bar";
-        bar.style.left = "0";
-        bar.style.width = `${Math.max(1, trace.durationMs / longest * 100)}%`;
-        track.append(bar);
-        const label = document.createElement("span");
-        label.className = "traces-duration-label";
-        label.textContent = formatDuration(trace.durationMs);
-        durationContent.append(track, label);
-        duration.append(durationContent);
-        const counts = [trace.spans ? `${trace.spans} spans` : "", trace.logs ? `${trace.logs} logs` : ""].filter(Boolean).join(" \xB7 ");
-        row.append(cell(trace.startMs === void 0 ? "" : actions.formatTime(trace.startMs), "time"), name, services, duration, cell(counts, "traces-counts"));
-        return row;
-      }));
+          const services = cell("", "traces-services");
+          for (const service of trace.services.slice(0, 4)) {
+            const chip = document.createElement("span");
+            chip.className = "service-chip";
+            chip.textContent = service;
+            chip.title = service;
+            services.append(chip);
+          }
+          if (trace.services.length > 4) services.append(document.createTextNode(` +${trace.services.length - 4}`));
+          const duration = cell("", "traces-duration");
+          const durationContent = document.createElement("div");
+          durationContent.className = "traces-duration-content";
+          const track = document.createElement("div");
+          track.className = "trace-track";
+          const bar = document.createElement("div");
+          bar.className = "trace-bar";
+          bar.style.left = "0";
+          bar.style.width = `${Math.max(1, trace.durationMs / longest * 100)}%`;
+          track.append(bar);
+          const label = document.createElement("span");
+          label.className = "traces-duration-label";
+          label.textContent = formatDuration(trace.durationMs);
+          durationContent.append(track, label);
+          duration.append(durationContent);
+          const counts = [trace.spans ? `${trace.spans} spans` : "", trace.logs ? `${trace.logs} logs` : ""].filter(Boolean).join(" \xB7 ");
+          row.append(
+            cell(trace.startMs === void 0 ? "" : actions.formatTime(trace.startMs), "time"),
+            name,
+            services,
+            duration,
+            cell(counts, "traces-counts")
+          );
+          return row;
+        })
+      );
     }
     return { show, receive, receiverChanged };
   }
 
   // src/webview/inspection/metrics.ts
   var REFRESH_MS = 5e3;
-  var MEASURE_LABELS = { value: "", rate: "rate", p95: "p95", average: "avg" };
-  var DURATION_MS = { ns: 1e-6, us: 1e-3, "\u03BCs": 1e-3, ms: 1, s: 1e3, min: 6e4, h: 36e5 };
+  var MEASURE_LABELS = {
+    value: "",
+    rate: "rate",
+    p95: "p95",
+    average: "avg"
+  };
+  var DURATION_MS = { ns: 1e-6, us: 1e-3, \u03BCs: 1e-3, ms: 1, s: 1e3, min: 6e4, h: 36e5 };
   function number(value) {
     const magnitude = Math.abs(value);
-    if (magnitude >= 1e4) return new Intl.NumberFormat(void 0, { notation: "compact", maximumFractionDigits: 1 }).format(value);
+    if (magnitude >= 1e4)
+      return new Intl.NumberFormat(void 0, { notation: "compact", maximumFractionDigits: 1 }).format(value);
     if (magnitude >= 100 || Number.isInteger(value)) return Math.round(value).toLocaleString();
     return value.toPrecision(magnitude >= 1 ? 3 : 2).replace(/\.?0+$/, "").replace(/^-?0$/, "0");
   }
@@ -1584,11 +1760,14 @@ Trace ${trace.traceId}`;
     const low = Math.min(...values), high = Math.max(...values);
     const first = points[0].timeMs, span = Math.max(1, points[points.length - 1].timeMs - first);
     const line = document.createElementNS(namespace, "polyline");
-    line.setAttribute("points", points.map((point) => {
-      const x = (point.timeMs - first) / span * 100;
-      const y = high === low ? 12 : 22 - (point.value - low) / (high - low) * 20;
-      return `${x.toFixed(2)},${y.toFixed(2)}`;
-    }).join(" "));
+    line.setAttribute(
+      "points",
+      points.map((point) => {
+        const x = (point.timeMs - first) / span * 100;
+        const y = high === low ? 12 : 22 - (point.value - low) / (high - low) * 20;
+        return `${x.toFixed(2)},${y.toFixed(2)}`;
+      }).join(" ")
+    );
     line.setAttribute("vector-effect", "non-scaling-stroke");
     svg.append(line);
     return svg;
@@ -1623,10 +1802,13 @@ Trace ${trace.traceId}`;
     }
     function refreshSoon() {
       if (refresh) return;
-      refresh = setTimeout(() => {
-        refresh = void 0;
-        if (elements.metricsDialog.open) load();
-      }, Math.max(0, loadedAt + REFRESH_MS - Date.now()));
+      refresh = setTimeout(
+        () => {
+          refresh = void 0;
+          if (elements.metricsDialog.open) load();
+        },
+        Math.max(0, loadedAt + REFRESH_MS - Date.now())
+      );
     }
     function show() {
       elements.metricsStatus.textContent = "Loading\u2026";
@@ -1667,27 +1849,32 @@ Trace ${trace.traceId}`;
       }
       const services = new Set(metrics.map((series) => series.service)).size;
       elements.metricsStatus.textContent = `${metrics.length.toLocaleString()} series from ${services.toLocaleString()} ${services === 1 ? "service" : "services"}` + (shown.length < metrics.length ? ` \xB7 ${shown.length.toLocaleString()} match` : "");
-      elements.metricsRows.replaceChildren(...shown.map((series) => {
-        const row = document.createElement("tr");
-        row.className = "metrics-row";
-        const name = cell(series.name, "metric-name");
-        name.title = details(series);
-        const service = cell("", "traces-services");
-        const chip = document.createElement("span");
-        chip.className = "service-chip";
-        chip.textContent = chip.title = series.service;
-        service.append(chip);
-        const pairs = series.attributes.map(([key, value]) => `${key}=${value}`).join(" ");
-        const attributes = cell(pairs, "metric-attributes");
-        attributes.title = series.attributes.map(([key, value]) => `${key}: ${value}`).join("\n");
-        const label = MEASURE_LABELS[series.measure];
-        const latest = cell(series.latest === void 0 ? "\u2013" : `${label ? `${label} ` : ""}${series.bound ? "\u2264 " : ""}${formatMetric(series.latest, series.unit, series.measure === "rate")}`, "metric-latest");
-        latest.title = details(series);
-        const trend = cell("", "metric-trend");
-        trend.append(sparkline(series.points));
-        row.append(name, service, attributes, latest, trend);
-        return row;
-      }));
+      elements.metricsRows.replaceChildren(
+        ...shown.map((series) => {
+          const row = document.createElement("tr");
+          row.className = "metrics-row";
+          const name = cell(series.name, "metric-name");
+          name.title = details(series);
+          const service = cell("", "traces-services");
+          const chip = document.createElement("span");
+          chip.className = "service-chip";
+          chip.textContent = chip.title = series.service;
+          service.append(chip);
+          const pairs = series.attributes.map(([key, value]) => `${key}=${value}`).join(" ");
+          const attributes = cell(pairs, "metric-attributes");
+          attributes.title = series.attributes.map(([key, value]) => `${key}: ${value}`).join("\n");
+          const label = MEASURE_LABELS[series.measure];
+          const latest = cell(
+            series.latest === void 0 ? "\u2013" : `${label ? `${label} ` : ""}${series.bound ? "\u2264 " : ""}${formatMetric(series.latest, series.unit, series.measure === "rate")}`,
+            "metric-latest"
+          );
+          latest.title = details(series);
+          const trend = cell("", "metric-trend");
+          trend.append(sparkline(series.points));
+          row.append(name, service, attributes, latest, trend);
+          return row;
+        })
+      );
     }
     return { show, receive, update };
   }
@@ -1701,13 +1888,10 @@ Trace ${trace.traceId}`;
         close(restoreFocus = false) {
           panel.hidden = true;
           button.setAttribute("aria-expanded", "false");
-          if (restoreFocus)
-            button.focus();
+          if (restoreFocus) button.focus();
         },
         open() {
-          for (const other of popovers)
-            if (other !== api)
-              other.close();
+          for (const other of popovers) if (other !== api) other.close();
           panel.hidden = false;
           button.setAttribute("aria-expanded", "true");
           panel.style.left = "0px";
@@ -1758,19 +1942,14 @@ Trace ${trace.traceId}`;
     }
     scope.listen(document, "click", (event) => {
       for (const popover of popovers)
-        if (popover.isOpen() && !popover.container.contains(event.target))
-          popover.close();
+        if (popover.isOpen() && !popover.container.contains(event.target)) popover.close();
     });
     scope.listen(document, "keydown", (event) => {
-      if (event.key !== "Escape")
-        return;
-      for (const popover of popovers)
-        if (popover.isOpen())
-          popover.close(true);
+      if (event.key !== "Escape") return;
+      for (const popover of popovers) if (popover.isOpen()) popover.close(true);
     });
     scope.listen(window, "resize", () => {
-      for (const popover of popovers)
-        popover.close();
+      for (const popover of popovers) popover.close();
     });
     return { popovers, createPopover };
   }
@@ -1787,7 +1966,13 @@ Trace ${trace.traceId}`;
     } catch {
       value = value.slice(1);
     }
-    return { prefix: input.slice(0, last?.index ?? input.length), negate: match[1], field: match[3], fieldText: match[2], value };
+    return {
+      prefix: input.slice(0, last?.index ?? input.length),
+      negate: match[1],
+      field: match[3],
+      fieldText: match[2],
+      value
+    };
   }
   function completeQuery(input, fields, values) {
     const target = completionTarget(input);
@@ -1806,8 +1991,10 @@ Trace ${trace.traceId}`;
       const pattern = match[1].slice(1, match[1].lastIndexOf("/"));
       const flags = match[2];
       const unsupported = [...new Set(flags.split("").filter((flag) => !"gimsuy".includes(flag)))];
-      if (unsupported.length) return `Unsupported regular expression flag${unsupported.length === 1 ? "" : "s"}: ${unsupported.join(", ")}`;
-      if (/\(\?[=!<]|\\(?:[1-9]|k<)/.test(pattern)) return "Unsupported regular expression syntax. RE2 does not allow lookaround or backreferences.";
+      if (unsupported.length)
+        return `Unsupported regular expression flag${unsupported.length === 1 ? "" : "s"}: ${unsupported.join(", ")}`;
+      if (/\(\?[=!<]|\\(?:[1-9]|k<)/.test(pattern))
+        return "Unsupported regular expression syntax. RE2 does not allow lookaround or backreferences.";
       try {
         new RegExp(pattern, flags.includes("u") ? flags : `${flags}u`);
       } catch {
@@ -1861,7 +2048,9 @@ Trace ${trace.traceId}`;
       this.columnOrder = Array.isArray(saved.columnOrder) ? saved.columnOrder : [];
       this.hiddenColumns = new Set(Array.isArray(saved.hiddenColumns) ? saved.hiddenColumns : []);
       const savedLevels = Array.isArray(saved.levels) ? saved.levels.filter((level) => LEVELS.includes(level)) : LEVELS;
-      this.checkedLevels = new Set(savedLevels.length === 6 && !savedLevels.includes("unclassified") ? LEVELS : savedLevels);
+      this.checkedLevels = new Set(
+        savedLevels.length === 6 && !savedLevels.includes("unclassified") ? LEVELS : savedLevels
+      );
     }
     currentLevels() {
       return this.checkedLevels.size === LEVELS.length ? void 0 : [...this.checkedLevels];
@@ -1937,7 +2126,15 @@ Trace ${trace.traceId}`;
     const MAX_QUERY_LENGTH = 256;
     let appliedQuery = queryTokens(elements.search.value.trim()).map((value) => value.toLowerCase() === "or" ? "OR" : value).join(" ").slice(0, MAX_QUERY_LENGTH);
     let editingIndex;
-    const LEVEL_LABELS = { trace: "Trace", debug: "Debug", info: "Info", warn: "Warn", error: "Error", fatal: "Fatal", unclassified: "Unclassified" };
+    const LEVEL_LABELS = {
+      trace: "Trace",
+      debug: "Debug",
+      info: "Info",
+      warn: "Warn",
+      error: "Error",
+      fatal: "Fatal",
+      unclassified: "Unclassified"
+    };
     function tokens(query2) {
       return queryTokens(query2.trim()).map((value) => value.toLowerCase() === "or" ? "OR" : value);
     }
@@ -1986,69 +2183,80 @@ Trace ${trace.traceId}`;
     function renderChips() {
       const values = tokens(appliedQuery);
       let editingInput;
-      elements.searchChips.replaceChildren(...values.map((value, index) => {
-        if (value === "OR") {
-          const separator = document.createElement("span");
-          separator.className = "search-or";
-          separator.textContent = "OR";
-          separator.setAttribute("aria-hidden", "true");
-          return separator;
-        }
-        const chip = document.createElement("span");
-        chip.className = `filter-chip${value.startsWith("-") ? " exclude" : ""}${editingIndex === index ? " editing" : ""}`;
-        chip.title = value;
-        if (editingIndex === index) {
-          const input = document.createElement("input");
-          input.type = "text";
-          input.className = "filter-chip-input";
-          input.value = value;
-          input.maxLength = MAX_QUERY_LENGTH;
-          input.title = `Edit filter: ${value}`;
-          input.setAttribute("aria-label", `Edit filter: ${value}`);
-          scope.listen(input, "input", () => setError());
-          scope.listen(input, "keydown", (event) => {
-            if (event.key === "Enter") {
-              event.preventDefault();
-              applyValue(input.value, index);
-            } else if (event.key === "Escape") {
-              event.preventDefault();
-              cancelEdit();
-            }
-          });
-          editingInput = input;
-          chip.append(input);
-        } else {
-          const label = document.createElement("button");
-          label.type = "button";
-          label.className = "filter-chip-label";
-          label.textContent = value;
-          label.title = `Edit filter: ${value}`;
-          label.setAttribute("aria-label", `Edit filter: ${value}`);
-          scope.listen(label, "click", (event) => {
+      elements.searchChips.replaceChildren(
+        ...values.map((value, index) => {
+          if (value === "OR") {
+            const separator = document.createElement("span");
+            separator.className = "search-or";
+            separator.textContent = "OR";
+            separator.setAttribute("aria-hidden", "true");
+            return separator;
+          }
+          const chip = document.createElement("span");
+          chip.className = `filter-chip${value.startsWith("-") ? " exclude" : ""}${editingIndex === index ? " editing" : ""}`;
+          chip.title = value;
+          if (editingIndex === index) {
+            const input = document.createElement("input");
+            input.type = "text";
+            input.className = "filter-chip-input";
+            input.value = value;
+            input.maxLength = MAX_QUERY_LENGTH;
+            input.title = `Edit filter: ${value}`;
+            input.setAttribute("aria-label", `Edit filter: ${value}`);
+            scope.listen(input, "input", () => setError());
+            scope.listen(input, "keydown", (event) => {
+              if (event.key === "Enter") {
+                event.preventDefault();
+                applyValue(input.value, index);
+              } else if (event.key === "Escape") {
+                event.preventDefault();
+                cancelEdit();
+              }
+            });
+            editingInput = input;
+            chip.append(input);
+          } else {
+            const label = document.createElement("button");
+            label.type = "button";
+            label.className = "filter-chip-label";
+            label.textContent = value;
+            label.title = `Edit filter: ${value}`;
+            label.setAttribute("aria-label", `Edit filter: ${value}`);
+            scope.listen(label, "click", (event) => {
+              event.stopPropagation();
+              beginEdit(index);
+            });
+            chip.append(label);
+          }
+          const remove = document.createElement("button");
+          remove.type = "button";
+          remove.className = "filter-chip-remove";
+          const cross = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+          for (const [key, value2] of Object.entries({
+            viewBox: "0 0 16 16",
+            width: "10",
+            height: "10",
+            "aria-hidden": "true",
+            fill: "none",
+            stroke: "currentColor",
+            "stroke-width": "1.6",
+            "stroke-linecap": "round"
+          }))
+            cross.setAttribute(key, value2);
+          const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+          path.setAttribute("d", "M4 4l8 8M12 4l-8 8");
+          cross.append(path);
+          remove.append(cross);
+          remove.title = `Remove filter: ${value}`;
+          remove.setAttribute("aria-label", `Remove filter: ${value}`);
+          scope.listen(remove, "click", (event) => {
             event.stopPropagation();
-            beginEdit(index);
+            removeAt(index);
           });
-          chip.append(label);
-        }
-        const remove = document.createElement("button");
-        remove.type = "button";
-        remove.className = "filter-chip-remove";
-        const cross = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-        for (const [key, value2] of Object.entries({ viewBox: "0 0 16 16", width: "10", height: "10", "aria-hidden": "true", fill: "none", stroke: "currentColor", "stroke-width": "1.6", "stroke-linecap": "round" }))
-          cross.setAttribute(key, value2);
-        const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
-        path.setAttribute("d", "M4 4l8 8M12 4l-8 8");
-        cross.append(path);
-        remove.append(cross);
-        remove.title = `Remove filter: ${value}`;
-        remove.setAttribute("aria-label", `Remove filter: ${value}`);
-        scope.listen(remove, "click", (event) => {
-          event.stopPropagation();
-          removeAt(index);
-        });
-        chip.append(remove);
-        return chip;
-      }));
+          chip.append(remove);
+          return chip;
+        })
+      );
       const editorClasses = elements.searchEditor.className.split(" ").filter(Boolean).filter((value) => value !== "has-chips");
       if (values.some((value) => value !== "OR")) editorClasses.push("has-chips");
       elements.searchEditor.className = editorClasses.join(" ");
@@ -2120,14 +2328,11 @@ Trace ${trace.traceId}`;
       elements.search.focus();
     }
     function updateLevelButtonLabel() {
-      if (state.checkedLevels.size === LEVELS.length)
-        setLabel(elements.levelButton, "All levels");
-      else if (state.checkedLevels.size === 0)
-        setLabel(elements.levelButton, "No levels");
+      if (state.checkedLevels.size === LEVELS.length) setLabel(elements.levelButton, "All levels");
+      else if (state.checkedLevels.size === 0) setLabel(elements.levelButton, "No levels");
       else if (state.checkedLevels.size === 1)
         setLabel(elements.levelButton, `${LEVEL_LABELS[[...state.checkedLevels][0]]} only`);
-      else
-        setLabel(elements.levelButton, `${state.checkedLevels.size} levels`);
+      else setLabel(elements.levelButton, `${state.checkedLevels.size} levels`);
     }
     function setAllLevels(value) {
       state.checkedLevels = value ? new Set(LEVELS) : /* @__PURE__ */ new Set();
@@ -2138,7 +2343,10 @@ Trace ${trace.traceId}`;
     function buildLevelMenu() {
       const actions2 = document.createElement("div");
       actions2.className = "level-actions";
-      for (const [label, value] of [["All", true], ["None", false]]) {
+      for (const [label, value] of [
+        ["All", true],
+        ["None", false]
+      ]) {
         const button = document.createElement("button");
         button.type = "button";
         button.textContent = label;
@@ -2154,10 +2362,8 @@ Trace ${trace.traceId}`;
         input.type = "checkbox";
         input.checked = state.checkedLevels.has(level);
         scope.listen(input, "change", () => {
-          if (input.checked)
-            state.checkedLevels.add(level);
-          else
-            state.checkedLevels.delete(level);
+          if (input.checked) state.checkedLevels.add(level);
+          else state.checkedLevels.delete(level);
           updateLevelButtonLabel();
           filterChanged();
         });
@@ -2169,8 +2375,7 @@ Trace ${trace.traceId}`;
     let savedSearchSignature;
     function renderSearchState(searches) {
       const signature = JSON.stringify(searches.saved ?? []);
-      if (signature === savedSearchSignature)
-        return;
+      if (signature === savedSearchSignature) return;
       savedSearchSignature = signature;
       const makeButton = (item, label, removable = false) => {
         const button = document.createElement("button");
@@ -2187,14 +2392,12 @@ Trace ${trace.traceId}`;
           updateScopeSelection();
           buildLevelMenu();
           updateLevelButtonLabel();
-          for (const popover of popovers)
-            popover.close();
+          for (const popover of popovers) popover.close();
           elements.search.focus();
           state.before = void 0;
           filterChanged();
         });
-        if (!removable)
-          return button;
+        if (!removable) return button;
         const row = document.createElement("div");
         row.className = "search-item-row";
         row.append(button);
@@ -2212,17 +2415,20 @@ Trace ${trace.traceId}`;
         return row;
       };
       const savedItems = (searches.saved ?? []).map((item) => makeButton(item, item.name, true));
-      elements.savedSearchList?.replaceChildren(...savedItems.length ? savedItems : [emptyMessage("Save a search to reuse it here.")]);
+      elements.savedSearchList?.replaceChildren(
+        ...savedItems.length ? savedItems : [emptyMessage("Save a search to reuse it here.")]
+      );
     }
     function renderAutocomplete(data) {
-      if (!elements.fieldSuggestions)
-        return;
-      elements.fieldSuggestions.replaceChildren(...completeQuery(data.input, data.fields, data.values).map((value) => {
-        const option = document.createElement("option");
-        option.value = value;
-        if (!value.toLowerCase().includes(data.input.toLowerCase())) option.setAttribute("label", data.input);
-        return option;
-      }));
+      if (!elements.fieldSuggestions) return;
+      elements.fieldSuggestions.replaceChildren(
+        ...completeQuery(data.input, data.fields, data.values).map((value) => {
+          const option = document.createElement("option");
+          option.value = value;
+          if (!value.toLowerCase().includes(data.input.toLowerCase())) option.setAttribute("label", data.input);
+          return option;
+        })
+      );
       elements.search.setAttribute("list", "fieldSuggestions");
     }
     function clearAutocomplete() {
@@ -2247,8 +2453,7 @@ Trace ${trace.traceId}`;
       }
     });
     scope.listen(elements.search, "focus", () => {
-      if (editingIndex === void 0 && elements.search.value === appliedQuery)
-        elements.search.value = "";
+      if (editingIndex === void 0 && elements.search.value === appliedQuery) elements.search.value = "";
     });
     scope.listen(elements.search, "input", () => setError());
     scope.listen(elements.searchClear, "click", (event) => {
@@ -2272,8 +2477,7 @@ Trace ${trace.traceId}`;
 
   // src/webview/table/layout.ts
   function layoutColumnWidths(displayedColumns, columnElements, columnWidths, available, table) {
-    if (!columnElements.size)
-      return;
+    if (!columnElements.size) return;
     const defaults = { "base:time": 140, "base:level": 110, "base:source": 110 };
     const messageFloor = 300;
     const minWidth = 72;
@@ -2285,8 +2489,7 @@ Trace ${trace.traceId}`;
     const fullOtherWidth = displayedColumns.filter((column) => column.key !== "base:message").reduce((sum, column) => sum + widthFor(column.key), 0);
     const sourceElement = columnElements.get("base:source");
     const collapseSource = Boolean(sourceElement) && available > 0 && fullOtherWidth + messageFloor > available;
-    if (sourceElement)
-      sourceElement.style.visibility = collapseSource ? "collapse" : "";
+    if (sourceElement) sourceElement.style.visibility = collapseSource ? "collapse" : "";
     const columns = displayedColumns.filter((column) => !(collapseSource && column.key === "base:source"));
     const explicitWidth = columns.filter((column) => isExplicit(column.key)).reduce((sum, column) => sum + widthFor(column.key), 0);
     const autoOthers = columns.filter((column) => column.key !== "base:message" && !isExplicit(column.key));
@@ -2315,8 +2518,7 @@ Trace ${trace.traceId}`;
       widths.set("base:message", widths.get("base:message") + available - total);
       total = available;
     }
-    for (const [key, width] of widths)
-      columnElements.get(key).style.width = `${width}px`;
+    for (const [key, width] of widths) columnElements.get(key).style.width = `${width}px`;
     table.style.width = `${Math.max(total, available)}px`;
   }
 
@@ -2358,26 +2560,35 @@ Trace ${trace.traceId}`;
         messageContent.append(trace);
       }
       if (event.site)
-        messageContent.append(rowIcon("row-site-button", "code", "Open code: open the log statement that logged this event", event.id));
+        messageContent.append(
+          rowIcon("row-site-button", "code", "Open code: open the log statement that logged this event", event.id)
+        );
       if (event.attachedTo !== void 0)
-        messageContent.append(rowIcon("row-attached-button", "attached", "Follows a JSON error: show the error with the logs around it", event.attachedTo));
+        messageContent.append(
+          rowIcon(
+            "row-attached-button",
+            "attached",
+            "Follows a JSON error: show the error with the logs around it",
+            event.attachedTo
+          )
+        );
       if (event.finding) {
-        const finding = rowIcon(`row-finding-button severity-${event.finding.severity}`, event.finding.severity, `Log doctor: ${event.finding.message} Click for details.`, event.id);
+        const finding = rowIcon(
+          `row-finding-button severity-${event.finding.severity}`,
+          event.finding.severity,
+          `Log doctor: ${event.finding.message} Click for details.`,
+          event.id
+        );
         messageContent.append(finding);
       }
       messageCell.append(messageContent);
       for (const column of columns()) {
         let tableCell;
-        if (column.key === "base:time")
-          tableCell = cell(formatTimestamp(event), "time");
-        else if (column.key === "base:level")
-          tableCell = cell(event.level, `level ${event.level}`);
-        else if (column.key === "base:message")
-          tableCell = messageCell;
-        else if (column.key === "base:source")
-          tableCell = cell(event.stream, "source");
-        else
-          tableCell = cell(event.fields?.[column.label] ?? "");
+        if (column.key === "base:time") tableCell = cell(formatTimestamp(event), "time");
+        else if (column.key === "base:level") tableCell = cell(event.level, `level ${event.level}`);
+        else if (column.key === "base:message") tableCell = messageCell;
+        else if (column.key === "base:source") tableCell = cell(event.stream, "source");
+        else tableCell = cell(event.fields?.[column.label] ?? "");
         tableCell.dataset.column = column.key;
         tableCell.tabIndex = -1;
         tableCell.setAttribute("aria-label", `${column.label}: ${tableCell.textContent ?? ""}`);
@@ -2391,9 +2602,16 @@ Trace ${trace.traceId}`;
       details2.className = "detail-row";
       const container = cell("", "detail-cell");
       container.colSpan = columns().length;
-      const context = eventAction("context-button", "context", "Surrounding logs", "Show the logs just before and after this event from the same run");
+      const context = eventAction(
+        "context-button",
+        "context",
+        "Surrounding logs",
+        "Show the logs just before and after this event from the same run"
+      );
       context.dataset.id = String(event.id);
-      container.append(buildEventDetails(event.id, state.selectedDetailText, state.selectedExceptions, state.selectedLinks, [context]));
+      container.append(
+        buildEventDetails(event.id, state.selectedDetailText, state.selectedExceptions, state.selectedLinks, [context])
+      );
       if (!state.cellHintDismissed) {
         const hint = document.createElement("p");
         hint.className = "detail-hint";
@@ -2401,7 +2619,10 @@ Trace ${trace.traceId}`;
         dismiss.type = "button";
         dismiss.className = "dismiss-hint";
         dismiss.textContent = "Got it";
-        hint.append(document.createTextNode("Tip: right-click any cell in the table to include or exclude its value."), dismiss);
+        hint.append(
+          document.createTextNode("Tip: right-click any cell in the table to include or exclude its value."),
+          dismiss
+        );
         container.append(hint);
       }
       details2.append(container);
@@ -2411,8 +2632,23 @@ Trace ${trace.traceId}`;
       const slot = row.querySelector(".row-quick");
       if (!slot || slot.firstChild) return;
       const id = Number(row.dataset.id);
-      const quick = [rowIcon("row-action row-context-button", "context", "Surrounding logs: show the logs just before and after this event", id)];
-      if (slot.classList.contains("has-site")) quick.push(rowIcon("row-action row-break-button", "breakpoint", "Break here: stop the debugger the next time this statement logs", id));
+      const quick = [
+        rowIcon(
+          "row-action row-context-button",
+          "context",
+          "Surrounding logs: show the logs just before and after this event",
+          id
+        )
+      ];
+      if (slot.classList.contains("has-site"))
+        quick.push(
+          rowIcon(
+            "row-action row-break-button",
+            "breakpoint",
+            "Break here: stop the debugger the next time this statement logs",
+            id
+          )
+        );
       for (const item of quick) item.tabIndex = -1;
       slot.append(...quick);
     }
@@ -2468,8 +2704,7 @@ Trace ${trace.traceId}`;
       measured = void 0;
     }
     function ensureSpacers() {
-      if (topSpacer)
-        return;
+      if (topSpacer) return;
       topSpacer = document.createElement("tr");
       topSpacer.className = "virtual-spacer";
       topSpacer.append(document.createElement("td"));
@@ -2478,9 +2713,15 @@ Trace ${trace.traceId}`;
       bottomSpacer.append(document.createElement("td"));
     }
     function ensureRowHeight() {
-      if (rowHeightMeasured)
-        return;
-      const probe = buildRow({ id: -1, timestamp: "00:00:00.000", message: "sample", level: "info", stream: "", fields: {} });
+      if (rowHeightMeasured) return;
+      const probe = buildRow({
+        id: -1,
+        timestamp: "00:00:00.000",
+        message: "sample",
+        level: "info",
+        stream: "",
+        fields: {}
+      });
       probe.style.visibility = "hidden";
       elements.logs.append(probe);
       const measured2 = probe.getBoundingClientRect().height;
@@ -2495,12 +2736,10 @@ Trace ${trace.traceId}`;
       ensureRowHeight();
       const total = virtualEvents.length;
       const selectedIndex = virtualEvents.findIndex((event) => event.id === state.selected);
-      if (selectedIndex < 0)
-        expandedHeight = 0;
+      if (selectedIndex < 0) expandedHeight = 0;
       else {
         const detail = elements.logs.querySelector(".detail-row");
-        if (detail)
-          expandedHeight = detail.getBoundingClientRect().height;
+        if (detail) expandedHeight = detail.getBoundingClientRect().height;
       }
       const overscan = 8;
       const top = viewportTop();
@@ -2517,14 +2756,15 @@ Trace ${trace.traceId}`;
       bottomSpacer.firstChild.colSpan = totalCols;
       bottomSpacer.firstChild.style.height = `${(total - end) * rowHeight + (selectedIndex >= end ? expandedHeight : 0)}px`;
       const windowKey = `${start}:${end}:${renderRevision}:${rowsVersion}`;
-      if (renderedWindow === windowKey)
-        return;
+      if (renderedWindow === windowKey) return;
       renderedWindow = windowKey;
       const focused = document.activeElement;
       const focusedRow = !!focused && elements.logs.contains(focused) ? focused.closest("tr") : void 0;
       const refocusId = focusedRow?.classList.contains("event-row") ? focusedRow.dataset.id : void 0;
       const refocusColumn = focused?.dataset.column;
-      const detailScrollers = [...expandedRow?.querySelectorAll(".event-details, pre") ?? []].map((element2) => ({ element: element2, top: element2.scrollTop, left: element2.scrollLeft }));
+      const detailScrollers = [...expandedRow?.querySelectorAll(".event-details, pre") ?? []].map(
+        (element2) => ({ element: element2, top: element2.scrollTop, left: element2.scrollLeft })
+      );
       if (rowCacheRevision !== renderRevision) {
         rowCache = /* @__PURE__ */ new Map();
         rowCacheRevision = renderRevision;
@@ -2550,7 +2790,9 @@ Trace ${trace.traceId}`;
       placeRows(wanted);
       rowCache = builtRows;
       if (hoveredId !== void 0) {
-        const hovered = [...elements.logs.querySelectorAll(".event-row")].find((row) => row.dataset.id === hoveredId);
+        const hovered = [...elements.logs.querySelectorAll(".event-row")].find(
+          (row) => row.dataset.id === hoveredId
+        );
         if (hovered) fillQuickActions(hovered);
       }
       onRowsChanged();
@@ -2558,11 +2800,14 @@ Trace ${trace.traceId}`;
         element2.scrollTop = top2;
         element2.scrollLeft = left;
       }
-      if (focused && !!focused && elements.logs.contains(focused))
-        focused.focus({ preventScroll: true });
+      if (focused && !!focused && elements.logs.contains(focused)) focused.focus({ preventScroll: true });
       else if (refocusId !== void 0) {
-        const row = [...elements.logs.querySelectorAll(".event-row")].find((row2) => row2.dataset.id === refocusId);
-        const target = refocusColumn ? [...row?.querySelectorAll("td[data-column]") ?? []].find((cell2) => cell2.dataset.column === refocusColumn) : row?.querySelector(".message-button");
+        const row = [...elements.logs.querySelectorAll(".event-row")].find(
+          (row2) => row2.dataset.id === refocusId
+        );
+        const target = refocusColumn ? [...row?.querySelectorAll("td[data-column]") ?? []].find(
+          (cell2) => cell2.dataset.column === refocusColumn
+        ) : row?.querySelector(".message-button");
         target?.focus({ preventScroll: true });
       }
       const measured2 = elements.logs.querySelector(".detail-row")?.getBoundingClientRect().height;
@@ -2589,8 +2834,7 @@ Trace ${trace.traceId}`;
     let followTailRequested = false;
     function scheduleRenderWindow(followTail = false) {
       followTailRequested ||= followTail === true;
-      if (windowRenderQueued)
-        return;
+      if (windowRenderQueued) return;
       windowRenderQueued = true;
       scope.frame(() => {
         windowRenderQueued = false;
@@ -2655,133 +2899,140 @@ Trace ${trace.traceId}`;
     let columnElements = /* @__PURE__ */ new Map();
     function updateColumns(columns, force = false) {
       const detected = Array.isArray(columns) ? columns : [];
-      if (!automaticColumnsLocked)
-        automaticColumns = detected;
-      const next = [.../* @__PURE__ */ new Set([...automaticColumns, ...state.extraColumns.filter((field) => state.columnFields.includes(field))])];
-      if (columnsInitialized && !force && JSON.stringify(next) === JSON.stringify(availableColumns))
-        return;
+      if (!automaticColumnsLocked) automaticColumns = detected;
+      const next = [
+        .../* @__PURE__ */ new Set([...automaticColumns, ...state.extraColumns.filter((field) => state.columnFields.includes(field))])
+      ];
+      if (columnsInitialized && !force && JSON.stringify(next) === JSON.stringify(availableColumns)) return;
       columnsInitialized = true;
       renderRevision++;
       availableColumns = next;
       currentColumns = next.filter((label) => !state.hiddenColumns.has(`field:${label}`));
       const allColumns = [...baseColumns, ...currentColumns.map((label) => ({ key: `field:${label}`, label }))];
       const known = new Map(allColumns.map((column) => [column.key, column]));
-      displayedColumns = [...state.columnOrder.map((key) => known.get(key)).filter((column) => Boolean(column)), ...allColumns.filter((column) => !state.columnOrder.includes(column.key))];
+      displayedColumns = [
+        ...state.columnOrder.map((key) => known.get(key)).filter((column) => Boolean(column)),
+        ...allColumns.filter((column) => !state.columnOrder.includes(column.key))
+      ];
       state.columnOrder = displayedColumns.map((column) => column.key);
-      columnElements = new Map(displayedColumns.map((column) => {
-        const col = document.createElement("col");
-        col.dataset.column = column.key;
-        return [column.key, col];
-      }));
+      columnElements = new Map(
+        displayedColumns.map((column) => {
+          const col = document.createElement("col");
+          col.dataset.column = column.key;
+          return [column.key, col];
+        })
+      );
       element("eventColumns").replaceChildren(...columnElements.values());
       layoutColumns();
       const head = element("head-row");
-      head.replaceChildren(...displayedColumns.map((column) => {
-        const { key, label } = column;
-        const th = document.createElement("th");
-        const grip = document.createElement("span");
-        grip.className = "column-grip";
-        grip.textContent = "\u283F";
-        grip.title = `Drag to move ${label}`;
-        grip.draggable = true;
-        th.append(grip);
-        const sortButton = document.createElement("button");
-        sortButton.type = "button";
-        sortButton.className = "column-sort";
-        const labelText = document.createElement("span");
-        labelText.className = "column-label";
-        labelText.textContent = label;
-        sortButton.append(labelText);
-        const sortKey = key === "base:time" ? "timestampMs" : key === "base:level" ? "level" : key === "base:message" ? "message" : key === "base:source" ? "stream" : label;
-        const indicator = document.createElement("span");
-        indicator.className = "sort-indicator";
-        indicator.textContent = state.selectedSort === sortKey ? state.selectedSortDirection === "asc" ? "\u2191" : "\u2193" : "\u2195";
-        indicator.setAttribute("aria-hidden", "true");
-        sortButton.append(indicator);
-        th.append(sortButton);
-        th.setAttribute("aria-sort", state.selectedSort === sortKey ? state.selectedSortDirection === "asc" ? "ascending" : "descending" : "none");
-        sortButton.title = `Sort by ${label}${state.selectedSort === sortKey ? state.selectedSortDirection === "asc" ? " descending" : " ascending" : ""}`;
-        sortButton.setAttribute("aria-label", sortButton.title);
-        th.dataset.column = key;
-        scope.listen(sortButton, "click", () => {
-          state.sort(sortKey);
-          updateModeLabel();
-          saveState();
-          updateColumns(automaticColumns, true);
-          updateModeLabel();
-          request(true);
-          scrollViewport.scrollTop = 0;
-          head.querySelectorAll(".column-sort")[displayedColumns.findIndex((column2) => column2.key === key)]?.focus();
-        });
-        scope.listen(grip, "dragstart", (event) => {
-          draggedColumn = key;
-          th.classList.add?.("column-dragging");
-          event.dataTransfer?.setData("text/plain", key);
-          if (event.dataTransfer)
-            event.dataTransfer.effectAllowed = "move";
-        });
-        scope.listen(th, "dragover", (event) => {
-          if (draggedColumn && draggedColumn !== key) {
+      head.replaceChildren(
+        ...displayedColumns.map((column) => {
+          const { key, label } = column;
+          const th = document.createElement("th");
+          const grip = document.createElement("span");
+          grip.className = "column-grip";
+          grip.textContent = "\u283F";
+          grip.title = `Drag to move ${label}`;
+          grip.draggable = true;
+          th.append(grip);
+          const sortButton = document.createElement("button");
+          sortButton.type = "button";
+          sortButton.className = "column-sort";
+          const labelText = document.createElement("span");
+          labelText.className = "column-label";
+          labelText.textContent = label;
+          sortButton.append(labelText);
+          const sortKey = key === "base:time" ? "timestampMs" : key === "base:level" ? "level" : key === "base:message" ? "message" : key === "base:source" ? "stream" : label;
+          const indicator = document.createElement("span");
+          indicator.className = "sort-indicator";
+          indicator.textContent = state.selectedSort === sortKey ? state.selectedSortDirection === "asc" ? "\u2191" : "\u2193" : "\u2195";
+          indicator.setAttribute("aria-hidden", "true");
+          sortButton.append(indicator);
+          th.append(sortButton);
+          th.setAttribute(
+            "aria-sort",
+            state.selectedSort === sortKey ? state.selectedSortDirection === "asc" ? "ascending" : "descending" : "none"
+          );
+          sortButton.title = `Sort by ${label}${state.selectedSort === sortKey ? state.selectedSortDirection === "asc" ? " descending" : " ascending" : ""}`;
+          sortButton.setAttribute("aria-label", sortButton.title);
+          th.dataset.column = key;
+          scope.listen(sortButton, "click", () => {
+            state.sort(sortKey);
+            updateModeLabel();
+            saveState();
+            updateColumns(automaticColumns, true);
+            updateModeLabel();
+            request(true);
+            scrollViewport.scrollTop = 0;
+            head.querySelectorAll(".column-sort")[displayedColumns.findIndex((column2) => column2.key === key)]?.focus();
+          });
+          scope.listen(grip, "dragstart", (event) => {
+            draggedColumn = key;
+            th.classList.add?.("column-dragging");
+            event.dataTransfer?.setData("text/plain", key);
+            if (event.dataTransfer) event.dataTransfer.effectAllowed = "move";
+          });
+          scope.listen(th, "dragover", (event) => {
+            if (draggedColumn && draggedColumn !== key) {
+              event.preventDefault();
+              th.classList.add("column-drop-target");
+            }
+          });
+          scope.listen(th, "dragleave", () => th.classList.remove?.("column-drop-target"));
+          scope.listen(th, "drop", (event) => {
             event.preventDefault();
-            th.classList.add("column-drop-target");
-          }
-        });
-        scope.listen(th, "dragleave", () => th.classList.remove?.("column-drop-target"));
-        scope.listen(th, "drop", (event) => {
-          event.preventDefault();
-          th.classList.remove?.("column-drop-target");
-          const source = draggedColumn || event.dataTransfer?.getData("text/plain");
-          if (!source || source === key)
-            return;
-          const order = displayedColumns.map((item) => item.key);
-          const from = order.indexOf(source);
-          const to = order.indexOf(key);
-          if (from < 0 || to < 0)
-            return;
-          order.splice(from, 1);
-          order.splice(to, 0, source);
-          state.columnOrder = order;
-          saveState();
-          updateColumns(automaticColumns, true);
-          renderWindow();
-        });
-        scope.listen(grip, "dragend", () => {
-          draggedColumn = void 0;
-          th.classList.remove?.("column-dragging", "column-drop-target");
-          for (const item of head.querySelectorAll?.(".column-drop-target") ?? [])
-            item.classList.remove?.("column-drop-target");
-        });
-        const handle = document.createElement("span");
-        handle.className = "resize-handle";
-        handle.dataset.column = key;
-        handle.setAttribute("aria-label", `Resize ${label} column`);
-        handle.title = `Drag to resize ${label}`;
-        handle.draggable = false;
-        scope.listen(handle, "pointerdown", (event) => {
-          event.stopPropagation?.();
-          resizeFromPointer(event, key, th);
-        });
-        scope.listen(handle, "click", (event) => event.stopPropagation?.());
-        th.append(handle);
-        if (key.startsWith("field:")) {
-          const remove = document.createElement("button");
-          remove.type = "button";
-          remove.className = "remove-column";
-          remove.textContent = "\xD7";
-          remove.title = `Remove ${label} column`;
-          remove.setAttribute("aria-label", `Remove ${label} column`);
-          scope.listen(remove, "click", (event) => {
-            event.stopPropagation?.();
-            state.hiddenColumns.add(key);
-            state.columnOrder = state.columnOrder.filter((item) => item !== key);
+            th.classList.remove?.("column-drop-target");
+            const source = draggedColumn || event.dataTransfer?.getData("text/plain");
+            if (!source || source === key) return;
+            const order = displayedColumns.map((item) => item.key);
+            const from = order.indexOf(source);
+            const to = order.indexOf(key);
+            if (from < 0 || to < 0) return;
+            order.splice(from, 1);
+            order.splice(to, 0, source);
+            state.columnOrder = order;
             saveState();
             updateColumns(automaticColumns, true);
             renderWindow();
           });
-          th.append(remove);
-        }
-        return th;
-      }));
+          scope.listen(grip, "dragend", () => {
+            draggedColumn = void 0;
+            th.classList.remove?.("column-dragging", "column-drop-target");
+            for (const item of head.querySelectorAll?.(".column-drop-target") ?? [])
+              item.classList.remove?.("column-drop-target");
+          });
+          const handle = document.createElement("span");
+          handle.className = "resize-handle";
+          handle.dataset.column = key;
+          handle.setAttribute("aria-label", `Resize ${label} column`);
+          handle.title = `Drag to resize ${label}`;
+          handle.draggable = false;
+          scope.listen(handle, "pointerdown", (event) => {
+            event.stopPropagation?.();
+            resizeFromPointer(event, key, th);
+          });
+          scope.listen(handle, "click", (event) => event.stopPropagation?.());
+          th.append(handle);
+          if (key.startsWith("field:")) {
+            const remove = document.createElement("button");
+            remove.type = "button";
+            remove.className = "remove-column";
+            remove.textContent = "\xD7";
+            remove.title = `Remove ${label} column`;
+            remove.setAttribute("aria-label", `Remove ${label} column`);
+            scope.listen(remove, "click", (event) => {
+              event.stopPropagation?.();
+              state.hiddenColumns.add(key);
+              state.columnOrder = state.columnOrder.filter((item) => item !== key);
+              saveState();
+              updateColumns(automaticColumns, true);
+              renderWindow();
+            });
+            th.append(remove);
+          }
+          return th;
+        })
+      );
       renderFieldList();
       state.lastRows = void 0;
     }
@@ -2793,11 +3044,16 @@ Trace ${trace.traceId}`;
       if (automaticColumns.length) automaticColumnsLocked = true;
     }
     function layoutColumns() {
-      layoutColumnWidths(displayedColumns, columnElements, state.columnWidths, scrollViewport.clientWidth || 0, element("eventsTable"));
+      layoutColumnWidths(
+        displayedColumns,
+        columnElements,
+        state.columnWidths,
+        scrollViewport.clientWidth || 0,
+        element("eventsTable")
+      );
     }
     function resizeFromPointer(event, key, header) {
-      if (event.button !== void 0 && event.button !== 0)
-        return;
+      if (event.button !== void 0 && event.button !== 0) return;
       event.currentTarget?.setPointerCapture?.(event.pointerId);
       const startX = event.clientX;
       const startWidth = header.getBoundingClientRect().width || Number(state.columnWidths[key]) || 80;
@@ -2835,8 +3091,7 @@ Trace ${trace.traceId}`;
         const key = `field:${label}`;
         if (visible) {
           state.hiddenColumns.delete(key);
-          if (!state.extraColumns.includes(label))
-            state.extraColumns.push(label);
+          if (!state.extraColumns.includes(label)) state.extraColumns.push(label);
         } else {
           state.hiddenColumns.add(key);
           state.extraColumns = state.extraColumns.filter((field) => field !== label);
@@ -2850,44 +3105,45 @@ Trace ${trace.traceId}`;
     scope.listen(elements.fieldsAll, "click", () => setAllFields(true));
     scope.listen(elements.fieldsNone, "click", () => setAllFields(false));
     function renderFieldList() {
-      if (!elements.fieldList)
-        return;
+      if (!elements.fieldList) return;
       const choices = fieldChoices();
       elements.fieldsAll.disabled = !choices.length || choices.every((label) => currentColumns.includes(label));
       elements.fieldsNone.disabled = !choices.length || choices.every((label) => !currentColumns.includes(label));
       const signature = JSON.stringify([choices, currentColumns]);
-      if (signature === fieldListSignature)
-        return;
+      if (signature === fieldListSignature) return;
       fieldListSignature = signature;
       if (!choices.length) {
-        elements.fieldList.replaceChildren(emptyMessage("Additional fields will appear when structured logs are received."));
+        elements.fieldList.replaceChildren(
+          emptyMessage("Additional fields will appear when structured logs are received.")
+        );
         return;
       }
-      elements.fieldList.replaceChildren(...choices.map((label) => {
-        const row = document.createElement("label");
-        row.className = "field-toggle";
-        row.dataset.field = label;
-        const input = document.createElement("input");
-        input.type = "checkbox";
-        input.checked = currentColumns.includes(label);
-        scope.listen(input, "change", () => {
-          const key = `field:${label}`;
-          if (input.checked) {
-            state.hiddenColumns.delete(key);
-            if (!state.extraColumns.includes(label))
-              state.extraColumns.push(label);
-          } else {
-            state.hiddenColumns.add(key);
-            state.extraColumns = state.extraColumns.filter((field) => field !== label);
-          }
-          saveState();
-          updateColumns(automaticColumns, true);
-          renderWindow();
-          request(true);
-        });
-        row.append(input, document.createTextNode(label));
-        return row;
-      }));
+      elements.fieldList.replaceChildren(
+        ...choices.map((label) => {
+          const row = document.createElement("label");
+          row.className = "field-toggle";
+          row.dataset.field = label;
+          const input = document.createElement("input");
+          input.type = "checkbox";
+          input.checked = currentColumns.includes(label);
+          scope.listen(input, "change", () => {
+            const key = `field:${label}`;
+            if (input.checked) {
+              state.hiddenColumns.delete(key);
+              if (!state.extraColumns.includes(label)) state.extraColumns.push(label);
+            } else {
+              state.hiddenColumns.add(key);
+              state.extraColumns = state.extraColumns.filter((field) => field !== label);
+            }
+            saveState();
+            updateColumns(automaticColumns, true);
+            renderWindow();
+            request(true);
+          });
+          row.append(input, document.createTextNode(label));
+          return row;
+        })
+      );
     }
     function toggleExpand(id) {
       const oldRow = elements.logs.querySelector(`tr.event-row[data-id="${id}"]`);
@@ -2904,8 +3160,7 @@ Trace ${trace.traceId}`;
       renderWindow();
       if (rowOffset !== void 0 && Number.isFinite(rowOffset)) {
         const newTop = elements.logs.querySelector(`tr.event-row[data-id="${id}"]`)?.getBoundingClientRect().top;
-        if (newTop !== void 0 && Number.isFinite(newTop))
-          scrollViewport.scrollTop += newTop - viewportTop2 - rowOffset;
+        if (newTop !== void 0 && Number.isFinite(newTop)) scrollViewport.scrollTop += newTop - viewportTop2 - rowOffset;
       }
     }
     function invalidateRows() {
@@ -2921,7 +3176,13 @@ Trace ${trace.traceId}`;
       if (data.id !== state.selected) return;
       state.selectedDetailText = data.text;
       state.selectedExceptions = data.exceptions;
-      state.selectedLinks = { site: data.site, traceId: data.traceId, findings: data.findings, crash: data.crash, attachedTo: data.attachedTo };
+      state.selectedLinks = {
+        site: data.site,
+        traceId: data.traceId,
+        findings: data.findings,
+        crash: data.crash,
+        attachedTo: data.attachedTo
+      };
       resetDetails();
       renderWindow();
     }
@@ -2973,7 +3234,9 @@ Trace ${trace.traceId}`;
       return collapsed;
     }
     function cells(row, collapsed = collapsedColumns()) {
-      return [...row.querySelectorAll("td[data-column]")].filter((cell2) => !collapsed.has(cell2.dataset.column));
+      return [...row.querySelectorAll("td[data-column]")].filter(
+        (cell2) => !collapsed.has(cell2.dataset.column)
+      );
     }
     function visibleCells() {
       const collapsed = collapsedColumns();
@@ -3008,7 +3271,9 @@ Trace ${trace.traceId}`;
         button.title = choice.reason ?? "";
         return choice;
       });
-      elements.cellFilterReason.textContent = [...new Set(results.map((choice) => choice.reason).filter(Boolean))].join(" ");
+      elements.cellFilterReason.textContent = [...new Set(results.map((choice) => choice.reason).filter(Boolean))].join(
+        " "
+      );
       elements.cellFilterReason.hidden = !elements.cellFilterReason.textContent;
       return results;
     }
@@ -3100,9 +3365,14 @@ Trace ${trace.traceId}`;
     scope.listen(document, "click", (event) => {
       if (!menu.hidden && !menu.contains(event.target)) close();
     });
-    scope.listen(document, "scroll", (event) => {
-      if (!menu.hidden && !menu.contains(event.target)) close();
-    }, { capture: true });
+    scope.listen(
+      document,
+      "scroll",
+      (event) => {
+        if (!menu.hidden && !menu.contains(event.target)) close();
+      },
+      { capture: true }
+    );
     scope.listen(window, "resize", () => {
       if (!menu.hidden) close();
     });
@@ -3125,13 +3395,16 @@ Trace ${trace.traceId}`;
     let cachedFormatter;
     let cachedFormatterTimezone;
     function timestampFormatter() {
-      if (cachedFormatter !== void 0 && cachedFormatterTimezone === state.displayTimezone)
-        return cachedFormatter;
-      const options = { hour: "2-digit", minute: "2-digit", second: "2-digit", fractionalSecondDigits: 3, hour12: false };
-      if (state.displayTimezone === "utc")
-        options.timeZone = "UTC";
-      else if (state.displayTimezone && state.displayTimezone !== "local")
-        options.timeZone = state.displayTimezone;
+      if (cachedFormatter !== void 0 && cachedFormatterTimezone === state.displayTimezone) return cachedFormatter;
+      const options = {
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit",
+        fractionalSecondDigits: 3,
+        hour12: false
+      };
+      if (state.displayTimezone === "utc") options.timeZone = "UTC";
+      else if (state.displayTimezone && state.displayTimezone !== "local") options.timeZone = state.displayTimezone;
       try {
         cachedFormatter = new Intl.DateTimeFormat(void 0, options);
       } catch {
@@ -3141,8 +3414,7 @@ Trace ${trace.traceId}`;
       return cachedFormatter;
     }
     function formatTimestamp(event) {
-      if (!Number.isFinite(event.timestampMs))
-        return event.timestamp;
+      if (!Number.isFinite(event.timestampMs)) return event.timestamp;
       const formatter = timestampFormatter();
       return formatter ? formatter.format(event.timestampMs) : event.timestamp;
     }
@@ -3162,22 +3434,34 @@ Trace ${trace.traceId}`;
     const { popovers, createPopover } = createPopovers(scope);
     createTooltips(scope);
     const formatTimestamp = createTimestampFormatter(state);
-    const analysis = createAnalysis(elements, state, {
-      drill: (term) => {
-        const choice = addFilterTerm(search.query(), term);
-        if (choice.query === void 0) {
-          elements.analysisStatus.textContent = choice.reason;
-          return;
+    const analysis = createAnalysis(
+      elements,
+      state,
+      {
+        drill: (term) => {
+          const choice = addFilterTerm(search.query(), term);
+          if (choice.query === void 0) {
+            elements.analysisStatus.textContent = choice.reason;
+            return;
+          }
+          elements.analysisDialog.close();
+          search.setQuery(choice.query, true);
+        },
+        selectSource: (id) => {
+          elements.analysisDialog.close();
+          selectSource(id);
         }
-        elements.analysisDialog.close();
-        search.setQuery(choice.query, true);
       },
-      selectSource: (id) => {
-        elements.analysisDialog.close();
-        selectSource(id);
-      }
-    }, scope);
-    const inspection = createInspection(elements, scrollViewport, api, formatTimestamp, scope, (traceId) => traceView.show(traceId));
+      scope
+    );
+    const inspection = createInspection(
+      elements,
+      scrollViewport,
+      api,
+      formatTimestamp,
+      scope,
+      (traceId) => traceView.show(traceId)
+    );
     const search = createSearch(elements, state, api, popovers, { filterChanged, updateScopeSelection }, scope);
     const request = (force = false) => bridge.request(force);
     const traceView = createTraceView(elements, api, scope, {
@@ -3221,7 +3505,13 @@ Trace ${trace.traceId}`;
       scope,
       () => cellActions?.rowsChanged()
     );
-    const bridge = new SnapshotBridge(api, state, () => search.query(), () => table.currentColumns, () => doctor.revision());
+    const bridge = new SnapshotBridge(
+      api,
+      state,
+      () => search.query(),
+      () => table.currentColumns,
+      () => doctor.revision()
+    );
     let serverSignature = "";
     let sessionSignature = "";
     let activeScopeTab = "sources";
@@ -3233,13 +3523,19 @@ Trace ${trace.traceId}`;
     let searchDebounce;
     let autocompleteDebounce;
     let copyFeedbackTimer;
-    cellActions = createCellActions(elements, () => table.events, () => search.query(), (query) => {
-      clearTimeout(searchDebounce);
-      clearTimeout(autocompleteDebounce);
-      search.clearAutocomplete();
-      search.setQuery(query, true);
-      elements.search.focus();
-    }, scope);
+    cellActions = createCellActions(
+      elements,
+      () => table.events,
+      () => search.query(),
+      (query) => {
+        clearTimeout(searchDebounce);
+        clearTimeout(autocompleteDebounce);
+        search.clearAutocomplete();
+        search.setQuery(query, true);
+        elements.search.focus();
+      },
+      scope
+    );
     let minimumSnapshotGeneration = 0;
     const onMessage = (event) => {
       if (event.data?.type !== "snapshot") {
@@ -3313,8 +3609,7 @@ Trace ${trace.traceId}`;
         }
         return;
       }
-      if (data.type !== "snapshot")
-        return;
+      if (data.type !== "snapshot") return;
       if (data.guideStatus) updateGuideStatus(data.guideStatus);
       bridge.received(data.requestId);
       const rows = bridge.rows(data);
@@ -3369,13 +3664,15 @@ Trace ${trace.traceId}`;
         table.renderRows(table.events);
       }
       state.newest = data.newest;
-      if (!state.following && state.before === void 0)
-        state.before = state.newest;
+      if (!state.following && state.before === void 0) state.before = state.newest;
       elements.status.textContent = otlpRunning && data.status.startsWith("OpenTelemetry receiver on") ? "Ready" : data.status;
       elements.command.textContent = data.command;
       elements.command.title = data.command;
       elements.stop.disabled = !data.running;
-      setLabel(elements.captureToggle, data.captureStatus?.state === "capturing" ? "Terminal capture: Capturing\u2026" : data.captureStatus?.state === "attention" ? "Terminal capture: Needs attention" : data.captureTerminals ? "Terminal capture: On" : "Terminal capture: Off");
+      setLabel(
+        elements.captureToggle,
+        data.captureStatus?.state === "capturing" ? "Terminal capture: Capturing\u2026" : data.captureStatus?.state === "attention" ? "Terminal capture: Needs attention" : data.captureTerminals ? "Terminal capture: On" : "Terminal capture: Off"
+      );
       elements.captureToggle.setAttribute("aria-pressed", String(data.captureTerminals));
       elements.captureToggle.title = data.captureStatus?.detail || (data.captureTerminals ? "Terminal capture is on. Click to turn it off." : "Terminal capture is off. Click to turn it on.");
       const sharing = data.agentSharing?.active;
@@ -3394,17 +3691,19 @@ Trace ${trace.traceId}`;
       elements.sessions.textContent = activeSessions.length ? `${activeSessions.length} active session${activeSessions.length === 1 ? "" : "s"}` : "No active sessions";
       let selectionChanged = false;
       if (data.servers) {
-        const signature = JSON.stringify(data.servers.map((server) => [
-          server.id,
-          server.label,
-          server.status,
-          server.activeSessions,
-          server.taskName,
-          server.taskType,
-          server.dependencies,
-          server.dependencyState,
-          server.exitReason
-        ]));
+        const signature = JSON.stringify(
+          data.servers.map((server) => [
+            server.id,
+            server.label,
+            server.status,
+            server.activeSessions,
+            server.taskName,
+            server.taskType,
+            server.dependencies,
+            server.dependencyState,
+            server.exitReason
+          ])
+        );
         if (signature !== serverSignature) {
           serverSignature = signature;
           visibleSources = data.servers;
@@ -3423,8 +3722,22 @@ Trace ${trace.traceId}`;
         }
       }
       if (data.sessions) {
-        const sessions = data.sessions.filter((session) => !state.selectedServer || session.serverId === state.selectedServer || state.selectedServer.startsWith(`${session.serverId}::`));
-        const signature = JSON.stringify(sessions.map((session) => [session.id, session.serverId, session.command, session.status, session.startedAt, session.endedAt, session.captureStatus, session.captureReason, session.canStop]));
+        const sessions = data.sessions.filter(
+          (session) => !state.selectedServer || session.serverId === state.selectedServer || state.selectedServer.startsWith(`${session.serverId}::`)
+        );
+        const signature = JSON.stringify(
+          sessions.map((session) => [
+            session.id,
+            session.serverId,
+            session.command,
+            session.status,
+            session.startedAt,
+            session.endedAt,
+            session.captureStatus,
+            session.captureReason,
+            session.canStop
+          ])
+        );
         if (signature !== sessionSignature) {
           sessionSignature = signature;
           visibleSessions = sessions;
@@ -3450,16 +3763,12 @@ Trace ${trace.traceId}`;
       const budget = Number.isFinite(data.maxBytes) ? (data.maxBytes / 1048576).toFixed(0) : "?";
       elements.counts.textContent = `${number2(data.total)} received \xB7 ${number2(data.retained)} retained \xB7 ${number2(data.discarded)} discarded \xB7 ${(data.bytes / 1048576).toFixed(1)} / ${budget} MiB \xB7 ${data.truncated} truncated` + (data.persistDropped ? ` \xB7 ${number2(data.persistDropped)} disk writes skipped` : "");
       updateModeLabel();
-      if (Array.isArray(data.columnFields))
-        state.columnFields = data.columnFields;
+      if (Array.isArray(data.columnFields)) state.columnFields = data.columnFields;
       table.updateColumns(data.columns ?? []);
-      if (rows?.length)
-        table.lockAutomaticColumns();
+      if (rows?.length) table.lockAutomaticColumns();
       table.renderFieldList();
-      if (Array.isArray(data.fields))
-        state.allFields = data.fields;
-      if (data.searches)
-        search.renderSearchState(data.searches);
+      if (Array.isArray(data.fields)) state.allFields = data.fields;
+      if (data.searches) search.renderSearchState(data.searches);
       if (rows && !bridge.refreshRequested && !state.paused && holdingLive()) {
         heldEvents = rows;
         updateModeLabel();
@@ -3480,8 +3789,7 @@ Trace ${trace.traceId}`;
         elements.empty.hidden = rows.length > 0;
         elements.rowHint.hidden = state.rowHintDismissed || !rows.length;
         elements.empty.textContent = data.total ? "No matching events in retained history." : "Run a server command to see its logs here.";
-        if (state.following && !state.paused && !state.selectedSort)
-          table.scheduleRenderWindow(true);
+        if (state.following && !state.paused && !state.selectedSort) table.scheduleRenderWindow(true);
       }
       bridge.flush();
     }
@@ -3568,7 +3876,10 @@ Trace ${trace.traceId}`;
     function updateGuideStatus(status) {
       guideUnread = status.unread;
       elements.helpBadge.hidden = !status.unread;
-      elements.help.setAttribute("aria-label", status.unread ? "Open the Logline Guide \u2014 new features available" : "Open the Logline Guide");
+      elements.help.setAttribute(
+        "aria-label",
+        status.unread ? "Open the Logline Guide \u2014 new features available" : "Open the Logline Guide"
+      );
       elements.help.title = status.unread ? `Open the Logline Guide \xB7 New in ${status.version}` : "Open the Logline Guide";
     }
     function requestInteraction() {
@@ -3597,14 +3908,14 @@ Trace ${trace.traceId}`;
         dismiss.closest(".detail-hint")?.remove();
         return;
       }
-      if (doctor.handleAction(event) || inspection.handleDetailAction(event))
-        return;
+      if (doctor.handleAction(event) || inspection.handleDetailAction(event)) return;
       const rowButton = target.closest(".row-icon, .row-action");
       const rowId = Number(rowButton?.dataset.id);
       if (rowButton && Number.isSafeInteger(rowId)) {
         if (rowButton.classList.contains("row-site-button")) api.postMessage({ type: "openLogSite", id: rowId });
         else if (rowButton.classList.contains("row-break-button")) api.postMessage({ type: "breakOnEvent", id: rowId });
-        else if (rowButton.classList.contains("row-context-button") || rowButton.classList.contains("row-attached-button")) inspection.showContext(rowId);
+        else if (rowButton.classList.contains("row-context-button") || rowButton.classList.contains("row-attached-button"))
+          inspection.showContext(rowId);
         else if (rowButton.classList.contains("row-finding-button") && state.selected !== rowId) toggleExpand(rowId);
         return;
       }
@@ -3614,8 +3925,7 @@ Trace ${trace.traceId}`;
         return;
       }
       const button = event.target.closest(".message-button");
-      if (!button)
-        return;
+      if (!button) return;
       toggleExpand(Number(button.closest("tr").dataset.id));
     });
     scope.listen(elements.search, "input", () => {
@@ -3639,11 +3949,31 @@ Trace ${trace.traceId}`;
     updateFollowControl();
     updateModeLabel();
     updateCopyResultsControl();
-    createPopover(elements.levelButton.closest(".popover-container"), elements.levelButton, elements.levelMenu);
-    createPopover(elements.searchHelp.closest(".popover-container"), elements.searchHelp, elements.searchHelpPanel);
-    createPopover(elements.searchTools.closest(".popover-container"), elements.searchTools, elements.searchToolsPanel);
-    createPopover(elements.fieldsButton.closest(".popover-container"), elements.fieldsButton, elements.fieldsPanel);
-    const scopePopover = createPopover(elements.server.closest(".popover-container"), elements.server, elements.scopeMenu);
+    createPopover(
+      elements.levelButton.closest(".popover-container"),
+      elements.levelButton,
+      elements.levelMenu
+    );
+    createPopover(
+      elements.searchHelp.closest(".popover-container"),
+      elements.searchHelp,
+      elements.searchHelpPanel
+    );
+    createPopover(
+      elements.searchTools.closest(".popover-container"),
+      elements.searchTools,
+      elements.searchToolsPanel
+    );
+    createPopover(
+      elements.fieldsButton.closest(".popover-container"),
+      elements.fieldsButton,
+      elements.fieldsPanel
+    );
+    const scopePopover = createPopover(
+      elements.server.closest(".popover-container"),
+      elements.server,
+      elements.scopeMenu
+    );
     setScopeTab("sources");
     scope.listen(elements.server, "keydown", (event) => {
       if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
@@ -3678,7 +4008,11 @@ Trace ${trace.traceId}`;
       if (!elements.scopeMenu.contains(event.relatedTarget)) scopePopover.close();
     });
     const actionsContainer = elements.moreActions.closest(".popover-container");
-    const doctorPopover = createPopover(elements.doctor.closest(".popover-container"), elements.doctor, elements.doctorPanel);
+    const doctorPopover = createPopover(
+      elements.doctor.closest(".popover-container"),
+      elements.doctor,
+      elements.doctorPanel
+    );
     scope.listen(elements.contextDetails, "click", (event) => {
       doctor.handleAction(event);
     });
@@ -3694,7 +4028,18 @@ Trace ${trace.traceId}`;
       table.toggleExpand(id);
     }
     const actionsMenu = createPopover(actionsContainer, elements.moreActions, elements.actionsMenu);
-    const actionItems = [elements.shareSpecificRuns, elements.connectAgent, elements.export, elements.import, elements.breakOnLogs, elements.otlpToggle, elements.manage, elements.statusAction, elements.config, elements.help];
+    const actionItems = [
+      elements.shareSpecificRuns,
+      elements.connectAgent,
+      elements.export,
+      elements.import,
+      elements.breakOnLogs,
+      elements.otlpToggle,
+      elements.manage,
+      elements.statusAction,
+      elements.config,
+      elements.help
+    ];
     scope.listen(elements.moreActions, "click", () => {
       if (actionsMenu.isOpen()) actionItems[0].focus();
     });
@@ -3721,7 +4066,13 @@ Trace ${trace.traceId}`;
     for (const item of actionItems) scope.listen(item, "click", () => actionsMenu.close(true));
     scope.listen(elements.copyResults, "click", () => {
       if (!hasActiveFilter()) return;
-      api.postMessage({ type: "copyFiltered", query: search.query(), levels: state.currentLevels(), serverId: state.selectedServer || void 0, sessionId: state.selectedSession || void 0 });
+      api.postMessage({
+        type: "copyFiltered",
+        query: search.query(),
+        levels: state.currentLevels(),
+        serverId: state.selectedServer || void 0,
+        sessionId: state.selectedSession || void 0
+      });
       setLabel(elements.copyResults, "Copied");
       elements.copyResults.dataset.copied = "true";
       clearTimeout(copyFeedbackTimer);
@@ -3735,12 +4086,15 @@ Trace ${trace.traceId}`;
       if (agentSharingActive) api.postMessage({ type: "stopSharing" });
       else api.postMessage({ type: "shareWithAgent" });
     });
-    scope.listen(elements.shareSpecificRuns, "click", () => api.postMessage({ type: "shareWithAgent", chooseRuns: true }));
+    scope.listen(
+      elements.shareSpecificRuns,
+      "click",
+      () => api.postMessage({ type: "shareWithAgent", chooseRuns: true })
+    );
     scope.listen(elements.connectAgent, "click", () => api.postMessage({ type: "connectAgent" }));
     scope.listen(elements.statusAction, "click", () => api.postMessage({ type: "showStatus" }));
     scope.listen(elements.saveSearch, "click", () => {
-      for (const popover of popovers)
-        popover.close();
+      for (const popover of popovers) popover.close();
       elements.saveSearchName.value = search.query() || "";
       elements.saveSearchDialog.showModal();
       elements.saveSearchName.select?.();
@@ -3750,7 +4104,13 @@ Trace ${trace.traceId}`;
       event.preventDefault();
       const name = elements.saveSearchName.value;
       elements.saveSearchDialog.close();
-      api.postMessage({ type: "saveSearch", name, query: search.query(), levels: state.currentLevels(), serverId: state.selectedServer || void 0 });
+      api.postMessage({
+        type: "saveSearch",
+        name,
+        query: search.query(),
+        levels: state.currentLevels(),
+        serverId: state.selectedServer || void 0
+      });
     });
     scope.listen(elements.changedOnly, "click", () => {
       search.setQuery(withChangedScope(search.query(), !hasChangedScope(search.query())), true);
@@ -3758,7 +4118,13 @@ Trace ${trace.traceId}`;
     scope.listen(elements.analyze, "click", () => {
       elements.analysisDialog.showModal();
       elements.analysisStatus.textContent = "Loading analysis\u2026";
-      api.postMessage({ type: "analysis", query: search.query(), levels: state.currentLevels(), serverId: state.selectedServer || void 0, sessionId: state.selectedSession || void 0 });
+      api.postMessage({
+        type: "analysis",
+        query: search.query(),
+        levels: state.currentLevels(),
+        serverId: state.selectedServer || void 0,
+        sessionId: state.selectedSession || void 0
+      });
     });
     scope.listen(elements.analysisClose, "click", () => elements.analysisDialog.close());
     function resumeLive() {
@@ -3789,8 +4155,7 @@ Trace ${trace.traceId}`;
       else if (!state.following && top <= 1 && !wasAtTop && state.page === 0) resumeLive();
     });
     scope.listen(elements.older, "click", () => {
-      if (state.following && !state.paused)
-        setFollowing(false);
+      if (state.following && !state.paused) setFollowing(false);
       state.page = Math.min(state.pages - 1, state.page + 1);
       requestInteraction();
     });
@@ -3810,22 +4175,43 @@ Trace ${trace.traceId}`;
       api.postMessage({ type: "clear" });
       requestInteraction();
     });
-    scope.listen(elements.stop, "click", () => api.postMessage({ type: "stop", serverId: state.selectedServer || void 0 }));
+    scope.listen(
+      elements.stop,
+      "click",
+      () => api.postMessage({ type: "stop", serverId: state.selectedServer || void 0 })
+    );
     scope.listen(elements.config, "click", () => api.postMessage({ type: "config" }));
-    scope.listen(elements.help, "click", () => api.postMessage({ type: "showGuide", section: guideUnread ? "whatsNew" : "guide" }));
+    scope.listen(
+      elements.help,
+      "click",
+      () => api.postMessage({ type: "showGuide", section: guideUnread ? "whatsNew" : "guide" })
+    );
     scope.listen(elements.manage, "click", () => api.postMessage({ type: "manageServers" }));
     scope.listen(elements.otlpToggle, "click", () => api.postMessage({ type: "toggleOtlp", enabled: !otlpRunning }));
     scope.listen(elements.otlpStatus, "click", () => traceList.show());
     function exportRequest(type) {
-      api.postMessage({ type, query: search.query(), levels: state.currentLevels(), serverId: state.selectedServer || void 0, sessionId: state.selectedSession || void 0 });
+      api.postMessage({
+        type,
+        query: search.query(),
+        levels: state.currentLevels(),
+        serverId: state.selectedServer || void 0,
+        sessionId: state.selectedSession || void 0
+      });
     }
     scope.listen(elements.export, "click", () => exportRequest("export"));
     scope.listen(elements.import, "click", () => api.postMessage({ type: "import" }));
-    scope.listen(elements.breakOnLogs, "click", () => api.postMessage({ type: "breakOnQuery", query: search.query(), levels: state.currentLevels() }));
-    scope.listen(elements.run, "click", () => api.postMessage({ type: "run", serverId: state.selectedServer || void 0 }));
+    scope.listen(
+      elements.breakOnLogs,
+      "click",
+      () => api.postMessage({ type: "breakOnQuery", query: search.query(), levels: state.currentLevels() })
+    );
+    scope.listen(
+      elements.run,
+      "click",
+      () => api.postMessage({ type: "run", serverId: state.selectedServer || void 0 })
+    );
     scope.listen(document, "visibilitychange", () => {
-      if (!document.hidden)
-        request();
+      if (!document.hidden) request();
     });
     const fallbackTimer = setInterval(() => request(), 5e3);
     request();
@@ -3875,21 +4261,26 @@ Trace ${trace.traceId}`;
       all.textContent = activeCount ? `All sources \xB7 ${activeCount} active` : "All sources";
       all.title = "Show logs from every source";
       scope.listen(all, "click", () => selectSource(""));
-      const options = [all, ...servers.map((server) => {
-        const option = document.createElement("button");
-        option.type = "button";
-        option.className = "source-select";
-        option.dataset.sourceId = server.id;
-        const formatted = formatSource(server);
-        option.textContent = formatted.label;
-        option.title = formatted.title;
-        scope.listen(option, "click", () => selectSource(server.id));
-        return option;
-      })];
+      const options = [
+        all,
+        ...servers.map((server) => {
+          const option = document.createElement("button");
+          option.type = "button";
+          option.className = "source-select";
+          option.dataset.sourceId = server.id;
+          const formatted = formatSource(server);
+          option.textContent = formatted.label;
+          option.title = formatted.title;
+          scope.listen(option, "click", () => selectSource(server.id));
+          return option;
+        })
+      ];
       elements.sourceMenu.replaceChildren(...options);
       updateSourceSelection();
       if (focusedSource !== void 0) {
-        const focus = [...elements.sourceMenu.querySelectorAll("[data-source-id]")].find((node) => node.dataset.sourceId === focusedSource);
+        const focus = [...elements.sourceMenu.querySelectorAll("[data-source-id]")].find(
+          (node) => node.dataset.sourceId === focusedSource
+        );
         focus?.focus();
       }
     }
@@ -3906,7 +4297,10 @@ Trace ${trace.traceId}`;
       const runLabel = selectedRun && runName(selectedRun) || (visibleSessions.length ? `All runs \xB7 ${visibleSessions.length}` : "All runs");
       elements.server.value = state.selectedServer;
       elements.server.textContent = `${sourceLabel} \xB7 ${runLabel}`;
-      elements.server.title = [selectedSource?.label || "All sources", selectedRun && runName(selectedRun) || "All runs"].join(" \xB7 ");
+      elements.server.title = [
+        selectedSource?.label || "All sources",
+        selectedRun && runName(selectedRun) || "All runs"
+      ].join(" \xB7 ");
     }
     function setScopeTab(tab, focus = false) {
       activeScopeTab = tab;
@@ -3916,8 +4310,7 @@ Trace ${trace.traceId}`;
       elements.runsTab.tabIndex = tab === "runs" ? 0 : -1;
       elements.sourceMenu.hidden = tab !== "sources";
       elements.sessionMenu.hidden = tab !== "runs";
-      if (focus)
-        (tab === "sources" ? elements.sourcesTab : elements.runsTab).focus();
+      if (focus) (tab === "sources" ? elements.sourcesTab : elements.runsTab).focus();
     }
     function selectSource(id) {
       search.clearAutocomplete();
@@ -3960,7 +4353,11 @@ Trace ${trace.traceId}`;
         const started = session.startedAt ? new Date(session.startedAt).toLocaleTimeString() : "";
         const stateText = session.status === "running" ? "running" : session.exitReason || session.status;
         select.textContent = `${runName(session)} \xB7 ${started} \xB7 ${stateText}`;
-        select.title = [session.cwd, session.captureStatus ? `Capture: ${session.captureStatus}` : void 0, session.captureReason].filter(Boolean).join(" \xB7 ");
+        select.title = [
+          session.cwd,
+          session.captureStatus ? `Capture: ${session.captureStatus}` : void 0,
+          session.captureReason
+        ].filter(Boolean).join(" \xB7 ");
         scope.listen(select, "click", () => selectRun(session.id));
         row.append(select);
         if (session.status === "running" || session.status === "stopping") {
@@ -3991,7 +4388,9 @@ Trace ${trace.traceId}`;
       }
       updateRunSelection();
       if (focusedRun !== void 0) {
-        const focus = [...elements.sessionMenu.querySelectorAll("[data-run-id]")].find((node) => node.dataset.runId === focusedRun);
+        const focus = [...elements.sessionMenu.querySelectorAll("[data-run-id]")].find(
+          (node) => node.dataset.runId === focusedRun
+        );
         focus?.focus();
       }
     }

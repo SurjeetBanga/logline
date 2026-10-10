@@ -10,41 +10,71 @@ const workspaceRoot = path.resolve('inspection-fixture');
 const uri = (file: string) => ({ fsPath: file, path: file.replace(/\\/g, '/'), toString: () => file });
 const files = new Set<string>();
 const notices: string[] = [];
-const opened: { document: unknown; options: unknown; }[] = [];
+const opened: { document: unknown; options: unknown }[] = [];
 let lookup: ReturnType<typeof uri>[] = [];
 let choices: unknown[] = [];
-class Position { constructor(public line: number, public character: number) { } }
-class Range { constructor(public start: Position, public end: Position) { } }
+class Position {
+  constructor(
+    public line: number,
+    public character: number,
+  ) {}
+}
+class Range {
+  constructor(
+    public start: Position,
+    public end: Position,
+  ) {}
+}
 const mock = {
-  Position, Range, Uri: { file: uri }, FileType: { File: 1 },
+  Position,
+  Range,
+  Uri: { file: uri },
+  FileType: { File: 1 },
   workspace: {
     workspaceFolders: [{ uri: uri(workspaceRoot) }],
-    onDidChangeConfiguration: () => ({ dispose() { } }),
+    onDidChangeConfiguration: () => ({ dispose() {} }),
     getConfiguration: () => ({ get: (_key: string, fallback: unknown) => fallback }),
     fs: {
       stat: async (value: ReturnType<typeof uri>) => {
         if (!files.has(value.fsPath)) throw new Error('missing');
         return { type: 1 };
-      }
+      },
     },
     findFiles: async () => lookup,
     asRelativePath: (value: ReturnType<typeof uri>) => path.relative(workspaceRoot, value.fsPath),
-    openTextDocument: async (value: ReturnType<typeof uri>) => ({ uri: value, lineCount: 100, lineAt: () => ({ text: ' '.repeat(80) }) })
+    openTextDocument: async (value: ReturnType<typeof uri>) => ({
+      uri: value,
+      lineCount: 100,
+      lineAt: () => ({ text: ' '.repeat(80) }),
+    }),
   },
   window: {
-    showInformationMessage: (message: string) => { notices.push(message); },
-    showTextDocument: async (document: unknown, options: unknown) => { opened.push({ document, options }); },
-    showQuickPick: async (items: unknown[]) => { choices = items; return items[0]; }
-  }
+    showInformationMessage: (message: string) => {
+      notices.push(message);
+    },
+    showTextDocument: async (document: unknown, options: unknown) => {
+      opened.push({ document, options });
+    },
+    showQuickPick: async (items: unknown[]) => {
+      choices = items;
+      return items[0];
+    },
+  },
 };
 const { LogsController, openSource } = withVscode(mock, () => ({
-  ...require('./logs-controller') as typeof import('./logs-controller'),
-  ...require('./source-navigation') as typeof import('./source-navigation')
+  ...(require('./logs-controller') as typeof import('./logs-controller')),
+  ...(require('./source-navigation') as typeof import('./source-navigation')),
 }));
 
 function setup(stack = 'Error: Failed\n    at run (src/main.ts:42:9)') {
-  notices.length = 0; opened.length = 0; files.clear(); lookup = []; choices = [];
-  const provider = new LogsController({ globalState: { get: (_key: string, fallback: unknown) => fallback, update: async () => { } } } as unknown as import('vscode').ExtensionContext);
+  notices.length = 0;
+  opened.length = 0;
+  files.clear();
+  lookup = [];
+  choices = [];
+  const provider = new LogsController({
+    globalState: { get: (_key: string, fallback: unknown) => fallback, update: async () => {} },
+  } as unknown as import('vscode').ExtensionContext);
   const event = parseLogLine(JSON.stringify({ message: 'Failed', err: { stack } }), 'stderr', 2, new Date());
   provider.store.add({ id: 1, level: 'debug', message: 'Preparing' });
   provider.store.add(event);
@@ -55,17 +85,40 @@ test('details and context messages return bounded structured data to the right v
   const provider = setup();
   const messages: Record<string, any>[] = [];
 
-  await provider.handleMessage(message => { messages.push(message); }, { type: 'details', id: 2, target: 'context' });
+  await provider.handleMessage(
+    (message) => {
+      messages.push(message);
+    },
+    { type: 'details', id: 2, target: 'context' },
+  );
   assert.equal(messages[0].target, 'context');
   assert.equal(messages[0].exceptions[0].lines[1].source.file, 'src/main.ts');
   assert.equal(JSON.parse(messages[0].text).message, 'Failed');
-  await provider.handleMessage(message => { messages.push(message); }, { type: 'context', id: 2, levels: ['error'], query: 'Failed' });
-  assert.deepEqual(messages[1].events.map((event: { id: number; }) => event.id), [2]);
+  await provider.handleMessage(
+    (message) => {
+      messages.push(message);
+    },
+    { type: 'context', id: 2, levels: ['error'], query: 'Failed' },
+  );
+  assert.deepEqual(
+    messages[1].events.map((event: { id: number }) => event.id),
+    [2],
+  );
   provider.store.clear();
-  await provider.handleMessage(message => { messages.push(message); }, { type: 'details', id: 2, target: 'context' });
+  await provider.handleMessage(
+    (message) => {
+      messages.push(message);
+    },
+    { type: 'details', id: 2, target: 'context' },
+  );
   assert.deepEqual(messages[2].exceptions, []);
   assert.match(messages[2].text, /discarded/);
-  await provider.handleMessage(message => { messages.push(message); }, { type: 'context', id: 2 });
+  await provider.handleMessage(
+    (message) => {
+      messages.push(message);
+    },
+    { type: 'context', id: 2 },
+  );
   assert.equal(messages[3].missing, true);
 });
 
@@ -74,7 +127,7 @@ test('source links use the retained frame, not a supplied path or command', asyn
   files.add(path.join(workspaceRoot, 'src/main.ts'));
   await openSource(provider.store, { id: 2, block: 0, line: 1, file: '/other/private.ts', command: 'malicious' });
   assert.equal(opened.length, 1);
-  const result = opened[0] as { document: { uri: ReturnType<typeof uri>; }; options: { selection: Range; }; };
+  const result = opened[0] as { document: { uri: ReturnType<typeof uri> }; options: { selection: Range } };
   assert.equal(result.document.uri.fsPath, path.join(workspaceRoot, 'src/main.ts'));
   assert.deepEqual(result.options.selection.start, new Position(41, 8));
   await openSource(provider.store, { id: 2, block: -1, line: 1 });

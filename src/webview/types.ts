@@ -13,4 +13,6 @@ export interface ViewerActions {
   updateFollowControl(): void;
   updateModeLabel(): void;
 }
-declare global { function acquireVsCodeApi(): WebviewApi; }
+declare global {
+  function acquireVsCodeApi(): WebviewApi;
+}

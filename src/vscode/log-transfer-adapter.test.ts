@@ -20,49 +20,88 @@ const mock = {
   workspace: {
     workspaceFolders: [{ uri: { fsPath: '/workspace' } }],
     fs: {
-      writeFile: async (_uri: unknown, bytes: Uint8Array) => { if (failWrite) throw new Error('provider full'); writes.push(Buffer.from(bytes).toString('utf8')); },
-      readFile: async () => { if (failRead) throw new Error('provider read failed'); return Buffer.from('{"message":"imported"}\n'); }
-    }
+      writeFile: async (_uri: unknown, bytes: Uint8Array) => {
+        if (failWrite) throw new Error('provider full');
+        writes.push(Buffer.from(bytes).toString('utf8'));
+      },
+      readFile: async () => {
+        if (failRead) throw new Error('provider read failed');
+        return Buffer.from('{"message":"imported"}\n');
+      },
+    },
   },
   window: {
-    showQuickPick: async (items: { format: typeof format }[]) => items.find(item => item.format === format),
+    showQuickPick: async (items: { format: typeof format }[]) => items.find((item) => item.format === format),
     showSaveDialog: async () => destination,
     showOpenDialog: async () => imported,
-    withProgress: async (_options: unknown, task: (progress: unknown, token: { isCancellationRequested: boolean }) => Promise<void>) => task({}, { isCancellationRequested: false }),
+    withProgress: async (
+      _options: unknown,
+      task: (progress: unknown, token: { isCancellationRequested: boolean }) => Promise<void>,
+    ) => task({}, { isCancellationRequested: false }),
     showInformationMessage: () => undefined,
-    showWarningMessage: (message: string) => { warnings.push(message); },
-    showErrorMessage: (message: string) => { errors.push(message); }
+    showWarningMessage: (message: string) => {
+      warnings.push(message);
+    },
+    showErrorMessage: (message: string) => {
+      errors.push(message);
+    },
   },
-  env: { clipboard: { writeText: async (text: string) => { writes.push(text); } } }
+  env: {
+    clipboard: {
+      writeText: async (text: string) => {
+        writes.push(text);
+      },
+    },
+  },
 };
 const { LogTransfer } = withVscode(mock, () => require('./log-transfer') as typeof import('./log-transfer'));
 
 function transfer() {
   const store = new LogStore();
-  store.add({ id: 1, serverId: 'api', sessionId: 'run', level: 'error', message: 'token=secret', raw: '{"message":"token=secret"}' });
+  store.add({
+    id: 1,
+    serverId: 'api',
+    sessionId: 'run',
+    level: 'error',
+    message: 'token=secret',
+    raw: '{"message":"token=secret"}',
+  });
   store.add({ id: 2, serverId: 'web', sessionId: 'run', level: 'info', message: 'other' });
-  const settings = { get: <T>(key: string, fallback: T) => {
-    if (key === 'redactExports') return true as T;
-    if (key === 'redactionFields') return [] as T;
-    if (key === 'redactionReplacement') return '[REDACTED]' as T;
-    if (key === 'maxLineLength') return 65536 as T;
-    return fallback;
-  } };
-  return { service: new LogTransfer(store, settings, new Ingestion(store, () => { }), new RuntimeState(() => { })), store };
+  const settings = {
+    get: <T>(key: string, fallback: T) => {
+      if (key === 'redactExports') return true as T;
+      if (key === 'redactionFields') return [] as T;
+      if (key === 'redactionReplacement') return '[REDACTED]' as T;
+      if (key === 'maxLineLength') return 65536 as T;
+      return fallback;
+    },
+  };
+  return {
+    service: new LogTransfer(store, settings, new Ingestion(store, () => {}), new RuntimeState(() => {})),
+    store,
+  };
 }
 
 test('log transfer covers provider export, markdown/context/copy actions, and non-file imports', async () => {
-  writes.length = 0; errors.length = 0; warnings.length = 0; failWrite = false; failRead = false;
-  format = 'jsonl'; destination = { scheme: 'mem', path: '/export.jsonl', fsPath: '/export.jsonl' };
+  writes.length = 0;
+  errors.length = 0;
+  warnings.length = 0;
+  failWrite = false;
+  failRead = false;
+  format = 'jsonl';
+  destination = { scheme: 'mem', path: '/export.jsonl', fsPath: '/export.jsonl' };
   const { service, store } = transfer();
   await service.exportLogs({ serverId: 'api' });
   assert.ok(writes[0].includes('[REDACTED]'));
   assert.doesNotMatch(writes[0], /secret/);
   await service.copyFiltered({ serverId: 'api' });
-  assert.ok(writes.some(value => value.includes('"id":1')));
+  assert.ok(writes.some((value) => value.includes('"id":1')));
   format = 'md';
   let saved = '';
-  service.saveExport = async content => { saved = content; return true; };
+  service.saveExport = async (content) => {
+    saved = content;
+    return true;
+  };
   await service.exportForAI({ serverId: 'api' });
   assert.match(saved, /# Logline incident context/);
   await service.exportContext([1, 99]);
@@ -73,7 +112,8 @@ test('log transfer covers provider export, markdown/context/copy actions, and no
   imported = [{ scheme: 'mem', path: '/import.jsonl', fsPath: '/import.jsonl' }];
   await service.importLogs();
   assert.equal(store.all().at(-1)?.message, 'imported');
-  failRead = true; await service.importLogs();
+  failRead = true;
+  await service.importLogs();
   assert.match(warnings.at(-1)!, /provider read failed/);
   failWrite = true;
   const { service: failedService } = transfer();

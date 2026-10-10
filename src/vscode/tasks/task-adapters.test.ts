@@ -14,25 +14,51 @@ const errors: string[] = [];
 const disposable = () => ({ dispose() {} });
 const mock = {
   Task: class {
-    constructor(public definition: unknown, public scope: unknown, public name: string, public source: string, public execution: unknown) {}
+    constructor(
+      public definition: unknown,
+      public scope: unknown,
+      public name: string,
+      public source: string,
+      public execution: unknown,
+    ) {}
   },
-  CustomExecution: class { constructor(public callback: unknown) {} },
-  EventEmitter: class { event = () => disposable(); fire() {} },
-  workspace: { isTrusted: true, get workspaceFolders() { return folders; } },
+  CustomExecution: class {
+    constructor(public callback: unknown) {}
+  },
+  EventEmitter: class {
+    event = () => disposable();
+    fire() {}
+  },
+  workspace: {
+    isTrusted: true,
+    get workspaceFolders() {
+      return folders;
+    },
+  },
   window: {
-    showQuickPick: async (items: unknown[]) => { onPick(); return items[0]; },
-    showInformationMessage() {}, showErrorMessage: (message: string) => errors.push(message)
+    showQuickPick: async (items: unknown[]) => {
+      onPick();
+      return items[0];
+    },
+    showInformationMessage() {},
+    showErrorMessage: (message: string) => errors.push(message),
   },
   tasks: {
     fetchTasks: async () => tasks,
-    registerTaskProvider: (_type: string, value: vscode.TaskProvider) => { provider = value; return disposable(); },
-    onDidStartTask: disposable, onDidStartTaskProcess: disposable, onDidEndTaskProcess: disposable, onDidEndTask: disposable
-  }
+    registerTaskProvider: (_type: string, value: vscode.TaskProvider) => {
+      provider = value;
+      return disposable();
+    },
+    onDidStartTask: disposable,
+    onDidStartTaskProcess: disposable,
+    onDidEndTaskProcess: disposable,
+    onDidEndTask: disposable,
+  },
 };
 const { convertTask, registerTasks, LogPseudoTerminal } = withVscode(mock, () => ({
-  ...require('./conversion') as typeof import('./conversion'),
-  ...require('./provider') as typeof import('./provider'),
-  ...require('./terminal') as typeof import('./terminal')
+  ...(require('./conversion') as typeof import('./conversion')),
+  ...(require('./provider') as typeof import('./provider')),
+  ...(require('./terminal') as typeof import('./terminal')),
 }));
 
 function setup() {
@@ -42,9 +68,17 @@ function setup() {
     mkdirSync(path.join(fsPath, '.vscode'), { recursive: true });
     return { name, index, uri: { fsPath, toString: () => fsPath } } as vscode.WorkspaceFolder;
   });
-  tasks = [{ name: 'Run', source: 'process', scope: folders[1], definition: { type: 'process' },
-    execution: { process: process.execPath, args: [], options: {} } }];
-  onPick = () => {}; errors.length = 0;
+  tasks = [
+    {
+      name: 'Run',
+      source: 'process',
+      scope: folders[1],
+      definition: { type: 'process' },
+      execution: { process: process.execPath, args: [], options: {} },
+    },
+  ];
+  onPick = () => {};
+  errors.length = 0;
   return { root, file: path.join(folders[1].uri.fsPath, '.vscode/tasks.json') };
 }
 
@@ -57,7 +91,9 @@ test('conversion leaves malformed task files untouched', async () => {
       assert.equal(readFileSync(file, 'utf8'), text);
     }
     assert.equal(errors.length, 4);
-  } finally { rmSync(root, { recursive: true, force: true }); }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test('conversion preserves edits made while its task picker is open', async () => {
@@ -65,11 +101,15 @@ test('conversion preserves edits made while its task picker is open', async () =
   try {
     writeFileSync(file, '{"tasks":[]}');
     const changed = '{"tasks":[{"label":"New user task"}]}';
-    onPick = () => { writeFileSync(file, changed); };
+    onPick = () => {
+      writeFileSync(file, changed);
+    };
     await convertTask();
     assert.equal(readFileSync(file, 'utf8'), changed);
     assert.match(errors[0], /changed during conversion/);
-  } finally { rmSync(root, { recursive: true, force: true }); }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test('conversion writes a captured process task into tasks.json', async () => {
@@ -80,29 +120,54 @@ test('conversion writes a captured process task into tasks.json', async () => {
     const text = readFileSync(file, 'utf8');
     assert.match(text, /"type": "logline"/);
     assert.match(text, /node|process/);
-  } finally { rmSync(root, { recursive: true, force: true }); }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test('task discovery covers all workspace folders and resolution retains its original scope', async () => {
   const { root } = setup();
   try {
-    for (const folder of folders) writeFileSync(path.join(folder.uri.fsPath, '.vscode/tasks.json'), JSON.stringify({
-      tasks: [null, { type: 'logline', label: folder.name, command: process.execPath }]
-    }));
+    for (const folder of folders)
+      writeFileSync(
+        path.join(folder.uri.fsPath, '.vscode/tasks.json'),
+        JSON.stringify({
+          tasks: [null, { type: 'logline', label: folder.name, command: process.execPath }],
+        }),
+      );
     registerTasks({} as never, {} as never, {} as never);
     const discovered = await provider.provideTasks({} as never);
-    assert.deepEqual(discovered?.map(task => task.scope), folders);
+    assert.deepEqual(
+      discovered?.map((task) => task.scope),
+      folders,
+    );
     const resolved = await provider.resolveTask(discovered![1], {} as never);
     assert.equal(resolved?.scope, folders[1]);
     folders = [];
-    assert.equal(await provider.resolveTask({ definition: { type: 'logline', command: 'node' } } as unknown as vscode.Task, {} as never), undefined);
-  } finally { rmSync(root, { recursive: true, force: true }); }
+    assert.equal(
+      await provider.resolveTask(
+        { definition: { type: 'logline', command: 'node' } } as unknown as vscode.Task,
+        {} as never,
+      ),
+      undefined,
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test('an explicit empty argument array stays in argv mode', () => {
   let actualArgs: unknown;
-  const terminal = new LogPseudoTerminal({ run: (...args: unknown[]) => { actualArgs = args[5]; } } as never,
-    { dependencyState: () => 'none' } as never, { type: 'logline', command: 'tool', args: [] }, undefined);
+  const terminal = new LogPseudoTerminal(
+    {
+      run: (...args: unknown[]) => {
+        actualArgs = args[5];
+      },
+    } as never,
+    { dependencyState: () => 'none' } as never,
+    { type: 'logline', command: 'tool', args: [] },
+    undefined,
+  );
   terminal.open();
   assert.deepEqual(actualArgs, []);
 });
@@ -110,15 +175,32 @@ test('an explicit empty argument array stays in argv mode', () => {
 test('task provider rejects unsupported definitions and pseudo terminals stop their own session', async () => {
   const disposables = registerTasks({} as never, {} as never, {} as never);
   assert.equal(disposables.length, 5);
-  const missingFolder = { uri: { fsPath: path.join(tmpdir(), 'missing-logline-tasks'), toString: () => 'missing' } } as unknown as vscode.WorkspaceFolder;
+  const missingFolder = {
+    uri: { fsPath: path.join(tmpdir(), 'missing-logline-tasks'), toString: () => 'missing' },
+  } as unknown as vscode.WorkspaceFolder;
   folders = [missingFolder];
   assert.deepEqual(await provider.provideTasks({} as never), []);
-  assert.equal(await provider.resolveTask({ definition: { type: 'shell', command: 'echo' } } as unknown as vscode.Task, {} as never), undefined);
+  assert.equal(
+    await provider.resolveTask(
+      { definition: { type: 'shell', command: 'echo' } } as unknown as vscode.Task,
+      {} as never,
+    ),
+    undefined,
+  );
   let stopped: string | undefined;
-  const terminal = new LogPseudoTerminal({
-    run: () => 'session-1',
-    stopSessionById: (id: string) => { stopped = id; }
-  } as never, { dependencyState: () => 'none' } as never, { type: 'logline', command: 'tool' }, undefined);
-  terminal.open(); terminal.handleInput(); terminal.close();
+  const terminal = new LogPseudoTerminal(
+    {
+      run: () => 'session-1',
+      stopSessionById: (id: string) => {
+        stopped = id;
+      },
+    } as never,
+    { dependencyState: () => 'none' } as never,
+    { type: 'logline', command: 'tool' },
+    undefined,
+  );
+  terminal.open();
+  terminal.handleInput();
+  terminal.close();
   assert.equal(stopped, 'session-1');
 });

@@ -6,17 +6,25 @@ import { SessionRegistry } from '../../capture/session-registry';
 import { LogStore } from '../../core/log-store';
 import { TaskLifecycle, taskCommand } from './lifecycle';
 function setup() {
-  const store = new LogStore(100), registry = new SessionRegistry();
-  return { store, registry, tasks: new TaskLifecycle(registry, new Ingestion(store, () => { }), new RuntimeState(() => { }), () => false) };
+  const store = new LogStore(100),
+    registry = new SessionRegistry();
+  return {
+    store,
+    registry,
+    tasks: new TaskLifecycle(registry, new Ingestion(store, () => {}), new RuntimeState(() => {}), () => false),
+  };
 }
 
 test('stopping one task execution leaves another task running', () => {
   const provider = setup();
   const terminated: string[] = [];
-  const execution = (name: string) => ({
-    task: { name, source: 'npm', definition: { type: 'shell' } },
-    terminate() { terminated.push(name); }
-  }) as unknown as import('vscode').TaskExecution;
+  const execution = (name: string) =>
+    ({
+      task: { name, source: 'npm', definition: { type: 'shell' } },
+      terminate() {
+        terminated.push(name);
+      },
+    }) as unknown as import('vscode').TaskExecution;
   const first = execution('First');
   const second = execution('Second');
   provider.tasks.captureTaskStart(first);
@@ -32,30 +40,43 @@ test('stopping one task execution leaves another task running', () => {
 
 test('disposing task observation does not terminate or re-register external tasks', () => {
   const provider = setup();
-  const execution = { task: { name: 'External', source: 'npm', definition: { type: 'shell' } }, terminate() { throw new Error('must not terminate'); } } as unknown as import('vscode').TaskExecution;
+  const execution = {
+    task: { name: 'External', source: 'npm', definition: { type: 'shell' } },
+    terminate() {
+      throw new Error('must not terminate');
+    },
+  } as unknown as import('vscode').TaskExecution;
   provider.tasks.captureTaskStart(execution);
   assert.equal(provider.tasks.executions.get(execution)?.owned, false);
   provider.tasks.disposeObservation();
   provider.tasks.captureTaskEnd(execution);
   assert.equal(provider.tasks.executions.size, 0);
-  assert.equal([...provider.registry.records.values()].some(record => record.taskName === 'External' && record.status === 'running'), true);
+  assert.equal(
+    [...provider.registry.records.values()].some(
+      (record) => record.taskName === 'External' && record.status === 'running',
+    ),
+    true,
+  );
 });
 
 test('task lifecycle records names, dependencies, process ids, and exit reasons', () => {
   const provider = setup();
   const execution = {
     task: {
-      name: 'Build API', source: 'npm', definition: {
-        type: 'shell', dependsOn: ['Lint', 'Generate types']
-      }
-    }
+      name: 'Build API',
+      source: 'npm',
+      definition: {
+        type: 'shell',
+        dependsOn: ['Lint', 'Generate types'],
+      },
+    },
   } as unknown as import('vscode').TaskExecution;
   provider.tasks.captureTaskStart(execution);
   provider.tasks.captureTaskProcessStart(execution, 42);
   provider.tasks.captureTaskProcessEnd(execution, 7);
   assert.ok(provider.tasks.executions);
   provider.tasks.captureTaskEnd(execution);
-  const record = [...provider.registry.records.values()].find(value => value.taskName === 'Build API')!;
+  const record = [...provider.registry.records.values()].find((value) => value.taskName === 'Build API')!;
   assert.equal(record.status, 'failed');
   assert.equal(record.pid, 42);
   assert.equal(record.exitReason, 'exit code 7');
@@ -63,23 +84,30 @@ test('task lifecycle records names, dependencies, process ids, and exit reasons'
   // Neither named dependency has actually run in this test, so it can't be ready yet.
   assert.equal(record.dependencyState, 'pending');
   const events = provider.store.all({ serverId: record.serverId });
-  assert.ok(events.some(event => event.message?.includes('Task started')));
-  assert.ok(events.some(event => event.message?.includes('exit code 7')));
+  assert.ok(events.some((event) => event.message?.includes('Task started')));
+  assert.ok(events.some((event) => event.message?.includes('exit code 7')));
 });
 
 test('dependencyState turns ready only once every named dependency has finished', () => {
   const provider = setup();
   const build = {
     task: {
-      name: 'Build API', source: 'npm', definition: {
-        type: 'shell', dependsOn: ['Lint', 'Generate types']
-      }
-    }
+      name: 'Build API',
+      source: 'npm',
+      definition: {
+        type: 'shell',
+        dependsOn: ['Lint', 'Generate types'],
+      },
+    },
   } as unknown as import('vscode').TaskExecution;
-  const lint = { task: { name: 'Lint', source: 'npm', definition: { type: 'shell' } } } as unknown as import('vscode').TaskExecution;
-  const generate = { task: { name: 'Generate types', source: 'npm', definition: { type: 'shell' } } } as unknown as import('vscode').TaskExecution;
+  const lint = {
+    task: { name: 'Lint', source: 'npm', definition: { type: 'shell' } },
+  } as unknown as import('vscode').TaskExecution;
+  const generate = {
+    task: { name: 'Generate types', source: 'npm', definition: { type: 'shell' } },
+  } as unknown as import('vscode').TaskExecution;
   provider.tasks.captureTaskStart(build);
-  const buildRecord = [...provider.registry.records.values()].find(value => value.taskName === 'Build API')!;
+  const buildRecord = [...provider.registry.records.values()].find((value) => value.taskName === 'Build API')!;
   assert.equal(buildRecord.dependencyState, 'pending');
   provider.tasks.captureTaskStart(lint);
   provider.tasks.captureTaskEnd(lint);
@@ -91,20 +119,39 @@ test('dependencyState turns ready only once every named dependency has finished'
 
 test('task identities distinguish workspace roots and labels with identical slugs', () => {
   const { tasks, registry } = setup();
-  const execution = (name: string, folder: string) => ({ task: { name, source: 'shell', definition: { type: 'shell' },
-    scope: { uri: { toString: () => folder } } } }) as unknown as import('vscode').TaskExecution;
-  for (const task of [execution('Build API', 'root-a'), execution('Build-API', 'root-a'), execution('Build API', 'root-b')]) tasks.captureTaskStart(task);
-  assert.equal(new Set([...registry.records.values()].map(record => record.serverId)).size, 3);
+  const execution = (name: string, folder: string) =>
+    ({
+      task: { name, source: 'shell', definition: { type: 'shell' }, scope: { uri: { toString: () => folder } } },
+    }) as unknown as import('vscode').TaskExecution;
+  for (const task of [
+    execution('Build API', 'root-a'),
+    execution('Build-API', 'root-a'),
+    execution('Build API', 'root-b'),
+  ])
+    tasks.captureTaskStart(task);
+  assert.equal(new Set([...registry.records.values()].map((record) => record.serverId)).size, 3);
   tasks.captureTaskStart(execution('Build API', 'root-a'));
-  assert.equal(new Set([...registry.records.values()].map(record => record.serverId)).size, 3, 'reruns reuse identity');
+  assert.equal(
+    new Set([...registry.records.values()].map((record) => record.serverId)).size,
+    3,
+    'reruns reuse identity',
+  );
 });
 
 test('dependencies follow the latest run in the same scope and recognize converted labels', () => {
   const { tasks, registry } = setup();
-  const execution = (name: string, folder: string, dependsOn?: string[]) => ({ task: { name, source: 'shell', definition: { type: 'shell', dependsOn },
-    scope: { uri: { toString: () => folder } } } }) as unknown as import('vscode').TaskExecution;
+  const execution = (name: string, folder: string, dependsOn?: string[]) =>
+    ({
+      task: {
+        name,
+        source: 'shell',
+        definition: { type: 'shell', dependsOn },
+        scope: { uri: { toString: () => folder } },
+      },
+    }) as unknown as import('vscode').TaskExecution;
   const lint = execution('Lint', 'root-a');
-  tasks.captureTaskStart(lint); tasks.captureTaskEnd(lint);
+  tasks.captureTaskStart(lint);
+  tasks.captureTaskEnd(lint);
   const build = execution('Build', 'root-a', ['Lint']);
   tasks.captureTaskStart(build);
   const buildRecord = tasks.executions.get(build)!;
@@ -113,7 +160,8 @@ test('dependencies follow the latest run in the same scope and recognize convert
   tasks.captureTaskStart(rerun);
   assert.equal(buildRecord.dependencyState, 'pending');
   const other = execution('Lint', 'root-b');
-  tasks.captureTaskStart(other); tasks.captureTaskEnd(other);
+  tasks.captureTaskStart(other);
+  tasks.captureTaskEnd(other);
   assert.equal(buildRecord.dependencyState, 'pending');
   const record = tasks.executions.get(rerun)!;
   record.taskLabel = 'Logline: Lint';
@@ -124,9 +172,13 @@ test('dependencies follow the latest run in the same scope and recognize convert
 });
 
 test('observed tasks are named by the command they run', () => {
-  const task = (execution: unknown) => ({ name: 'build', definition: { type: 'shell' }, execution }) as unknown as import('vscode').Task;
+  const task = (execution: unknown) =>
+    ({ name: 'build', definition: { type: 'shell' }, execution }) as unknown as import('vscode').Task;
   assert.equal(taskCommand(task({ commandLine: ' npm run build ' })), 'npm run build');
-  assert.equal(taskCommand(task({ command: 'gradlew', args: ['bootRun', { value: '--info' }] })), 'gradlew bootRun --info');
+  assert.equal(
+    taskCommand(task({ command: 'gradlew', args: ['bootRun', { value: '--info' }] })),
+    'gradlew bootRun --info',
+  );
   assert.equal(taskCommand(task({ command: { value: 'make' }, args: [] })), 'make');
   assert.equal(taskCommand(task({ process: 'node', args: ['server.js'] })), 'node server.js');
   assert.equal(taskCommand(task(undefined)), undefined);

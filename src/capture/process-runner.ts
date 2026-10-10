@@ -15,13 +15,23 @@ export class ProcessRunner {
   private readonly timers = new Set<ReturnType<typeof setTimeout>>();
   /** Extra variables for a server's environment; existing values always win. */
   environment?: (server: Session['server'], env: Record<string, string | undefined>) => Record<string, string>;
-  constructor(private readonly config: Settings, private readonly registry: SessionRegistry,
-    private readonly ingestion: Ingestion, private readonly state: RuntimeState) { }
-  stop(): void { for (const session of this.sessions) this.stopSession(session); }
-  stopServer(id: string): void { for (const session of this.sessions) if (session.server.id === id) this.stopSession(session); }
+  constructor(
+    private readonly config: Settings,
+    private readonly registry: SessionRegistry,
+    private readonly ingestion: Ingestion,
+    private readonly state: RuntimeState,
+  ) {}
+  stop(): void {
+    for (const session of this.sessions) this.stopSession(session);
+  }
+  stopServer(id: string): void {
+    for (const session of this.sessions) if (session.server.id === id) this.stopSession(session);
+  }
   async dispose(): Promise<void> {
     const sessions = [...this.sessions];
-    const closed = sessions.map(session => new Promise<void>(resolve => session.child.once('close', () => resolve())));
+    const closed = sessions.map(
+      (session) => new Promise<void>((resolve) => session.child.once('close', () => resolve())),
+    );
     this.stop();
     // Keep the escalation timers alive until every child has actually closed.
     await Promise.all(closed);
@@ -30,7 +40,9 @@ export class ProcessRunner {
     // Windows has no process groups: taskkill /T /F already took the whole
     // tree down, and repeating it against an exited PID can hit a reused one.
     if (process.platform !== 'win32') {
-      await Promise.all(sessions.map(session => this.killProcessTree(session.child.pid, 'SIGKILL').catch(() => undefined)));
+      await Promise.all(
+        sessions.map((session) => this.killProcessTree(session.child.pid, 'SIGKILL').catch(() => undefined)),
+      );
     }
     for (const timer of this.timers) clearTimeout(timer);
     this.timers.clear();
@@ -39,10 +51,10 @@ export class ProcessRunner {
     command: string,
     cwd: string | undefined,
     server: Session['server'] = { id: 'custom', label: command },
-    output?: { write: (text: string) => void; },
+    output?: { write: (text: string) => void },
     env?: Record<string, string>,
     args?: string[],
-    onExit?: (code: number) => void
+    onExit?: (code: number) => void,
   ): string | undefined {
     // Saved servers are single-instance; ad-hoc commands all share the 'custom'
     // id and stay independent of each other.
@@ -62,18 +74,37 @@ export class ProcessRunner {
     const childEnv: Record<string, string | undefined> = { ...process.env, ...(env ?? {}) };
     Object.assign(childEnv, this.environment?.(server, childEnv));
     const spawnOptions: SpawnOptions = {
-      cwd, shell: server.shell ?? !args, env: childEnv, detached: process.platform !== 'win32',
-      stdio: ['ignore', 'pipe', 'pipe']
+      cwd,
+      shell: server.shell ?? !args,
+      env: childEnv,
+      detached: process.platform !== 'win32',
+      stdio: ['ignore', 'pipe', 'pipe'],
     };
-    const child = (args !== undefined ? spawn(command, args, spawnOptions) : spawn(command, spawnOptions)) as ChildProcessWithoutNullStreams;
+    const child = (
+      args !== undefined ? spawn(command, args, spawnOptions) : spawn(command, spawnOptions)
+    ) as ChildProcessWithoutNullStreams;
     const record: SessionSummary = {
-      id: randomBytes(8).toString('hex'), serverId: server.id, server: server.label,
-      status: 'running', startedAt: Date.now(), pid: child.pid, events: 0,
-      taskName: server.taskName, taskType: server.taskType, taskState: server.taskName ? 'running' : undefined,
-      taskScope: server.taskScope, taskLabel: server.taskLabel,
-      dependencies: server.dependencies, dependencyState: server.dependencyState, source: server.source,
-      sourceKind: server.sourceKind ?? (server.taskName ? 'task' : 'process'), owned: true, canStop: true,
-      captureComplete: false, command: args ? [command, ...args].join(' ') : command, cwd
+      id: randomBytes(8).toString('hex'),
+      serverId: server.id,
+      server: server.label,
+      status: 'running',
+      startedAt: Date.now(),
+      pid: child.pid,
+      events: 0,
+      taskName: server.taskName,
+      taskType: server.taskType,
+      taskState: server.taskName ? 'running' : undefined,
+      taskScope: server.taskScope,
+      taskLabel: server.taskLabel,
+      dependencies: server.dependencies,
+      dependencyState: server.dependencyState,
+      source: server.source,
+      sourceKind: server.sourceKind ?? (server.taskName ? 'task' : 'process'),
+      owned: true,
+      canStop: true,
+      captureComplete: false,
+      command: args ? [command, ...args].join(' ') : command,
+      cwd,
     };
     const session: Session = { child, stopping: false, exited: false, server, record };
     this.registry.records.set(record.id, record);
@@ -87,29 +118,36 @@ export class ProcessRunner {
     }
     const limit = this.config.get('maxLineLength', 65536);
     const joiners: LinePipeline[] = [];
-    const readers = (['stdout', 'stderr'] as const).filter(stream => source === 'both' || source === stream).map(stream => {
-      const ingest = (line: string, truncated: boolean, container?: ContainerTag) => {
-        if (!this.sessions.has(session)) return;
-        const event = this.ingestion.accept(line, stream, {
-          serverId: server.id, server: server.label,
-          sessionId: record.id, truncated, jsonOnly: server.jsonOnly, persist: true, container
-        });
-        if (!event) return;
-        record.events++;
-        this.state.notify();
-      };
-      // Each stream is joined separately: a trace never interleaves stdout and stderr.
-      const joiner = new LinePipeline(ingest, linePipelineOptions(this.config, limit));
-      joiners.push(joiner);
-      const reader = new LineReader((line, truncated) => {
-        if (!this.sessions.has(session)) return;
-        output?.write(line + '\r\n');
-        joiner.write(line, truncated);
-      }, limit);
-      child[stream].on('data', chunk => reader.write(chunk));
-      return reader;
-    });
-    child.on('error', error => {
+    const readers = (['stdout', 'stderr'] as const)
+      .filter((stream) => source === 'both' || source === stream)
+      .map((stream) => {
+        const ingest = (line: string, truncated: boolean, container?: ContainerTag) => {
+          if (!this.sessions.has(session)) return;
+          const event = this.ingestion.accept(line, stream, {
+            serverId: server.id,
+            server: server.label,
+            sessionId: record.id,
+            truncated,
+            jsonOnly: server.jsonOnly,
+            persist: true,
+            container,
+          });
+          if (!event) return;
+          record.events++;
+          this.state.notify();
+        };
+        // Each stream is joined separately: a trace never interleaves stdout and stderr.
+        const joiner = new LinePipeline(ingest, linePipelineOptions(this.config, limit));
+        joiners.push(joiner);
+        const reader = new LineReader((line, truncated) => {
+          if (!this.sessions.has(session)) return;
+          output?.write(line + '\r\n');
+          joiner.write(line, truncated);
+        }, limit);
+        child[stream].on('data', (chunk) => reader.write(chunk));
+        return reader;
+      });
+    child.on('error', (error) => {
       record.status = 'failed';
       record.error = error.message;
       if (record.taskName) {
@@ -128,11 +166,12 @@ export class ProcessRunner {
       record.endedAt = Date.now();
       record.exitCode = typeof code === 'number' ? code : undefined;
       record.signal = signal ?? undefined;
-      if (record.status !== 'failed') record.status = session.stopping ? 'exited' : (code === 0 ? 'exited' : 'failed');
+      if (record.status !== 'failed') record.status = session.stopping ? 'exited' : code === 0 ? 'exited' : 'failed';
       if (record.taskName) {
         record.taskState = record.status;
         // A process that never started closes with a negative errno; keep the spawn error instead.
-        if (record.error === undefined) record.exitReason = signal ? `signal ${signal}` : `exit code ${typeof code === 'number' ? code : 'unknown'}`;
+        if (record.error === undefined)
+          record.exitReason = signal ? `signal ${signal}` : `exit code ${typeof code === 'number' ? code : 'unknown'}`;
         this.registry.refreshDependents(record.taskName, record.taskScope, record.taskLabel);
       }
       if (this.sessions.delete(session)) {
@@ -143,14 +182,17 @@ export class ProcessRunner {
         this.state.notify();
       }
       this.registry.pruneSessionRegistry();
-      onExit?.(typeof code === 'number' ? code : (signal ? 1 : 0));
+      onExit?.(typeof code === 'number' ? code : signal ? 1 : 0);
     });
     return record.id;
   }
 
   stopSessionById(id: string): void {
     for (const session of this.sessions) {
-      if (session.record.id === id) { this.stopSession(session); return; }
+      if (session.record.id === id) {
+        this.stopSession(session);
+        return;
+      }
     }
   }
 
@@ -164,13 +206,19 @@ export class ProcessRunner {
       // After exit, only a POSIX process group can still hold descendants; a
       // Windows PID may already belong to an unrelated process.
       if (session.exited && (!force || process.platform === 'win32')) return;
-      void this.killProcessTree(session.child.pid, signal).catch(error => {
+      void this.killProcessTree(session.child.pid, signal).catch((error) => {
         const code = (error as NodeJS.ErrnoException).code;
-        if (code !== 'ESRCH') { this.state.status = `Could not stop: ${(error as Error).message}`; this.state.notify(); }
+        if (code !== 'ESRCH') {
+          this.state.status = `Could not stop: ${(error as Error).message}`;
+          this.state.notify();
+        }
       });
     };
     kill('SIGTERM');
-    const timer = setTimeout(() => { kill('SIGKILL', true); this.timers.delete(timer); }, 2000);
+    const timer = setTimeout(() => {
+      kill('SIGKILL', true);
+      this.timers.delete(timer);
+    }, 2000);
     timer.unref();
     this.timers.add(timer);
   }
@@ -181,16 +229,19 @@ export class ProcessRunner {
       // Node signals are emulated on Windows and only reach the immediate
       // child, leaving descendants (and their ports) running. taskkill /T
       // walks the whole process tree instead.
-      return new Promise(resolve => execFile('taskkill', ['/PID', String(pid), '/T', '/F'], error => {
-        if (error && (error as NodeJS.ErrnoException).code !== 'ESRCH') {
-          this.state.status = `Could not stop process tree: ${error.message}`;
-          this.state.notify();
-        }
-        resolve();
-      }));
+      return new Promise((resolve) =>
+        execFile('taskkill', ['/PID', String(pid), '/T', '/F'], (error) => {
+          if (error && (error as NodeJS.ErrnoException).code !== 'ESRCH') {
+            this.state.status = `Could not stop process tree: ${error.message}`;
+            this.state.notify();
+          }
+          resolve();
+        }),
+      );
     } else {
-      try { process.kill(-pid, signal); }
-      catch (error) {
+      try {
+        process.kill(-pid, signal);
+      } catch (error) {
         // The group may have exited between the child close event and the
         // escalation/disposal pass. That is a successful termination state.
         if ((error as NodeJS.ErrnoException).code !== 'ESRCH') return Promise.reject(error);

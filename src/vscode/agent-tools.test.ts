@@ -3,21 +3,41 @@ import test from 'node:test';
 import { withVscode } from '../test/vscode-mock';
 
 const registrations = new Map<string, any>();
-const { registerAgentTools } = withVscode({
-  lm: { registerTool: (name: string, tool: unknown) => { registrations.set(name, tool); return { dispose() { registrations.delete(name); } }; } },
-  MarkdownString: class { constructor(readonly value: string) {} }
-}, () => require('./agent-tools') as typeof import('./agent-tools'));
+const { registerAgentTools } = withVscode(
+  {
+    lm: {
+      registerTool: (name: string, tool: unknown) => {
+        registrations.set(name, tool);
+        return {
+          dispose() {
+            registrations.delete(name);
+          },
+        };
+      },
+    },
+    MarkdownString: class {
+      constructor(readonly value: string) {}
+    },
+  },
+  () => require('./agent-tools') as typeof import('./agent-tools'),
+);
 
 test('agent tools register all actions, format bounded results, and translate validation errors', async () => {
   registrations.clear();
   const access = {
     status: () => ({ scope: 'selected', sources: [{ runs: [{ id: 'run' }] }] }),
     list: () => ({ active: true, sources: [] }),
-    search: () => ({ events: Array.from({ length: 400 }, (_, id) => ({ id, message: 'x'.repeat(400) })), matched: 400, newest: 400, partial: true, hasMore: true }),
+    search: () => ({
+      events: Array.from({ length: 400 }, (_, id) => ({ id, message: 'x'.repeat(400) })),
+      matched: 400,
+      newest: 400,
+      partial: true,
+      hasMore: true,
+    }),
     inspect: () => ({ event: { id: 1 }, details: '', exceptions: [], context: [] }),
     analyze: () => ({ coverage: { matched: 1 } }),
     wait: async () => ({ events: [], matched: 0, newest: 1, partial: false, hasMore: false }),
-    trace: (shareId: string, traceId: string) => ({ traceId, shareId, spans: [] })
+    trace: (shareId: string, traceId: string) => ({ traceId, shareId, spans: [] }),
   } as any;
   const disposables = registerAgentTools({} as any, access);
   assert.equal(registrations.size, 6);

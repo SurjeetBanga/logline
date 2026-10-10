@@ -7,17 +7,26 @@
 
 type Json = Record<string, unknown>;
 
-export class ProtoError extends Error { }
+export class ProtoError extends Error {}
 
 const MAX_DEPTH = 32;
 
 class Reader {
   pos: number;
-  constructor(readonly buf: Uint8Array, start = 0, readonly end = buf.length) { this.pos = start; }
-  get done(): boolean { return this.pos >= this.end; }
+  constructor(
+    readonly buf: Uint8Array,
+    start = 0,
+    readonly end = buf.length,
+  ) {
+    this.pos = start;
+  }
+  get done(): boolean {
+    return this.pos >= this.end;
+  }
 
   varint(): bigint {
-    let result = 0n, shift = 0n;
+    let result = 0n,
+      shift = 0n;
     for (let i = 0; i < 10; i++) {
       if (this.pos >= this.end) throw new ProtoError('Truncated varint');
       const byte = this.buf[this.pos++];
@@ -28,7 +37,9 @@ class Reader {
     throw new ProtoError('Malformed varint');
   }
 
-  number(): number { return Number(BigInt.asUintN(32, this.varint())); }
+  number(): number {
+    return Number(BigInt.asUintN(32, this.varint()));
+  }
 
   fixed64(): bigint {
     if (this.pos + 8 > this.end) throw new ProtoError('Truncated fixed64');
@@ -53,7 +64,10 @@ class Reader {
 
   /** A repeated fixed64 or double field, packed (wire type 2) or not (wire type 1). */
   packed64(wire: number, read: (reader: Reader) => void): void {
-    if (wire === 1) { read(this); return; }
+    if (wire === 1) {
+      read(this);
+      return;
+    }
     const bytes = this.bytes();
     const inner = new Reader(bytes);
     if (bytes.length % 8) throw new ProtoError('Truncated packed field');
@@ -62,30 +76,39 @@ class Reader {
 
   bytes(): Uint8Array {
     const length = Number(this.varint());
-    if (!Number.isSafeInteger(length) || this.pos + length > this.end) throw new ProtoError('Truncated length-delimited field');
+    if (!Number.isSafeInteger(length) || this.pos + length > this.end)
+      throw new ProtoError('Truncated length-delimited field');
     const value = this.buf.subarray(this.pos, this.pos + length);
     this.pos += length;
     return value;
   }
 
-  string(): string { return new TextDecoder().decode(this.bytes()); }
+  string(): string {
+    return new TextDecoder().decode(this.bytes());
+  }
 
   skip(wire: number): void {
     if (wire === 0) this.varint();
-    else if (wire === 1) { if ((this.pos += 8) > this.end) throw new ProtoError('Truncated field'); }
-    else if (wire === 2) this.bytes();
-    else if (wire === 5) { if ((this.pos += 4) > this.end) throw new ProtoError('Truncated field'); }
-    else throw new ProtoError(`Unsupported wire type ${wire}`);
+    else if (wire === 1) {
+      if ((this.pos += 8) > this.end) throw new ProtoError('Truncated field');
+    } else if (wire === 2) this.bytes();
+    else if (wire === 5) {
+      if ((this.pos += 4) > this.end) throw new ProtoError('Truncated field');
+    } else throw new ProtoError(`Unsupported wire type ${wire}`);
   }
 
   /** Iterate fields, calling `read` with the field number and wire type. */
   fields(read: (field: number, wire: number) => boolean | void): void {
     while (!this.done) {
       const key = this.number();
-      const field = key >>> 3, wire = key & 7;
+      const field = key >>> 3,
+        wire = key & 7;
       if (field === 0) throw new ProtoError('Invalid field number 0');
       const before = this.pos;
-      if (read(field, wire) !== true) { this.pos = before; this.skip(wire); }
+      if (read(field, wire) !== true) {
+        this.pos = before;
+        this.skip(wire);
+      }
     }
   }
 }
@@ -105,8 +128,10 @@ function anyValue(r: Reader, depth: number): Json {
     else if (field === 2 && wire === 0) value.boolValue = r.varint() !== 0n;
     else if (field === 3 && wire === 0) value.intValue = BigInt.asIntN(64, r.varint()).toString();
     else if (field === 4 && wire === 1) value.doubleValue = r.double();
-    else if (field === 5 && wire === 2) value.arrayValue = sub(r, depth, (inner, d) => ({ values: repeated(inner, 1, d, anyValue) }));
-    else if (field === 6 && wire === 2) value.kvlistValue = sub(r, depth, (inner, d) => ({ values: repeated(inner, 1, d, keyValue) }));
+    else if (field === 5 && wire === 2)
+      value.arrayValue = sub(r, depth, (inner, d) => ({ values: repeated(inner, 1, d, anyValue) }));
+    else if (field === 6 && wire === 2)
+      value.kvlistValue = sub(r, depth, (inner, d) => ({ values: repeated(inner, 1, d, keyValue) }));
     else if (field === 7 && wire === 2) value.bytesValue = Buffer.from(r.bytes()).toString('base64');
     else return false;
     return true;
@@ -264,8 +289,10 @@ function histogramPoint(r: Reader, depth: number): Json {
     else if (field === 3 && wire === 1) value.timeUnixNano = r.fixed64().toString();
     else if (field === 4 && wire === 1) value.count = r.fixed64().toString();
     else if (field === 5) value.sum = r.float64Field(wire);
-    else if (field === 6 && (wire === 1 || wire === 2)) r.packed64(wire, inner => (value.bucketCounts as string[]).push(inner.fixed64().toString()));
-    else if (field === 7 && (wire === 1 || wire === 2)) r.packed64(wire, inner => (value.explicitBounds as number[]).push(inner.double()));
+    else if (field === 6 && (wire === 1 || wire === 2))
+      r.packed64(wire, (inner) => (value.bucketCounts as string[]).push(inner.fixed64().toString()));
+    else if (field === 7 && (wire === 1 || wire === 2))
+      r.packed64(wire, (inner) => (value.explicitBounds as number[]).push(inner.double()));
     else if (field === 9 && wire === 2) (value.attributes as Json[]).push(sub(r, depth, keyValue));
     else if (field === 11) value.min = r.float64Field(wire);
     else if (field === 12) value.max = r.float64Field(wire);
@@ -301,16 +328,19 @@ function summaryPoint(r: Reader, depth: number): Json {
     else if (field === 3 && wire === 1) value.timeUnixNano = r.fixed64().toString();
     else if (field === 4 && wire === 1) value.count = r.fixed64().toString();
     else if (field === 5) value.sum = r.float64Field(wire);
-    else if (field === 6 && wire === 2) (value.quantileValues as Json[]).push(sub(r, depth, inner => {
-      const quantile: Json = {};
-      inner.fields((f, w) => {
-        if (f === 1) quantile.quantile = inner.float64Field(w);
-        else if (f === 2) quantile.value = inner.float64Field(w);
-        else return false;
-        return true;
-      });
-      return quantile;
-    }));
+    else if (field === 6 && wire === 2)
+      (value.quantileValues as Json[]).push(
+        sub(r, depth, (inner) => {
+          const quantile: Json = {};
+          inner.fields((f, w) => {
+            if (f === 1) quantile.quantile = inner.float64Field(w);
+            else if (f === 2) quantile.value = inner.float64Field(w);
+            else return false;
+            return true;
+          });
+          return quantile;
+        }),
+      );
     else if (field === 7 && wire === 2) (value.attributes as Json[]).push(sub(r, depth, keyValue));
     else return false;
     return true;
@@ -338,7 +368,7 @@ const METRIC_DATA: Record<number, [string, (reader: Reader, depth: number) => Js
   7: ['sum', metricData(numberPoint)],
   9: ['histogram', metricData(histogramPoint)],
   10: ['exponentialHistogram', metricData(exponentialPoint)],
-  11: ['summary', metricData(summaryPoint)]
+  11: ['summary', metricData(summaryPoint)],
 };
 
 // Metric { name = 1; description = 2; unit = 3; oneof data { gauge = 5; sum = 7; histogram = 9; exponential_histogram = 10; summary = 11; } }

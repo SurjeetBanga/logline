@@ -13,5 +13,5 @@ serveStdio({
   windows: () => readWindows(agentsDirectory()),
   // Claude Code sets CLAUDE_PROJECT_DIR; other clients start servers in the project.
   cwd: process.env.CLAUDE_PROJECT_DIR || process.cwd(),
-  workspace: workspaceArgument(process.argv)
+  workspace: workspaceArgument(process.argv),
 });

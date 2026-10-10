@@ -5,7 +5,13 @@ import { matchesQuery, parseQuery, queryError } from './query';
 import { queryError as webviewQueryError } from './query-validation';
 import type { LogEvent } from './types';
 
-const event: LogEvent = { id: 1, level: 'error', message: 'Database timeout', raw: '{"service":"api","status":503}', fields: { service: 'api', status: 503, requestId: 'abc-123' } };
+const event: LogEvent = {
+  id: 1,
+  level: 'error',
+  message: 'Database timeout',
+  raw: '{"service":"api","status":503}',
+  fields: { service: 'api', status: 503, requestId: 'abc-123' },
+};
 
 test('supports field filters, phrases, negation and OR', () => {
   assert.equal(matchesQuery(event, 'level:error service:api status:5xx'), true);
@@ -47,7 +53,10 @@ test('reports unsupported regex flags and keeps route values literal', () => {
   assert.equal(queryError('/api/users'), undefined);
   assert.equal(webviewQueryError('path:/api/users'), undefined);
   assert.match(webviewQueryError('message:/error/v')!, /Unsupported regular expression flag/);
-  assert.equal(matchesQuery({ id: 2, level: 'info', message: 'GET', fields: { path: '/api/users' } }, 'path:/api/users'), true);
+  assert.equal(
+    matchesQuery({ id: 2, level: 'info', message: 'GET', fields: { path: '/api/users' } }, 'path:/api/users'),
+    true,
+  );
 });
 
 test('rejects regexes with catastrophic nested quantifiers', () => {
@@ -79,7 +88,10 @@ test('global and sticky regex queries start fresh for every event and scan', () 
   for (const flags of ['g', 'y', 'gy']) {
     const parsed = parseQuery(`message:/error/${flags}`);
     for (let scan = 0; scan < 2; scan++) {
-      assert.deepEqual(events.map(event => matchesQuery(event, parsed)), [true, true, false, true]);
+      assert.deepEqual(
+        events.map((event) => matchesQuery(event, parsed)),
+        [true, true, false, true],
+      );
     }
   }
 });
@@ -94,7 +106,10 @@ test('resolves field aliases', () => {
 test('a colon inside a pasted value does not create a field filter', () => {
   const event = parseLogLine(
     '{"level":"info","message":"GET http://api.internal/health took 12ms","service":"web"}',
-    'stdout', 1, new Date());
+    'stdout',
+    1,
+    new Date(),
+  );
   assert.equal(matchesQuery(event, 'http://api.internal'), true);
   assert.equal(matchesQuery(event, 'http://nope.internal'), false);
   assert.equal(matchesQuery(event, 'service:web'), true, 'real field filters still parse');
@@ -113,7 +128,12 @@ test('numeric comparisons ignore non-numeric field values instead of matching th
 });
 
 test('a field filter matches the name as typed, whichever variant the log uses', () => {
-  const camel = parseLogLine('{"level":"info","message":"hb","statusCode":200,"durationMs":30}', 'stdout', 1, new Date());
+  const camel = parseLogLine(
+    '{"level":"info","message":"hb","statusCode":200,"durationMs":30}',
+    'stdout',
+    1,
+    new Date(),
+  );
   const snake = parseLogLine('{"level":"info","message":"hb","status":200,"duration":30}', 'stdout', 2, new Date());
   for (const event of [camel, snake]) {
     assert.equal(matchesQuery(event, 'statusCode:200'), true);
@@ -137,8 +157,15 @@ test('server and session metadata are searchable even when not duplicated in fie
 
 test('task lifecycle metadata is searchable by field, including the joined dependency list', () => {
   const event: LogEvent = {
-    id: 1, level: 'info', message: 'Task started', taskName: 'Build API', taskType: 'shell',
-    taskState: 'running', dependencies: ['Lint', 'Generate types'], dependencyState: 'pending', exitReason: 'exit code 1'
+    id: 1,
+    level: 'info',
+    message: 'Task started',
+    taskName: 'Build API',
+    taskType: 'shell',
+    taskState: 'running',
+    dependencies: ['Lint', 'Generate types'],
+    dependencyState: 'pending',
+    exitReason: 'exit code 1',
   };
   assert.equal(matchesQuery(event, 'taskName:"Build API"'), true);
   assert.equal(matchesQuery(event, 'taskType:shell'), true);

@@ -7,56 +7,65 @@ import { extractExceptions } from '../core/exceptions';
 
 function join(lines: string[], limit?: number): string[] {
   const out: string[] = [];
-  const joiner = new StackJoiner(line => out.push(line), limit, 0);
+  const joiner = new StackJoiner((line) => out.push(line), limit, 0);
   for (const line of lines) joiner.write(line, false);
   joiner.end();
   return out;
 }
 
 test('Java and Node stack traces become one event per exception', () => {
-  assert.deepEqual(join([
-    'INFO starting',
-    'Exception in thread "main" java.lang.IllegalStateException: boom',
-    '\tat com.example.App.run(App.java:42)',
-    '\tat com.example.App.main(App.java:10)',
-    'Caused by: java.io.IOException: disk full',
-    '\tat com.example.Store.write(Store.java:7)',
-    '\t... 2 more',
-    'Error: request failed',
-    '    at handler (/srv/app.js:12:5)',
-    '    at process.processTicksAndRejections (node:internal/process/task_queues:95:5)',
-    'INFO recovered'
-  ]), [
-    'INFO starting',
-    'Exception in thread "main" java.lang.IllegalStateException: boom\n\tat com.example.App.run(App.java:42)\n\tat com.example.App.main(App.java:10)\nCaused by: java.io.IOException: disk full\n\tat com.example.Store.write(Store.java:7)\n\t... 2 more',
-    'Error: request failed\n    at handler (/srv/app.js:12:5)\n    at process.processTicksAndRejections (node:internal/process/task_queues:95:5)',
-    'INFO recovered'
-  ]);
+  assert.deepEqual(
+    join([
+      'INFO starting',
+      'Exception in thread "main" java.lang.IllegalStateException: boom',
+      '\tat com.example.App.run(App.java:42)',
+      '\tat com.example.App.main(App.java:10)',
+      'Caused by: java.io.IOException: disk full',
+      '\tat com.example.Store.write(Store.java:7)',
+      '\t... 2 more',
+      'Error: request failed',
+      '    at handler (/srv/app.js:12:5)',
+      '    at process.processTicksAndRejections (node:internal/process/task_queues:95:5)',
+      'INFO recovered',
+    ]),
+    [
+      'INFO starting',
+      'Exception in thread "main" java.lang.IllegalStateException: boom\n\tat com.example.App.run(App.java:42)\n\tat com.example.App.main(App.java:10)\nCaused by: java.io.IOException: disk full\n\tat com.example.Store.write(Store.java:7)\n\t... 2 more',
+      'Error: request failed\n    at handler (/srv/app.js:12:5)\n    at process.processTicksAndRejections (node:internal/process/task_queues:95:5)',
+      'INFO recovered',
+    ],
+  );
 });
 
 test('Python tracebacks, including chained ones, end at the exception line', () => {
-  assert.deepEqual(join([
-    'ERROR:root:job failed',
-    'Traceback (most recent call last):',
-    '  File "/app/job.py", line 3, in <module>',
-    '    run()',
-    'KeyError: \'id\'',
-    // Line readers drop the blank line Python prints between chained tracebacks.
-    'During handling of the above exception, another exception occurred:',
-    'Traceback (most recent call last):',
-    '  File "/app/job.py", line 5, in <module>',
-    'ValueError: bad input',
-    '  indented output after the trace',
-  ]), [
-    'ERROR:root:job failed\nTraceback (most recent call last):\n  File "/app/job.py", line 3, in <module>\n    run()\nKeyError: \'id\'\n'
-      + 'During handling of the above exception, another exception occurred:\nTraceback (most recent call last):\n  File "/app/job.py", line 5, in <module>\nValueError: bad input',
-    '  indented output after the trace'
-  ]);
+  assert.deepEqual(
+    join([
+      'ERROR:root:job failed',
+      'Traceback (most recent call last):',
+      '  File "/app/job.py", line 3, in <module>',
+      '    run()',
+      "KeyError: 'id'",
+      // Line readers drop the blank line Python prints between chained tracebacks.
+      'During handling of the above exception, another exception occurred:',
+      'Traceback (most recent call last):',
+      '  File "/app/job.py", line 5, in <module>',
+      'ValueError: bad input',
+      '  indented output after the trace',
+    ]),
+    [
+      'ERROR:root:job failed\nTraceback (most recent call last):\n  File "/app/job.py", line 3, in <module>\n    run()\nKeyError: \'id\'\n' +
+        'During handling of the above exception, another exception occurred:\nTraceback (most recent call last):\n  File "/app/job.py", line 5, in <module>\nValueError: bad input',
+      '  indented output after the trace',
+    ],
+  );
 });
 
 test('JSON lines are never held or joined, and ordering is preserved', () => {
-  assert.deepEqual(join(['Error: x', '{"level":"info","message":"json"}', '    at f (a.js:1:1)']),
-    ['Error: x', '{"level":"info","message":"json"}', '    at f (a.js:1:1)']);
+  assert.deepEqual(join(['Error: x', '{"level":"info","message":"json"}', '    at f (a.js:1:1)']), [
+    'Error: x',
+    '{"level":"info","message":"json"}',
+    '    at f (a.js:1:1)',
+  ]);
 });
 
 test('a joined trace never exceeds the line limit', () => {
@@ -69,11 +78,11 @@ test('a joined trace never exceeds the line limit', () => {
 
 test('held lines are released by the flush timer', async () => {
   const out: string[] = [];
-  const joiner = new StackJoiner(line => out.push(line), undefined, 10);
+  const joiner = new StackJoiner((line) => out.push(line), undefined, 10);
   joiner.write('Error: x', false);
   joiner.write('    at f (a.js:1:1)', false);
   assert.deepEqual(out, []);
-  await new Promise(resolve => setTimeout(resolve, 40));
+  await new Promise((resolve) => setTimeout(resolve, 40));
   assert.deepEqual(out, ['Error: x\n    at f (a.js:1:1)']);
 });
 
@@ -92,15 +101,18 @@ const nodeCrash = [
   '/srv/app/server.js:12',
   '    const total = order.items.reduce(sum);',
   '                              ^',
-  'TypeError: Cannot read properties of undefined (reading \'reduce\')',
+  "TypeError: Cannot read properties of undefined (reading 'reduce')",
   '    at checkout (/srv/app/server.js:12:31)',
   '    at /srv/app/server.js:40:5',
-  'Node.js v22.22.0'
+  'Node.js v22.22.0',
 ];
 
 test('a Node crash block becomes one event with its header, frames and version', () => {
-  assert.deepEqual(join(['{"level":50,"msg":"checkout failed"}', ...nodeCrash, 'next line']),
-    ['{"level":50,"msg":"checkout failed"}', nodeCrash.join('\n'), 'next line']);
+  assert.deepEqual(join(['{"level":50,"msg":"checkout failed"}', ...nodeCrash, 'next line']), [
+    '{"level":50,"msg":"checkout failed"}',
+    nodeCrash.join('\n'),
+    'next line',
+  ]);
 });
 
 test('Node crash shapes: error properties, ESM URLs, internal locations and thrown values', () => {
@@ -111,37 +123,74 @@ test('Node crash shapes: error properties, ESM URLs, internal locations and thro
     'Error: connect ECONNREFUSED 127.0.0.1:5432',
     '    at Object.<anonymous> (/srv/app/db.js:1:11)',
     '    at node:internal/main/run_main_module:36:49 {',
-    '  code: \'ECONNREFUSED\',',
+    "  code: 'ECONNREFUSED',",
     '  meta: { a: {',
     '    b: 1',
     '  } }',
     '}',
-    'Node.js v22.22.0'
+    'Node.js v22.22.0',
   ];
-  const esm = ['file:///srv/app/main.mjs:1', 'await start();', '^', 'RangeError: bad', '    at file:///srv/app/main.mjs:1:22'];
-  const thrown = ['/srv/app/str.js:1', 'throw \'boom\';', '^', 'boom', '(Use `node --trace-uncaught ...` to show where the exception was thrown)', 'Node.js v22.22.0'];
-  const internal = ['node:internal/process/promises:394', '    triggerUncaughtException(err, true /* fromPromise */);', '    ^', 'Error: x', '    at f (/srv/a.js:1:1)'];
-  for (const block of [properties, esm, thrown, internal]) assert.deepEqual(join([...block, 'after']), [block.join('\n'), 'after']);
+  const esm = [
+    'file:///srv/app/main.mjs:1',
+    'await start();',
+    '^',
+    'RangeError: bad',
+    '    at file:///srv/app/main.mjs:1:22',
+  ];
+  const thrown = [
+    '/srv/app/str.js:1',
+    "throw 'boom';",
+    '^',
+    'boom',
+    '(Use `node --trace-uncaught ...` to show where the exception was thrown)',
+    'Node.js v22.22.0',
+  ];
+  const internal = [
+    'node:internal/process/promises:394',
+    '    triggerUncaughtException(err, true /* fromPromise */);',
+    '    ^',
+    'Error: x',
+    '    at f (/srv/a.js:1:1)',
+  ];
+  for (const block of [properties, esm, thrown, internal])
+    assert.deepEqual(join([...block, 'after']), [block.join('\n'), 'after']);
 });
 
 test('a path:line line that does not start a crash block is released line by line', () => {
-  assert.deepEqual(join(['/srv/app/server.js:12', 'listening on 3000', 'ready']), ['/srv/app/server.js:12', 'listening on 3000', 'ready']);
+  assert.deepEqual(join(['/srv/app/server.js:12', 'listening on 3000', 'ready']), [
+    '/srv/app/server.js:12',
+    'listening on 3000',
+    'ready',
+  ]);
   assert.deepEqual(join(['/srv/app/server.js:12']), ['/srv/app/server.js:12']);
-  assert.deepEqual(join(['/srv/app/server.js:12', '{"level":"info"}', 'x']), ['/srv/app/server.js:12', '{"level":"info"}', 'x']);
+  assert.deepEqual(join(['/srv/app/server.js:12', '{"level":"info"}', 'x']), [
+    '/srv/app/server.js:12',
+    '{"level":"info"}',
+    'x',
+  ]);
   // A replayed line can start a trace of its own.
-  assert.deepEqual(join(['/srv/app/server.js:12', 'Error: x', '    at f (a.js:1:1)']), ['/srv/app/server.js:12', 'Error: x\n    at f (a.js:1:1)']);
+  assert.deepEqual(join(['/srv/app/server.js:12', 'Error: x', '    at f (a.js:1:1)']), [
+    '/srv/app/server.js:12',
+    'Error: x\n    at f (a.js:1:1)',
+  ]);
   // `Node.js v…` and error properties only continue a trace.
   assert.deepEqual(join(['starting', 'Node.js v22.22.0']), ['starting', 'Node.js v22.22.0']);
 });
 
 test('a JSON line after a path:line line is delivered at once', () => {
   const out: string[] = [];
-  const joiner = new StackJoiner(line => out.push(line), undefined, 0);
+  const joiner = new StackJoiner((line) => out.push(line), undefined, 0);
   joiner.write('/srv/app/server.js:12', false);
   joiner.write('{"level":"info","msg":"ready"}', false);
   assert.deepEqual(out, ['/srv/app/server.js:12', '{"level":"info","msg":"ready"}']);
   // A source line that only starts with a bracket still forms a crash block.
-  const block = ['/srv/app/a.js:3', '[a, b] = pair();', '^', 'TypeError: pair is not a function', '    at /srv/app/a.js:3:10'];
+  const block = [
+    '/srv/app/a.js:3',
+    '[a, b] = pair();',
+    '^',
+    'TypeError: pair is not a function',
+    '    at /srv/app/a.js:3:10',
+  ];
   assert.deepEqual(join(block), [block.join('\n')]);
 });
 
@@ -151,27 +200,30 @@ test('lines replayed from an unconfirmed crash block keep their own metadata', (
   joiner.write('/srv/app/server.js:12', false, 'first');
   joiner.write('listening on 3000', false, 'second');
   joiner.end();
-  assert.deepEqual(out, [['/srv/app/server.js:12', 'first'], ['listening on 3000', 'second']]);
+  assert.deepEqual(out, [
+    ['/srv/app/server.js:12', 'first'],
+    ['listening on 3000', 'second'],
+  ]);
 });
 
 test('an unconfirmed crash block is split when the flush timer fires', async () => {
   const out: string[] = [];
-  const joiner = new StackJoiner(line => out.push(line), undefined, 10);
+  const joiner = new StackJoiner((line) => out.push(line), undefined, 10);
   joiner.write('/srv/app/server.js:12', false);
   joiner.write('const x = 1;', false);
-  await new Promise(resolve => setTimeout(resolve, 40));
+  await new Promise((resolve) => setTimeout(resolve, 40));
   assert.deepEqual(out, ['/srv/app/server.js:12', 'const x = 1;']);
 });
 
 test('a Node crash shows its error line and is an error', () => {
   const raw = nodeCrash.join('\n');
   const event = parseLogLine(raw, 'terminal', 1, new Date());
-  assert.equal(event.message, 'TypeError: Cannot read properties of undefined (reading \'reduce\')');
+  assert.equal(event.message, "TypeError: Cannot read properties of undefined (reading 'reduce')");
   assert.equal(event.level, 'error');
   assert.equal(event.raw, raw);
   const [group] = groupErrors([event]);
   assert.equal(group.location, '/srv/app/server.js:12');
-  const thrown = parseLogLine('/srv/app/str.js:1\nthrow \'boom\';\n^\nboom', 'terminal', 2, new Date());
+  const thrown = parseLogLine("/srv/app/str.js:1\nthrow 'boom';\n^\nboom", 'terminal', 2, new Date());
   assert.equal(thrown.message, 'boom');
   assert.equal(thrown.level, 'error');
 });

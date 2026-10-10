@@ -15,14 +15,14 @@ function harness(settings: Record<string, unknown> = {}) {
   const state = new RuntimeState(() => undefined);
   const config = { get: <T>(key: string, fallback: T) => (key in settings ? settings[key] : fallback) as T };
   const follower = new FileFollower(config, registry, new Ingestion(store, () => undefined), state);
-  return { store, registry, state, follower, messages: () => store.all().map(event => event.message) };
+  return { store, registry, state, follower, messages: () => store.all().map((event) => event.message) };
 }
 
 async function eventually(check: () => boolean, timeout = 3000): Promise<void> {
   const start = Date.now();
   while (!check()) {
     if (Date.now() - start > timeout) throw new Error('Timed out waiting for followed lines');
-    await new Promise(resolve => setTimeout(resolve, 20));
+    await new Promise((resolve) => setTimeout(resolve, 20));
   }
 }
 
@@ -51,9 +51,11 @@ test('following a file shows its tail, then appended lines, and stops cleanly', 
     assert.equal(record.status, 'exited');
     assert.equal(h.follower.active, 0);
     await appendFile(file, 'after stop\n');
-    await new Promise(resolve => setTimeout(resolve, 80));
+    await new Promise((resolve) => setTimeout(resolve, 80));
     assert.ok(!h.messages().includes('after stop'));
-  } finally { await rm(dir, { recursive: true, force: true }); }
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
 });
 
 test('following survives truncation, rotation and a file that does not exist yet', async () => {
@@ -72,7 +74,9 @@ test('following survives truncation, rotation and a file that does not exist yet
     await eventually(() => h.messages().includes('Error: boom'));
     assert.equal(h.store.all().at(-1)!.raw, 'Error: boom\n    at run (/srv/job.js:3:9)', 'stack traces are joined');
     await h.follower.dispose();
-  } finally { await rm(dir, { recursive: true, force: true }); }
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
 });
 
 test('the poll timer cannot read a large file from its start before the tail position is known', async () => {
@@ -84,14 +88,14 @@ test('the poll timer cannot read a large file from its start before the tail pos
   const stat = fsPromises.stat;
   let calls = 0;
   fsPromises.stat = (async (...args: Parameters<typeof stat>) => {
-    if (++calls === 1) await new Promise(resolve => setTimeout(resolve, 100));
+    if (++calls === 1) await new Promise((resolve) => setTimeout(resolve, 100));
     return stat(...args);
   }) as typeof stat;
   try {
     await writeFile(file, Array.from({ length: 5000 }, (_, i) => `line ${i}`).join('\n') + '\n');
     const h = harness({ joinStackTraces: false });
     await h.follower.follow(file, { tailBytes: 30, pollMs: 5 });
-    await new Promise(resolve => setTimeout(resolve, 50));
+    await new Promise((resolve) => setTimeout(resolve, 50));
     assert.deepEqual(h.messages(), ['line 4997', 'line 4998', 'line 4999']);
     await h.follower.dispose();
   } finally {
@@ -120,7 +124,9 @@ test('stopping a file source stops only that file', async () => {
     assert.ok(!h.messages().includes('INFO ignored'));
     await h.follower.dispose();
     assert.equal(h.follower.active, 0);
-  } finally { await rm(dir, { recursive: true, force: true }); }
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
 });
 
 test('a failed read is reported in the status and following continues', async () => {
@@ -130,7 +136,10 @@ test('a failed read is reported in the status and following continues', async ()
     await writeFile(file, '');
     const h = harness({ joinStackTraces: false });
     const add = h.store.add.bind(h.store);
-    h.store.add = event => { if (event.message === 'poison') throw new Error('store failed'); return add(event); };
+    h.store.add = (event) => {
+      if (event.message === 'poison') throw new Error('store failed');
+      return add(event);
+    };
     await h.follower.follow(file, { pollMs: 20 });
     await appendFile(file, 'poison\n');
     await eventually(() => h.state.status.startsWith('Could not read app.log'));
@@ -138,5 +147,7 @@ test('a failed read is reported in the status and following continues', async ()
     await appendFile(file, 'after\n');
     await eventually(() => h.messages().includes('after'));
     await h.follower.dispose();
-  } finally { await rm(dir, { recursive: true, force: true }); }
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
 });

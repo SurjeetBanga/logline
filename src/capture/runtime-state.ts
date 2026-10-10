@@ -5,8 +5,11 @@ export class RuntimeState {
   command = '';
   /** Changes only when the retained history boundary is reset. */
   generation = 0;
-  constructor(readonly notify: () => void) { }
-  invalidate(): void { this.generation++; this.notify(); }
+  constructor(readonly notify: () => void) {}
+  invalidate(): void {
+    this.generation++;
+    this.notify();
+  }
   /** Remove status left by finished imports or commands when the log history is cleared. */
   reset(running = false): void {
     this.status = running ? 'Running' : RuntimeState.readyStatus;

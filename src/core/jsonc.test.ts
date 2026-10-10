@@ -17,8 +17,10 @@ test('strips line and block comments outside strings', () => {
 });
 
 test('leaves // and /* inside string values alone', () => {
-  assert.deepEqual(parseJsonc('{"url": "http://example.com", "note": "/* not a comment */"}'),
-    { url: 'http://example.com', note: '/* not a comment */' });
+  assert.deepEqual(parseJsonc('{"url": "http://example.com", "note": "/* not a comment */"}'), {
+    url: 'http://example.com',
+    note: '/* not a comment */',
+  });
 });
 
 test('tolerates trailing commas the way tasks.json does', () => {

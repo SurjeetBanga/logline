@@ -3,7 +3,10 @@ import * as vscode from 'vscode';
 import { parseDiffRanges, WHOLE_FILE, type ChangedLines, type LineRanges } from '../core/changed-lines';
 
 // The parts of the built-in git extension's API (`vscode.git`, version 1) that this reads.
-interface GitChange { readonly uri: vscode.Uri; readonly status: number; }
+interface GitChange {
+  readonly uri: vscode.Uri;
+  readonly status: number;
+}
 interface GitRepository {
   readonly rootUri: vscode.Uri;
   readonly state: {
@@ -20,10 +23,17 @@ interface GitApi {
   readonly onDidOpenRepository: vscode.Event<GitRepository>;
   readonly onDidCloseRepository: vscode.Event<GitRepository>;
 }
-interface GitExtension { getAPI(version: 1): GitApi; }
+interface GitExtension {
+  getAPI(version: 1): GitApi;
+}
 
 // Status values from the git extension's `Status` enum.
-const INDEX_ADDED = 1, INDEX_DELETED = 2, DELETED = 6, UNTRACKED = 7, IGNORED = 8, INTENT_TO_ADD = 9;
+const INDEX_ADDED = 1,
+  INDEX_DELETED = 2,
+  DELETED = 6,
+  UNTRACKED = 7,
+  IGNORED = 8,
+  INTENT_TO_ADD = 9;
 const NEW_FILE = new Set([INDEX_ADDED, UNTRACKED, INTENT_TO_ADD]);
 const GONE = new Set([INDEX_DELETED, DELETED, IGNORED]);
 // Diffing is one git process per file; past this many changed files the
@@ -49,7 +59,10 @@ export class GitChanges implements vscode.Disposable {
   private disposed = false;
   private changedFiles = 0;
 
-  constructor(private readonly changes: ChangedLines, private readonly onChange: () => void) {
+  constructor(
+    private readonly changes: ChangedLines,
+    private readonly onChange: () => void,
+  ) {
     void this.start();
   }
 
@@ -62,17 +75,20 @@ export class GitChanges implements vscode.Disposable {
     const extension = vscode.extensions.getExtension<GitExtension>('vscode.git');
     if (!extension) return;
     let api: GitApi;
-    try { api = (extension.isActive ? extension.exports : await extension.activate()).getAPI(1); }
-    catch { return; }
+    try {
+      api = (extension.isActive ? extension.exports : await extension.activate()).getAPI(1);
+    } catch {
+      return;
+    }
     if (this.disposed) return;
     this.disposables.push(
-      api.onDidOpenRepository(repository => this.add(repository)),
-      api.onDidCloseRepository(repository => this.remove(repository)),
-      vscode.workspace.onDidSaveTextDocument(document => {
+      api.onDidOpenRepository((repository) => this.add(repository)),
+      api.onDidCloseRepository((repository) => this.remove(repository)),
+      vscode.workspace.onDidSaveTextDocument((document) => {
         if (document.uri.scheme !== 'file' || !this.ranges.has(document.uri.fsPath)) return;
         this.stale.add(document.uri.fsPath);
         this.schedule();
-      })
+      }),
     );
     for (const repository of api.repositories) this.add(repository);
   }
@@ -94,14 +110,23 @@ export class GitChanges implements vscode.Disposable {
 
   private schedule(): void {
     if (this.disposed || this.timer) return;
-    this.timer = setTimeout(() => { this.timer = undefined; void this.update(); }, SETTLE_MS);
+    this.timer = setTimeout(() => {
+      this.timer = undefined;
+      void this.update();
+    }, SETTLE_MS);
     this.timer.unref?.();
   }
 
   private async update(): Promise<void> {
     // One pass at a time; a change during a pass schedules the next.
-    if (this.running) { await this.running; this.schedule(); return; }
-    this.running = this.collect().finally(() => { this.running = undefined; });
+    if (this.running) {
+      await this.running;
+      this.schedule();
+      return;
+    }
+    this.running = this.collect().finally(() => {
+      this.running = undefined;
+    });
     await this.running;
   }
 
@@ -124,7 +149,11 @@ export class GitChanges implements vscode.Disposable {
       }
     }
     this.changedFiles = wanted.size;
-    for (const file of [...this.ranges.keys()]) if (!wanted.has(file)) { this.ranges.delete(file); this.modified.delete(file); }
+    for (const file of [...this.ranges.keys()])
+      if (!wanted.has(file)) {
+        this.ranges.delete(file);
+        this.modified.delete(file);
+      }
     for (const [file, { repository, whole }] of [...wanted].slice(0, MAX_FILES)) {
       if (this.disposed) return;
       // Agents and command-line tools write files without a save event, so a new modification time also means a new diff.
@@ -132,9 +161,15 @@ export class GitChanges implements vscode.Disposable {
       if (this.ranges.has(file) && !this.stale.has(file) && this.modified.get(file) === mtime) continue;
       this.stale.delete(file);
       this.modified.set(file, mtime);
-      if (whole) { this.ranges.set(file, WHOLE_FILE); continue; }
-      try { this.ranges.set(file, parseDiffRanges(await repository.diffWith('HEAD', file))); }
-      catch { this.ranges.delete(file); }
+      if (whole) {
+        this.ranges.set(file, WHOLE_FILE);
+        continue;
+      }
+      try {
+        this.ranges.set(file, parseDiffRanges(await repository.diffWith('HEAD', file)));
+      } catch {
+        this.ranges.delete(file);
+      }
     }
     this.changes.set(this.ranges);
     if (JSON.stringify([this.status(), this.changes.version]) !== before) this.onChange();
@@ -150,5 +185,8 @@ export class GitChanges implements vscode.Disposable {
 }
 
 function isInside(file: string, root: string): boolean {
-  return file === root || file.startsWith(root.endsWith('/') || root.endsWith('\\') ? root : root + (root.includes('\\') ? '\\' : '/'));
+  return (
+    file === root ||
+    file.startsWith(root.endsWith('/') || root.endsWith('\\') ? root : root + (root.includes('\\') ? '\\' : '/'))
+  );
 }

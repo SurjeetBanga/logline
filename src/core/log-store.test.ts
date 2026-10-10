@@ -88,8 +88,14 @@ test('server and session counts stay correct across wrapping, resize, mixed case
   assert.equal(store.sessionEventCount('api', 'one'), 1);
   assert.equal(store.sessionEventCount('api', 'two'), 2);
   assert.deepEqual(store.sessionIds('api').sort(), ['one', 'two']);
-  assert.deepEqual(store.all({ serverId: 'Api' }).map(event => event.id), [2, 3, 5]);
-  assert.deepEqual(store.exportEvents({ serverId: 'Api', sessionIds: ['two'] }).map(event => event.id), [3, 5]);
+  assert.deepEqual(
+    store.all({ serverId: 'Api' }).map((event) => event.id),
+    [2, 3, 5],
+  );
+  assert.deepEqual(
+    store.exportEvents({ serverId: 'Api', sessionIds: ['two'] }).map((event) => event.id),
+    [3, 5],
+  );
   store.resize(2, store.maxBytes);
   assert.equal(store.sessionEventCount('api', 'two'), 1);
   assert.equal(store.sessionEventCount('worker', 'w2'), 1);
@@ -104,9 +110,11 @@ test('server indexes release evicted records under the memory budget', () => {
     const serverId = id < 10 ? `finished-${id}` : 'api';
     store.add({ id, raw: 'x'.repeat(1000), level: 'info', serverId, fields: { serverId } });
   }
-  const referenced = [...store.serverIndex.values()].flatMap(index => index.items.filter(slot => slot !== undefined));
+  const referenced = [...store.serverIndex.values()].flatMap((index) =>
+    index.items.filter((slot) => slot !== undefined),
+  );
   assert.equal(referenced.length, store.size);
-  assert.ok(referenced.every(slot => store.find(slot.event.id) === slot.event));
+  assert.ok(referenced.every((slot) => store.find(slot.event.id) === slot.event));
   assert.deepEqual([...store.serverIndex.keys()], ['api'], 'empty server indexes are removed');
 });
 
@@ -123,35 +131,48 @@ test('search, level filtering, history pages and frozen boundaries', () => {
 
 test('reversePage returns newest matches without materializing the full result set', () => {
   const store = new LogStore(1000, 10 * 1024 * 1024);
-  for (let id = 1; id <= 500; id++) store.add({ id, serverId: id % 2 ? 'api' : 'web', level: id % 3 ? 'info' : 'error', message: `event ${id}` });
+  for (let id = 1; id <= 500; id++)
+    store.add({ id, serverId: id % 2 ? 'api' : 'web', level: id % 3 ? 'info' : 'error', message: `event ${id}` });
   const page = store.reversePage({ serverId: 'api', levels: ['error'] }, 3);
-  assert.deepEqual(page.events.map(event => event.id), [495, 489, 483]);
+  assert.deepEqual(
+    page.events.map((event) => event.id),
+    [495, 489, 483],
+  );
   assert.equal(page.matched, 83);
   assert.equal(page.hasMore, true);
 });
 
 test('line reader handles split UTF-8, CRLF and a final unterminated line', () => {
-  const output: { line: string; truncated: boolean; }[] = [];
+  const output: { line: string; truncated: boolean }[] = [];
   const reader = new LineReader((line, truncated) => output.push({ line, truncated }));
   const input = Buffer.from('hi 😀\r\nlast');
   for (const byte of input) reader.write(Buffer.from([byte]));
   reader.end();
-  assert.deepEqual(output, [{ line: 'hi 😀', truncated: false }, { line: 'last', truncated: false }]);
+  assert.deepEqual(output, [
+    { line: 'hi 😀', truncated: false },
+    { line: 'last', truncated: false },
+  ]);
 });
 
 test('newline-free output is bounded and parsing recovers after a truncated line', () => {
-  const output: { line: string; truncated: boolean; }[] = [];
+  const output: { line: string; truncated: boolean }[] = [];
   const reader = new LineReader((line, truncated) => output.push({ line, truncated }), 16);
   for (let i = 0; i < 10000; i++) reader.write(Buffer.from('x'.repeat(1024)));
   assert.equal(reader.pending.length, 16);
   reader.write(Buffer.from('\n{"ok":true}\n'));
   reader.end();
-  assert.deepEqual(output, [{ line: 'x'.repeat(16), truncated: true }, { line: '{"ok":true}', truncated: false }]);
+  assert.deepEqual(output, [
+    { line: 'x'.repeat(16), truncated: true },
+    { line: '{"ok":true}', truncated: false },
+  ]);
 });
 
 test('a line whose callback throws is not glued onto the next line', () => {
   const output: string[] = [];
-  const reader = new LineReader(line => { if (line === 'poison') throw new Error('rejected'); output.push(line); });
+  const reader = new LineReader((line) => {
+    if (line === 'poison') throw new Error('rejected');
+    output.push(line);
+  });
   assert.throws(() => reader.write(Buffer.from('poison\n')), /rejected/);
   reader.write(Buffer.from('after\n'));
   assert.deepEqual(output, ['after']);
@@ -166,7 +187,12 @@ test('messages preserve repeated spaces and Pino numeric levels', () => {
 test('columns prefers known fields in a fixed order and caps at six', () => {
   const store = new LogStore();
   store.add({ id: 1, raw: '{}', level: 'info', fields: { host: 'h', service: 'api', junk: 'x' } });
-  store.add({ id: 2, raw: '{}', level: 'info', fields: { status: 200, method: 'GET', path: '/', durationMs: 5, environment: 'prod', traceId: 't' } });
+  store.add({
+    id: 2,
+    raw: '{}',
+    level: 'info',
+    fields: { status: 200, method: 'GET', path: '/', durationMs: 5, environment: 'prod', traceId: 't' },
+  });
   assert.deepEqual(store.columns(), ['service', 'traceId', 'method', 'path', 'status', 'durationMs']);
 });
 
@@ -202,7 +228,14 @@ test('server searches preserve substring, case and regex matching across live an
     const serverId = servers[id % servers.length];
     store.add({ id, level: 'info', serverId, fields: { serverId } });
   }
-  for (const query of ['serverId:api', 'serverId:API', 'serverId:worker', 'serverId:/api/', 'serverId:/api/g', '-serverId:api']) {
+  for (const query of [
+    'serverId:api',
+    'serverId:API',
+    'serverId:worker',
+    'serverId:/api/',
+    'serverId:/api/g',
+    '-serverId:api',
+  ]) {
     const live = store.page({ query });
     const history = store.page({ query, before: store.total });
     assert.deepEqual(live, history, query);
@@ -241,7 +274,8 @@ test('a level filter on a large store reports the filtered match count, not the 
 test('levels filters to exactly the checked set, in any combination', () => {
   const store = new LogStore();
   const levels = ['trace', 'debug', 'info', 'warn', 'error', 'fatal'];
-  for (let id = 1; id <= 60; id++) store.add({ id, raw: `e${id}`, message: `e${id}`, level: levels[id % levels.length] });
+  for (let id = 1; id <= 60; id++)
+    store.add({ id, raw: `e${id}`, message: `e${id}`, level: levels[id % levels.length] });
   const warnOnly = store.page({ levels: ['warn'] });
   const warnAndFatal = store.page({ levels: ['warn', 'fatal'] });
   const none = store.page({ levels: [] });
@@ -250,7 +284,7 @@ test('levels filters to exactly the checked set, in any combination', () => {
   assert.equal(warnAndFatal.matched, 20, 'a combination that skips levels in between');
   assert.equal(none.matched, 0, 'an empty selection matches nothing, unlike omitting levels entirely');
   assert.equal(all.matched, 60, 'omitting levels applies no filter');
-  assert.ok(warnOnly.events.every(event => event.level === 'warn'));
+  assert.ok(warnOnly.events.every((event) => event.level === 'warn'));
 });
 
 test('all returns filtered retained events chronologically for exports', () => {
@@ -259,25 +293,48 @@ test('all returns filtered retained events chronologically for exports', () => {
   store.add({ id: 2, level: 'error', message: 'two', serverId: 'web', server: 'Web' });
   store.add({ id: 3, level: 'error', message: 'three', serverId: 'api', server: 'API' });
   const events = store.all({ query: 'serverId:api', levels: ['error'] });
-  assert.deepEqual(events.map(event => event.id), [3]);
-  assert.deepEqual(store.all({ serverId: 'api' }).map(event => event.id), [1, 3]);
+  assert.deepEqual(
+    events.map((event) => event.id),
+    [3],
+  );
+  assert.deepEqual(
+    store.all({ serverId: 'api' }).map((event) => event.id),
+    [1, 3],
+  );
   assert.deepEqual(store.serverIds(), ['api', 'web']);
   assert.equal(store.serverLabel('api'), 'API');
 });
 
 test('analysis helpers provide arbitrary sorting, groups and charts', () => {
   const store = new LogStore();
-  const add = (id: number, level: string, message: string, fields: Record<string, string | number | boolean>, timestampMs: number) =>
-    store.add({ id, level, message, timestampMs, timestamp: new Date(timestampMs).toISOString(), fields, sessionId: id < 3 ? 'one' : 'two' });
+  const add = (
+    id: number,
+    level: string,
+    message: string,
+    fields: Record<string, string | number | boolean>,
+    timestampMs: number,
+  ) =>
+    store.add({
+      id,
+      level,
+      message,
+      timestampMs,
+      timestamp: new Date(timestampMs).toISOString(),
+      fields,
+      sessionId: id < 3 ? 'one' : 'two',
+    });
   add(1, 'error', 'timeout for user 123', { service: 'api', statusCode: 500, durationMs: 80 }, 1000);
   add(2, 'error', 'timeout for user 456', { service: 'api', statusCode: 500, durationMs: 100 }, 1100);
   add(3, 'info', 'ok', { service: 'web', statusCode: 200, durationMs: 20 }, 1200);
-  assert.deepEqual(store.page({ sort: 'durationMs', sortDirection: 'desc' }).events.map(event => event.id), [2, 1, 3]);
+  assert.deepEqual(
+    store.page({ sort: 'durationMs', sortDirection: 'desc' }).events.map((event) => event.id),
+    [2, 1, 3],
+  );
   assert.equal(store.fieldSuggestions('ser').fields.includes('service'), true);
   const analysis = store.analysis();
   assert.equal(analysis.errorGroups[0].count, 2);
-  assert.equal(analysis.statusCodes.find(value => value.code === '500')?.count, 2);
-  assert.equal(analysis.patterns.find(pattern => pattern.message === 'timeout for user 123')?.count, 2);
+  assert.equal(analysis.statusCodes.find((value) => value.code === '500')?.count, 2);
+  assert.equal(analysis.patterns.find((pattern) => pattern.message === 'timeout for user 123')?.count, 2);
   assert.equal(store.all({ from: 1100, to: 1200 }).length, 2);
 });
 
@@ -286,8 +343,14 @@ test('page and all restrict results to one capture session', () => {
   store.add({ id: 1, level: 'info', message: 'a', sessionId: 'run1' });
   store.add({ id: 2, level: 'info', message: 'b', sessionId: 'run2' });
   store.add({ id: 3, level: 'info', message: 'c', sessionId: 'run1' });
-  assert.deepEqual(store.page({ sessionId: 'run1' }).events.map(event => event.id), [1, 3]);
-  assert.deepEqual(store.all({ sessionId: 'run1' }).map(event => event.id), [1, 3]);
+  assert.deepEqual(
+    store.page({ sessionId: 'run1' }).events.map((event) => event.id),
+    [1, 3],
+  );
+  assert.deepEqual(
+    store.all({ sessionId: 'run1' }).map((event) => event.id),
+    [1, 3],
+  );
   assert.equal(store.page({ sessionId: 'nope' }).matched, 0);
 });
 
@@ -308,7 +371,11 @@ test('fieldNames lists builtin fields plus every observed payload field, sorted'
   const names = store.fieldNames();
   assert.ok(names.includes('traceId'), 'builtin fields are always offered');
   assert.ok(names.includes('zebra') && names.includes('apple'), 'observed payload fields are included');
-  assert.deepEqual([...names].sort((a, b) => a.localeCompare(b, undefined, { numeric: true })), names, 'the list is sorted');
+  assert.deepEqual(
+    [...names].sort((a, b) => a.localeCompare(b, undefined, { numeric: true })),
+    names,
+    'the list is sorted',
+  );
 });
 
 test('log patterns cluster every retained event, any level, by normalized message template', () => {
@@ -323,20 +390,45 @@ test('log patterns cluster every retained event, any level, by normalized messag
   assert.equal(patterns[0].message, 'user 1 logged in');
   assert.equal(patterns[0].count, 3);
   assert.equal(patterns[0].level, 'info');
-  assert.equal(patterns[0].trend.reduce((sum, value) => sum + value, 0), 3);
-  const cacheMiss = patterns.find(pattern => pattern.message === 'cache miss for key abc');
+  assert.equal(
+    patterns[0].trend.reduce((sum, value) => sum + value, 0),
+    3,
+  );
+  const cacheMiss = patterns.find((pattern) => pattern.message === 'cache miss for key abc');
   assert.equal(cacheMiss?.count, 1);
   assert.equal(cacheMiss?.level, 'warn');
 });
 
 test('log patterns are capped at the top 20 by volume', () => {
   const store = new LogStore();
-  const base = ['alpha', 'bravo', 'charlie', 'delta', 'echo', 'foxtrot', 'golf', 'hotel', 'india', 'juliet', 'kilo', 'lima', 'mike', 'november', 'oscar'];
-  const words = [...base, ...base.slice(0, 10).map(word => `${word}-again`)];
+  const base = [
+    'alpha',
+    'bravo',
+    'charlie',
+    'delta',
+    'echo',
+    'foxtrot',
+    'golf',
+    'hotel',
+    'india',
+    'juliet',
+    'kilo',
+    'lima',
+    'mike',
+    'november',
+    'oscar',
+  ];
+  const words = [...base, ...base.slice(0, 10).map((word) => `${word}-again`)];
   let id = 0;
   for (let template = 0; template < words.length; template++) {
     for (let occurrence = 0; occurrence <= template; occurrence++) {
-      store.add({ id: ++id, level: 'info', message: `${words[template]} pattern occurred`, timestampMs: id, timestamp: new Date(id).toISOString() });
+      store.add({
+        id: ++id,
+        level: 'info',
+        message: `${words[template]} pattern occurred`,
+        timestampMs: id,
+        timestamp: new Date(id).toISOString(),
+      });
     }
   }
   const patterns = store.patterns();
@@ -346,47 +438,82 @@ test('log patterns are capped at the top 20 by volume', () => {
 
 test('analysis flags rate buckets that spike against the series baseline, not raw counts alone', () => {
   const store = new LogStore();
-  for (let i = 0; i < 20; i++) store.add({ id: i + 1, level: 'info', message: 'heartbeat', timestampMs: i * 100, timestamp: new Date(i * 100).toISOString() });
+  for (let i = 0; i < 20; i++)
+    store.add({
+      id: i + 1,
+      level: 'info',
+      message: 'heartbeat',
+      timestampMs: i * 100,
+      timestamp: new Date(i * 100).toISOString(),
+    });
   const burstStart = 2900;
-  for (let i = 0; i < 30; i++) store.add({ id: 1000 + i, level: 'info', message: 'burst', timestampMs: burstStart + i, timestamp: new Date(burstStart + i).toISOString() });
+  for (let i = 0; i < 30; i++)
+    store.add({
+      id: 1000 + i,
+      level: 'info',
+      message: 'burst',
+      timestampMs: burstStart + i,
+      timestamp: new Date(burstStart + i).toISOString(),
+    });
   const analysis = store.analysis();
-  const peak = Math.max(...analysis.rate.map(bucket => bucket.count));
-  const spike = analysis.rate.find(bucket => bucket.count === peak);
+  const peak = Math.max(...analysis.rate.map((bucket) => bucket.count));
+  const spike = analysis.rate.find((bucket) => bucket.count === peak);
   assert.equal(spike?.anomalous, true);
-  const quiet = analysis.rate.filter(bucket => bucket.count > 0 && bucket.count < peak);
+  const quiet = analysis.rate.filter((bucket) => bucket.count > 0 && bucket.count < peak);
   assert.ok(quiet.length > 0);
-  assert.ok(quiet.every(bucket => bucket.anomalous === false));
+  assert.ok(quiet.every((bucket) => bucket.anomalous === false));
 });
 
 test('error groups fingerprint by exception type and originating stack frame, not raw message text', () => {
   const store = new LogStore();
   const raw = (payload: unknown) => JSON.stringify(payload);
   store.add({
-    id: 1, level: 'error', isJson: true, message: 'Failed to charge card ending 4242',
+    id: 1,
+    level: 'error',
+    isJson: true,
+    message: 'Failed to charge card ending 4242',
     raw: raw({
       message: 'Failed to charge card ending 4242',
-      err: { type: 'PaymentError', message: 'card declined', stack: 'PaymentError: card declined\n    at charge (/work/billing.ts:55:3)' }
-    })
+      err: {
+        type: 'PaymentError',
+        message: 'card declined',
+        stack: 'PaymentError: card declined\n    at charge (/work/billing.ts:55:3)',
+      },
+    }),
   });
   store.add({
-    id: 2, level: 'error', isJson: true, message: 'Failed to charge card ending 9999 for premium plan',
+    id: 2,
+    level: 'error',
+    isJson: true,
+    message: 'Failed to charge card ending 9999 for premium plan',
     raw: raw({
       message: 'Failed to charge card ending 9999 for premium plan',
-      err: { type: 'PaymentError', message: 'insufficient funds', stack: 'PaymentError: insufficient funds\n    at charge (/work/billing.ts:55:3)' }
-    })
+      err: {
+        type: 'PaymentError',
+        message: 'insufficient funds',
+        stack: 'PaymentError: insufficient funds\n    at charge (/work/billing.ts:55:3)',
+      },
+    }),
   });
   store.add({
-    id: 3, level: 'error', isJson: true, message: 'Failed to charge card ending 1111',
+    id: 3,
+    level: 'error',
+    isJson: true,
+    message: 'Failed to charge card ending 1111',
     raw: raw({
       message: 'Failed to charge card ending 1111',
-      err: { type: 'PaymentError', message: 'card declined', stack: 'PaymentError: card declined\n    at charge (/work/refund.ts:80:5)' }
-    })
+      err: {
+        type: 'PaymentError',
+        message: 'card declined',
+        stack: 'PaymentError: card declined\n    at charge (/work/refund.ts:80:5)',
+      },
+    }),
   });
   const groups = store.errorGroups();
   assert.equal(groups.length, 2);
-  const billing = groups.find(group => group.location === '/work/billing.ts:55');
+  const billing = groups.find((group) => group.location === '/work/billing.ts:55');
   assert.equal(billing?.count, 2, 'differently-worded messages from the same call site should still merge');
-  const refund = groups.find(group => group.location === '/work/refund.ts:80');
+  const refund = groups.find((group) => group.location === '/work/refund.ts:80');
   assert.equal(refund?.count, 1, 'the same exception type/message from a different call site should not merge');
 });
 
@@ -457,12 +584,16 @@ test('a repeated query keeps counting correctly as events arrive and are evicted
     const warm = store.page({ query: 'boom' });
     const reference = cold('boom');
     assert.equal(warm.matched, reference.matched, `match count after event ${id}`);
-    assert.deepEqual(warm.events.map(e => e.id), reference.events.map(e => e.id), `page rows after event ${id}`);
+    assert.deepEqual(
+      warm.events.map((e) => e.id),
+      reference.events.map((e) => e.id),
+      `page rows after event ${id}`,
+    );
   }
   assert.equal(store.page({ query: 'boom' }).matched, 10, 'only the retained window is counted');
 });
 
-test('switching filters and paging does not serve another query\'s cached matches', () => {
+test("switching filters and paging does not serve another query's cached matches", () => {
   const store = new LogStore(5000, 8 * 1024 * 1024);
   for (let id = 1; id <= 2500; id++) store.add(event(id, id % 2 ? 'info' : 'error', `line ${id}`));
   assert.equal(store.page({ query: 'line' }).matched, 2500);
@@ -485,11 +616,17 @@ test('a relative time query is re-evaluated rather than served from the cache', 
   const recent = event(2, 'info', 'fresh');
   recent.timestampMs = Date.now();
   store.add(recent);
-  assert.deepEqual(store.page({ query: 'last:5m' }).events.map(e => e.id), [2]);
+  assert.deepEqual(
+    store.page({ query: 'last:5m' }).events.map((e) => e.id),
+    [2],
+  );
   const later = event(3, 'info', 'newer');
   later.timestampMs = Date.now();
   store.add(later);
-  assert.deepEqual(store.page({ query: 'last:5m' }).events.map(e => e.id), [2, 3]);
+  assert.deepEqual(
+    store.page({ query: 'last:5m' }).events.map((e) => e.id),
+    [2, 3],
+  );
 });
 
 test('field suggestions stay scoped to the selected server', () => {
@@ -501,7 +638,11 @@ test('field suggestions stay scoped to the selected server', () => {
   store.add(api);
   store.add(worker);
   assert.equal(store.fieldSuggestions('rou', 'api').fields.includes('route'), true);
-  assert.equal(store.fieldSuggestions('que', 'api').fields.includes('queue'), false, 'another server\'s fields stay out');
+  assert.equal(
+    store.fieldSuggestions('que', 'api').fields.includes('queue'),
+    false,
+    "another server's fields stay out",
+  );
   assert.equal(store.fieldSuggestions('que', 'worker').fields.includes('queue'), true);
   assert.equal(store.fieldSuggestions('qu').fields.includes('queue'), true, 'with no server every field is offered');
 });
@@ -528,13 +669,17 @@ test('field names are released on eviction, remain while referenced, and reset o
 
 test('sorted pages keep natural ordering, missing values and cache invalidation correct', () => {
   const store = new LogStore(2000);
-  for (let id = 1; id <= 1500; id++) store.add({ id, level: id % 2 ? 'info' : 'error', fields: { requestId: `req-${1501 - id}` } });
-  const ids = (options: Parameters<LogStore['page']>[0]) => store.page(options).events.map(event => event.id);
+  for (let id = 1; id <= 1500; id++)
+    store.add({ id, level: id % 2 ? 'info' : 'error', fields: { requestId: `req-${1501 - id}` } });
+  const ids = (options: Parameters<LogStore['page']>[0]) => store.page(options).events.map((event) => event.id);
   const asc = { sort: 'requestId', sortDirection: 'asc' as const };
-  assert.deepEqual(ids(asc), Array.from({ length: 1000 }, (_, i) => 1500 - i));
+  assert.deepEqual(
+    ids(asc),
+    Array.from({ length: 1000 }, (_, i) => 1500 - i),
+  );
   assert.equal(ids({ ...asc, page: 1 })[0], 500);
   assert.equal(ids({ ...asc, sortDirection: 'desc' })[0], 1);
-  assert.ok(ids({ ...asc, levels: ['error'] }).every(id => id % 2 === 0));
+  assert.ok(ids({ ...asc, levels: ['error'] }).every((id) => id % 2 === 0));
   assert.equal(ids(asc)[0], 1500);
   store.add({ id: 1501, level: 'info', fields: { requestId: 'req-0' } });
   assert.equal(ids(asc)[0], 1501);
@@ -548,14 +693,21 @@ test('sorted pages keep natural ordering, missing values and cache invalidation 
   assert.deepEqual(ids(asc), []);
 });
 
-test('repeated sorted pages reuse comparisons until data changes; relative filters expire', t => {
+test('repeated sorted pages reuse comparisons until data changes; relative filters expire', (t) => {
   let reads = 0;
   const store = new LogStore(10);
-  for (let id = 1; id <= 5; id++) store.add({
-    id, level: 'info', timestampMs: 100000, fields: {
-      get requestId() { reads++; return `req-${id}`; }
-    }
-  });
+  for (let id = 1; id <= 5; id++)
+    store.add({
+      id,
+      level: 'info',
+      timestampMs: 100000,
+      fields: {
+        get requestId() {
+          reads++;
+          return `req-${id}`;
+        },
+      },
+    });
   const options = { sort: 'requestId' };
   store.page(options);
   const initial = reads;
@@ -577,8 +729,8 @@ test('eviction releases cached payload references even without another page requ
   store.page({ query: 'match', sort: 'id' });
   store.add({ id: 3, level: 'info', message: 'new' });
   store.add({ id: 4, level: 'info', message: 'new' });
-  const caches = store as unknown as { pageCache: { matches: (LogEvent | undefined)[]; }; sortedCache?: unknown; };
-  assert.ok(caches.pageCache.matches.every(event => event === undefined));
+  const caches = store as unknown as { pageCache: { matches: (LogEvent | undefined)[] }; sortedCache?: unknown };
+  assert.ok(caches.pageCache.matches.every((event) => event === undefined));
   assert.equal(caches.sortedCache, undefined);
   assert.equal(store.page({ query: 'match' }).matched, 0);
 });
@@ -588,7 +740,10 @@ test('analysis and patterns handle 200k timestamps without argument-limit failur
   for (let id = 1; id <= 200000; id++) store.add({ id, level: 'info', message: 'done', timestampMs: 200001 - id });
   const analysis = store.analysis();
   assert.deepEqual(analysis.range, { from: 1, to: 200000 });
-  assert.equal(analysis.rate.reduce((sum, bucket) => sum + bucket.count, 0), 200000);
+  assert.equal(
+    analysis.rate.reduce((sum, bucket) => sum + bucket.count, 0),
+    200000,
+  );
   assert.equal(analysis.patterns[0].count, 200000);
   assert.equal(store.patterns()[0].count, 200000);
   const filtered = store.analysis({ from: 10, to: 20 });
@@ -600,10 +755,17 @@ test('analysis and patterns handle 200k timestamps without argument-limit failur
 
 test('columns discover arbitrary JSON and scope choices to the selected server', () => {
   const store = new LogStore();
-  const api = parseLogLine('{"message":"job","job":{"queue":"fast","attempt":2},"customer":"a"}', 'stdout', 1, new Date());
-  api.serverId = 'api'; store.add(api);
+  const api = parseLogLine(
+    '{"message":"job","job":{"queue":"fast","attempt":2},"customer":"a"}',
+    'stdout',
+    1,
+    new Date(),
+  );
+  api.serverId = 'api';
+  store.add(api);
   const worker = parseLogLine('{"message":"work","workerPool":"batch"}', 'stdout', 2, new Date());
-  worker.serverId = 'worker'; store.add(worker);
+  worker.serverId = 'worker';
+  store.add(worker);
   assert.deepEqual(store.columns('API'), ['customer', 'job.attempt', 'job.queue']);
   assert.deepEqual(store.columns('worker'), ['workerPool']);
   assert.ok(store.columnFields('api').includes('job.queue'));
@@ -612,9 +774,21 @@ test('columns discover arbitrary JSON and scope choices to the selected server',
 
 test('ECS, Pino HTTP and Log4j alias fields are discovered as useful columns and searchable', () => {
   const fixtures = [
-    { message: 'ecs', 'service.name': 'api', 'log.logger': 'main', 'trace.id': 'abc', 'http.response.status_code': 503 },
-    { msg: 'pino', service_name: 'api', req: { method: 'GET', url: '/jobs', id: 'r1' }, res: { statusCode: 503 }, responseTime: 12 },
-    { message: 'log4j', logger_name: 'main', contextMap: { serviceName: 'api', trace_id: 'abc', status_code: 503 } }
+    {
+      message: 'ecs',
+      'service.name': 'api',
+      'log.logger': 'main',
+      'trace.id': 'abc',
+      'http.response.status_code': 503,
+    },
+    {
+      msg: 'pino',
+      service_name: 'api',
+      req: { method: 'GET', url: '/jobs', id: 'r1' },
+      res: { statusCode: 503 },
+      responseTime: 12,
+    },
+    { message: 'log4j', logger_name: 'main', contextMap: { serviceName: 'api', trace_id: 'abc', status_code: 503 } },
   ];
   for (const fixture of fixtures) {
     const store = new LogStore();
@@ -638,7 +812,10 @@ test('indexed history pages match filtered capture order across gaps, wrapping a
         assert.equal(result.matched, expected.length);
         assert.equal(result.pages, pages);
         assert.equal(result.page, page);
-        assert.deepEqual(result.events.map(event => event.id), expected.slice(Math.max(0, end - 1000), end).map(event => event.id));
+        assert.deepEqual(
+          result.events.map((event) => event.id),
+          expected.slice(Math.max(0, end - 1000), end).map((event) => event.id),
+        );
       }
     }
   }
@@ -646,18 +823,22 @@ test('indexed history pages match filtered capture order across gaps, wrapping a
 
 test('server index shortcuts preserve combined filters, case variants and numeric queries', () => {
   const store = new LogStore();
-  for (let id = 1; id <= 15000; id++) store.add({ id, level: 'info', serverId: ['api', 'API', 'worker', '123', '234'][id % 5] });
+  for (let id = 1; id <= 15000; id++)
+    store.add({ id, level: 'info', serverId: ['api', 'API', 'worker', '123', '234'][id % 5] });
   const options = [
     { serverId: 'api' },
     { serverId: 'worker', query: 'serverId:api' },
     { serverId: 'api', query: 'serverId:worker' },
-    { query: 'serverId:>200' }
+    { query: 'serverId:>200' },
   ];
   for (const option of options) {
     const expected = store.all(option);
     const result = store.page(option);
     assert.equal(result.matched, expected.length, JSON.stringify(option));
-    assert.deepEqual(result.events.map(event => event.id), expected.slice(-1000).map(event => event.id));
+    assert.deepEqual(
+      result.events.map((event) => event.id),
+      expected.slice(-1000).map((event) => event.id),
+    );
   }
 });
 
@@ -665,12 +846,13 @@ test('history paging and nearby context read bounded portions of retained histor
   const store = new LogStore(50000);
   for (let id = 1; id <= 50000; id++) store.add({ id, level: 'info', serverId: 'api', sessionId: 'run' });
   let reads = 0;
-  const countReads = <T>(items: T[]) => new Proxy(items, {
-    get(target, key, receiver) {
-      if (typeof key === 'string' && /^\d+$/.test(key)) reads++;
-      return Reflect.get(target, key, receiver);
-    }
-  });
+  const countReads = <T>(items: T[]) =>
+    new Proxy(items, {
+      get(target, key, receiver) {
+        if (typeof key === 'string' && /^\d+$/.test(key)) reads++;
+        return Reflect.get(target, key, receiver);
+      },
+    });
   store.slots = countReads(store.slots);
   for (const index of store.serverIndex.values()) index.items = countReads(index.items);
   for (const option of [{ page: 12 }, { page: 12, before: 40000 }, { page: 12, before: 40000, serverId: 'api' }]) {
@@ -679,7 +861,10 @@ test('history paging and nearby context read bounded portions of retained histor
     assert.ok(reads < 1100, `paging read ${reads} entries`);
   }
   reads = 0;
-  assert.deepEqual(store.context(45000).events.map(event => event.id), Array.from({ length: 51 }, (_, i) => 44975 + i));
+  assert.deepEqual(
+    store.context(45000).events.map((event) => event.id),
+    Array.from({ length: 51 }, (_, i) => 44975 + i),
+  );
   assert.ok(reads < 100, `context read ${reads} entries`);
 });
 
@@ -687,15 +872,23 @@ test('sorted pages merge streamed events and drop evicted ones without a full re
   const store = new LogStore(200);
   const reference = new LogStore(200);
   const add = (id: number) => {
-    const event = { id, level: id % 3 ? 'info' : 'error', message: `m${id}`, fields: { durationMs: (id * 37) % 50, service: `svc-${id % 4}` } };
+    const event = {
+      id,
+      level: id % 3 ? 'info' : 'error',
+      message: `m${id}`,
+      fields: { durationMs: (id * 37) % 50, service: `svc-${id % 4}` },
+    };
     store.add(event);
     reference.add({ ...event, fields: { ...event.fields } });
   };
   for (let id = 1; id <= 150; id++) add(id);
-  for (const [sort, sortDirection] of [['durationMs', 'desc'], ['service', 'asc']] as const) {
+  for (const [sort, sortDirection] of [
+    ['durationMs', 'desc'],
+    ['service', 'asc'],
+  ] as const) {
     for (let round = 0; round < 12; round++) {
       const options = { sort, sortDirection, query: 'level:info' };
-      const ids = (pages: ReturnType<LogStore['page']>) => pages.events.map(event => event.id);
+      const ids = (pages: ReturnType<LogStore['page']>) => pages.events.map((event) => event.id);
       const cached = store.page(options);
       // A fresh store has no cache, so it always sorts from scratch.
       const fresh = new LogStore(200);
@@ -714,9 +907,15 @@ test('fieldSuggestions value counts refresh when events arrive or are evicted', 
   assert.deepEqual(store.fieldSuggestions('service:a').values, [{ value: 'api', count: 2 }]);
   assert.deepEqual(store.fieldSuggestions('service:ap').values, [{ value: 'api', count: 2 }]);
   store.add({ id: 3, level: 'info', message: 'x', fields: { service: 'auth' } });
-  assert.deepEqual(store.fieldSuggestions('service:a').values, [{ value: 'api', count: 2 }, { value: 'auth', count: 1 }]);
+  assert.deepEqual(store.fieldSuggestions('service:a').values, [
+    { value: 'api', count: 2 },
+    { value: 'auth', count: 1 },
+  ]);
   store.add({ id: 4, level: 'info', message: 'x', fields: { service: 'auth' } });
-  assert.deepEqual(store.fieldSuggestions('service:a').values, [{ value: 'auth', count: 2 }, { value: 'api', count: 1 }]);
+  assert.deepEqual(store.fieldSuggestions('service:a').values, [
+    { value: 'auth', count: 2 },
+    { value: 'api', count: 1 },
+  ]);
   store.clear();
   assert.deepEqual(store.fieldSuggestions('service:a').values, []);
 });

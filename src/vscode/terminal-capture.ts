@@ -37,41 +37,78 @@ export class TerminalCapture {
   private readonly disposables: vscode.Disposable[] = [];
   private nextTerminal = 1;
 
-  constructor(private readonly config: Settings, private readonly ingestion: Ingestion,
-    private readonly registry: SessionRegistry, private readonly state: RuntimeState) {
+  constructor(
+    private readonly config: Settings,
+    private readonly ingestion: Ingestion,
+    private readonly registry: SessionRegistry,
+    private readonly state: RuntimeState,
+  ) {
     this.enabled = config.get('captureTerminals', false);
     this.state.status = this.enabled ? 'Ready for the next supported terminal command' : 'Terminal capture is off';
     const windowApi = vscode.window as unknown as Record<string, unknown>;
-    for (const terminal of (vscode.window.terminals ?? [])) this.rememberTerminal(terminal as TerminalLike);
-    const open = windowApi.onDidOpenTerminal as ((listener: (terminal: unknown) => void) => vscode.Disposable) | undefined;
-    if (open) this.disposables.push(open(terminal => this.rememberTerminal(terminal as TerminalLike)));
-    const start = windowApi.onDidStartTerminalShellExecution as ((listener: (event: unknown) => void) => vscode.Disposable) | undefined;
-    if (start) this.disposables.push(start(event => this.onStart(event as { terminal: TerminalLike; execution: ExecutionLike; shellIntegration?: unknown })));
-    const end = windowApi.onDidEndTerminalShellExecution as ((listener: (event: unknown) => void) => vscode.Disposable) | undefined;
-    if (end) this.disposables.push(end(event => this.onEnd(event as { terminal: TerminalLike; execution: ExecutionLike; exitCode?: number })));
-    const close = windowApi.onDidCloseTerminal as ((listener: (terminal: TerminalLike) => void) => vscode.Disposable) | undefined;
-    if (close) this.disposables.push(close(terminal => {
-      const id = this.terminalIds.get(terminal as object);
-      if (id) {
-        for (const context of this.active) {
-          if (context.terminalId === id) this.markTerminalClosed(context, terminal.exitStatus?.code);
-        }
-        this.terminals.delete(id);
-        this.ignoredSourceIds.delete(id);
-      }
-      this.ignored.delete(terminal as object);
-      this.pruneStale();
-      this.state.notify();
-    }));
+    for (const terminal of vscode.window.terminals ?? []) this.rememberTerminal(terminal as TerminalLike);
+    const open = windowApi.onDidOpenTerminal as
+      ((listener: (terminal: unknown) => void) => vscode.Disposable) | undefined;
+    if (open) this.disposables.push(open((terminal) => this.rememberTerminal(terminal as TerminalLike)));
+    const start = windowApi.onDidStartTerminalShellExecution as
+      ((listener: (event: unknown) => void) => vscode.Disposable) | undefined;
+    if (start)
+      this.disposables.push(
+        start((event) =>
+          this.onStart(event as { terminal: TerminalLike; execution: ExecutionLike; shellIntegration?: unknown }),
+        ),
+      );
+    const end = windowApi.onDidEndTerminalShellExecution as
+      ((listener: (event: unknown) => void) => vscode.Disposable) | undefined;
+    if (end)
+      this.disposables.push(
+        end((event) => this.onEnd(event as { terminal: TerminalLike; execution: ExecutionLike; exitCode?: number })),
+      );
+    const close = windowApi.onDidCloseTerminal as
+      ((listener: (terminal: TerminalLike) => void) => vscode.Disposable) | undefined;
+    if (close)
+      this.disposables.push(
+        close((terminal) => {
+          const id = this.terminalIds.get(terminal as object);
+          if (id) {
+            for (const context of this.active) {
+              if (context.terminalId === id) this.markTerminalClosed(context, terminal.exitStatus?.code);
+            }
+            this.terminals.delete(id);
+            this.ignoredSourceIds.delete(id);
+          }
+          this.ignored.delete(terminal as object);
+          this.pruneStale();
+          this.state.notify();
+        }),
+      );
   }
 
-  get isEnabled(): boolean { return this.enabled; }
+  get isEnabled(): boolean {
+    return this.enabled;
+  }
   status(): { state: 'off' | 'waiting' | 'capturing' | 'attention'; detail: string; active: number; failed: number } {
-    const failed = [...this.registry.records.values()].filter(record => record.sourceKind === 'terminal' && (record.captureStatus === 'failed' || record.captureStatus === 'unavailable')).length;
-    const active = [...this.active].filter(context => context.accepting).length;
+    const failed = [...this.registry.records.values()].filter(
+      (record) =>
+        record.sourceKind === 'terminal' &&
+        (record.captureStatus === 'failed' || record.captureStatus === 'unavailable'),
+    ).length;
+    const active = [...this.active].filter((context) => context.accepting).length;
     if (!this.enabled) return { state: 'off', detail: 'Terminal capture is off', active, failed };
-    if (failed) return { state: 'attention', detail: `${failed} terminal capture${failed === 1 ? '' : 's'} failed`, active, failed };
-    if (active) return { state: 'capturing', detail: `Capturing ${active} terminal command${active === 1 ? '' : 's'}`, active, failed };
+    if (failed)
+      return {
+        state: 'attention',
+        detail: `${failed} terminal capture${failed === 1 ? '' : 's'} failed`,
+        active,
+        failed,
+      };
+    if (active)
+      return {
+        state: 'capturing',
+        detail: `Capturing ${active} terminal command${active === 1 ? '' : 's'}`,
+        active,
+        failed,
+      };
     return { state: 'waiting', detail: 'Ready for the next supported terminal command', active, failed };
   }
   setEnabled(value: boolean): void {
@@ -84,21 +121,34 @@ export class TerminalCapture {
     this.state.status = value ? 'Ready for the next supported terminal command' : 'Terminal capture is off';
     this.state.notify();
   }
-  ignoreTerminal(terminal: object): void { this.ignored.add(terminal); }
+  ignoreTerminal(terminal: object): void {
+    this.ignored.add(terminal);
+  }
   resetTerminalIgnore(terminal: object): void {
     this.ignored.delete(terminal);
     const id = this.terminalIds.get(terminal);
     if (id) this.ignoredSourceIds.delete(id);
   }
   availableTerminals(): { id: string; label: string; ignored: boolean }[] {
-    return [...this.terminals.entries()].map(([id, value]) => ({ id, label: value.label, ignored: this.ignoredSourceIds.has(id) || this.ignored.has(value.terminal) }));
+    return [...this.terminals.entries()].map(([id, value]) => ({
+      id,
+      label: value.label,
+      ignored: this.ignoredSourceIds.has(id) || this.ignored.has(value.terminal),
+    }));
   }
   /** Remove completed terminal metadata once its final retained event is gone. */
   pruneStale(): boolean {
     let removed = false;
     for (const [id, record] of this.registry.records) {
-      if (record.sourceKind !== 'terminal' || record.status === 'running' || record.status === 'stopping' || record.captureStatus === 'streaming'
-        || record.captureStatus === 'failed' || record.captureStatus === 'unavailable') continue;
+      if (
+        record.sourceKind !== 'terminal' ||
+        record.status === 'running' ||
+        record.status === 'stopping' ||
+        record.captureStatus === 'streaming' ||
+        record.captureStatus === 'failed' ||
+        record.captureStatus === 'unavailable'
+      )
+        continue;
       if (this.ingestion.store.sessionEventCount(record.serverId, record.id) > 0) continue;
       this.registry.records.delete(id);
       removed = true;
@@ -108,10 +158,12 @@ export class TerminalCapture {
   toggleSource(id: string): void {
     const terminal = this.terminals.get(id)?.terminal;
     const currentlyIgnored = this.ignoredSourceIds.has(id) || Boolean(terminal && this.ignored.has(terminal));
-    if (currentlyIgnored) { this.ignoredSourceIds.delete(id); if (terminal) this.ignored.delete(terminal); }
-    else this.ignoredSourceIds.add(id);
-    for (const context of this.active) if (context.terminalId === id && !currentlyIgnored)
-      this.interrupt(context, 'Terminal excluded from capture.');
+    if (currentlyIgnored) {
+      this.ignoredSourceIds.delete(id);
+      if (terminal) this.ignored.delete(terminal);
+    } else this.ignoredSourceIds.add(id);
+    for (const context of this.active)
+      if (context.terminalId === id && !currentlyIgnored) this.interrupt(context, 'Terminal excluded from capture.');
     this.state.notify();
   }
 
@@ -134,12 +186,30 @@ export class TerminalCapture {
     this.terminals.set(id, { terminal, label });
     if (this.ignoredSourceIds.has(id)) return;
     const record: SessionSummary = {
-      id: randomBytes(8).toString('hex'), serverId: id, server: label, status: 'running', startedAt: Date.now(), events: 0,
-      sourceKind: 'terminal', owned: false, canStop: false, captureComplete: false, captureStatus: 'streaming', command, cwd,
-      taskState: 'running'
+      id: randomBytes(8).toString('hex'),
+      serverId: id,
+      server: label,
+      status: 'running',
+      startedAt: Date.now(),
+      events: 0,
+      sourceKind: 'terminal',
+      owned: false,
+      canStop: false,
+      captureComplete: false,
+      captureStatus: 'streaming',
+      command,
+      cwd,
+      taskState: 'running',
     };
     this.registry.records.set(record.id, record);
-    const context: CaptureContext = { record, terminalId: id, accepting: true, streamDone: false, streamFailed: false, endSeen: false };
+    const context: CaptureContext = {
+      record,
+      terminalId: id,
+      accepting: true,
+      streamDone: false,
+      streamFailed: false,
+      endSeen: false,
+    };
     this.executions.set(event.execution as object, context);
     this.active.add(context);
     this.state.status = `Capturing ${label}`;
@@ -147,7 +217,11 @@ export class TerminalCapture {
     // Calling read synchronously here is required by VS Code: awaiting before
     // obtaining the stream can lose the first bytes written by the command.
     let stream: AsyncIterable<string> | undefined;
-    try { stream = event.execution.read(); } catch { stream = undefined; }
+    try {
+      stream = event.execution.read();
+    } catch {
+      stream = undefined;
+    }
     if (!stream) {
       context.streamFailed = true;
       context.streamDone = true;
@@ -161,16 +235,31 @@ export class TerminalCapture {
     const limit = this.config.get('maxLineLength', 65536);
     const ingest = (text: string, truncated: boolean, container?: ContainerTag) => {
       if (!context.accepting || this.disposed || !this.enabled) return;
-      const accepted = this.ingestion.accept(text, 'terminal', { serverId: id, server: label, sessionId: record.id, truncated, persist: this.config.get('persistLogs', false), container });
-      if (accepted) { record.events++; this.state.notify(); }
+      const accepted = this.ingestion.accept(text, 'terminal', {
+        serverId: id,
+        server: label,
+        sessionId: record.id,
+        truncated,
+        persist: this.config.get('persistLogs', false),
+        container,
+      });
+      if (accepted) {
+        record.events++;
+        this.state.notify();
+      }
     };
-    const joiner = context.joiner = new LinePipeline(ingest, linePipelineOptions(this.config, limit));
+    const joiner = (context.joiner = new LinePipeline(ingest, linePipelineOptions(this.config, limit)));
     const normalizer = new TerminalNormalizer(({ text, truncated }) => joiner.write(text, truncated), limit);
     void this.consume(stream, normalizer, record, joiner);
   }
 
-  private async consume(stream: AsyncIterable<string>, normalizer: TerminalNormalizer, record: SessionSummary, joiner?: LinePipeline): Promise<void> {
-    const context = [...this.active].find(item => item.record === record);
+  private async consume(
+    stream: AsyncIterable<string>,
+    normalizer: TerminalNormalizer,
+    record: SessionSummary,
+    joiner?: LinePipeline,
+  ): Promise<void> {
+    const context = [...this.active].find((item) => item.record === record);
     if (!context) return;
     try {
       for await (const chunk of stream) {
@@ -184,7 +273,9 @@ export class TerminalCapture {
     } catch (error) {
       context.streamFailed = true;
       record.captureStatus = context.accepting ? 'failed' : 'interrupted';
-      record.captureReason = context.accepting ? `Terminal output stream failed: ${error instanceof Error ? error.message : String(error)}` : record.captureReason;
+      record.captureReason = context.accepting
+        ? `Terminal output stream failed: ${error instanceof Error ? error.message : String(error)}`
+        : record.captureReason;
       record.error = record.captureReason;
     } finally {
       normalizer.end();
@@ -192,7 +283,10 @@ export class TerminalCapture {
       context.streamDone = true;
       if (context.streamFailed && context.accepting) record.captureStatus = 'failed';
       else if (!context.accepting || this.disposed) record.captureStatus = 'interrupted';
-      else { record.captureStatus = 'complete'; record.captureComplete = true; }
+      else {
+        record.captureStatus = 'complete';
+        record.captureComplete = true;
+      }
       if (record.captureStatus !== 'complete') record.captureComplete = false;
       if (!context.endSeen && (record.status === 'running' || record.status === 'stopping')) {
         record.status = 'exited';
@@ -203,8 +297,13 @@ export class TerminalCapture {
       this.active.delete(context);
       if (context.endSeen) this.registry.pruneSessionRegistry();
       this.pruneStale();
-      if (!this.registry.sessionSummaries().some(item => item.sourceKind === 'terminal' && item.status === 'running')) {
-        this.state.status = record.status === 'failed' ? `Terminal command failed: ${record.exitCode ?? 'unknown'}` : 'Terminal command exited';
+      if (
+        !this.registry.sessionSummaries().some((item) => item.sourceKind === 'terminal' && item.status === 'running')
+      ) {
+        this.state.status =
+          record.status === 'failed'
+            ? `Terminal command failed: ${record.exitCode ?? 'unknown'}`
+            : 'Terminal command exited';
       }
       this.state.notify();
     }
@@ -220,12 +319,14 @@ export class TerminalCapture {
     record.endedAt = Date.now();
     record.exitReason = event.exitCode === undefined ? 'exit code unknown' : `exit code ${event.exitCode}`;
     record.taskState = record.status;
-    if (record.captureStatus !== 'unavailable' && context.streamFailed && context.accepting) record.captureStatus = 'failed';
+    if (record.captureStatus !== 'unavailable' && context.streamFailed && context.accepting)
+      record.captureStatus = 'failed';
     else if (!context.streamDone) record.captureStatus = context.accepting ? 'streaming' : 'interrupted';
     if (context.streamDone) this.registry.pruneSessionRegistry();
     if (context.streamDone) this.pruneStale();
-    if (!this.registry.sessionSummaries().some(item => item.sourceKind === 'terminal' && item.status === 'running')) {
-      this.state.status = event.exitCode === 0 ? 'Terminal command exited' : `Terminal command failed: ${event.exitCode ?? 'unknown'}`;
+    if (!this.registry.sessionSummaries().some((item) => item.sourceKind === 'terminal' && item.status === 'running')) {
+      this.state.status =
+        event.exitCode === 0 ? 'Terminal command exited' : `Terminal command failed: ${event.exitCode ?? 'unknown'}`;
     }
     this.state.notify();
   }

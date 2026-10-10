@@ -20,9 +20,14 @@ export class SpanStore {
   /** Bumps whenever spans are added or removed, for change detection. */
   revision = 0;
 
-  constructor(public maxSpans = 20000, public maxBytes = 64 * 1024 * 1024) { }
+  constructor(
+    public maxSpans = 20000,
+    public maxBytes = 64 * 1024 * 1024,
+  ) {}
 
-  get size(): number { return this.count; }
+  get size(): number {
+    return this.count;
+  }
 
   add(span: Span): boolean {
     let trace = this.traces.get(span.traceId);
@@ -30,7 +35,10 @@ export class SpanStore {
     if (trace?.ids.has(span.spanId)) return false;
     const bytes = spanBytes(span);
     if (bytes > this.maxBytes) return false;
-    if (!trace) { trace = { spans: [], ids: new Set() }; this.traces.set(span.traceId, trace); }
+    if (!trace) {
+      trace = { spans: [], ids: new Set() };
+      this.traces.set(span.traceId, trace);
+    }
     trace.spans.push(span);
     trace.ids.add(span.spanId);
     this.queue.push({ span, bytes });
@@ -41,14 +49,18 @@ export class SpanStore {
     return true;
   }
 
-  trace(traceId: string): readonly Span[] { return this.traces.get(traceId.toLowerCase())?.spans ?? []; }
+  trace(traceId: string): readonly Span[] {
+    return this.traces.get(traceId.toLowerCase())?.spans ?? [];
+  }
 
   /** Every retained trace with its spans. */
   *entries(): IterableIterator<[string, readonly Span[]]> {
     for (const [traceId, trace] of this.traces) yield [traceId, trace.spans];
   }
 
-  get traceCount(): number { return this.traces.size; }
+  get traceCount(): number {
+    return this.traces.size;
+  }
 
   clear(): void {
     this.traces.clear();
@@ -62,7 +74,10 @@ export class SpanStore {
   private evict(): void {
     const entry = this.queue[this.head];
     this.queue[this.head++] = undefined;
-    if (this.head > 1024 && this.head * 2 > this.queue.length) { this.queue = this.queue.slice(this.head); this.head = 0; }
+    if (this.head > 1024 && this.head * 2 > this.queue.length) {
+      this.queue = this.queue.slice(this.head);
+      this.head = 0;
+    }
     if (!entry) return;
     const { span } = entry;
     this.count--;
@@ -97,8 +112,22 @@ export interface TraceRow {
   events: { offsetMs: number; name: string }[];
 }
 
-export interface TraceLogInput { id: number; level: string; message: string; timeMs?: number; spanId?: string; server?: string; }
-export interface TraceLog { id: number; level: string; message: string; offsetMs?: number; spanId?: string; server?: string; }
+export interface TraceLogInput {
+  id: number;
+  level: string;
+  message: string;
+  timeMs?: number;
+  spanId?: string;
+  server?: string;
+}
+export interface TraceLog {
+  id: number;
+  level: string;
+  message: string;
+  offsetMs?: number;
+  spanId?: string;
+  server?: string;
+}
 
 /** Spans of one operation in one service, ranked by the time they spent themselves. */
 export interface TraceHotspot {
@@ -137,13 +166,18 @@ const roundMs = (ms: number) => Math.round(ms * 1000) / 1000;
  */
 export function selfTimeMs(span: Span, children: readonly Span[]): number {
   const intervals = children
-    .map(child => [Math.max(child.startMs, span.startMs), Math.min(child.endMs, span.endMs)] as const)
+    .map((child) => [Math.max(child.startMs, span.startMs), Math.min(child.endMs, span.endMs)] as const)
     .filter(([start, end]) => end > start)
     .sort((a, b) => a[0] - b[0]);
-  let covered = 0, start = -Infinity, end = -Infinity;
+  let covered = 0,
+    start = -Infinity,
+    end = -Infinity;
   for (const [childStart, childEnd] of intervals) {
-    if (childStart > end) { if (end > start) covered += end - start; start = childStart; end = childEnd; }
-    else if (childEnd > end) end = childEnd;
+    if (childStart > end) {
+      if (end > start) covered += end - start;
+      start = childStart;
+      end = childEnd;
+    } else if (childEnd > end) end = childEnd;
   }
   if (end > start) covered += end - start;
   return roundMs(Math.max(0, span.endMs - span.startMs - covered));
@@ -153,15 +187,29 @@ export function selfTimeMs(span: Span, children: readonly Span[]): number {
  * Log entries for a trace view, oldest first, from events matching a trace
  * id. A span's own table row is left out when its span is drawn anyway.
  */
-export function traceLogs(events: readonly LogEvent[], traceId: string, hasSpans: boolean,
-  message: (event: LogEvent) => string = event => event.message ?? ''): TraceLogInput[] {
+export function traceLogs(
+  events: readonly LogEvent[],
+  traceId: string,
+  hasSpans: boolean,
+  message: (event: LogEvent) => string = (event) => event.message ?? '',
+): TraceLogInput[] {
   return events
-    .filter(event => String(getField(event, 'traceId') ?? '').toLowerCase() === traceId && !(hasSpans && getField(event, 'kind') === 'span'))
+    .filter(
+      (event) =>
+        String(getField(event, 'traceId') ?? '').toLowerCase() === traceId &&
+        !(hasSpans && getField(event, 'kind') === 'span'),
+    )
     .sort((a, b) => a.id - b.id)
-    .map(event => {
+    .map((event) => {
       const spanId = getField(event, 'spanId');
-      return { id: event.id, level: event.level, message: message(event), timeMs: event.timestampMs,
-        spanId: typeof spanId === 'string' ? spanId.toLowerCase() : undefined, server: event.server };
+      return {
+        id: event.id,
+        level: event.level,
+        message: message(event),
+        timeMs: event.timestampMs,
+        spanId: typeof spanId === 'string' ? spanId.toLowerCase() : undefined,
+        server: event.server,
+      };
     });
 }
 
@@ -170,8 +218,13 @@ export function traceLogs(events: readonly LogEvent[], traceId: string, hasSpans
  * not received become roots. The critical path follows, from the root that
  * ends last, the child that ends last at each level.
  */
-export function buildTrace(traceId: string, spans: readonly Span[], logs: TraceLogInput[] = [], limit = 2000): TraceView {
-  const byId = new Map(spans.map(span => [span.spanId, span]));
+export function buildTrace(
+  traceId: string,
+  spans: readonly Span[],
+  logs: TraceLogInput[] = [],
+  limit = 2000,
+): TraceView {
+  const byId = new Map(spans.map((span) => [span.spanId, span]));
   const children = new Map<string, Span[]>();
   const roots: Span[] = [];
   for (const span of spans) {
@@ -186,10 +239,16 @@ export function buildTrace(traceId: string, spans: readonly Span[], logs: TraceL
   for (const list of children.values()) list.sort(byStart);
 
   const critical = new Set<string>();
-  let node = roots.reduce<Span | undefined>((latest, span) => !latest || span.endMs > latest.endMs ? span : latest, undefined);
+  let node = roots.reduce<Span | undefined>(
+    (latest, span) => (!latest || span.endMs > latest.endMs ? span : latest),
+    undefined,
+  );
   while (node && !critical.has(node.spanId)) {
     critical.add(node.spanId);
-    node = (children.get(node.spanId) ?? []).reduce<Span | undefined>((latest, span) => !latest || span.endMs >= latest.endMs ? span : latest, undefined);
+    node = (children.get(node.spanId) ?? []).reduce<Span | undefined>(
+      (latest, span) => (!latest || span.endMs >= latest.endMs ? span : latest),
+      undefined,
+    );
   }
 
   let startMs: number | undefined, endMs: number | undefined;
@@ -198,35 +257,59 @@ export function buildTrace(traceId: string, spans: readonly Span[], logs: TraceL
     if (endMs === undefined || span.endMs > endMs) endMs = span.endMs;
   }
   // Without spans, the trace's logs alone set its time range.
-  if (!spans.length) for (const log of logs) {
-    if (log.timeMs === undefined) continue;
-    if (startMs === undefined || log.timeMs < startMs) startMs = log.timeMs;
-    if (endMs === undefined || log.timeMs > endMs) endMs = log.timeMs;
-  }
-  const selfMs = new Map(spans.map(span => [span.spanId, selfTimeMs(span, children.get(span.spanId) ?? [])]));
+  if (!spans.length)
+    for (const log of logs) {
+      if (log.timeMs === undefined) continue;
+      if (startMs === undefined || log.timeMs < startMs) startMs = log.timeMs;
+      if (endMs === undefined || log.timeMs > endMs) endMs = log.timeMs;
+    }
+  const selfMs = new Map(spans.map((span) => [span.spanId, selfTimeMs(span, children.get(span.spanId) ?? [])]));
   const rows: TraceRow[] = [];
   const visited = new Set<string>();
   // An explicit stack keeps malformed, deeply nested traces from overflowing the call stack.
-  const stack: { span: Span; depth: number }[] = roots.slice().reverse().map(span => ({ span, depth: 0 }));
+  const stack: { span: Span; depth: number }[] = roots
+    .slice()
+    .reverse()
+    .map((span) => ({ span, depth: 0 }));
   while (stack.length) {
     const { span, depth } = stack.pop()!;
     if (visited.has(span.spanId)) continue;
     visited.add(span.spanId);
-    if (rows.length < limit) rows.push({
-      spanId: span.spanId, parentSpanId: span.parentSpanId, name: span.name, service: span.service, kind: SPAN_KINDS[span.kind] ?? 'unspecified',
-      offsetMs: span.startMs - (startMs ?? span.startMs), durationMs: spanDurationMs(span), selfMs: selfMs.get(span.spanId) ?? 0, depth, error: span.status.code === 2,
-      statusMessage: span.status.message, critical: critical.has(span.spanId),
-      attributes: Object.fromEntries(Object.entries(span.attributes).slice(0, MAX_ROW_ATTRIBUTES)),
-      events: span.events.slice(0, 16).map(event => ({ offsetMs: event.timeMs - (startMs ?? event.timeMs), name: event.name }))
-    });
-    for (const child of (children.get(span.spanId) ?? []).slice().reverse()) stack.push({ span: child, depth: depth + 1 });
+    if (rows.length < limit)
+      rows.push({
+        spanId: span.spanId,
+        parentSpanId: span.parentSpanId,
+        name: span.name,
+        service: span.service,
+        kind: SPAN_KINDS[span.kind] ?? 'unspecified',
+        offsetMs: span.startMs - (startMs ?? span.startMs),
+        durationMs: spanDurationMs(span),
+        selfMs: selfMs.get(span.spanId) ?? 0,
+        depth,
+        error: span.status.code === 2,
+        statusMessage: span.status.message,
+        critical: critical.has(span.spanId),
+        attributes: Object.fromEntries(Object.entries(span.attributes).slice(0, MAX_ROW_ATTRIBUTES)),
+        events: span.events
+          .slice(0, 16)
+          .map((event) => ({ offsetMs: event.timeMs - (startMs ?? event.timeMs), name: event.name })),
+      });
+    for (const child of (children.get(span.spanId) ?? []).slice().reverse())
+      stack.push({ span: child, depth: depth + 1 });
   }
   return {
-    traceId, startMs, durationMs: startMs === undefined || endMs === undefined ? 0 : Math.round((endMs - startMs) * 1000) / 1000,
-    services: [...new Set(spans.map(span => span.service))].sort(),
-    spans: rows, errors: spans.filter(span => span.status.code === 2).length, omitted: Math.max(0, visited.size - rows.length),
+    traceId,
+    startMs,
+    durationMs: startMs === undefined || endMs === undefined ? 0 : Math.round((endMs - startMs) * 1000) / 1000,
+    services: [...new Set(spans.map((span) => span.service))].sort(),
+    spans: rows,
+    errors: spans.filter((span) => span.status.code === 2).length,
+    omitted: Math.max(0, visited.size - rows.length),
     hotspots: hotspots(spans, selfMs),
-    logs: logs.map(({ timeMs, ...log }) => ({ ...log, offsetMs: timeMs === undefined || startMs === undefined ? undefined : timeMs - startMs }))
+    logs: logs.map(({ timeMs, ...log }) => ({
+      ...log,
+      offsetMs: timeMs === undefined || startMs === undefined ? undefined : timeMs - startMs,
+    })),
   };
 }
 
@@ -238,17 +321,28 @@ function hotspots(spans: readonly Span[], selfMs: ReadonlyMap<string, number>): 
     const self = selfMs.get(span.spanId) ?? 0;
     total += self;
     const key = `${span.service}\u0000${span.name}`;
-    const group = groups.get(key) ?? { service: span.service, name: span.name, count: 0, selfMs: 0, share: 0, errors: 0 };
+    const group = groups.get(key) ?? {
+      service: span.service,
+      name: span.name,
+      count: 0,
+      selfMs: 0,
+      share: 0,
+      errors: 0,
+    };
     group.count++;
     group.selfMs += self;
     if (span.status.code === 2) group.errors++;
     groups.set(key, group);
   }
   return [...groups.values()]
-    .filter(group => group.selfMs > 0)
+    .filter((group) => group.selfMs > 0)
     .sort((a, b) => b.selfMs - a.selfMs || a.name.localeCompare(b.name))
     .slice(0, MAX_HOTSPOTS)
-    .map(group => ({ ...group, selfMs: roundMs(group.selfMs), share: total > 0 ? Math.round(group.selfMs / total * 1000) / 1000 : 0 }));
+    .map((group) => ({
+      ...group,
+      selfMs: roundMs(group.selfMs),
+      share: total > 0 ? Math.round((group.selfMs / total) * 1000) / 1000 : 0,
+    }));
 }
 
 /** One row of the trace list: a request across services, from its spans or its logs. */
@@ -272,13 +366,19 @@ export interface TraceSummary {
  *
  * @param events Retained events that have a trace id, in any order.
  */
-export function summarizeTraces(traces: Iterable<[string, readonly Span[]]>, events: readonly LogEvent[], limit = 200): TraceSummary[] {
+export function summarizeTraces(
+  traces: Iterable<[string, readonly Span[]]>,
+  events: readonly LogEvent[],
+  limit = 200,
+): TraceSummary[] {
   const summaries = new Map<string, TraceSummary>();
   for (const [traceId, spans] of traces) {
     if (!spans.length) continue;
     let root: Span | undefined;
-    let start = Infinity, end = -Infinity, errors = 0;
-    const ids = new Set(spans.map(span => span.spanId));
+    let start = Infinity,
+      end = -Infinity,
+      errors = 0;
+    const ids = new Set(spans.map((span) => span.spanId));
     for (const span of spans) {
       if (span.startMs < start) start = span.startMs;
       if (span.endMs > end) end = span.endMs;
@@ -287,11 +387,21 @@ export function summarizeTraces(traces: Iterable<[string, readonly Span[]]>, eve
       if (isRoot && (!root || span.startMs < root.startMs)) root = span;
     }
     summaries.set(traceId, {
-      traceId, name: root?.name ?? spans[0].name, service: root?.service, services: [...new Set(spans.map(span => span.service))].sort(),
-      startMs: start, durationMs: Math.round((end - start) * 1000) / 1000, spans: spans.length, logs: 0, errors
+      traceId,
+      name: root?.name ?? spans[0].name,
+      service: root?.service,
+      services: [...new Set(spans.map((span) => span.service))].sort(),
+      startMs: start,
+      durationMs: Math.round((end - start) * 1000) / 1000,
+      spans: spans.length,
+      logs: 0,
+      errors,
     });
   }
-  const logOnly = new Map<string, { first: LogEvent; named?: { id: number; operation: string }; start: number; end: number; services: Set<string> }>();
+  const logOnly = new Map<
+    string,
+    { first: LogEvent; named?: { id: number; operation: string }; start: number; end: number; services: Set<string> }
+  >();
   for (const event of events) {
     const value = getField(event, 'traceId');
     if (typeof value !== 'string' || !value || getField(event, 'kind') === 'span') continue;
@@ -299,13 +409,32 @@ export function summarizeTraces(traces: Iterable<[string, readonly Span[]]>, eve
     const known = summaries.get(traceId);
     const failed = event.level === 'error' || event.level === 'fatal';
     // Errors of a trace with spans come from span status; its logs are only counted.
-    if (known?.spans) { known.logs++; continue; }
+    if (known?.spans) {
+      known.logs++;
+      continue;
+    }
     const time = event.timestampMs ?? NaN;
     const entry = logOnly.get(traceId);
     if (!entry) {
       const operation = requestOperation(event);
-      logOnly.set(traceId, { first: event, named: operation ? { id: event.id, operation } : undefined, start: time, end: time, services: new Set(event.server ? [event.server] : []) });
-      summaries.set(traceId, { traceId, name: '', service: event.server, services: [], startMs: undefined, durationMs: 0, spans: 0, logs: 1, errors: failed ? 1 : 0 });
+      logOnly.set(traceId, {
+        first: event,
+        named: operation ? { id: event.id, operation } : undefined,
+        start: time,
+        end: time,
+        services: new Set(event.server ? [event.server] : []),
+      });
+      summaries.set(traceId, {
+        traceId,
+        name: '',
+        service: event.server,
+        services: [],
+        startMs: undefined,
+        durationMs: 0,
+        spans: 0,
+        logs: 1,
+        errors: failed ? 1 : 0,
+      });
       continue;
     }
     const summary = summaries.get(traceId)!;
@@ -314,7 +443,10 @@ export function summarizeTraces(traces: Iterable<[string, readonly Span[]]>, eve
     if (event.server) entry.services.add(event.server);
     if (time < entry.start || Number.isNaN(entry.start)) entry.start = time;
     if (time > entry.end || Number.isNaN(entry.end)) entry.end = time;
-    if (event.id < entry.first.id) { entry.first = event; summary.service = event.server; }
+    if (event.id < entry.first.id) {
+      entry.first = event;
+      summary.service = event.server;
+    }
     if (!entry.named || event.id < entry.named.id) {
       const operation = requestOperation(event);
       if (operation) entry.named = { id: event.id, operation };
@@ -324,7 +456,10 @@ export function summarizeTraces(traces: Iterable<[string, readonly Span[]]>, eve
     const summary = summaries.get(traceId)!;
     summary.name = entry.named?.operation ?? entry.first.message ?? '';
     summary.services = [...entry.services].sort();
-    if (Number.isFinite(entry.start)) { summary.startMs = entry.start; summary.durationMs = Math.max(0, entry.end - entry.start); }
+    if (Number.isFinite(entry.start)) {
+      summary.startMs = entry.start;
+      summary.durationMs = Math.max(0, entry.end - entry.start);
+    }
   }
   return [...summaries.values()]
     .sort((a, b) => (b.startMs ?? -Infinity) - (a.startMs ?? -Infinity) || a.traceId.localeCompare(b.traceId))
@@ -333,7 +468,8 @@ export function summarizeTraces(traces: Iterable<[string, readonly Span[]]>, eve
 
 const HTTP_METHOD = /^(GET|HEAD|POST|PUT|PATCH|DELETE|OPTIONS|TRACE|CONNECT)$/i;
 const MESSAGE_METHOD = /\b(?:http[._]?)?(?:request)?method[=:]\s*["']?([a-z]+)/i;
-const MESSAGE_PATH = /\b(?:http[._]?)?(?:request)?(?:url|uri|path|route|target)[=:]\s*["']?((?:[a-z][a-z\d+.-]*:\/\/[^\s/"']*)?\/[^\s"',;]*)/i;
+const MESSAGE_PATH =
+  /\b(?:http[._]?)?(?:request)?(?:url|uri|path|route|target)[=:]\s*["']?((?:[a-z][a-z\d+.-]*:\/\/[^\s/"']*)?\/[^\s"',;]*)/i;
 const MESSAGE_REQUEST = /\b(GET|HEAD|POST|PUT|PATCH|DELETE|OPTIONS)\s+(\/[^\s"',;]*)/;
 
 /**
@@ -343,10 +479,15 @@ const MESSAGE_REQUEST = /\b(GET|HEAD|POST|PUT|PATCH|DELETE|OPTIONS)\s+(\/[^\s"',
 export function requestOperation(event: LogEvent): string | undefined {
   const message = event.message ?? '';
   const request = MESSAGE_REQUEST.exec(message);
-  const field = (name: string) => { const value = getField(event, name); return typeof value === 'string' && value ? value : undefined; };
+  const field = (name: string) => {
+    const value = getField(event, name);
+    return typeof value === 'string' && value ? value : undefined;
+  };
   const path = field('path') ?? MESSAGE_PATH.exec(message)?.[1] ?? request?.[2];
   if (!path || !/^(\/|[a-z][a-z\d+.-]*:\/\/)/i.test(path)) return undefined;
-  const method = [field('method'), MESSAGE_METHOD.exec(message)?.[1], request?.[1]].find(value => value && HTTP_METHOD.test(value));
+  const method = [field('method'), MESSAGE_METHOD.exec(message)?.[1], request?.[1]].find(
+    (value) => value && HTTP_METHOD.test(value),
+  );
   const route = path.replace(/[?#].*$/, '') || '/';
   return method ? `${method.toUpperCase()} ${route}` : route;
 }

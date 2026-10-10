@@ -2,7 +2,16 @@ import { randomBytes, timingSafeEqual } from 'node:crypto';
 import { chmodSync, mkdirSync, readdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import { createServer, type Server, type Socket } from 'node:net';
 import { dirname, join } from 'node:path';
-import { agentLabel, agentsDirectory, BRIDGE_VERSION, isAlive, MAX_BRIDGE_REQUEST_BYTES, mcpScriptPath, type BridgeRequest, type BridgeWindow } from '../protocol/agent-bridge';
+import {
+  agentLabel,
+  agentsDirectory,
+  BRIDGE_VERSION,
+  isAlive,
+  MAX_BRIDGE_REQUEST_BYTES,
+  mcpScriptPath,
+  type BridgeRequest,
+  type BridgeWindow,
+} from '../protocol/agent-bridge';
 
 export interface AgentBridgeOptions {
   /** Run a Logline tool and return its bounded JSON text. */
@@ -39,19 +48,26 @@ export class AgentBridge {
     this.pid = options.pid ?? process.pid;
   }
 
-  get running(): boolean { return Boolean(this.server); }
+  get running(): boolean {
+    return Boolean(this.server);
+  }
 
   /** Start listening; overlapping calls, such as quick setting toggles, share one listener. */
   start(): Promise<void> {
     if (this.server) return Promise.resolve();
-    return this.starting ??= this.listen().finally(() => { this.starting = undefined; });
+    return (this.starting ??= this.listen().finally(() => {
+      this.starting = undefined;
+    }));
   }
 
   private async listen(): Promise<void> {
-    const server = createServer(socket => this.accept(socket));
+    const server = createServer((socket) => this.accept(socket));
     await new Promise<void>((resolve, reject) => {
       server.once('error', reject);
-      server.listen(0, '127.0.0.1', () => { server.off('error', reject); resolve(); });
+      server.listen(0, '127.0.0.1', () => {
+        server.off('error', reject);
+        resolve();
+      });
     });
     server.unref?.();
     this.server = server;
@@ -66,7 +82,14 @@ export class AgentBridge {
     if (!this.server) return;
     mkdirSync(this.directory, { recursive: true, mode: 0o700 });
     chmodSync(this.directory, 0o700);
-    const window: BridgeWindow = { version: BRIDGE_VERSION, pid: this.pid, port: this.port, token: this.token, folders: this.options.folders(), name: this.options.name() };
+    const window: BridgeWindow = {
+      version: BRIDGE_VERSION,
+      pid: this.pid,
+      port: this.port,
+      token: this.token,
+      folders: this.options.folders(),
+      name: this.options.name(),
+    };
     this.file = join(this.directory, `${this.pid}.json`);
     writeFileSync(this.file, JSON.stringify(window), { mode: 0o600 });
     chmodSync(this.file, 0o600);
@@ -76,16 +99,27 @@ export class AgentBridge {
     await this.starting?.catch(() => undefined);
     const server = this.server;
     this.server = undefined;
-    if (this.file) { try { unlinkSync(this.file); } catch { /* already gone */ } this.file = undefined; }
-    if (server) await new Promise<void>(resolve => server.close(() => resolve()));
+    if (this.file) {
+      try {
+        unlinkSync(this.file);
+      } catch {
+        /* already gone */
+      }
+      this.file = undefined;
+    }
+    if (server) await new Promise<void>((resolve) => server.close(() => resolve()));
   }
 
   /** Agents that called in the last ten minutes, by friendly name. */
   recentClients(now = Date.now()): string[] {
     const grant = this.options.grant?.();
     return [...this.clients]
-      .filter(([, client]) => now - client.seen < RECENT_MS && (!this.options.grant || (grant !== undefined && client.grant === grant)))
-      .map(([name]) => name).sort();
+      .filter(
+        ([, client]) =>
+          now - client.seen < RECENT_MS && (!this.options.grant || (grant !== undefined && client.grant === grant)),
+      )
+      .map(([name]) => name)
+      .sort();
   }
 
   private accept(socket: Socket): void {
@@ -94,10 +128,14 @@ export class AgentBridge {
     let handled = false;
     socket.setNoDelay?.(true);
     // A connection that never sends its request is dropped; the call itself may take longer.
-    socket.setTimeout(30_000, () => { if (!handled) socket.destroy(); });
-    socket.on('close', () => { cancellation.isCancellationRequested = true; });
+    socket.setTimeout(30_000, () => {
+      if (!handled) socket.destroy();
+    });
+    socket.on('close', () => {
+      cancellation.isCancellationRequested = true;
+    });
     socket.on('error', () => socket.destroy());
-    socket.on('data', chunk => {
+    socket.on('data', (chunk) => {
       if (handled) return;
       buffer = Buffer.concat([buffer, chunk]);
       const end = buffer.indexOf(10);
@@ -107,21 +145,46 @@ export class AgentBridge {
       }
       handled = true;
       socket.setTimeout(0);
-      if (end > MAX_BRIDGE_REQUEST_BYTES) { socket.destroy(); return; }
+      if (end > MAX_BRIDGE_REQUEST_BYTES) {
+        socket.destroy();
+        return;
+      }
       void this.handle(buffer.subarray(0, end).toString('utf8'), socket, cancellation);
     });
   }
 
-  private async handle(line: string, socket: Socket, cancellation: { isCancellationRequested: boolean }): Promise<void> {
-    const reply = (value: object) => { if (!socket.destroyed) socket.end(`${JSON.stringify(value)}\n`); };
+  private async handle(
+    line: string,
+    socket: Socket,
+    cancellation: { isCancellationRequested: boolean },
+  ): Promise<void> {
+    const reply = (value: object) => {
+      if (!socket.destroyed) socket.end(`${JSON.stringify(value)}\n`);
+    };
     let request: Partial<BridgeRequest>;
-    try { request = JSON.parse(line) as Partial<BridgeRequest>; }
-    catch { reply({ error: 'The request was not valid JSON.' }); return; }
-    if (!this.authorized(request.token)) { reply({ error: 'This Logline window did not accept the token. Restart the agent so it reads the current window.' }); return; }
-    if (typeof request.tool !== 'string') { reply({ error: 'The request named no tool.' }); return; }
+    try {
+      request = JSON.parse(line) as Partial<BridgeRequest>;
+    } catch {
+      reply({ error: 'The request was not valid JSON.' });
+      return;
+    }
+    if (!this.authorized(request.token)) {
+      reply({
+        error: 'This Logline window did not accept the token. Restart the agent so it reads the current window.',
+      });
+      return;
+    }
+    if (typeof request.tool !== 'string') {
+      reply({ error: 'The request named no tool.' });
+      return;
+    }
     let text: string;
-    try { text = await this.options.run(request.tool, request.input, cancellation); }
-    catch (error) { reply({ error: error instanceof Error ? error.message : String(error) }); return; }
+    try {
+      text = await this.options.run(request.tool, request.input, cancellation);
+    } catch (error) {
+      reply({ error: error instanceof Error ? error.message : String(error) });
+      return;
+    }
     // Only a call that returned logs makes an agent a reader of this grant.
     if (typeof request.client === 'string' && request.client && !refused(text)) {
       const label = agentLabel(request.client);
@@ -135,22 +198,33 @@ export class AgentBridge {
 
   private authorized(token: unknown): boolean {
     if (typeof token !== 'string') return false;
-    const given = Buffer.from(token), expected = Buffer.from(this.token);
+    const given = Buffer.from(token),
+      expected = Buffer.from(this.token);
     return given.length === expected.length && timingSafeEqual(given, expected);
   }
 
   /** Discovery files of windows that closed without cleaning up. */
   private removeStale(): void {
     let names: string[];
-    try { names = readdirSync(this.directory); } catch { return; }
+    try {
+      names = readdirSync(this.directory);
+    } catch {
+      return;
+    }
     for (const name of names) {
       if (!name.endsWith('.json') || name === `${this.pid}.json`) continue;
       const file = join(this.directory, name);
       try {
         const { pid } = JSON.parse(readFileSync(file, 'utf8')) as { pid?: unknown };
         if (typeof pid === 'number' && isAlive(pid)) continue;
-      } catch { /* unreadable files are stale too */ }
-      try { unlinkSync(file); } catch { /* another window removed it */ }
+      } catch {
+        /* unreadable files are stale too */
+      }
+      try {
+        unlinkSync(file);
+      } catch {
+        /* another window removed it */
+      }
     }
   }
 }
@@ -161,11 +235,19 @@ export class AgentBridge {
  */
 export function installMcpScript(source: string, target = mcpScriptPath()): void {
   const script = readFileSync(source, 'utf8');
-  try { if (readFileSync(target, 'utf8') === script) return; } catch { /* not installed yet */ }
+  try {
+    if (readFileSync(target, 'utf8') === script) return;
+  } catch {
+    /* not installed yet */
+  }
   mkdirSync(dirname(target), { recursive: true, mode: 0o700 });
   writeFileSync(target, script, { mode: 0o644 });
 }
 
 function refused(text: string): boolean {
-  try { return Boolean((JSON.parse(text) as { error?: unknown }).error); } catch { return false; }
+  try {
+    return Boolean((JSON.parse(text) as { error?: unknown }).error);
+  } catch {
+    return false;
+  }
 }

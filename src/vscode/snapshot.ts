@@ -18,7 +18,8 @@ function pickColumns(event: LogEvent, columns: string[]): LogEvent['fields'] {
   for (const column of columns) {
     const value = Object.hasOwn(fields, column) ? fields[column] : getField(event, column);
     if (value !== undefined) {
-      if (column === '__proto__') Object.defineProperty(picked, column, { value, enumerable: true, writable: true, configurable: true });
+      if (column === '__proto__')
+        Object.defineProperty(picked, column, { value, enumerable: true, writable: true, configurable: true });
       else picked[column] = value;
     }
   }
@@ -26,9 +27,19 @@ function pickColumns(event: LogEvent, columns: string[]): LogEvent['fields'] {
 }
 
 export interface SnapshotSources {
-  store: LogStore; config: Settings; registry: SessionRegistry; state: RuntimeState;
-  ingestion: Ingestion; persistence: LogPersistence; searches: SavedSearches; running: boolean;
-  guideStatus: GuideStatus; agentAccess: AgentLogAccess; terminalCapture?: { status(): { state: 'off' | 'waiting' | 'capturing' | 'attention'; detail: string; active: number; failed: number } };
+  store: LogStore;
+  config: Settings;
+  registry: SessionRegistry;
+  state: RuntimeState;
+  ingestion: Ingestion;
+  persistence: LogPersistence;
+  searches: SavedSearches;
+  running: boolean;
+  guideStatus: GuideStatus;
+  agentAccess: AgentLogAccess;
+  terminalCapture?: {
+    status(): { state: 'off' | 'waiting' | 'capturing' | 'attention'; detail: string; active: number; failed: number };
+  };
   otlp?: { status(): ReceiverStatus };
   spans?: { traceCount: number };
   metrics?: { size: number; revision: number };
@@ -47,28 +58,66 @@ export interface SnapshotSources {
 // oldest leave. So rows a view holds up to `have.last` are still the start of
 // the new page, unless the page is sorted, a deeper page that slides with new
 // events, or a `last:` window that moves with the clock.
-function keptRows(msg: Extract<ViewRequest, { type: 'snapshot'; }>, events: LogEvent[], rowsVersion: string): number | undefined {
+function keptRows(
+  msg: Extract<ViewRequest, { type: 'snapshot' }>,
+  events: LogEvent[],
+  rowsVersion: string,
+): number | undefined {
   const have = msg.have;
   if (!have || have.version !== rowsVersion || msg.sort || (msg.page && msg.before === undefined)) return undefined;
-  if (parseQuery((msg.query ?? '').slice(0, 256)).some(group => group.some(token => token.canonical === 'last'))) return undefined;
-  let low = 0, high = events.length - 1;
+  if (parseQuery((msg.query ?? '').slice(0, 256)).some((group) => group.some((token) => token.canonical === 'last')))
+    return undefined;
+  let low = 0,
+    high = events.length - 1;
   while (low <= high) {
     const middle = (low + high) >> 1;
     const id = events[middle].id;
     if (id === have.last) return middle + 1 <= have.count ? middle + 1 : undefined;
-    if (id < have.last) low = middle + 1; else high = middle - 1;
+    if (id < have.last) low = middle + 1;
+    else high = middle - 1;
   }
   return undefined;
 }
-export function buildSnapshot(msg: Extract<ViewRequest, { type: 'snapshot'; }>,
-  { store, config, registry, state, ingestion, persistence, searches, running, guideStatus, agentAccess, terminalCapture, otlp, spans, metrics, rowLinks, doctor, agentClients, rowLinksVersion, changes }: SnapshotSources): Snapshot {
-  const options = { query: msg.query, serverId: msg.serverId, sessionId: msg.sessionId, levels: msg.levels,
-    page: msg.page, before: msg.before, sort: msg.sort, sortDirection: msg.sortDirection };
+export function buildSnapshot(
+  msg: Extract<ViewRequest, { type: 'snapshot' }>,
+  {
+    store,
+    config,
+    registry,
+    state,
+    ingestion,
+    persistence,
+    searches,
+    running,
+    guideStatus,
+    agentAccess,
+    terminalCapture,
+    otlp,
+    spans,
+    metrics,
+    rowLinks,
+    doctor,
+    agentClients,
+    rowLinksVersion,
+    changes,
+  }: SnapshotSources,
+): Snapshot {
+  const options = {
+    query: msg.query,
+    serverId: msg.serverId,
+    sessionId: msg.sessionId,
+    levels: msg.levels,
+    page: msg.page,
+    before: msg.before,
+    sort: msg.sort,
+    sortDirection: msg.sortDirection,
+  };
   const configured = config.get<string[]>('columns', []);
   const columns = configured.length ? configured : store.columns(options.serverId);
   const columnFields = store.columnFields(options.serverId);
   const requestedColumns = Array.isArray(msg.columns)
-    ? msg.columns.filter((field): field is string => typeof field === 'string' && columnFields.includes(field)) : [];
+    ? msg.columns.filter((field): field is string => typeof field === 'string' && columnFields.includes(field))
+    : [];
   const projectedColumns = [...new Set([...columns, ...requestedColumns])];
   const pageResult = msg.statsOnly ? undefined : store.page(options);
   const result = pageResult ?? store.stats();
@@ -78,42 +127,69 @@ export function buildSnapshot(msg: Extract<ViewRequest, { type: 'snapshot'; }>,
   // wide the log records happen to be.
   // Rows matched by `changed:true` stop matching when the diff changes, so
   // held rows only continue while the diff they were matched against holds.
-  const changeVersion = usesChangedScope(parseQuery((msg.query ?? '').slice(0, 256))) ? store.changeScope?.version ?? null : null;
+  const changeVersion = usesChangedScope(parseQuery((msg.query ?? '').slice(0, 256)))
+    ? (store.changeScope?.version ?? null)
+    : null;
   const rowsVersion = JSON.stringify([state.generation, projectedColumns, rowLinksVersion ?? null, changeVersion]);
   const keep = pageResult && keptRows(msg, pageResult.events, rowsVersion);
-  const events = pageResult?.events.slice(keep ?? 0).map(event => {
+  const events = pageResult?.events.slice(keep ?? 0).map((event) => {
     const traceId = getField(event, 'traceId');
-    return { ...event, fields: pickColumns(event, projectedColumns), ...(typeof traceId === 'string' && traceId ? { traceId } : {}), ...rowLinks?.(event) };
+    return {
+      ...event,
+      fields: pickColumns(event, projectedColumns),
+      ...(typeof traceId === 'string' && traceId ? { traceId } : {}),
+      ...rowLinks?.(event),
+    };
   });
   const sessions = registry.sessionSummaries();
-  const known = new Set(sessions.map(session => `${session.serverId}\0${session.id}`));
+  const known = new Set(sessions.map((session) => `${session.serverId}\0${session.id}`));
   // Imported files and retained runs whose registry record has been pruned
   // still need to be selectable in the run picker.
-  for (const serverId of store.serverIds()) for (const sessionId of store.sessionIds(serverId)) {
-    if (sessionId === '*' || known.has(`${serverId}\0${sessionId}`)) continue;
-    const label = store.serverLabel(serverId) ?? serverId;
-    sessions.push({ id: sessionId, server: label, serverId, status: 'exited', startedAt: 0,
-      sourceKind: 'import', owned: false, canStop: false, captureComplete: true, command: label });
-  }
+  for (const serverId of store.serverIds())
+    for (const sessionId of store.sessionIds(serverId)) {
+      if (sessionId === '*' || known.has(`${serverId}\0${sessionId}`)) continue;
+      const label = store.serverLabel(serverId) ?? serverId;
+      sessions.push({
+        id: sessionId,
+        server: label,
+        serverId,
+        status: 'exited',
+        startedAt: 0,
+        sourceKind: 'import',
+        owned: false,
+        canStop: false,
+        captureComplete: true,
+        command: label,
+      });
+    }
   return {
     type: 'snapshot',
-    ...result, ...(events ? { events, rowsVersion } : {}),
+    ...result,
+    ...(events ? { events, rowsVersion } : {}),
     ...(keep !== undefined ? { keep, keepFirst: pageResult!.events[0].id } : {}),
     columns,
     columnFields,
     fields: store.fieldNames(),
-    status: state.status, command: state.command, running,
-    servers: registry.serverSummaries(config.get('servers', []), store), sessions,
+    status: state.status,
+    command: state.command,
+    running,
+    servers: registry.serverSummaries(config.get('servers', []), store),
+    sessions,
     searches: { saved: searches.savedSearches() },
-    newest: ingestion.sequence, generation: state.generation,
+    newest: ingestion.sequence,
+    generation: state.generation,
     persistDropped: persistence.persistDropped,
-    timezone: config.get('timezone', 'local'), newestFirst: config.get('newestFirst', true), guideStatus, agentSharing: agentAccess.status(),
-    captureTerminals: config.get('captureTerminals', false), captureStatus: terminalCapture?.status(), otlp: otlp?.status(),
+    timezone: config.get('timezone', 'local'),
+    newestFirst: config.get('newestFirst', true),
+    guideStatus,
+    agentSharing: agentAccess.status(),
+    captureTerminals: config.get('captureTerminals', false),
+    captureStatus: terminalCapture?.status(),
+    otlp: otlp?.status(),
     traceCount: spans?.traceCount ?? 0,
     ...(metrics?.size ? { metrics: { series: metrics.size, revision: metrics.revision } } : {}),
     ...(doctor ? { doctor } : {}),
     ...(agentClients?.length ? { agentClients } : {}),
-    ...(changes ? { changes } : {})
+    ...(changes ? { changes } : {}),
   };
-
 }

@@ -1,183 +1,747 @@
 <!doctype html>
 <html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src {{CSP_SOURCE}}; script-src 'nonce-{{NONCE}}';">
-  <link rel="stylesheet" href="{{STYLE_URI}}">
-  <title>Logs</title>
-</head>
-<body data-guide-unread="{{GUIDE_UNREAD}}">
-  <header>
-    <div class="toolbar">
-      <div class="source-controls" role="group" aria-label="Log source and run">
-        <div class="scope-picker popover-container">
-          <button id="server" type="button" aria-label="Log source and command run" aria-haspopup="dialog" aria-expanded="false" aria-controls="scopeMenu">All sources · All runs</button>
-          <div id="scopeMenu" class="popover scope-menu" role="dialog" aria-label="Log source and command run" hidden>
-            <div class="scope-tabs" role="tablist" aria-label="Filter by">
-              <button id="sourcesTab" type="button" role="tab" aria-selected="true" aria-controls="sourceMenu">Sources</button>
-              <button id="runsTab" type="button" role="tab" aria-selected="false" aria-controls="sessionMenu" tabindex="-1">Runs</button>
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; style-src {{CSP_SOURCE}}; script-src 'nonce-{{NONCE}}';"
+    />
+    <link rel="stylesheet" href="{{STYLE_URI}}" />
+    <title>Logs</title>
+  </head>
+  <body data-guide-unread="{{GUIDE_UNREAD}}">
+    <header>
+      <div class="toolbar">
+        <div class="source-controls" role="group" aria-label="Log source and run">
+          <div class="scope-picker popover-container">
+            <button
+              id="server"
+              type="button"
+              aria-label="Log source and command run"
+              aria-haspopup="dialog"
+              aria-expanded="false"
+              aria-controls="scopeMenu"
+            >
+              All sources · All runs
+            </button>
+            <div id="scopeMenu" class="popover scope-menu" role="dialog" aria-label="Log source and command run" hidden>
+              <div class="scope-tabs" role="tablist" aria-label="Filter by">
+                <button id="sourcesTab" type="button" role="tab" aria-selected="true" aria-controls="sourceMenu">
+                  Sources
+                </button>
+                <button
+                  id="runsTab"
+                  type="button"
+                  role="tab"
+                  aria-selected="false"
+                  aria-controls="sessionMenu"
+                  tabindex="-1"
+                >
+                  Runs
+                </button>
+              </div>
+              <div id="sourceMenu" role="tabpanel" aria-labelledby="sourcesTab"></div>
+              <div id="sessionMenu" role="tabpanel" aria-labelledby="runsTab" hidden></div>
             </div>
-            <div id="sourceMenu" role="tabpanel" aria-labelledby="sourcesTab"></div>
-            <div id="sessionMenu" role="tabpanel" aria-labelledby="runsTab" hidden></div>
+          </div>
+        </div>
+        <button id="run" title="Run selected source" aria-label="Run selected source">
+          <svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14">
+            <path d="M5 3l7 5-7 5z" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" /></svg
+          >Run
+        </button>
+        <button id="captureToggle" title="Terminal capture is off. Click to turn it on.">
+          <svg
+            class="tb-icon"
+            aria-hidden="true"
+            viewBox="0 0 16 16"
+            width="14"
+            height="14"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.4"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          >
+            <path d="M2.5 4l3.5 3.5L2.5 11M8 12h5.5" /></svg
+          ><span class="button-label">Terminal capture: Off</span>
+        </button>
+        <button
+          id="shareAgent"
+          aria-pressed="false"
+          title="Share existing and new captured logs in this window until stopped"
+        >
+          <svg
+            class="tb-icon"
+            aria-hidden="true"
+            viewBox="0 0 16 16"
+            width="14"
+            height="14"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.4"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          >
+            <path d="M8 2l1.4 4.6L14 8l-4.6 1.4L8 14l-1.4-4.6L2 8l4.6-1.4z" /></svg
+          ><span class="button-label">Share with agent</span>
+        </button>
+        <button id="follow" aria-pressed="true" data-mode="live">
+          <svg
+            class="tb-icon"
+            aria-hidden="true"
+            viewBox="0 0 16 16"
+            width="14"
+            height="14"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.4"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            data-mode="live"
+          >
+            <circle cx="8" cy="8" r="3.5" fill="currentColor" stroke="none" /></svg
+          ><svg
+            class="tb-icon"
+            aria-hidden="true"
+            viewBox="0 0 16 16"
+            width="14"
+            height="14"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.4"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            data-mode="resume"
+          >
+            <path d="M5 3l7 5-7 5z" /></svg
+          ><svg
+            class="tb-icon"
+            aria-hidden="true"
+            viewBox="0 0 16 16"
+            width="14"
+            height="14"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.4"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            data-mode="browse"
+          >
+            <path d="M8 4.5V8l2.5 1.5M2.5 8a5.5 5.5 0 1 0 1.6-3.9M2.5 2.5v2.5H5" /></svg
+          ><span class="button-label">Live</span>
+        </button>
+        <div class="toolbar-actions">
+          <button id="clear" title="Remove every retained log and span. Capture keeps running.">
+            <svg
+              class="tb-icon"
+              aria-hidden="true"
+              viewBox="0 0 16 16"
+              width="14"
+              height="14"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.4"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            >
+              <path d="M3 4.5h10M6.5 4.5V3h3v1.5M4.5 4.5l.6 8.5h5.8l.6-8.5" /></svg
+            ><span class="button-label">Clear</span></button
+          ><button id="stop" disabled title="Stop running commands that Logline started">
+            <svg
+              class="tb-icon"
+              aria-hidden="true"
+              viewBox="0 0 16 16"
+              width="14"
+              height="14"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.4"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            >
+              <rect x="4" y="4" width="8" height="8" rx="1" /></svg
+            ><span class="button-label">Stop all</span>
+          </button>
+          <div class="popover-container">
+            <button
+              id="moreActions"
+              class="more-actions"
+              type="button"
+              aria-label="More actions"
+              title="More actions"
+              aria-haspopup="menu"
+              aria-expanded="false"
+              aria-controls="actionsMenu"
+            >
+              <span aria-hidden="true">⋯</span>
+            </button>
+            <div id="actionsMenu" class="popover actions-menu" role="menu" aria-labelledby="moreActions" hidden>
+              <button id="shareSpecificRuns" type="button" role="menuitem" tabindex="-1">
+                Choose specific runs to share…
+              </button>
+              <button
+                id="connectAgent"
+                type="button"
+                role="menuitem"
+                tabindex="-1"
+                title="Let Claude Code, Codex, or another MCP client read the logs you share, like Copilot"
+              >
+                Connect Claude Code or Codex…
+              </button>
+              <div class="menu-separator" role="separator"></div>
+              <button
+                id="export"
+                type="button"
+                role="menuitem"
+                tabindex="-1"
+                title="Export filtered logs as JSON Lines, JSON, CSV, or AI context (Markdown)"
+              >
+                Export logs…
+              </button>
+              <button id="import" type="button" role="menuitem" tabindex="-1">Import logs…</button>
+              <button
+                id="breakOnLogs"
+                type="button"
+                role="menuitem"
+                tabindex="-1"
+                title="Pause debug sessions when they log an event matching the current filter"
+              >
+                Break on matching logs
+              </button>
+              <button
+                id="otlpToggle"
+                type="button"
+                role="menuitem"
+                tabindex="-1"
+                title="Receive OpenTelemetry logs, traces, and metrics from instrumented apps on this machine"
+              >
+                Start OpenTelemetry receiver
+              </button>
+              <div class="menu-separator" role="separator"></div>
+              <button id="manage" type="button" role="menuitem" tabindex="-1">Manage servers…</button>
+              <button
+                id="statusAction"
+                type="button"
+                role="menuitem"
+                tabindex="-1"
+                title="What Logline is doing: the OpenTelemetry receiver, agent connections, sharing, and capture, with a fix for anything off or broken"
+              >
+                Status and troubleshooting…
+              </button>
+              <button id="config" type="button" role="menuitem" tabindex="-1">Settings</button>
+              <div class="menu-separator" role="separator"></div>
+              <button
+                id="help"
+                type="button"
+                role="menuitem"
+                tabindex="-1"
+                aria-label="Open the Logline Guide"
+                title="Open the Logline Guide"
+              >
+                <span id="helpLabel">Help</span><span id="helpBadge" class="new-badge" hidden>New</span>
+              </button>
+            </div>
           </div>
         </div>
       </div>
-      <button id="run" title="Run selected source" aria-label="Run selected source"><svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14"><path d="M5 3l7 5-7 5z" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/></svg>Run</button>
-      <button id="captureToggle" title="Terminal capture is off. Click to turn it on."><svg class="tb-icon" aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 4l3.5 3.5L2.5 11M8 12h5.5"/></svg><span class="button-label">Terminal capture: Off</span></button>
-      <button id="shareAgent" aria-pressed="false" title="Share existing and new captured logs in this window until stopped"><svg class="tb-icon" aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2l1.4 4.6L14 8l-4.6 1.4L8 14l-1.4-4.6L2 8l4.6-1.4z"/></svg><span class="button-label">Share with agent</span></button>
-      <button id="follow" aria-pressed="true" data-mode="live"><svg class="tb-icon" aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" data-mode="live"><circle cx="8" cy="8" r="3.5" fill="currentColor" stroke="none"/></svg><svg class="tb-icon" aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" data-mode="resume"><path d="M5 3l7 5-7 5z"/></svg><svg class="tb-icon" aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" data-mode="browse"><path d="M8 4.5V8l2.5 1.5M2.5 8a5.5 5.5 0 1 0 1.6-3.9M2.5 2.5v2.5H5"/></svg><span class="button-label">Live</span></button>
-      <div class="toolbar-actions">
-        <button id="clear" title="Remove every retained log and span. Capture keeps running."><svg class="tb-icon" aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M3 4.5h10M6.5 4.5V3h3v1.5M4.5 4.5l.6 8.5h5.8l.6-8.5"/></svg><span class="button-label">Clear</span></button><button id="stop" disabled title="Stop running commands that Logline started"><svg class="tb-icon" aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="8" height="8" rx="1"/></svg><span class="button-label">Stop all</span></button>
+      <div class="search-toolbar" role="group" aria-label="Search and filter logs">
+        <div class="popover-container search-group">
+          <div id="searchEditor" class="search-editor">
+            <div class="search-terms">
+              <div id="searchChips" class="search-chips" aria-label="Active filters"></div>
+              <input
+                id="search"
+                type="text"
+                placeholder="Add a filter…"
+                aria-label="Add a filter"
+                maxlength="256"
+                autocomplete="off"
+                list="fieldSuggestions"
+              />
+            </div>
+            <button
+              id="searchClear"
+              class="search-clear"
+              type="button"
+              title="Clear all filters"
+              aria-label="Clear all filters"
+              hidden
+            >
+              <svg
+                aria-hidden="true"
+                viewBox="0 0 16 16"
+                width="12"
+                height="12"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.6"
+                stroke-linecap="round"
+              >
+                <path d="M4 4l8 8M12 4l-8 8" />
+              </svg>
+            </button>
+            <button
+              id="searchHelp"
+              class="search-help-button"
+              type="button"
+              aria-haspopup="true"
+              aria-expanded="false"
+              aria-controls="searchHelpPanel"
+              aria-label="Search syntax help"
+              title="Search syntax help"
+            >
+              Syntax
+            </button>
+          </div>
+          <datalist id="fieldSuggestions"></datalist>
+          <div id="searchError" class="search-error" role="alert" hidden></div>
+          <div id="searchHelpPanel" class="popover cheat-sheet" hidden>
+            <h3>Search syntax</h3>
+            <p class="search-help-note">
+              Press Enter to apply a term. Click a filter chip to edit it, or × to remove it.
+            </p>
+            <dl>
+              <dt>error timeout</dt>
+              <dd>Free text — matches all words</dd>
+              <dt>"database timeout"</dt>
+              <dd>Exact phrase</dd>
+              <dt>-timeout</dt>
+              <dd>Exclude a word or filter</dd>
+              <dt>a OR b</dt>
+              <dd>Either side matches</dd>
+              <dt>level:error</dt>
+              <dd>
+                Field filter (severity, msg, service, requestId, traceId, spanId, durationMs and more all work as
+                aliases)
+              </dd>
+              <dt>status:5xx</dt>
+              <dd>Wildcard: 2xx / 4xx / 5xx</dd>
+              <dt>status:&gt;=500</dt>
+              <dd>Numeric comparison: &gt; &gt;= &lt; &lt;=</dd>
+              <dt>status:[500 TO 599]</dt>
+              <dd>Numeric range</dd>
+              <dt>message:/time.?out/i</dt>
+              <dd>Regex, with optional flags</dd>
+              <dt>exists:requestId</dt>
+              <dd>Field is present on the event</dd>
+              <dt>last:15m</dt>
+              <dd>Relative time: s / m / h / d</dd>
+              <dt>changed:true</dt>
+              <dd>Logged by, or failing in, code changed since the last commit</dd>
+              <dt>timestamp:[2026-01-01 TO 2026-01-02]</dt>
+              <dd>Absolute time range</dd>
+            </dl>
+          </div>
+        </div>
+        <button
+          id="copyResults"
+          class="copy-filter"
+          type="button"
+          hidden
+          title="Copy up to 1,000 filtered log rows as JSON Lines"
+        >
+          <svg
+            class="tb-icon"
+            aria-hidden="true"
+            viewBox="0 0 16 16"
+            width="14"
+            height="14"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.4"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          >
+            <rect x="5.5" y="5.5" width="8" height="8.5" rx="1" />
+            <path d="M3 10.5v-7a1 1 0 0 1 1-1h6" /></svg
+          ><span class="button-label">Copy results</span>
+        </button>
+        <div class="popover-container toolbar-divider">
+          <button
+            id="levelButton"
+            class="level-button dropdown-button"
+            type="button"
+            aria-haspopup="true"
+            aria-expanded="false"
+            aria-controls="levelMenu"
+            aria-label="Log level filter"
+            title="Show only some log levels"
+          >
+            <svg
+              class="tb-icon"
+              aria-hidden="true"
+              viewBox="0 0 16 16"
+              width="14"
+              height="14"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.4"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            >
+              <path d="M2.5 3.5h11l-4.2 5v4l-2.6 1.2V8.5z" /></svg
+            ><span class="button-label">All levels</span>
+          </button>
+          <div id="levelMenu" class="popover level-menu" hidden role="group" aria-label="Log level filter"></div>
+        </div>
+        <button
+          id="changedOnly"
+          type="button"
+          aria-pressed="false"
+          hidden
+          title="Show only logs from code changed since the last commit"
+        >
+          <svg
+            class="tb-icon"
+            aria-hidden="true"
+            viewBox="0 0 16 16"
+            width="14"
+            height="14"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.4"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          >
+            <path d="M5 2.5v6M2 5.5h6M8.5 12.5h5.5" /></svg
+          ><span class="button-label">My changes</span>
+        </button>
         <div class="popover-container">
-          <button id="moreActions" class="more-actions" type="button" aria-label="More actions" title="More actions" aria-haspopup="menu" aria-expanded="false" aria-controls="actionsMenu"><span aria-hidden="true">⋯</span></button>
-          <div id="actionsMenu" class="popover actions-menu" role="menu" aria-labelledby="moreActions" hidden>
-            <button id="shareSpecificRuns" type="button" role="menuitem" tabindex="-1">Choose specific runs to share…</button>
-            <button id="connectAgent" type="button" role="menuitem" tabindex="-1" title="Let Claude Code, Codex, or another MCP client read the logs you share, like Copilot">Connect Claude Code or Codex…</button>
-            <div class="menu-separator" role="separator"></div>
-            <button id="export" type="button" role="menuitem" tabindex="-1" title="Export filtered logs as JSON Lines, JSON, CSV, or AI context (Markdown)">Export logs…</button>
-            <button id="import" type="button" role="menuitem" tabindex="-1">Import logs…</button>
-            <button id="breakOnLogs" type="button" role="menuitem" tabindex="-1" title="Pause debug sessions when they log an event matching the current filter">Break on matching logs</button>
-            <button id="otlpToggle" type="button" role="menuitem" tabindex="-1" title="Receive OpenTelemetry logs, traces, and metrics from instrumented apps on this machine">Start OpenTelemetry receiver</button>
-            <div class="menu-separator" role="separator"></div>
-            <button id="manage" type="button" role="menuitem" tabindex="-1">Manage servers…</button>
-            <button id="statusAction" type="button" role="menuitem" tabindex="-1" title="What Logline is doing: the OpenTelemetry receiver, agent connections, sharing, and capture, with a fix for anything off or broken">Status and troubleshooting…</button>
-            <button id="config" type="button" role="menuitem" tabindex="-1">Settings</button>
-            <div class="menu-separator" role="separator"></div>
-            <button id="help" type="button" role="menuitem" tabindex="-1" aria-label="Open the Logline Guide" title="Open the Logline Guide"><span id="helpLabel">Help</span><span id="helpBadge" class="new-badge" hidden>New</span></button>
+          <button
+            id="searchTools"
+            class="dropdown-button"
+            type="button"
+            aria-haspopup="true"
+            aria-expanded="false"
+            aria-controls="searchToolsPanel"
+            title="Save the current search, or apply a saved one"
+          >
+            <svg
+              class="tb-icon"
+              aria-hidden="true"
+              viewBox="0 0 16 16"
+              width="14"
+              height="14"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.4"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            >
+              <path d="M4.5 2.5h7v11L8 11l-3.5 2.5z" /></svg
+            ><span class="button-label">Saved searches</span>
+          </button>
+          <div id="searchToolsPanel" class="popover saved-searches" hidden>
+            <div class="popover-heading">
+              <h3>Saved searches</h3>
+              <button id="saveSearch" type="button" title="Save the current query, server, and levels">
+                Save current
+              </button>
+            </div>
+            <div id="savedSearchList" class="search-list">
+              <p class="popover-empty">Save a search to reuse it here.</p>
+            </div>
+          </div>
+        </div>
+        <div class="popover-container">
+          <button
+            id="fieldsButton"
+            class="dropdown-button"
+            type="button"
+            aria-haspopup="true"
+            aria-expanded="false"
+            aria-controls="fieldsPanel"
+            title="Choose which fields appear as table columns"
+          >
+            <svg
+              class="tb-icon"
+              aria-hidden="true"
+              viewBox="0 0 16 16"
+              width="14"
+              height="14"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.4"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            >
+              <rect x="2.5" y="3" width="11" height="10" rx="1" />
+              <path d="M6.2 3v10M9.8 3v10" /></svg
+            ><span class="button-label">Columns</span>
+          </button>
+          <div id="fieldsPanel" class="popover fields-panel" hidden>
+            <div class="popover-heading">
+              <h3>Table columns</h3>
+              <div class="field-actions">
+                <button id="fieldsAll" type="button">All</button><button id="fieldsNone" type="button">None</button>
+              </div>
+            </div>
+            <p class="popover-description">Select fields to show. Newly found fields stay off until selected.</p>
+            <div id="fieldList"></div>
+          </div>
+        </div>
+        <button
+          id="analyze"
+          type="button"
+          class="toolbar-divider"
+          title="Charts of levels, sources, errors, and patterns in the logs matching your current filter"
+        >
+          <svg
+            class="tb-icon"
+            aria-hidden="true"
+            viewBox="0 0 16 16"
+            width="14"
+            height="14"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.4"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          >
+            <path d="M3 13.5V8M6.5 13.5V4M10 13.5V9.5M13.5 13.5V6" /></svg
+          ><span class="button-label">Analyze</span>
+        </button>
+        <button
+          id="traces"
+          type="button"
+          title="Requests across services, from OpenTelemetry spans and logs with a trace id"
+        >
+          <svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14">
+            <path
+              d="M2 3.5h7M4 7.5h8M7 11.5h7"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.6"
+              stroke-linecap="round"
+            /></svg
+          ><span class="button-label">Traces</span><span id="traceCount" class="count-badge" hidden></span>
+        </button>
+        <button id="metrics" type="button" hidden>
+          <svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14">
+            <path
+              d="M1.5 11.5 5 7l3 3 5.5-6.5"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.6"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            /></svg
+          ><span class="button-label">Metrics</span><span id="metricCount" class="count-badge"></span>
+        </button>
+        <div class="popover-container doctor-container">
+          <button
+            id="doctor"
+            class="doctor-chip"
+            type="button"
+            aria-haspopup="true"
+            aria-expanded="false"
+            aria-controls="doctorPanel"
+            hidden
+          >
+            <svg
+              aria-hidden="true"
+              viewBox="0 0 16 16"
+              width="14"
+              height="14"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.3"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            >
+              <path d="M8 2.5 14.5 13.5h-13zM8 6.5v3" />
+              <circle cx="8" cy="11.6" r=".4" fill="currentColor" /></svg
+            ><span class="button-label">Log issues</span><span id="doctorCount" class="count-badge"></span>
+          </button>
+          <div id="doctorPanel" class="popover doctor-panel" hidden>
+            <div class="popover-heading">
+              <h3>Log doctor</h3>
+              <button type="button" data-doctor-action="report" title="Open a Markdown report of every finding">
+                Full report
+              </button>
+            </div>
+            <p class="popover-description">
+              Problems with log statements, found in what they actually logged. Also shown in the Problems panel.
+            </p>
+            <div id="doctorList"></div>
           </div>
         </div>
       </div>
-    </div>
-    <div class="search-toolbar" role="group" aria-label="Search and filter logs">
-      <div class="popover-container search-group">
-        <div id="searchEditor" class="search-editor">
-          <div class="search-terms">
-            <div id="searchChips" class="search-chips" aria-label="Active filters"></div>
-            <input id="search" type="text" placeholder="Add a filter…" aria-label="Add a filter" maxlength="256" autocomplete="off" list="fieldSuggestions">
-          </div>
-          <button id="searchClear" class="search-clear" type="button" title="Clear all filters" aria-label="Clear all filters" hidden><svg aria-hidden="true" viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M4 4l8 8M12 4l-8 8"/></svg></button>
-          <button id="searchHelp" class="search-help-button" type="button" aria-haspopup="true" aria-expanded="false" aria-controls="searchHelpPanel" aria-label="Search syntax help" title="Search syntax help">Syntax</button>
-        </div>
-        <datalist id="fieldSuggestions"></datalist>
-        <div id="searchError" class="search-error" role="alert" hidden></div>
-        <div id="searchHelpPanel" class="popover cheat-sheet" hidden>
-          <h3>Search syntax</h3>
-          <p class="search-help-note">Press Enter to apply a term. Click a filter chip to edit it, or × to remove it.</p>
-          <dl>
-            <dt>error timeout</dt><dd>Free text — matches all words</dd>
-            <dt>"database timeout"</dt><dd>Exact phrase</dd>
-            <dt>-timeout</dt><dd>Exclude a word or filter</dd>
-            <dt>a OR b</dt><dd>Either side matches</dd>
-            <dt>level:error</dt><dd>Field filter (severity, msg, service, requestId, traceId, spanId, durationMs and more all work as aliases)</dd>
-            <dt>status:5xx</dt><dd>Wildcard: 2xx / 4xx / 5xx</dd>
-            <dt>status:&gt;=500</dt><dd>Numeric comparison: &gt; &gt;= &lt; &lt;=</dd>
-            <dt>status:[500 TO 599]</dt><dd>Numeric range</dd>
-            <dt>message:/time.?out/i</dt><dd>Regex, with optional flags</dd>
-            <dt>exists:requestId</dt><dd>Field is present on the event</dd>
-            <dt>last:15m</dt><dd>Relative time: s / m / h / d</dd>
-            <dt>changed:true</dt><dd>Logged by, or failing in, code changed since the last commit</dd>
-            <dt>timestamp:[2026-01-01 TO 2026-01-02]</dt><dd>Absolute time range</dd>
-          </dl>
-        </div>
+      <div class="session">
+        <button id="otlpStatus" class="otlp-chip" type="button" hidden></button><span id="status">Ready</span
+        ><span id="sessions" aria-live="polite"></span><span id="shareScope" aria-live="polite" hidden></span
+        ><code id="command"></code>
       </div>
-      <button id="copyResults" class="copy-filter" type="button" hidden title="Copy up to 1,000 filtered log rows as JSON Lines"><svg class="tb-icon" aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><rect x="5.5" y="5.5" width="8" height="8.5" rx="1"/><path d="M3 10.5v-7a1 1 0 0 1 1-1h6"/></svg><span class="button-label">Copy results</span></button>
-      <div class="popover-container toolbar-divider">
-        <button id="levelButton" class="level-button dropdown-button" type="button" aria-haspopup="true" aria-expanded="false" aria-controls="levelMenu" aria-label="Log level filter" title="Show only some log levels"><svg class="tb-icon" aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 3.5h11l-4.2 5v4l-2.6 1.2V8.5z"/></svg><span class="button-label">All levels</span></button>
-        <div id="levelMenu" class="popover level-menu" hidden role="group" aria-label="Log level filter"></div>
+      <p id="rowHint" class="detail-hint table-hint" hidden>
+        Click an event to see its details and actions. Hover a row for quick actions, and hover any icon to see what it
+        does.<button id="rowHintDismiss" class="dismiss-hint" type="button">Got it</button>
+      </p>
+    </header>
+    <section class="table-scroll" aria-label="Log events">
+      <table id="eventsTable">
+        <colgroup id="eventColumns"></colgroup>
+        <thead>
+          <tr id="head-row">
+            <th>Time</th>
+            <th>Level</th>
+            <th title="Click a message to expand it">Message</th>
+            <th>Source</th>
+          </tr>
+        </thead>
+        <tbody id="logs"></tbody>
+      </table>
+      <p id="empty">
+        Make your terminal output searchable. Turn Terminal capture: On, then run commands normally in a supported VS
+        Code terminal.
+      </p>
+    </section>
+    <div
+      id="cellFilterMenu"
+      class="cell-filter-menu"
+      role="menu"
+      aria-labelledby="cellFilterLabel"
+      aria-describedby="cellFilterReason"
+      tabindex="-1"
+      hidden
+    >
+      <div id="cellFilterLabel" class="cell-filter-label"></div>
+      <button id="cellFilterInclude" type="button" role="menuitem" tabindex="-1">Include value</button>
+      <button id="cellFilterExclude" type="button" role="menuitem" tabindex="-1">Exclude value</button>
+      <p id="cellFilterReason" class="cell-filter-reason" hidden></p>
+    </div>
+    <footer>
+      <div class="pagination">
+        <button id="older">← Older</button><span id="page">Page 1 of 1</span><button id="newer">Newer →</button
+        ><span id="mode">Live</span>
       </div>
-      <button id="changedOnly" type="button" aria-pressed="false" hidden title="Show only logs from code changed since the last commit"><svg class="tb-icon" aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 2.5v6M2 5.5h6M8.5 12.5h5.5"/></svg><span class="button-label">My changes</span></button>
-      <div class="popover-container">
-        <button id="searchTools" class="dropdown-button" type="button" aria-haspopup="true" aria-expanded="false" aria-controls="searchToolsPanel" title="Save the current search, or apply a saved one"><svg class="tb-icon" aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M4.5 2.5h7v11L8 11l-3.5 2.5z"/></svg><span class="button-label">Saved searches</span></button>
-        <div id="searchToolsPanel" class="popover saved-searches" hidden>
-          <div class="popover-heading"><h3>Saved searches</h3><button id="saveSearch" type="button" title="Save the current query, server, and levels">Save current</button></div>
-          <div id="savedSearchList" class="search-list"><p class="popover-empty">Save a search to reuse it here.</p></div>
+      <div id="counts" role="status">0 received · 0 retained · 0 discarded</div>
+    </footer>
+    <dialog id="contextDialog" aria-labelledby="contextTitle">
+      <div class="context-header">
+        <strong id="contextTitle">Surrounding logs</strong
+        ><span
+          ><button id="contextExport">Export context</button
+          ><button id="contextClose" autofocus>Back to results</button></span
+        >
+      </div>
+      <p id="contextStatus" role="status">Loading…</p>
+      <div class="context-scroll">
+        <table aria-label="Surrounding log events">
+          <thead>
+            <tr>
+              <th>Time</th>
+              <th>Level</th>
+              <th>Message</th>
+              <th>Source</th>
+            </tr>
+          </thead>
+          <tbody id="contextLogs"></tbody>
+        </table>
+      </div>
+      <div id="contextDetails" aria-live="polite"></div>
+    </dialog>
+    <dialog id="traceDialog" aria-labelledby="traceTitle">
+      <div class="context-header">
+        <strong id="traceTitle">Trace</strong
+        ><span
+          ><button id="traceBack" hidden>All traces</button
+          ><button id="traceFilter" title="Show every retained event with this trace id">Filter logs by trace</button
+          ><button id="traceClose" autofocus>Back to results</button></span
+        >
+      </div>
+      <p id="traceStatus" role="status">Loading…</p>
+      <section id="traceHotspots" class="trace-hotspots" aria-labelledby="traceHotspotsTitle" hidden>
+        <h3 id="traceHotspotsTitle">Where the time went</h3>
+        <ol id="traceHotspotList"></ol>
+      </section>
+      <div class="trace-scroll">
+        <table class="trace-table" aria-label="Spans and logs in this trace">
+          <thead>
+            <tr>
+              <th>Operation</th>
+              <th>Service</th>
+              <th>Timeline</th>
+              <th>Duration</th>
+              <th title="Time not spent in child spans">Self</th>
+            </tr>
+          </thead>
+          <tbody id="traceRows"></tbody>
+        </table>
+      </div>
+    </dialog>
+    <dialog id="tracesDialog" aria-labelledby="tracesTitle">
+      <div class="context-header">
+        <strong id="tracesTitle">Traces</strong
+        ><span
+          ><label class="traces-filter"><input id="tracesErrorsOnly" type="checkbox" /> Errors only</label
+          ><button id="tracesStartReceiver" hidden title="Receive spans from instrumented apps on this machine">
+            Start OpenTelemetry receiver</button
+          ><button id="tracesClose" autofocus>Back to results</button></span
+        >
+      </div>
+      <p id="tracesStatus" role="status">Loading…</p>
+      <div class="trace-scroll">
+        <table class="trace-table traces-table" aria-label="Recent traces">
+          <thead>
+            <tr>
+              <th>Started</th>
+              <th>Operation</th>
+              <th>Services</th>
+              <th>Duration</th>
+              <th>Spans and logs</th>
+            </tr>
+          </thead>
+          <tbody id="tracesRows"></tbody>
+        </table>
+      </div>
+    </dialog>
+    <dialog id="metricsDialog" aria-labelledby="metricsTitle">
+      <div class="context-header">
+        <strong id="metricsTitle">Metrics</strong
+        ><span
+          ><input
+            id="metricsFilter"
+            type="search"
+            placeholder="Filter by name, service, or attribute"
+            aria-label="Filter metrics"
+          /><button id="metricsClose" autofocus>Back to results</button></span
+        >
+      </div>
+      <p id="metricsStatus" role="status">Loading…</p>
+      <div class="trace-scroll">
+        <table class="trace-table metrics-table" aria-label="OpenTelemetry metrics">
+          <thead>
+            <tr>
+              <th>Metric</th>
+              <th>Service</th>
+              <th>Attributes</th>
+              <th>Latest</th>
+              <th>Trend</th>
+            </tr>
+          </thead>
+          <tbody id="metricsRows"></tbody>
+        </table>
+      </div>
+    </dialog>
+    <dialog id="analysisDialog" aria-labelledby="analysisTitle">
+      <div class="context-header">
+        <strong id="analysisTitle">Search analysis</strong><button id="analysisClose" autofocus>Close</button>
+      </div>
+      <p id="analysisStatus" role="status">Loading…</p>
+      <div id="analysisContent" class="analysis-content"></div>
+    </dialog>
+    <dialog id="saveSearchDialog" aria-labelledby="saveSearchTitle">
+      <form id="saveSearchForm">
+        <div class="context-header">
+          <strong id="saveSearchTitle">Save search</strong><button id="saveSearchCancel" type="button">Cancel</button>
         </div>
-      </div>
-      <div class="popover-container">
-        <button id="fieldsButton" class="dropdown-button" type="button" aria-haspopup="true" aria-expanded="false" aria-controls="fieldsPanel" title="Choose which fields appear as table columns"><svg class="tb-icon" aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="3" width="11" height="10" rx="1"/><path d="M6.2 3v10M9.8 3v10"/></svg><span class="button-label">Columns</span></button>
-        <div id="fieldsPanel" class="popover fields-panel" hidden>
-          <div class="popover-heading"><h3>Table columns</h3><div class="field-actions"><button id="fieldsAll" type="button">All</button><button id="fieldsNone" type="button">None</button></div></div>
-          <p class="popover-description">Select fields to show. Newly found fields stay off until selected.</p>
-          <div id="fieldList"></div>
-        </div>
-      </div>
-      <button id="analyze" type="button" class="toolbar-divider" title="Charts of levels, sources, errors, and patterns in the logs matching your current filter"><svg class="tb-icon" aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M3 13.5V8M6.5 13.5V4M10 13.5V9.5M13.5 13.5V6"/></svg><span class="button-label">Analyze</span></button>
-      <button id="traces" type="button" title="Requests across services, from OpenTelemetry spans and logs with a trace id"><svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14"><path d="M2 3.5h7M4 7.5h8M7 11.5h7" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg><span class="button-label">Traces</span><span id="traceCount" class="count-badge" hidden></span></button>
-      <button id="metrics" type="button" hidden><svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14"><path d="M1.5 11.5 5 7l3 3 5.5-6.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="button-label">Metrics</span><span id="metricCount" class="count-badge"></span></button>
-      <div class="popover-container doctor-container">
-        <button id="doctor" class="doctor-chip" type="button" aria-haspopup="true" aria-expanded="false" aria-controls="doctorPanel" hidden><svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2.5 14.5 13.5h-13zM8 6.5v3"/><circle cx="8" cy="11.6" r=".4" fill="currentColor"/></svg><span class="button-label">Log issues</span><span id="doctorCount" class="count-badge"></span></button>
-        <div id="doctorPanel" class="popover doctor-panel" hidden>
-          <div class="popover-heading"><h3>Log doctor</h3><button type="button" data-doctor-action="report" title="Open a Markdown report of every finding">Full report</button></div>
-          <p class="popover-description">Problems with log statements, found in what they actually logged. Also shown in the Problems panel.</p>
-          <div id="doctorList"></div>
-        </div>
-      </div>
-    </div>
-    <div class="session"><button id="otlpStatus" class="otlp-chip" type="button" hidden></button><span id="status">Ready</span><span id="sessions" aria-live="polite"></span><span id="shareScope" aria-live="polite" hidden></span><code id="command"></code></div>
-    <p id="rowHint" class="detail-hint table-hint" hidden>Click an event to see its details and actions. Hover a row for quick actions, and hover any icon to see what it does.<button id="rowHintDismiss" class="dismiss-hint" type="button">Got it</button></p>
-  </header>
-  <section class="table-scroll" aria-label="Log events">
-    <table id="eventsTable">
-      <colgroup id="eventColumns"></colgroup>
-      <thead><tr id="head-row"><th>Time</th><th>Level</th><th title="Click a message to expand it">Message</th><th>Source</th></tr></thead>
-      <tbody id="logs"></tbody>
-    </table>
-    <p id="empty">Make your terminal output searchable. Turn Terminal capture: On, then run commands normally in a supported VS Code terminal.</p>
-  </section>
-  <div id="cellFilterMenu" class="cell-filter-menu" role="menu" aria-labelledby="cellFilterLabel" aria-describedby="cellFilterReason" tabindex="-1" hidden>
-    <div id="cellFilterLabel" class="cell-filter-label"></div>
-    <button id="cellFilterInclude" type="button" role="menuitem" tabindex="-1">Include value</button>
-    <button id="cellFilterExclude" type="button" role="menuitem" tabindex="-1">Exclude value</button>
-    <p id="cellFilterReason" class="cell-filter-reason" hidden></p>
-  </div>
-  <footer>
-    <div class="pagination"><button id="older">← Older</button><span id="page">Page 1 of 1</span><button id="newer">Newer →</button><span id="mode">Live</span></div>
-    <div id="counts" role="status">0 received · 0 retained · 0 discarded</div>
-  </footer>
-  <dialog id="contextDialog" aria-labelledby="contextTitle">
-    <div class="context-header"><strong id="contextTitle">Surrounding logs</strong><span><button id="contextExport">Export context</button><button id="contextClose" autofocus>Back to results</button></span></div>
-    <p id="contextStatus" role="status">Loading…</p>
-    <div class="context-scroll">
-      <table aria-label="Surrounding log events"><thead><tr><th>Time</th><th>Level</th><th>Message</th><th>Source</th></tr></thead><tbody id="contextLogs"></tbody></table>
-    </div>
-    <div id="contextDetails" aria-live="polite"></div>
-  </dialog>
-  <dialog id="traceDialog" aria-labelledby="traceTitle">
-    <div class="context-header"><strong id="traceTitle">Trace</strong><span><button id="traceBack" hidden>All traces</button><button id="traceFilter" title="Show every retained event with this trace id">Filter logs by trace</button><button id="traceClose" autofocus>Back to results</button></span></div>
-    <p id="traceStatus" role="status">Loading…</p>
-    <section id="traceHotspots" class="trace-hotspots" aria-labelledby="traceHotspotsTitle" hidden><h3 id="traceHotspotsTitle">Where the time went</h3><ol id="traceHotspotList"></ol></section>
-    <div class="trace-scroll">
-      <table class="trace-table" aria-label="Spans and logs in this trace"><thead><tr><th>Operation</th><th>Service</th><th>Timeline</th><th>Duration</th><th title="Time not spent in child spans">Self</th></tr></thead><tbody id="traceRows"></tbody></table>
-    </div>
-  </dialog>
-  <dialog id="tracesDialog" aria-labelledby="tracesTitle">
-    <div class="context-header"><strong id="tracesTitle">Traces</strong><span><label class="traces-filter"><input id="tracesErrorsOnly" type="checkbox"> Errors only</label><button id="tracesStartReceiver" hidden title="Receive spans from instrumented apps on this machine">Start OpenTelemetry receiver</button><button id="tracesClose" autofocus>Back to results</button></span></div>
-    <p id="tracesStatus" role="status">Loading…</p>
-    <div class="trace-scroll">
-      <table class="trace-table traces-table" aria-label="Recent traces"><thead><tr><th>Started</th><th>Operation</th><th>Services</th><th>Duration</th><th>Spans and logs</th></tr></thead><tbody id="tracesRows"></tbody></table>
-    </div>
-  </dialog>
-  <dialog id="metricsDialog" aria-labelledby="metricsTitle">
-    <div class="context-header"><strong id="metricsTitle">Metrics</strong><span><input id="metricsFilter" type="search" placeholder="Filter by name, service, or attribute" aria-label="Filter metrics"><button id="metricsClose" autofocus>Back to results</button></span></div>
-    <p id="metricsStatus" role="status">Loading…</p>
-    <div class="trace-scroll">
-      <table class="trace-table metrics-table" aria-label="OpenTelemetry metrics"><thead><tr><th>Metric</th><th>Service</th><th>Attributes</th><th>Latest</th><th>Trend</th></tr></thead><tbody id="metricsRows"></tbody></table>
-    </div>
-  </dialog>
-  <dialog id="analysisDialog" aria-labelledby="analysisTitle">
-    <div class="context-header"><strong id="analysisTitle">Search analysis</strong><button id="analysisClose" autofocus>Close</button></div>
-    <p id="analysisStatus" role="status">Loading…</p>
-    <div id="analysisContent" class="analysis-content"></div>
-  </dialog>
-  <dialog id="saveSearchDialog" aria-labelledby="saveSearchTitle">
-    <form id="saveSearchForm">
-      <div class="context-header"><strong id="saveSearchTitle">Save search</strong><button id="saveSearchCancel" type="button">Cancel</button></div>
-      <label for="saveSearchName">Name</label>
-      <input id="saveSearchName" type="text" maxlength="80" autofocus>
-      <div class="save-search-actions"><button id="saveSearchConfirm" type="submit">Save</button></div>
-    </form>
-  </dialog>
-  <script nonce="{{NONCE}}" src="{{SCRIPT_URI}}"></script>
-</body>
+        <label for="saveSearchName">Name</label>
+        <input id="saveSearchName" type="text" maxlength="80" autofocus />
+        <div class="save-search-actions"><button id="saveSearchConfirm" type="submit">Save</button></div>
+      </form>
+    </dialog>
+    <script nonce="{{NONCE}}" src="{{SCRIPT_URI}}"></script>
+  </body>
 </html>

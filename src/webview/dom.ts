@@ -112,7 +112,7 @@ export function getElements() {
     doctorPanel: element<HTMLElement>('doctorPanel'),
     doctorList: element<HTMLElement>('doctorList'),
     rowHint: element<HTMLElement>('rowHint'),
-    rowHintDismiss: element<HTMLButtonElement>('rowHintDismiss')
+    rowHintDismiss: element<HTMLButtonElement>('rowHintDismiss'),
   };
 }
 export type Elements = ReturnType<typeof getElements>;
@@ -126,8 +126,7 @@ export function setLabel(button: HTMLElement, text: string) {
 export function cell(text: string | number | boolean | undefined, className?: string) {
   const element = document.createElement('td');
   element.textContent = String(text ?? '');
-  if (className)
-    element.className = className;
+  if (className) element.className = className;
   return element;
 }
 

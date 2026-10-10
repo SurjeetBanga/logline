@@ -16,21 +16,35 @@ test('nextServerId disambiguates id collisions', () => {
 });
 
 test('resolveAutoStartServers only runs autoStart servers, and reports untrusted workspaces', () => {
-  const servers = [{ id: 'a', autoStart: true }, { id: 'b', autoStart: false }] as ServerConfig[];
+  const servers = [
+    { id: 'a', autoStart: true },
+    { id: 'b', autoStart: false },
+  ] as ServerConfig[];
   assert.deepEqual(resolveAutoStartServers(servers, true), { blocked: false, servers: [servers[0]] });
   assert.deepEqual(resolveAutoStartServers(servers, false), { blocked: true, servers: [] });
-  assert.deepEqual(resolveAutoStartServers([{ id: 'b', autoStart: false }] as ServerConfig[], false), { blocked: false, servers: [] });
+  assert.deepEqual(resolveAutoStartServers([{ id: 'b', autoStart: false }] as ServerConfig[], false), {
+    blocked: false,
+    servers: [],
+  });
 });
 
 test('resolveRunTarget looks up a saved server, forwards its env, and falls back to the workspace cwd', () => {
   const servers: ServerConfig[] = [
     { id: 'api', label: 'API', command: 'npm start', env: { PORT: '3000' } },
-    { id: 'worker', label: 'Worker', command: 'npm run worker', cwd: '/srv/worker' }
+    { id: 'worker', label: 'Worker', command: 'npm run worker', cwd: '/srv/worker' },
   ];
-  assert.deepEqual(resolveRunTarget(servers, 'api', '/workspace'),
-    { command: 'npm start', cwd: '/workspace', server: servers[0], env: { PORT: '3000' } });
-  assert.deepEqual(resolveRunTarget(servers, 'worker', '/workspace'),
-    { command: 'npm run worker', cwd: '/srv/worker', server: servers[1], env: undefined });
+  assert.deepEqual(resolveRunTarget(servers, 'api', '/workspace'), {
+    command: 'npm start',
+    cwd: '/workspace',
+    server: servers[0],
+    env: { PORT: '3000' },
+  });
+  assert.deepEqual(resolveRunTarget(servers, 'worker', '/workspace'), {
+    command: 'npm run worker',
+    cwd: '/srv/worker',
+    server: servers[1],
+    env: undefined,
+  });
   assert.equal(resolveRunTarget(servers, 'missing', '/workspace'), undefined);
 });
 

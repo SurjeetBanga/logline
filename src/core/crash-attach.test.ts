@@ -10,8 +10,8 @@ const crash = [
   '/srv/app/server.js:12',
   '    const total = order.items.reduce(sum);',
   '                              ^',
-  'TypeError: Cannot read properties of undefined (reading \'reduce\')',
-  '    at checkout (/srv/app/server.js:12:31)'
+  "TypeError: Cannot read properties of undefined (reading 'reduce')",
+  '    at checkout (/srv/app/server.js:12:31)',
 ].join('\n');
 const exiting = `${crash}\nNode.js v22.22.0`;
 
@@ -41,7 +41,7 @@ test('a crash is not attached across a healthy JSON line, a non-error, another r
     [[event('{"level":"error","msg":"a"}'), event('{"level":"info","msg":"ok"}')], event(crash)],
     [[event('{"level":"warn","msg":"slow"}')], event(crash)],
     [[event('{"level":"error","msg":"a"}', 'api', 'run-1')], event(crash, 'api', 'run-2')],
-    [[event('{"level":"error","msg":"a"}', 'api::worker')], event(crash, 'api::web')]
+    [[event('{"level":"error","msg":"a"}', 'api::worker')], event(crash, 'api::web')],
   ];
   for (const [before, trace] of cases) {
     const linker = new CrashLinker();
@@ -80,7 +80,7 @@ test('captured lines are linked by id without changing either event', () => {
   assert.equal(store.find(error.id)!.raw, errorLine);
   assert.equal(store.find(trace.id)!.raw, exiting);
   assert.equal(store.attachedCrash(error.id)?.id, trace.id);
-  assert.equal(store.page().events.find(item => item.id === trace.id)?.attachedTo, error.id);
+  assert.equal(store.page().events.find((item) => item.id === trace.id)?.attachedTo, error.id);
   // Imports have no arrival timing, so nothing is attached.
   ingestion.accept(errorLine, 'import', metadata);
   assert.equal(ingestion.accept(crash, 'import', metadata)!.attachedTo, undefined);

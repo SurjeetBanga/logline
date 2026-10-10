@@ -6,7 +6,12 @@ for (const args of [
   ['--check', 'media/viewer.js'],
   ['--test'],
 ]) {
-  if (args[0] === '--test') args.push(...readdirSync('out-tests', { recursive: true }).filter(name => name.endsWith('.test.js')).map(name => `out-tests/${name}`));
+  if (args[0] === '--test')
+    args.push(
+      ...readdirSync('out-tests', { recursive: true })
+        .filter((name) => name.endsWith('.test.js'))
+        .map((name) => `out-tests/${name}`),
+    );
   const result = spawnSync(process.execPath, args, { stdio: 'inherit' });
   if (result.status !== 0) process.exit(result.status ?? 1);
 }

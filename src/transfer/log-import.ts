@@ -1,7 +1,10 @@
 import { StringDecoder } from 'node:string_decoder';
 import { setImmediate as yieldToHost } from 'node:timers/promises';
 
-export interface ImportRecord { raw: string; truncated: boolean; }
+export interface ImportRecord {
+  raw: string;
+  truncated: boolean;
+}
 
 // Keep at most one bounded record, rather than a file's text, split lines and
 // parsed objects at the same time. Oversized records still consume their full
@@ -10,7 +13,7 @@ class RecordBuffer {
   private parts: string[] = [];
   private length = 0;
   private truncated = false;
-  constructor(private limit: number) { }
+  constructor(private limit: number) {}
   append(text: string): void {
     const room = this.limit - this.length;
     if (text.length > room) this.truncated = true;
@@ -22,7 +25,9 @@ class RecordBuffer {
   }
   take(): ImportRecord {
     const record = { raw: this.parts.join(''), truncated: this.truncated };
-    this.parts = []; this.length = 0; this.truncated = false;
+    this.parts = [];
+    this.length = 0;
+    this.truncated = false;
     return record;
   }
 }
@@ -36,7 +41,12 @@ class RecordFramer {
   private arrayEnded = false;
   private cellStart = true;
   private quotePending = false;
-  constructor(private format: string, limit: number) { this.buffer = new RecordBuffer(limit); }
+  constructor(
+    private format: string,
+    limit: number,
+  ) {
+    this.buffer = new RecordBuffer(limit);
+  }
 
   *write(text: string): Generator<ImportRecord> {
     if (this.format !== 'json' && this.format !== 'csv') {
@@ -57,23 +67,38 @@ class RecordFramer {
           if (char === '"') continue; // doubled quote inside a quoted cell
           this.quoted = false;
         }
-        if (this.quoted) { if (char === '"') this.quotePending = true; continue; }
-        if (char === '"' && this.cellStart) { this.quoted = true; this.cellStart = false; continue; }
+        if (this.quoted) {
+          if (char === '"') this.quotePending = true;
+          continue;
+        }
+        if (char === '"' && this.cellStart) {
+          this.quoted = true;
+          this.cellStart = false;
+          continue;
+        }
         if (char === '\n' || char === '\r') {
           this.buffer.append(text.slice(start, i));
           yield this.buffer.take();
-          start = i + 1; this.cellStart = true;
+          start = i + 1;
+          this.cellStart = true;
         } else this.cellStart = char === ',';
         continue;
       }
       if (this.arrayDocument === undefined) {
-        if (/\s|\uFEFF/.test(char)) { start = i + 1; continue; }
+        if (/\s|\uFEFF/.test(char)) {
+          start = i + 1;
+          continue;
+        }
         this.arrayDocument = char === '[';
-        if (this.arrayDocument) { start = i + 1; continue; }
+        if (this.arrayDocument) {
+          start = i + 1;
+          continue;
+        }
       }
       if (this.arrayEnded) {
         if (!/\s/.test(char)) throw new Error('Unexpected content after the JSON array.');
-        start = i + 1; continue;
+        start = i + 1;
+        continue;
       }
       if (this.quoted) {
         if (this.escaped) this.escaped = false;
@@ -81,7 +106,10 @@ class RecordFramer {
         else if (char === '"') this.quoted = false;
         continue;
       }
-      if (char === '"') { this.quoted = true; continue; }
+      if (char === '"') {
+        this.quoted = true;
+        continue;
+      }
       if (this.depth === 0 && this.arrayDocument && (char === ',' || char === ']')) {
         this.buffer.append(text.slice(start, i));
         yield this.buffer.take();
@@ -104,11 +132,17 @@ class RecordFramer {
     this.buffer.append(text.slice(start));
   }
 
-  end(): ImportRecord { return this.buffer.take(); }
+  end(): ImportRecord {
+    return this.buffer.take();
+  }
 }
 
 /** Decode UTF-8 across chunk boundaries and yield records without parsing JSON twice. */
-export async function* importRecords(chunks: AsyncIterable<Uint8Array>, format = 'jsonl', limit = 65536): AsyncGenerator<ImportRecord> {
+export async function* importRecords(
+  chunks: AsyncIterable<Uint8Array>,
+  format = 'jsonl',
+  limit = 65536,
+): AsyncGenerator<ImportRecord> {
   const decoder = new StringDecoder('utf8');
   const framer = new RecordFramer(format, limit);
   let header: string[] | undefined;
@@ -131,7 +165,10 @@ export async function* importRecords(chunks: AsyncIterable<Uint8Array>, format =
   };
   for await (const chunk of chunks) {
     let text = decoder.write(chunk);
-    if (firstText && text) { text = text.replace(/^\uFEFF/, ''); firstText = false; }
+    if (firstText && text) {
+      text = text.replace(/^\uFEFF/, '');
+      firstText = false;
+    }
     for (const record of framer.write(text)) {
       const converted = convert(record);
       if (converted) yield converted;
@@ -158,21 +195,41 @@ export function parseCsv(text: string): string[][] {
   for (let i = 0; i < text.length; i++) {
     const char = text[i];
     if (quoted) {
-      if (char !== '"') { cell += char; continue; }
-      if (text[i + 1] === '"') { cell += '"'; i++; continue; }
+      if (char !== '"') {
+        cell += char;
+        continue;
+      }
+      if (text[i + 1] === '"') {
+        cell += '"';
+        i++;
+        continue;
+      }
       quoted = false;
       continue;
     }
-    if (char === '"' && cell === '') { quoted = true; continue; }
-    if (char === ',') { row.push(cell); cell = ''; continue; }
+    if (char === '"' && cell === '') {
+      quoted = true;
+      continue;
+    }
+    if (char === ',') {
+      row.push(cell);
+      cell = '';
+      continue;
+    }
     if (char === '\n' || char === '\r') {
       if (char === '\r' && text[i + 1] === '\n') i++;
-      row.push(cell); rows.push(row); row = []; cell = '';
+      row.push(cell);
+      rows.push(row);
+      row = [];
+      cell = '';
       continue;
     }
     cell += char;
   }
-  if (cell !== '' || row.length) { row.push(cell); rows.push(row); }
+  if (cell !== '' || row.length) {
+    row.push(cell);
+    rows.push(row);
+  }
   return rows;
 }
 
@@ -189,7 +246,7 @@ export function parseCsvRecords(text: string): unknown[] {
 }
 
 function csvRecord(header: string[], row: string[]): unknown {
-  if (!row.some(cell => cell !== '')) return undefined;
+  if (!row.some((cell) => cell !== '')) return undefined;
   const cells = new Map(header.map((name, index) => [name.trim(), row[index] ?? '']));
   // A Logline CSV export keeps the original line in `raw`, so replaying that
   // reproduces the event exactly - timestamp, level and JSON payload included -

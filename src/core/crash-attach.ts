@@ -18,7 +18,11 @@ export const EXIT_ATTACH_WINDOW_MS = 30000;
 // Distinct runs remembered at once; the oldest is forgotten first.
 const MAX_RUNS = 256;
 
-interface LastJson { id: number; error: boolean; at: number; }
+interface LastJson {
+  id: number;
+  error: boolean;
+  at: number;
+}
 
 export class CrashLinker {
   private readonly last = new Map<string, LastJson>();
@@ -41,5 +45,7 @@ export class CrashLinker {
     this.last.delete(key);
   }
 
-  clear(): void { this.last.clear(); }
+  clear(): void {
+    this.last.clear();
+  }
 }

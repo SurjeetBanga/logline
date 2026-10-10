@@ -2,11 +2,21 @@ import { extractExceptions } from './exceptions';
 import { canonicalField, getField } from './query';
 import type { LogEvent } from './types';
 
-interface AnalysisOptions { from?: number; to?: number; }
+interface AnalysisOptions {
+  from?: number;
+  to?: number;
+}
 
 export interface ErrorGroup {
   /** `message` is the first occurrence; `pattern` shows its variable parts as `*`. */
-  key: string; message: string; pattern?: string; count: number; first?: number; last?: number; sampleIds: number[]; location?: string;
+  key: string;
+  message: string;
+  pattern?: string;
+  count: number;
+  first?: number;
+  last?: number;
+  sampleIds: number[];
+  location?: string;
   /** Occurrences over the analysed range, in equal buckets. */
   trend?: number[];
   /** First seen in the last quarter of the range. */
@@ -15,13 +25,29 @@ export interface ErrorGroup {
   query?: string;
 }
 export interface LogPattern {
-  key: string; message: string; pattern?: string; level: string; count: number; first?: number; last?: number; sampleIds: number[]; trend: number[];
-  isNew?: boolean; query?: string;
+  key: string;
+  message: string;
+  pattern?: string;
+  level: string;
+  count: number;
+  first?: number;
+  last?: number;
+  sampleIds: number[];
+  trend: number[];
+  isNew?: boolean;
+  query?: string;
 }
 /** The most common values of one field, like a facet in Datadog or Kibana. */
-export interface FieldValues { field: string; label: string; total: number; values: { value: string; label?: string; count: number }[]; }
+export interface FieldValues {
+  field: string;
+  label: string;
+  total: number;
+  values: { value: string; label?: string; count: number }[];
+}
 export interface AnalysisSummary {
-  events: number; errors: number; sources: number;
+  events: number;
+  errors: number;
+  sources: number;
   latency?: { p50: number; p95: number; p99: number; count: number };
   /** Events whose timestamps lie far outside the rest, left out of the time charts. */
   outside: number;
@@ -62,7 +88,7 @@ function timeRange(events: LogEvent[], options: AnalysisOptions): { from?: numbe
     if (trimmedHigh - trimmedLow < (high - low) / 2) {
       // Keep the real edges of the range; only far-away times are left out.
       const margin = Math.max(1000, (trimmedHigh - trimmedLow) * 0.1);
-      low = times.find(time => time >= trimmedLow - margin)!;
+      low = times.find((time) => time >= trimmedLow - margin)!;
       let last = times.length - 1;
       while (times[last] > trimmedHigh + margin) last--;
       high = times[last];
@@ -97,13 +123,18 @@ const HAS_DIGIT = /\d/;
 
 /** A search for a normalized template: each literal run between its placeholders, in the message. */
 export function templateQuery(template: string): string | undefined {
-  const literals = template.split(/<(?:n|id|path)>/)
-    .map(part => part.replace(/^[^a-z0-9]+|[^a-z0-9]+$/g, ''))
-    .filter(part => part.length >= 3)
-    .sort((a, b) => b.length - a.length).slice(0, 4);
+  const literals = template
+    .split(/<(?:n|id|path)>/)
+    .map((part) => part.replace(/^[^a-z0-9]+|[^a-z0-9]+$/g, ''))
+    .filter((part) => part.length >= 3)
+    .sort((a, b) => b.length - a.length)
+    .slice(0, 4);
   if (literals.join('').length < 4) return undefined;
   // In template order, so the search reads like the message.
-  return literals.sort((a, b) => template.indexOf(a) - template.indexOf(b)).map(part => `message:${JSON.stringify(part)}`).join(' ');
+  return literals
+    .sort((a, b) => template.indexOf(a) - template.indexOf(b))
+    .map((part) => `message:${JSON.stringify(part)}`)
+    .join(' ');
 }
 
 // Groups errors by exception type + originating stack frame when a stack trace is
@@ -112,7 +143,7 @@ export function templateQuery(template: string): string | undefined {
 // into many. Falls back to the normalized message when there's no stack to anchor on.
 function errorFingerprint(event: LogEvent, message: string): { key: string; location?: string } {
   const block = extractExceptions(event)[0];
-  const frame = block?.lines.find(line => line.source)?.source;
+  const frame = block?.lines.find((line) => line.source)?.source;
   if (block && frame) {
     const type = normalizeMessage(block.title.split(':', 1)[0] || block.title);
     const location = `${frame.file}:${frame.line}`;
@@ -129,7 +160,7 @@ function flagAnomalies(values: number[]): boolean[] {
   const variance = values.reduce((sum, value) => sum + (value - mean) ** 2, 0) / (values.length || 1);
   const stddev = Math.sqrt(variance);
   const threshold = mean + Math.max(stddev * 2.5, mean * 0.5, 1);
-  return values.map(value => value >= 3 && value > threshold);
+  return values.map((value) => value >= 3 && value > threshold);
 }
 
 function numericField(event: LogEvent, names: string[]): number | undefined {
@@ -159,7 +190,13 @@ function bucketOf(time: number | undefined, from: number | undefined, to: number
 // Recent enough to be news: first seen in the last quarter of a range long
 // enough for "earlier" to mean something.
 function firstSeenLate(first: number | undefined, from: number | undefined, to: number | undefined): boolean {
-  return first !== undefined && from !== undefined && to !== undefined && to - from >= 60000 && first >= from + (to - from) * 0.75;
+  return (
+    first !== undefined &&
+    from !== undefined &&
+    to !== undefined &&
+    to - from >= 60000 &&
+    first >= from + (to - from) * 0.75
+  );
 }
 
 function track(group: { first?: number; last?: number; sampleIds: number[]; count: number }, event: LogEvent): void {
@@ -181,7 +218,14 @@ export function groupErrors(events: LogEvent[], options: AnalysisOptions = {}): 
     const message = String(event.message ?? event.raw ?? '').split(/\r?\n/, 1)[0];
     if (!message || !isErrorEvent(event)) continue;
     const { key, location } = errorFingerprint(event, message);
-    const group = groups.get(key) ?? { key, message, count: 0, sampleIds: [], location, trend: new Array(TREND_BUCKETS).fill(0) };
+    const group = groups.get(key) ?? {
+      key,
+      message,
+      count: 0,
+      sampleIds: [],
+      location,
+      trend: new Array(TREND_BUCKETS).fill(0),
+    };
     track(group, event);
     const bucket = bucketOf(event.timestampMs, from, to, TREND_BUCKETS);
     if (bucket >= 0) group.trend![bucket]++;
@@ -206,32 +250,78 @@ export function groupErrors(events: LogEvent[], options: AnalysisOptions = {}): 
     groups.delete(key);
   }
   return [...groups.values()]
-    .map(group => ({ ...group, pattern: patternText(group.message), isNew: firstSeenLate(group.first, from, to), query: templateQuery(normalizeMessage(group.message)) }))
-    .sort((a, b) => b.count - a.count || a.key.localeCompare(b.key)).slice(0, 100);
+    .map((group) => ({
+      ...group,
+      pattern: patternText(group.message),
+      isNew: firstSeenLate(group.first, from, to),
+      query: templateQuery(normalizeMessage(group.message)),
+    }))
+    .sort((a, b) => b.count - a.count || a.key.localeCompare(b.key))
+    .slice(0, 100);
 }
 
 // Groups every retained event (any level) by its normalized message template, with a
 // coarse volume trend per template, so recurring shapes stand out without requiring a
 // query - the same idea as Grafana's log-pattern view or Splunk's Patterns tab.
-export function findPatterns(events: LogEvent[], options: AnalysisOptions = {}, trendBuckets = TREND_BUCKETS, limit = 20): LogPattern[] {
+export function findPatterns(
+  events: LogEvent[],
+  options: AnalysisOptions = {},
+  trendBuckets = TREND_BUCKETS,
+  limit = 20,
+): LogPattern[] {
   const { from, to } = timeRange(events, options);
   const groups = new Map<string, LogPattern>();
   for (const event of events) {
     const message = String(event.message ?? event.raw ?? '').split(/\r?\n/, 1)[0];
     if (!message) continue;
     const key = normalizeMessage(message);
-    const pattern: LogPattern = groups.get(key) ?? { key, message, level: String(event.level ?? ''), count: 0, sampleIds: [], trend: new Array(trendBuckets).fill(0) };
+    const pattern: LogPattern = groups.get(key) ?? {
+      key,
+      message,
+      level: String(event.level ?? ''),
+      count: 0,
+      sampleIds: [],
+      trend: new Array(trendBuckets).fill(0),
+    };
     track(pattern, event);
     const bucket = bucketOf(event.timestampMs, from, to, trendBuckets);
     if (bucket >= 0) pattern.trend[bucket]++;
     groups.set(key, pattern);
   }
-  return [...groups.values()].sort((a, b) => b.count - a.count || a.key.localeCompare(b.key)).slice(0, limit)
-    .map(pattern => ({ ...pattern, pattern: patternText(pattern.message), isNew: firstSeenLate(pattern.first, from, to), query: templateQuery(pattern.key) }));
+  return [...groups.values()]
+    .sort((a, b) => b.count - a.count || a.key.localeCompare(b.key))
+    .slice(0, limit)
+    .map((pattern) => ({
+      ...pattern,
+      pattern: patternText(pattern.message),
+      isNew: firstSeenLate(pattern.first, from, to),
+      query: templateQuery(pattern.key),
+    }));
 }
 
-const FACET_PREFERRED = ['service', 'path', 'method', 'host', 'logger', 'environment', 'region', 'version', 'container', 'pod'];
-const FACET_SKIPPED = new Set(['level', 'message', 'timestamp', 'status', 'durationms', 'traceid', 'spanid', 'parentspanid', 'requestid']);
+const FACET_PREFERRED = [
+  'service',
+  'path',
+  'method',
+  'host',
+  'logger',
+  'environment',
+  'region',
+  'version',
+  'container',
+  'pod',
+];
+const FACET_SKIPPED = new Set([
+  'level',
+  'message',
+  'timestamp',
+  'status',
+  'durationms',
+  'traceid',
+  'spanid',
+  'parentspanid',
+  'requestid',
+]);
 
 // Fields worth breaking the results down by: present on enough events, with
 // a few repeated values rather than one value per event (ids) or prose.
@@ -253,7 +343,7 @@ function facetFields(events: LogEvent[]): string[] {
     }
   }
   const keys = [...seen.keys()];
-  const candidates = keys.filter(key => {
+  const candidates = keys.filter((key) => {
     const entry = seen.get(key)!;
     const canonical = canonicalField(key).toLowerCase();
     if (FACET_SKIPPED.has(canonical) || canonical.endsWith('.time') || entry.long) return false;
@@ -269,7 +359,9 @@ function facetFields(events: LogEvent[]): string[] {
   };
   const chosen: string[] = [];
   const canonicals = new Set<string>();
-  for (const key of candidates.sort((a, b) => rank(a) - rank(b) || seen.get(b)!.present - seen.get(a)!.present || a.localeCompare(b))) {
+  for (const key of candidates.sort(
+    (a, b) => rank(a) - rank(b) || seen.get(b)!.present - seen.get(a)!.present || a.localeCompare(b),
+  )) {
     if (canonicals.has(canonicalField(key))) continue;
     canonicals.add(canonicalField(key));
     chosen.push(key);
@@ -288,8 +380,15 @@ function topValues(events: LogEvent[]): FieldValues[] {
     sources.set(event.serverId, entry);
   }
   if (sources.size > 1) {
-    facets.push({ field: 'serverId', label: 'Source', total: [...sources.values()].reduce((sum, item) => sum + item.count, 0),
-      values: [...sources].sort((a, b) => b[1].count - a[1].count).slice(0, 5).map(([value, { label, count }]) => ({ value, label, count })) });
+    facets.push({
+      field: 'serverId',
+      label: 'Source',
+      total: [...sources.values()].reduce((sum, item) => sum + item.count, 0),
+      values: [...sources]
+        .sort((a, b) => b[1].count - a[1].count)
+        .slice(0, 5)
+        .map(([value, { label, count }]) => ({ value, label, count })),
+    });
   }
   for (const field of facetFields(events)) {
     const counts = new Map<string, number>();
@@ -301,7 +400,15 @@ function topValues(events: LogEvent[]): FieldValues[] {
       total++;
       counts.set(value, (counts.get(value) ?? 0) + 1);
     }
-    facets.push({ field, label: field, total, values: [...counts].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).slice(0, 5).map(([value, count]) => ({ value, count })) });
+    facets.push({
+      field,
+      label: field,
+      total,
+      values: [...counts]
+        .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+        .slice(0, 5)
+        .map(([value, count]) => ({ value, count })),
+    });
   }
   return facets;
 }
@@ -326,32 +433,53 @@ export function analyzeEvents(events: LogEvent[], options: AnalysisOptions = {})
     const latency = numericField(event, ['durationMs', 'duration']);
     if (error) errorCount++;
     if (latency !== undefined) latencies.push(latency);
-    if (code !== undefined) { const key = String(code); status.set(key, (status.get(key) ?? 0) + 1); }
+    if (code !== undefined) {
+      const key = String(code);
+      status.set(key, (status.get(key) ?? 0) + 1);
+    }
     if (event.serverId !== undefined) sources.add(event.serverId);
     const index = bucketOf(event.timestampMs, from, to, 30);
-    if (index < 0) { outside++; continue; }
+    if (index < 0) {
+      outside++;
+      continue;
+    }
     rate[index].count++;
     if (error) errors[index].count++;
     if (latency !== undefined) latencyBuckets[index].push(latency);
   }
   const latency = latencyBuckets.map((values, bucket) => {
-    values.sort((a, b) => a - b); const average = values.length ? values.reduce((a, b) => a + b, 0) / values.length : 0;
-    return { bucket, average, p95: values.length ? percentile(values, .95) : 0, count: values.length };
+    values.sort((a, b) => a - b);
+    const average = values.length ? values.reduce((a, b) => a + b, 0) / values.length : 0;
+    return { bucket, average, p95: values.length ? percentile(values, 0.95) : 0, count: values.length };
   });
   latencies.sort((a, b) => a - b);
-  const rateAnomalies = flagAnomalies(rate.map(item => item.count));
-  const errorAnomalies = flagAnomalies(errors.map(item => item.count));
-  const latencyAnomalies = flagAnomalies(latency.map(item => item.average));
+  const rateAnomalies = flagAnomalies(rate.map((item) => item.count));
+  const errorAnomalies = flagAnomalies(errors.map((item) => item.count));
+  const latencyAnomalies = flagAnomalies(latency.map((item) => item.average));
   return {
     rate: rate.map((item, index) => ({ ...item, anomalous: rateAnomalies[index] })),
     errors: errors.map((item, index) => ({ ...item, anomalous: errorAnomalies[index] })),
     latency: latency.map((item, index) => ({ ...item, anomalous: latencyAnomalies[index] })),
     statusCodes: [...status.entries()].sort((a, b) => b[1] - a[1]).map(([code, count]) => ({ code, count })),
-    errorGroups: groupErrors(events, { from, to }), patterns: findPatterns(events, { from, to }), range: { from, to },
+    errorGroups: groupErrors(events, { from, to }),
+    patterns: findPatterns(events, { from, to }),
+    range: { from, to },
     summary: {
-      events: events.length, errors: errorCount, sources: sources.size, outside,
-      ...(latencies.length ? { latency: { p50: percentile(latencies, .5), p95: percentile(latencies, .95), p99: percentile(latencies, .99), count: latencies.length } } : {})
+      events: events.length,
+      errors: errorCount,
+      sources: sources.size,
+      outside,
+      ...(latencies.length
+        ? {
+            latency: {
+              p50: percentile(latencies, 0.5),
+              p95: percentile(latencies, 0.95),
+              p99: percentile(latencies, 0.99),
+              count: latencies.length,
+            },
+          }
+        : {}),
     },
-    topValues: topValues(events)
+    topValues: topValues(events),
   };
 }

@@ -10,13 +10,23 @@ import { withVscode } from '../test/vscode-mock';
 type Listener = () => void;
 const event = <T = void>() => {
   const listeners = new Set<(value: T) => void>();
-  return { fire: (value: T) => { for (const listener of listeners) listener(value); },
-    on: (listener: (value: T) => void) => { listeners.add(listener); return { dispose: () => listeners.delete(listener) }; } };
+  return {
+    fire: (value: T) => {
+      for (const listener of listeners) listener(value);
+    },
+    on: (listener: (value: T) => void) => {
+      listeners.add(listener);
+      return { dispose: () => listeners.delete(listener) };
+    },
+  };
 };
 
 test('git changes follow the working tree of each repository', async () => {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'logline-git-')));
-  const git = (...args: string[]) => execFileSync('git', ['-C', root, '-c', 'user.name=Test', '-c', 'user.email=test@example.com', ...args], { encoding: 'utf8' });
+  const git = (...args: string[]) =>
+    execFileSync('git', ['-C', root, '-c', 'user.name=Test', '-c', 'user.email=test@example.com', ...args], {
+      encoding: 'utf8',
+    });
   try {
     git('init', '-q');
     writeFileSync(join(root, 'app.ts'), ['one', 'two', 'three', 'four'].join('\n') + '\n');
@@ -34,24 +44,38 @@ test('git changes follow the working tree of each repository', async () => {
         indexChanges: [] as { uri: unknown; status: number }[],
         workingTreeChanges: [{ uri: uri('app.ts'), status: 5 }],
         untrackedChanges: [{ uri: uri('new.ts'), status: 7 }],
-        onDidChange: (listener: Listener) => stateChanged.on(listener)
+        onDidChange: (listener: Listener) => stateChanged.on(listener),
       },
-      diffWith: async (ref: string, path: string) => git('diff', ref, '--', path)
+      diffWith: async (ref: string, path: string) => git('diff', ref, '--', path),
     };
     const saved = event<{ uri: { scheme: string; fsPath: string } }>();
-    const api = { repositories: [repository], onDidOpenRepository: () => ({ dispose() { } }), onDidCloseRepository: () => ({ dispose() { } }) };
-    const { GitChanges } = withVscode({
-      extensions: { getExtension: () => ({ isActive: true, exports: { getAPI: () => api } }) },
-      workspace: { onDidSaveTextDocument: (listener: (document: { uri: { scheme: string; fsPath: string } }) => void) => saved.on(listener) }
-    }, () => require('./git-changes') as typeof import('./git-changes'));
+    const api = {
+      repositories: [repository],
+      onDidOpenRepository: () => ({ dispose() {} }),
+      onDidCloseRepository: () => ({ dispose() {} }),
+    };
+    const { GitChanges } = withVscode(
+      {
+        extensions: { getExtension: () => ({ isActive: true, exports: { getAPI: () => api } }) },
+        workspace: {
+          onDidSaveTextDocument: (listener: (document: { uri: { scheme: string; fsPath: string } }) => void) =>
+            saved.on(listener),
+        },
+      },
+      () => require('./git-changes') as typeof import('./git-changes'),
+    );
 
     const changes = new ChangedLines();
-    let notified: Listener = () => { };
+    let notified: Listener = () => {};
     // The tracker's own timers are unref'd; this one keeps the process alive while waiting, and fails a wait that never ends.
-    const next = () => new Promise<void>((resolve, reject) => {
-      const guard = setTimeout(() => reject(new Error('GitChanges reported no change')), 10000);
-      notified = () => { clearTimeout(guard); resolve(); };
-    });
+    const next = () =>
+      new Promise<void>((resolve, reject) => {
+        const guard = setTimeout(() => reject(new Error('GitChanges reported no change')), 10000);
+        notified = () => {
+          clearTimeout(guard);
+          resolve();
+        };
+      });
     let ready = next();
     const tracker = new GitChanges(changes, () => notified());
     try {
@@ -88,6 +112,10 @@ test('git changes follow the working tree of each repository', async () => {
       await ready;
       assert.deepEqual(tracker.status(), { files: 0 });
       assert.equal(changes.fileCount, 0);
-    } finally { tracker.dispose(); }
-  } finally { rmSync(root, { recursive: true, force: true }); }
+    } finally {
+      tracker.dispose();
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });

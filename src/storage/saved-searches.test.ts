@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import { SavedSearches } from './saved-searches';
 
 test('saveSearch dedupes by query and server, caps history at 50, and falls back to the query as a name', () => {
-  const searches = new SavedSearches({ get: (_key, fallback) => fallback, update() { } });
+  const searches = new SavedSearches({ get: (_key, fallback) => fallback, update() {} });
   const first = searches.saveSearch(undefined, 'status:500', ['error'], 'api')!;
   assert.equal(first.name, 'status:500');
   const renamed = searches.saveSearch('Server errors', 'status:500', ['error'], 'api')!;
@@ -17,15 +17,18 @@ test('saveSearch dedupes by query and server, caps history at 50, and falls back
 });
 
 test('deleteSavedSearch removes only the matching entry', () => {
-  const searches = new SavedSearches({ get: (_key, fallback) => fallback, update() { } });
+  const searches = new SavedSearches({ get: (_key, fallback) => fallback, update() {} });
   const a = searches.saveSearch(undefined, 'a')!;
   searches.saveSearch(undefined, 'b');
   searches.deleteSavedSearch(a.id);
-  assert.deepEqual(searches.savedSearches().map(search => search.query), ['b']);
+  assert.deepEqual(
+    searches.savedSearches().map((search) => search.query),
+    ['b'],
+  );
 });
 
 test('saved searches retain distinct level filters, including level-only and empty selections', () => {
-  const searches = new SavedSearches({ get: (_key, fallback) => fallback, update() { } });
+  const searches = new SavedSearches({ get: (_key, fallback) => fallback, update() {} });
   searches.saveSearch('Errors', '', ['error']);
   searches.saveSearch('No levels', '', []);
   searches.saveSearch('Warnings', 'service:api', ['warn']);
@@ -36,8 +39,17 @@ test('saved searches retain distinct level filters, including level-only and emp
 });
 
 test('malformed persisted searches are ignored and loaded entries stay bounded', () => {
-  const values = [null, { id: 'broken', levels: 'error' }, { id: 'bad-name', name: {}, query: 'x' },
-    ...Array.from({ length: 60 }, (_, id) => ({ id: String(id), name: 'n'.repeat(100), query: 'q'.repeat(300), levels: ['error'] }))];
+  const values = [
+    null,
+    { id: 'broken', levels: 'error' },
+    { id: 'bad-name', name: {}, query: 'x' },
+    ...Array.from({ length: 60 }, (_, id) => ({
+      id: String(id),
+      name: 'n'.repeat(100),
+      query: 'q'.repeat(300),
+      levels: ['error'],
+    })),
+  ];
   const searches = new SavedSearches({ get: <T>() => values as T, update() {} });
   const saved = searches.savedSearches();
   assert.equal(saved.length, 50);
@@ -49,6 +61,6 @@ test('malformed persisted searches are ignored and loaded entries stay bounded',
 
 test('persisted searches retain the unclassified level', () => {
   const values = [{ id: '1', name: 'Plain text', query: '', levels: ['unclassified'], createdAt: 1, lastUsedAt: 1 }];
-  const searches = new SavedSearches({ get: <T>() => values as T, update() { } });
+  const searches = new SavedSearches({ get: <T>() => values as T, update() {} });
   assert.deepEqual(searches.savedSearches()[0].levels, ['unclassified']);
 });

@@ -31,7 +31,8 @@ export function createTooltips(scope: EventScope) {
   function adopt(element: HTMLElement): string | undefined {
     if (element.title) {
       element.dataset.tip = element.title;
-      if (!element.getAttribute('aria-label') && !element.textContent?.trim()) element.setAttribute('aria-label', element.title);
+      if (!element.getAttribute('aria-label') && !element.textContent?.trim())
+        element.setAttribute('aria-label', element.title);
       else element.setAttribute('aria-description', element.title);
       element.removeAttribute('title');
     }
@@ -56,7 +57,10 @@ export function createTooltips(scope: EventScope) {
     const box = tip.getBoundingClientRect();
     const margin = 6;
     const below = anchor.bottom + margin + box.height <= window.innerHeight;
-    const left = Math.max(margin, Math.min(anchor.left + anchor.width / 2 - box.width / 2, window.innerWidth - box.width - margin));
+    const left = Math.max(
+      margin,
+      Math.min(anchor.left + anchor.width / 2 - box.width / 2, window.innerWidth - box.width - margin),
+    );
     tip.style.left = `${left}px`;
     tip.style.top = `${below ? anchor.bottom + margin : Math.max(margin, anchor.top - margin - box.height)}px`;
   }
@@ -70,8 +74,8 @@ export function createTooltips(scope: EventScope) {
     timer = setTimeout(() => show(owner), Date.now() < warmUntil ? WARM_DELAY_MS : DELAY_MS);
   }
 
-  scope.listen(document, 'pointerover', event => schedule(event.target as HTMLElement));
-  scope.listen(document, 'focusin', event => {
+  scope.listen(document, 'pointerover', (event) => schedule(event.target as HTMLElement));
+  scope.listen(document, 'focusin', (event) => {
     const element = event.target as HTMLElement;
     if (element.matches?.(':focus-visible')) schedule(element);
   });

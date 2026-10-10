@@ -7,24 +7,53 @@ import { LogStore } from '../core/log-store';
 import { parseViewRequest, type ViewRequest } from '../protocol/messages';
 import { buildSnapshot, type SnapshotSources } from './snapshot';
 
-type SnapshotRequest = Extract<ViewRequest, { type: 'snapshot'; }>;
+type SnapshotRequest = Extract<ViewRequest, { type: 'snapshot' }>;
 
 function harness(maxRows = 5000) {
   const store = new LogStore(maxRows);
   const ingestion = new Ingestion(store, () => undefined);
   const add = (count: number, level = 'info') => {
-    for (let i = 0; i < count; i++) ingestion.accept(JSON.stringify({ level, message: `line ${ingestion.sequence + 1}`, f1: 1, f2: 2, f3: 3, f4: 4, f5: 5, f6: 6, f7: 7 }), 'stdout',
-      { serverId: 'api', server: 'API', sessionId: 'run' });
+    for (let i = 0; i < count; i++)
+      ingestion.accept(
+        JSON.stringify({
+          level,
+          message: `line ${ingestion.sequence + 1}`,
+          f1: 1,
+          f2: 2,
+          f3: 3,
+          f4: 4,
+          f5: 5,
+          f6: 6,
+          f7: 7,
+        }),
+        'stdout',
+        { serverId: 'api', server: 'API', sessionId: 'run' },
+      );
   };
   let linksVersion = 'links-1';
   const sources = (): SnapshotSources => ({
-    store, ingestion, config: { get: (_key, fallback) => fallback }, registry: new SessionRegistry(), state: new RuntimeState(() => undefined),
-    persistence: { persistDropped: 0 } as SnapshotSources['persistence'], searches: { savedSearches: () => [] } as unknown as SnapshotSources['searches'],
-    running: true, guideStatus: { version: '', unread: false }, agentAccess: { status: () => ({ active: false, sources: [] }) } as unknown as SnapshotSources['agentAccess'],
-    rowLinksVersion: linksVersion
+    store,
+    ingestion,
+    config: { get: (_key, fallback) => fallback },
+    registry: new SessionRegistry(),
+    state: new RuntimeState(() => undefined),
+    persistence: { persistDropped: 0 } as SnapshotSources['persistence'],
+    searches: { savedSearches: () => [] } as unknown as SnapshotSources['searches'],
+    running: true,
+    guideStatus: { version: '', unread: false },
+    agentAccess: { status: () => ({ active: false, sources: [] }) } as unknown as SnapshotSources['agentAccess'],
+    rowLinksVersion: linksVersion,
   });
-  const snapshot = (request: Omit<SnapshotRequest, 'type'> = {}) => buildSnapshot({ type: 'snapshot', ...request }, sources());
-  return { store, add, snapshot, setLinksVersion: (value: string) => { linksVersion = value; } };
+  const snapshot = (request: Omit<SnapshotRequest, 'type'> = {}) =>
+    buildSnapshot({ type: 'snapshot', ...request }, sources());
+  return {
+    store,
+    add,
+    snapshot,
+    setLinksVersion: (value: string) => {
+      linksVersion = value;
+    },
+  };
 }
 
 test('a refresh sends only the rows after the ones the view holds', () => {
@@ -36,7 +65,10 @@ test('a refresh sends only the rows after the ones the view holds', () => {
   const have = { last: full.events!.at(-1)!.id, count: 1000, version: full.rowsVersion! };
   h.add(3);
   const partial = h.snapshot({ have });
-  assert.deepEqual(partial.events!.map(event => event.id), [1501, 1502, 1503]);
+  assert.deepEqual(
+    partial.events!.map((event) => event.id),
+    [1501, 1502, 1503],
+  );
   assert.equal(partial.keep, 997, 'the three oldest held rows left the newest page');
   assert.equal(partial.keepFirst, 504);
   assert.equal(partial.matched, 1503);
@@ -69,7 +101,14 @@ test('a refresh sends the whole page when held rows cannot be continued', () => 
 test('snapshot requests accept only well-formed held rows', () => {
   const parse = (have: unknown) => (parseViewRequest({ type: 'snapshot', have }) as SnapshotRequest).have;
   assert.deepEqual(parse({ last: 5, count: 2, version: 'v', extra: true }), { last: 5, count: 2, version: 'v' });
-  for (const have of [undefined, null, 'x', { last: 1.5, count: 1, version: 'v' }, { last: 1, count: 0, version: 'v' }, { last: 1, count: 1 }]) {
+  for (const have of [
+    undefined,
+    null,
+    'x',
+    { last: 1.5, count: 1, version: 'v' },
+    { last: 1, count: 0, version: 'v' },
+    { last: 1, count: 1 },
+  ]) {
     assert.equal(parse(have), undefined);
   }
 });

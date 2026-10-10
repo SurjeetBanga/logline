@@ -12,5 +12,8 @@ export class Configuration implements Settings {
     this.cache.set(key, { raw, fallback, value });
     return value as T;
   }
-  refresh(): void { this.current = vscode.workspace.getConfiguration('logline'); this.cache.clear(); }
+  refresh(): void {
+    this.current = vscode.workspace.getConfiguration('logline');
+    this.cache.clear();
+  }
 }

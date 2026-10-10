@@ -22,7 +22,12 @@ export interface BridgeWindow {
 }
 
 /** One line from the MCP server: a tool call. */
-export interface BridgeRequest { token: string; tool: string; input: unknown; client?: string; }
+export interface BridgeRequest {
+  token: string;
+  tool: string;
+  input: unknown;
+  client?: string;
+}
 
 /** One line back: the tool's bounded JSON text, or why the call was refused. */
 export type BridgeResponse = { text: string } | { error: string };
@@ -30,21 +35,34 @@ export type BridgeResponse = { text: string } | { error: string };
 /** Largest request accepted on the bridge; tool inputs are small. */
 export const MAX_BRIDGE_REQUEST_BYTES = 1024 * 1024;
 
-export function loglineHome(home = homedir()): string { return join(home, '.logline'); }
-export function agentsDirectory(home = homedir()): string { return join(loglineHome(home), 'agents'); }
+export function loglineHome(home = homedir()): string {
+  return join(home, '.logline');
+}
+export function agentsDirectory(home = homedir()): string {
+  return join(loglineHome(home), 'agents');
+}
 /** The MCP server script agents run, kept at a path that survives extension updates. */
-export function mcpScriptPath(home = homedir()): string { return join(loglineHome(home), 'mcp.js'); }
+export function mcpScriptPath(home = homedir()): string {
+  return join(loglineHome(home), 'mcp.js');
+}
 
 /** A friendly name for an MCP client from the name it reports when it connects. */
 export function agentLabel(client: string): string {
   if (/claude/i.test(client)) return 'Claude Code';
   if (/codex/i.test(client)) return 'Codex';
-  const cleaned = client.replace(/[^\w .@/-]/g, '').trim().slice(0, 40);
+  const cleaned = client
+    .replace(/[^\w .@/-]/g, '')
+    .trim()
+    .slice(0, 40);
   return cleaned || 'an MCP client';
 }
 
 /** Whether a process is still running, so files of closed windows are ignored. */
 export function isAlive(pid: number): boolean {
-  try { process.kill(pid, 0); return true; }
-  catch (error) { return (error as NodeJS.ErrnoException).code === 'EPERM'; }
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === 'EPERM';
+  }
 }

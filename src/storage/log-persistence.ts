@@ -16,10 +16,18 @@ export class LogPersistence {
   persistedBytes: number | undefined;
   persistChain: Promise<void> | undefined;
   private writeErrorReported = false;
-  constructor(private readonly config: Settings, private readonly workspaceFolder: () => string | undefined,
-    private readonly warn: (message: string) => void) { }
-  invalidate(): void { this.persistedBytes = undefined; }
-  async dispose(): Promise<void> { this.flushPersist(); await this.persistChain; }
+  constructor(
+    private readonly config: Settings,
+    private readonly workspaceFolder: () => string | undefined,
+    private readonly warn: (message: string) => void,
+  ) {}
+  invalidate(): void {
+    this.persistedBytes = undefined;
+  }
+  async dispose(): Promise<void> {
+    this.flushPersist();
+    await this.persistChain;
+  }
   persist(line: string): void {
     if (!this.config?.get('persistLogs', false)) return;
     // Count estimated UTF-16 storage, including pending and in-flight batches.
@@ -27,14 +35,19 @@ export class LogPersistence {
     const bytes = (line.length + 1) * 2;
     if (this.queuedWriteBytes + bytes > PERSIST_QUEUE_BYTES) {
       if (this.persistDropped++ === 0) {
-        void this.warn('Logline disk writes are falling behind. New disk writes are being skipped while the 8 MiB queue is full; live capture continues. The Logs footer shows the skipped count.');
+        void this.warn(
+          'Logline disk writes are falling behind. New disk writes are being skipped while the 8 MiB queue is full; live capture continues. The Logs footer shows the skipped count.',
+        );
       }
       return;
     }
     this.queuedWriteBytes += bytes;
     this.pendingWriteBytes += bytes;
     this.pendingWrites.push(line);
-    if (this.pendingWrites.length >= PERSIST_MAX_BUFFER || this.pendingWriteBytes >= PERSIST_BATCH_BYTES) { this.flushPersist(); return; }
+    if (this.pendingWrites.length >= PERSIST_MAX_BUFFER || this.pendingWriteBytes >= PERSIST_BATCH_BYTES) {
+      this.flushPersist();
+      return;
+    }
     if (this.persistTimer) return;
     this.persistTimer = setTimeout(() => this.flushPersist(), PERSIST_FLUSH_MS);
     this.persistTimer.unref?.();
@@ -51,15 +64,19 @@ export class LogPersistence {
     this.pendingWriteBytes = 0;
     this.persistChain = (this.persistChain ?? Promise.resolve())
       .then(() => this.writeBatch(batch))
-      .catch(error => {
+      .catch((error) => {
         this.persistDropped += lines;
         this.persistedBytes = undefined;
         if (!this.writeErrorReported) {
           this.writeErrorReported = true;
-          this.warn(`Logline could not persist logs: ${String(error)}. Live capture continues; the Logs footer counts failed disk writes.`);
+          this.warn(
+            `Logline could not persist logs: ${String(error)}. Live capture continues; the Logs footer counts failed disk writes.`,
+          );
         }
       })
-      .finally(() => { this.queuedWriteBytes -= bytes; });
+      .finally(() => {
+        this.queuedWriteBytes -= bytes;
+      });
   }
 
   async writeBatch(batch: string): Promise<void> {
@@ -69,7 +86,7 @@ export class LogPersistence {
     // Persisted logs are unredacted; only this user may read them.
     await mkdir(path.dirname(file), { recursive: true, mode: 0o700 });
     // Persisted logs are unredacted; keep them out of version control.
-    await writeFile(path.join(path.dirname(file), '.gitignore'), '*\n', { flag: 'wx' }).catch(error => {
+    await writeFile(path.join(path.dirname(file), '.gitignore'), '*\n', { flag: 'wx' }).catch((error) => {
       if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
     });
     const max = this.config.get('maxDiskMb', 1000) * 1024 * 1024;

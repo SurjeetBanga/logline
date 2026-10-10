@@ -67,18 +67,30 @@ export class DebugCapture {
   /** Called for each event captured from a debug session, after it is stored. */
   onEvent?: (event: LogEvent, session: DebugSessionInfo) => void;
 
-  constructor(private readonly config: Settings, private readonly registry: SessionRegistry,
-    private readonly ingestion: Ingestion, private readonly state: RuntimeState,
-    private readonly terminalCaptureEnabled: () => boolean = () => false) { }
+  constructor(
+    private readonly config: Settings,
+    private readonly registry: SessionRegistry,
+    private readonly ingestion: Ingestion,
+    private readonly state: RuntimeState,
+    private readonly terminalCaptureEnabled: () => boolean = () => false,
+  ) {}
 
-  get active(): number { return [...this.captures.values()].filter(capture => capture.record && !capture.ended).length; }
+  get active(): number {
+    return [...this.captures.values()].filter((capture) => capture.record && !capture.ended).length;
+  }
 
   start(info: DebugSessionInfo): void {
     if (this.captures.has(info.id) || !this.config.get('captureDebugSessions', true)) return;
     // With a terminal console, program output also reaches the terminal,
     // where terminal capture would record every line a second time.
     if (info.console === 'integratedTerminal' && this.terminalCaptureEnabled()) return;
-    this.captures.set(info.id, { info, serverId: `debug:${info.name}`, label: `Debug · ${info.name}`, streams: new Map(), ended: false });
+    this.captures.set(info.id, {
+      info,
+      serverId: `debug:${info.name}`,
+      label: `Debug · ${info.name}`,
+      streams: new Map(),
+      ended: false,
+    });
   }
 
   output(sessionId: string, body: DapOutputBody | undefined): void {
@@ -104,7 +116,10 @@ export class DebugCapture {
     const capture = this.captures.get(sessionId);
     if (!capture) return;
     // A final line without a newline is complete once the session ends.
-    for (const stream of capture.streams.values()) { stream.reader.end(); stream.joiner?.end(); }
+    for (const stream of capture.streams.values()) {
+      stream.reader.end();
+      stream.joiner?.end();
+    }
     capture.ended = true;
     this.captures.delete(sessionId);
     const record = capture.record;
@@ -112,7 +127,8 @@ export class DebugCapture {
     record.endedAt = Date.now();
     record.captureComplete = true;
     record.exitCode = capture.exitCode;
-    record.status = capture.exitCode !== undefined && capture.exitCode !== 0 && record.status !== 'stopping' ? 'failed' : 'exited';
+    record.status =
+      capture.exitCode !== undefined && capture.exitCode !== 0 && record.status !== 'stopping' ? 'failed' : 'exited';
     record.exitReason = capture.exitCode === undefined ? 'debug session ended' : `exit code ${capture.exitCode}`;
     this.state.status = this.active ? 'Running' : `Debug session ended: ${capture.info.name}`;
     this.registry.pruneSessionRegistry();
@@ -127,7 +143,9 @@ export class DebugCapture {
     for (const capture of this.captures.values()) if (capture.serverId === serverId) this.requestStop(capture);
   }
 
-  dispose(): void { for (const id of [...this.captures.keys()]) this.end(id); }
+  dispose(): void {
+    for (const id of [...this.captures.keys()]) this.end(id);
+  }
 
   private requestStop(capture: Capture): void {
     if (!capture.record || capture.record.status !== 'running' || !capture.info.stop) return;
@@ -144,7 +162,12 @@ export class DebugCapture {
     const ingest = (line: string, truncated: boolean, location?: Location) => {
       const record = capture.record!;
       const event = this.ingestion.accept(line, name, {
-        serverId: capture.serverId, server: capture.label, sessionId: record.id, truncated, persist: true, location
+        serverId: capture.serverId,
+        server: capture.label,
+        sessionId: record.id,
+        truncated,
+        persist: true,
+        location,
       });
       if (!event) return;
       record.events++;
@@ -157,8 +180,9 @@ export class DebugCapture {
       reader: new LineReader((line, truncated) => {
         const location = created.location;
         created.location = created.current;
-        if (joiner) joiner.write(line, truncated, location); else ingest(line, truncated, location);
-      }, limit)
+        if (joiner) joiner.write(line, truncated, location);
+        else ingest(line, truncated, location);
+      }, limit),
     };
     capture.streams.set(name, created);
     return created;
@@ -169,9 +193,18 @@ export class DebugCapture {
   private createRecord(capture: Capture): SessionSummary {
     const { info } = capture;
     const record: SessionSummary = {
-      id: randomBytes(8).toString('hex'), serverId: capture.serverId, server: capture.label, status: 'running',
-      startedAt: Date.now(), events: 0, sourceKind: 'debug', owned: false, canStop: Boolean(info.stop), captureComplete: false,
-      command: info.command || `${info.name} (${info.type})`, cwd: info.cwd
+      id: randomBytes(8).toString('hex'),
+      serverId: capture.serverId,
+      server: capture.label,
+      status: 'running',
+      startedAt: Date.now(),
+      events: 0,
+      sourceKind: 'debug',
+      owned: false,
+      canStop: Boolean(info.stop),
+      captureComplete: false,
+      command: info.command || `${info.name} (${info.type})`,
+      cwd: info.cwd,
     };
     capture.record = record;
     this.registry.records.set(record.id, record);
@@ -187,7 +220,11 @@ export function locationOf(body: DapOutputBody): Location | undefined {
   const line = body.line;
   if (!file || typeof file !== 'string' || !Number.isSafeInteger(line) || line! < 1) return undefined;
   if (file.startsWith('file://')) {
-    try { file = decodeURIComponent(new URL(file).pathname).replace(/^\/([A-Za-z]:\/)/, '$1'); } catch { return undefined; }
+    try {
+      file = decodeURIComponent(new URL(file).pathname).replace(/^\/([A-Za-z]:\/)/, '$1');
+    } catch {
+      return undefined;
+    }
   } else if (/^[a-z][a-z\d+.-]+:/i.test(file) && !/^[A-Za-z]:[\\/]/.test(file)) return undefined;
   if (/[\x00-\x1f]/.test(file)) return undefined;
   const column = Number.isSafeInteger(body.column) && body.column! >= 1 ? body.column : undefined;

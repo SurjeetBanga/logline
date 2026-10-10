@@ -1,5 +1,12 @@
 import { fieldValue, mergeSortedEvents, sortEvents } from './event-order';
-import { analyzeEvents, findPatterns, groupErrors, type AnalysisResult, type ErrorGroup, type LogPattern } from './log-analysis';
+import {
+  analyzeEvents,
+  findPatterns,
+  groupErrors,
+  type AnalysisResult,
+  type ErrorGroup,
+  type LogPattern,
+} from './log-analysis';
 import { canonicalField, matchesQuery, parseQuery, usesChangedScope, type ParsedQuery } from './query';
 import type { LogEvent } from './types';
 import { completionTarget } from './query-completion';
@@ -13,12 +20,48 @@ interface Slot {
   bytes: number;
 }
 
-const pickFields = ({ id, timestamp, timestampMs, level, message, isJson, truncated, stream, fields,
-  serverId, server, sessionId, taskName, taskType, taskState, dependencies, dependencyState, exitReason, location, attachedTo }: LogEvent): LogEvent =>
-({
-  id, timestamp, timestampMs, level, message, isJson, truncated, stream, fields, serverId, server, sessionId,
-  taskName, taskType, taskState, dependencies, dependencyState, exitReason, ...(location ? { location } : {}),
-  ...(attachedTo !== undefined ? { attachedTo } : {})
+const pickFields = ({
+  id,
+  timestamp,
+  timestampMs,
+  level,
+  message,
+  isJson,
+  truncated,
+  stream,
+  fields,
+  serverId,
+  server,
+  sessionId,
+  taskName,
+  taskType,
+  taskState,
+  dependencies,
+  dependencyState,
+  exitReason,
+  location,
+  attachedTo,
+}: LogEvent): LogEvent => ({
+  id,
+  timestamp,
+  timestampMs,
+  level,
+  message,
+  isJson,
+  truncated,
+  stream,
+  fields,
+  serverId,
+  server,
+  sessionId,
+  taskName,
+  taskType,
+  taskState,
+  dependencies,
+  dependencyState,
+  exitReason,
+  ...(location ? { location } : {}),
+  ...(attachedTo !== undefined ? { attachedTo } : {}),
 });
 const identity = <T>(value: T): T => value;
 
@@ -33,7 +76,9 @@ class ServerIndex {
   fields = new Map<string, number>();
   // Session counts make agent sharing/status lookups constant time as well.
   sessions = new Map<string, number>();
-  push(item: Slot) { this.items.push(item); }
+  push(item: Slot) {
+    this.items.push(item);
+  }
   shift() {
     this.items[this.start] = undefined;
     this.start++;
@@ -42,7 +87,9 @@ class ServerIndex {
       this.start = 0;
     }
   }
-  get length() { return this.items.length - this.start; }
+  get length() {
+    return this.items.length - this.start;
+  }
   *iterateFromEnd(): Generator<Slot> {
     for (let i = this.items.length - 1; i >= this.start; i--) yield this.items[i]!;
   }
@@ -74,7 +121,10 @@ function upperBound(length: number, eventAt: (offset: number) => LogEvent, id: n
 }
 
 /** Answers `changed:true`, and changes its version whenever an answer could. */
-export interface ChangeScopeLike { readonly version: string; matches(event: LogEvent): boolean; }
+export interface ChangeScopeLike {
+  readonly version: string;
+  matches(event: LogEvent): boolean;
+}
 
 export interface Stats {
   total: number;
@@ -137,10 +187,34 @@ export interface PageResult extends Stats {
   matched: number;
 }
 
-export interface SuggestedValue { value: string; count: number; }
-const BUILTIN_FIELDS = ['id', 'level', 'message', 'timestamp', 'timestampMs', 'stream', 'server', 'serverId', 'sessionId',
-  'taskName', 'taskType', 'taskState', 'dependencies', 'dependencyState', 'exitReason', 'traceId', 'spanId', 'parentSpanId',
-  'requestId', 'status', 'statusCode', 'durationMs'];
+export interface SuggestedValue {
+  value: string;
+  count: number;
+}
+const BUILTIN_FIELDS = [
+  'id',
+  'level',
+  'message',
+  'timestamp',
+  'timestampMs',
+  'stream',
+  'server',
+  'serverId',
+  'sessionId',
+  'taskName',
+  'taskType',
+  'taskState',
+  'dependencies',
+  'dependencyState',
+  'exitReason',
+  'traceId',
+  'spanId',
+  'parentSpanId',
+  'requestId',
+  'status',
+  'statusCode',
+  'durationMs',
+];
 
 const fieldCollator = new Intl.Collator(undefined, { numeric: true });
 
@@ -161,7 +235,7 @@ export class LogStore {
   serverIndex!: Map<string, ServerIndex>;
   private pageCache: PageCache | undefined;
   private sortedCache?: SortedCache;
-  private suggestionCache?: { key: string; counts: Map<string, number>; };
+  private suggestionCache?: { key: string; counts: Map<string, number> };
   /** JSON error id to the id of the crash attached to it, while both are retained. */
   private attached!: Map<number, number>;
   /** Which events came from changed code; without one, none did. */
@@ -199,10 +273,15 @@ export class LogStore {
     for (const key in evicted.event.fields) {
       const count = this.fieldCounts.get(key)! - 1;
       if (count) this.fieldCounts.set(key, count);
-      else { this.fieldCounts.delete(key); this.columnCache.delete(key); this.fieldNamesCache = undefined; }
+      else {
+        this.fieldCounts.delete(key);
+        this.columnCache.delete(key);
+        this.fieldNamesCache = undefined;
+      }
       if (index) {
         const serverCount = index.fields.get(key)! - 1;
-        if (serverCount) index.fields.set(key, serverCount); else index.fields.delete(key);
+        if (serverCount) index.fields.set(key, serverCount);
+        else index.fields.delete(key);
       }
     }
     // Release cached event references immediately, even while the viewer is hidden.
@@ -233,7 +312,10 @@ export class LogStore {
     let index: ServerIndex | undefined;
     if (serverId !== undefined) {
       index = this.serverIndex.get(serverId);
-      if (!index) { index = new ServerIndex(); this.serverIndex.set(serverId, index); }
+      if (!index) {
+        index = new ServerIndex();
+        this.serverIndex.set(serverId, index);
+      }
       index.push(slot);
       const sessionKey = slot.event.sessionId ?? '*';
       index.sessions.set(sessionKey, (index.sessions.get(sessionKey) ?? 0) + 1);
@@ -241,11 +323,15 @@ export class LogStore {
     // A plain for-in avoids allocating a key array per ingested line, which at
     // flood rates is the difference between steady state and constant GC.
     const fields = slot.event.fields;
-    if (fields) for (const key in fields) {
-      if (!this.fieldCounts.has(key)) { this.columnCache.add(key); this.fieldNamesCache = undefined; }
-      this.fieldCounts.set(key, (this.fieldCounts.get(key) ?? 0) + 1);
-      if (index) index.fields.set(key, (index.fields.get(key) ?? 0) + 1);
-    }
+    if (fields)
+      for (const key in fields) {
+        if (!this.fieldCounts.has(key)) {
+          this.columnCache.add(key);
+          this.fieldNamesCache = undefined;
+        }
+        this.fieldCounts.set(key, (this.fieldCounts.get(key) ?? 0) + 1);
+        if (index) index.fields.set(key, (index.fields.get(key) ?? 0) + 1);
+      }
     if (slot.event.attachedTo !== undefined) this.attached.set(slot.event.attachedTo, slot.event.id);
     this.size++;
     this.bytes += slot.bytes;
@@ -267,7 +353,10 @@ export class LogStore {
     }
     for (const dependency of event.dependencies ?? []) bytes += 8 + dependency.length * 2;
     if (event.location) bytes += 48 + event.location.file.length * 2;
-    if (bytes > this.maxBytes) { this.discarded++; return; }
+    if (bytes > this.maxBytes) {
+      this.discarded++;
+      return;
+    }
     while (this.size && (this.size === this.maxRows || this.bytes + bytes > this.maxBytes)) this.evictOldest();
     this.insertSlot({ event, bytes });
   }
@@ -301,7 +390,7 @@ export class LogStore {
 
   // Neighbours are in capture order within the same process session, including
   // both streams and every level. Query filters intentionally do not apply.
-  context(id: number): { events: LogEvent[]; server?: string; missing: boolean; } {
+  context(id: number): { events: LogEvent[]; server?: string; missing: boolean } {
     const anchor = this.find(id);
     if (!anchor) return { events: [], missing: true };
     const earlier: LogEvent[] = [];
@@ -310,7 +399,8 @@ export class LogStore {
     if (anchor.sessionId !== undefined) {
       const index = anchor.serverId === undefined ? undefined : this.serverIndex.get(anchor.serverId);
       const length = index?.length ?? this.size;
-      const eventAt = index ? (offset: number) => index.items[index.start + offset]!.event
+      const eventAt = index
+        ? (offset: number) => index.items[index.start + offset]!.event
         : (offset: number) => this.slots[(this.head + offset) % this.maxRows]!.event;
       const after = upperBound(length, eventAt, id);
       // Seek to the anchor and stop as soon as each side has enough context.
@@ -339,13 +429,29 @@ export class LogStore {
     this.discarded = discarded;
     this.truncated = truncated;
     for (const slot of kept) {
-      if (slot.bytes > this.maxBytes) { this.discarded++; continue; }
+      if (slot.bytes > this.maxBytes) {
+        this.discarded++;
+        continue;
+      }
       while (this.size && (this.size === this.maxRows || this.bytes + slot.bytes > this.maxBytes)) this.evictOldest();
       this.insertSlot(slot);
     }
   }
 
-  page({ query = '', serverId, levels, page = 0, before = Infinity, sort, sortDirection = 'asc', sessionId, sessionIds, from, to, full = false }: PageOptions = {}): PageResult {
+  page({
+    query = '',
+    serverId,
+    levels,
+    page = 0,
+    before = Infinity,
+    sort,
+    sortDirection = 'asc',
+    sessionId,
+    sessionIds,
+    from,
+    to,
+    full = false,
+  }: PageOptions = {}): PageResult {
     if (!Number.isFinite(before)) before = Infinity;
     // `levels` omitted means no filter (every level shown, the default —
     // matches the fast path below); an empty array is a deliberate "nothing
@@ -354,41 +460,84 @@ export class LogStore {
     const levelMatches = (eventLevel: string) => !levelSet || levelSet.has(eventLevel);
     query = query.slice(0, 256);
     const parsedQuery: ParsedQuery = parseQuery(query);
-    const invalidQuery = parsedQuery.flat().find(token => token.regexError)?.regexError;
+    const invalidQuery = parsedQuery.flat().find((token) => token.regexError)?.regexError;
     if (invalidQuery) throw new Error(invalidQuery);
-    const canUseIndex = !sort && sessionId === undefined && sessionIds === undefined
-      && from === undefined && to === undefined && !levelSet;
+    const canUseIndex =
+      !sort &&
+      sessionId === undefined &&
+      sessionIds === undefined &&
+      from === undefined &&
+      to === undefined &&
+      !levelSet;
     if (!parsedQuery.length && canUseIndex) {
       if (serverId === undefined) {
-        return this.indexedPage(this.size, offset => this.slots[(this.head + offset) % this.maxRows]!.event, page, before, full ? identity : pickFields);
+        return this.indexedPage(
+          this.size,
+          (offset) => this.slots[(this.head + offset) % this.maxRows]!.event,
+          page,
+          before,
+          full ? identity : pickFields,
+        );
       }
       const wantedServer = serverId.toLowerCase();
-      const keys = [...this.serverIndex.keys()].filter(key => key.toLowerCase() === wantedServer);
+      const keys = [...this.serverIndex.keys()].filter((key) => key.toLowerCase() === wantedServer);
       // The filter is case-insensitive: multiple differently cased IDs must
       // use the general path so no matching server is silently omitted.
       if (keys.length <= 1) {
         const index = this.serverIndex.get(keys[0]);
-        return this.indexedPage(index?.length ?? 0, offset => index!.items[index!.start + offset]!.event, page, before, full ? identity : pickFields);
+        return this.indexedPage(
+          index?.length ?? 0,
+          (offset) => index!.items[index!.start + offset]!.event,
+          page,
+          before,
+          full ? identity : pickFields,
+        );
       }
     }
     const soleToken = parsedQuery.length === 1 && parsedQuery[0].length === 1 ? parsedQuery[0][0] : undefined;
-    if (serverId === undefined && soleToken?.field === 'serverId' && !soleToken.negate
-      && !soleToken.compare && soleToken.regex === undefined && soleToken.value && canUseIndex) {
+    if (
+      serverId === undefined &&
+      soleToken?.field === 'serverId' &&
+      !soleToken.negate &&
+      !soleToken.compare &&
+      soleToken.regex === undefined &&
+      soleToken.value &&
+      canUseIndex
+    ) {
       const key = findServerKey(this.serverIndex, soleToken.value);
       const index = key !== undefined ? this.serverIndex.get(key) : undefined;
-      if (index) return this.indexedPage(index.length, offset => index.items[index.start + offset]!.event, page, before, full ? identity : pickFields);
+      if (index)
+        return this.indexedPage(
+          index.length,
+          (offset) => index.items[index.start + offset]!.event,
+          page,
+          before,
+          full ? identity : pickFields,
+        );
     }
     // A `last:5m` window slides with the wall clock, so its match set cannot be
     // carried between refreshes; every other filter is a pure function of the
     // retained events and is safe to keep.
-    const relative = parsedQuery.some(group => group.some(token => token.canonical === 'last'));
+    const relative = parsedQuery.some((group) => group.some((token) => token.canonical === 'last'));
     // A `changed:` term answers differently once the diff changes, so its
     // version is part of what the cached matches were computed for.
-    const key = JSON.stringify([query, serverId?.toLowerCase() ?? null, levels ? [...levels].sort() : null,
-      sessionId ?? null, sessionIds ? [...sessionIds].sort() : null, from ?? null, to ?? null,
-      Number.isFinite(before) ? before : null, usesChangedScope(parsedQuery) ? this.changeScope?.version ?? null : null]);
-    const { matches, start } = this.matchingEvents(key, !relative,
-      this.filterFor({ before, sessionId, sessionIds, from, to, serverId, levelMatches, parsedQuery }), serverId);
+    const key = JSON.stringify([
+      query,
+      serverId?.toLowerCase() ?? null,
+      levels ? [...levels].sort() : null,
+      sessionId ?? null,
+      sessionIds ? [...sessionIds].sort() : null,
+      from ?? null,
+      to ?? null,
+      Number.isFinite(before) ? before : null,
+      usesChangedScope(parsedQuery) ? (this.changeScope?.version ?? null) : null,
+    ]);
+    const { matches, start } = this.matchingEvents(
+      key,
+      !relative,
+      this.filterFor({ before, sessionId, sessionIds, from, to, serverId, levelMatches, parsedQuery }),
+      serverId,
+    );
     const matched = matches.length - start;
     if (sort) {
       const sortKey = JSON.stringify([key, sort, sortDirection]);
@@ -398,20 +547,24 @@ export class LogStore {
         // Evictions only ever remove the oldest ids, and new matches only ever
         // append to the end of `matches`, so both ends are cheap to reconcile.
         const oldestId = this.size ? this.slots[this.head]!.event.id : Infinity;
-        const retained = cached.stale ? cached.events.filter(event => event.id >= oldestId) : cached.events;
+        const retained = cached.stale ? cached.events.filter((event) => event.id >= oldestId) : cached.events;
         let first = matches.length;
         while (first > start && matches[first - 1]!.id > cached.lastId) first--;
-        sorted = first < matches.length
-          ? mergeSortedEvents(retained, matches.slice(first) as LogEvent[], sort, sortDirection)
-          : retained;
+        sorted =
+          first < matches.length
+            ? mergeSortedEvents(retained, matches.slice(first) as LogEvent[], sort, sortDirection)
+            : retained;
       } else sorted = sortEvents(matches.slice(start) as LogEvent[], sort, sortDirection);
       const lastId = matches.length > start ? matches[matches.length - 1]!.id : -1;
       this.sortedCache = relative ? undefined : { key: sortKey, events: sorted, lastId, stale: 0 };
       const sortedPages = Math.max(1, Math.ceil(sorted.length / PAGE_SIZE));
       page = Math.max(0, Math.min(sortedPages - 1, Number.isInteger(page) ? page : 0));
       return {
-        events: sorted.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE).map(full ? identity : pickFields), page, pages: sortedPages,
-        matched: sorted.length, ...this.stats()
+        events: sorted.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE).map(full ? identity : pickFields),
+        page,
+        pages: sortedPages,
+        matched: sorted.length,
+        ...this.stats(),
       };
     }
     const pages = Math.max(1, Math.ceil(matched / PAGE_SIZE));
@@ -419,20 +572,33 @@ export class LogStore {
     // Each page is chronological; page zero is the newest page. `matches` is
     // oldest-first, so page N counts back from its end.
     const end = matched - page * PAGE_SIZE;
-    const events = (matches.slice(start + Math.max(0, end - PAGE_SIZE), start + end) as LogEvent[]).map(full ? identity : pickFields);
+    const events = (matches.slice(start + Math.max(0, end - PAGE_SIZE), start + end) as LogEvent[]).map(
+      full ? identity : pickFields,
+    );
     return { events, page, pages, matched, ...this.stats() };
   }
 
   /** Read a bounded newest-first page without building a complete match array. */
-  reversePage({ query = '', serverId, levels, before = Infinity, sessionId, sessionIds, from, to }: PageOptions = {}, limit = 1000): { events: LogEvent[]; matched: number; hasMore: boolean } {
+  reversePage(
+    { query = '', serverId, levels, before = Infinity, sessionId, sessionIds, from, to }: PageOptions = {},
+    limit = 1000,
+  ): { events: LogEvent[]; matched: number; hasMore: boolean } {
     if (!Number.isFinite(before)) before = Infinity;
     const levelSet = levels ? new Set(levels) : undefined;
     query = query.slice(0, 256);
     const parsedQuery: ParsedQuery = parseQuery(query);
-    const invalidQuery = parsedQuery.flat().find(token => token.regexError)?.regexError;
+    const invalidQuery = parsedQuery.flat().find((token) => token.regexError)?.regexError;
     if (invalidQuery) throw new Error(invalidQuery);
-    const test = this.filterFor({ before, sessionId, sessionIds, from, to, serverId,
-      levelMatches: (level: string) => !levelSet || levelSet.has(level), parsedQuery });
+    const test = this.filterFor({
+      before,
+      sessionId,
+      sessionIds,
+      from,
+      to,
+      serverId,
+      levelMatches: (level: string) => !levelSet || levelSet.has(level),
+      parsedQuery,
+    });
     const events: LogEvent[] = [];
     let matched = 0;
     const bounded = Math.max(1, Math.min(1000, Math.floor(limit)));
@@ -446,8 +612,13 @@ export class LogStore {
 
   // Unfiltered pages only read their own rows. A frozen boundary is found
   // by binary search, so browsing history does not allocate a full match set.
-  private indexedPage(length: number, eventAt: (offset: number) => LogEvent, page: number, before: number,
-    project: (event: LogEvent) => LogEvent = pickFields): PageResult {
+  private indexedPage(
+    length: number,
+    eventAt: (offset: number) => LogEvent,
+    page: number,
+    before: number,
+    project: (event: LogEvent) => LogEvent = pickFields,
+  ): PageResult {
     const matched = before === Infinity ? length : upperBound(length, eventAt, before);
     const pages = Math.max(1, Math.ceil(matched / PAGE_SIZE));
     page = Math.max(0, Math.min(pages - 1, Number.isInteger(page) ? page : 0));
@@ -459,40 +630,69 @@ export class LogStore {
 
   // Builds the row predicate once per query rather than re-deriving the
   // lowercased server id and level lookup for every event in the ring.
-  private filterFor({ before, sessionId, sessionIds, from, to, serverId, levelMatches, parsedQuery }: {
-    before: number; sessionId?: string; sessionIds?: readonly string[]; from?: number; to?: number; serverId?: string;
-    levelMatches: (level: string) => boolean; parsedQuery: ParsedQuery;
+  private filterFor({
+    before,
+    sessionId,
+    sessionIds,
+    from,
+    to,
+    serverId,
+    levelMatches,
+    parsedQuery,
+  }: {
+    before: number;
+    sessionId?: string;
+    sessionIds?: readonly string[];
+    from?: number;
+    to?: number;
+    serverId?: string;
+    levelMatches: (level: string) => boolean;
+    parsedQuery: ParsedQuery;
   }): (event: LogEvent) => boolean {
     const wantedServer = serverId?.toLowerCase();
     const wantedSessions = sessionIds === undefined ? undefined : new Set(sessionIds);
-    const queryNow = parsedQuery.some(group => group.some(token => token.canonical === 'last')) ? Date.now() : undefined;
+    const queryNow = parsedQuery.some((group) => group.some((token) => token.canonical === 'last'))
+      ? Date.now()
+      : undefined;
     const scope = this.changeScope;
     const changed = scope && ((event: LogEvent) => scope.matches(event));
-    return event => event.id <= before
-      && (sessionId === undefined || event.sessionId === sessionId)
-      && (wantedSessions === undefined || wantedSessions.has(event.sessionId ?? '*'))
-      && (from === undefined || (event.timestampMs ?? 0) >= from)
-      && (to === undefined || (event.timestampMs ?? 0) <= to)
-      && (wantedServer === undefined || event.serverId?.toLowerCase() === wantedServer)
-      && levelMatches(event.level) && matchesQuery(event, parsedQuery, queryNow, changed);
+    return (event) =>
+      event.id <= before &&
+      (sessionId === undefined || event.sessionId === sessionId) &&
+      (wantedSessions === undefined || wantedSessions.has(event.sessionId ?? '*')) &&
+      (from === undefined || (event.timestampMs ?? 0) >= from) &&
+      (to === undefined || (event.timestampMs ?? 0) <= to) &&
+      (wantedServer === undefined || event.serverId?.toLowerCase() === wantedServer) &&
+      levelMatches(event.level) &&
+      matchesQuery(event, parsedQuery, queryNow, changed);
   }
 
   // The retained set only ever changes at its two ends: new events are appended
   // and the oldest are evicted. So when the same filter is re-run — which is
   // what every refresh tick does while logs stream — only the events that
   // arrived since the last run need testing, instead of the whole ring.
-  private matchingEvents(key: string, cacheable: boolean, test: (event: LogEvent) => boolean, serverId?: string): Pick<PageCache, 'matches' | 'start'> {
+  private matchingEvents(
+    key: string,
+    cacheable: boolean,
+    test: (event: LogEvent) => boolean,
+    serverId?: string,
+  ): Pick<PageCache, 'matches' | 'start'> {
     const newestId = this.size ? this.slots[(this.head + this.size - 1) % this.maxRows]!.event.id : -1;
     const cache = cacheable && this.pageCache?.key === key ? this.pageCache : undefined;
     if (cache) {
       const oldestId = this.size ? this.slots[this.head]!.event.id : Infinity;
-      while (cache.start < cache.matches.length && cache.matches[cache.start]!.id < oldestId) cache.matches[cache.start++] = undefined;
+      while (cache.start < cache.matches.length && cache.matches[cache.start]!.id < oldestId)
+        cache.matches[cache.start++] = undefined;
       if (cache.start > 1024 && cache.start * 2 > cache.matches.length) {
         cache.matches = cache.matches.slice(cache.start);
         cache.start = 0;
       }
       let fresh = 0;
-      while (fresh < this.size && this.slots[(this.head + this.size - 1 - fresh) % this.maxRows]!.event.id > cache.lastId) fresh++;
+      while (
+        fresh < this.size &&
+        this.slots[(this.head + this.size - 1 - fresh) % this.maxRows]!.event.id > cache.lastId
+      )
+        fresh++;
       for (let i = this.size - fresh; i < this.size; i++) {
         const event = this.slots[(this.head + i) % this.maxRows]!.event;
         if (test(event)) cache.matches.push(event);
@@ -511,27 +711,47 @@ export class LogStore {
   // boundary in one message; exports are user initiated and intentionally
   // operate on the bounded retained set.
   all(options: PageOptions = {}): LogEvent[] {
-    const events = this.scan(options).map(event => ({ ...event, fields: event.fields ? { ...event.fields } : event.fields }));
+    const events = this.scan(options).map((event) => ({
+      ...event,
+      fields: event.fields ? { ...event.fields } : event.fields,
+    }));
     return options.sort ? sortEvents(events, options.sort, options.sortDirection ?? 'asc') : events;
   }
 
   /** Fixed capture-order snapshot for streaming exports. Callers must not mutate events. */
-  exportEvents(options: PageOptions = {}): readonly LogEvent[] { return this.scan(options); }
+  exportEvents(options: PageOptions = {}): readonly LogEvent[] {
+    return this.scan(options);
+  }
 
   // Chronological references to the matching retained events. all() copies these
   // for export callers that hand events on to redaction and serialization; the
   // in-process readers below only ever read them, and cloning 100k events (and
   // their field maps) just to count them was most of what made analysis stall.
-  private scan({ query = '', serverId, levels, before = Infinity, sessionId, sessionIds, from, to }: PageOptions = {}): LogEvent[] {
+  private scan({
+    query = '',
+    serverId,
+    levels,
+    before = Infinity,
+    sessionId,
+    sessionIds,
+    from,
+    to,
+  }: PageOptions = {}): LogEvent[] {
     if (!Number.isFinite(before)) before = Infinity;
     const levelSet = levels ? new Set(levels) : undefined;
     query = query.slice(0, 256);
     const parsedQuery: ParsedQuery = parseQuery(query);
-    const invalidQuery = parsedQuery.flat().find(token => token.regexError)?.regexError;
+    const invalidQuery = parsedQuery.flat().find((token) => token.regexError)?.regexError;
     if (invalidQuery) throw new Error(invalidQuery);
     const test = this.filterFor({
-      before, sessionId, sessionIds, from, to, serverId,
-      levelMatches: (level: string) => !levelSet || levelSet.has(level), parsedQuery
+      before,
+      sessionId,
+      sessionIds,
+      from,
+      to,
+      serverId,
+      levelMatches: (level: string) => !levelSet || levelSet.has(level),
+      parsedQuery,
     });
     const events: LogEvent[] = [];
     for (const event of this.iterateEvents(serverId)) if (test(event)) events.push(event);
@@ -547,22 +767,23 @@ export class LogStore {
       return;
     }
     const wanted = serverId.toLowerCase();
-    const indexes = [...this.serverIndex]
-      .filter(([key]) => key.toLowerCase() === wanted)
-      .map(([, index]) => index);
+    const indexes = [...this.serverIndex].filter(([key]) => key.toLowerCase() === wanted).map(([, index]) => index);
     if (indexes.length === 0) return;
     if (indexes.length === 1) {
       const index = indexes[0];
       for (let i = index.start; i < index.items.length; i++) yield index.items[i]!.event;
       return;
     }
-    const offsets = indexes.map(index => index.start);
+    const offsets = indexes.map((index) => index.start);
     while (true) {
       let selected = -1;
       let selectedId = Infinity;
       for (let i = 0; i < indexes.length; i++) {
         const slot = indexes[i].items[offsets[i]];
-        if (slot && slot.event.id < selectedId) { selected = i; selectedId = slot.event.id; }
+        if (slot && slot.event.id < selectedId) {
+          selected = i;
+          selectedId = slot.event.id;
+        }
       }
       if (selected < 0) return;
       yield indexes[selected].items[offsets[selected]++]!.event;
@@ -575,17 +796,18 @@ export class LogStore {
       return;
     }
     const wanted = serverId.toLowerCase();
-    const indexes = [...this.serverIndex]
-      .filter(([key]) => key.toLowerCase() === wanted)
-      .map(([, index]) => index);
-    const offsets = indexes.map(index => index.items.length - 1);
+    const indexes = [...this.serverIndex].filter(([key]) => key.toLowerCase() === wanted).map(([, index]) => index);
+    const offsets = indexes.map((index) => index.items.length - 1);
     while (true) {
       let selected = -1;
       let selectedId = -1;
       for (let i = 0; i < indexes.length; i++) {
         const index = indexes[i];
         const slot = offsets[i] >= index.start ? index.items[offsets[i]] : undefined;
-        if (slot && slot.event.id > selectedId) { selected = i; selectedId = slot.event.id; }
+        if (slot && slot.event.id > selectedId) {
+          selected = i;
+          selectedId = slot.event.id;
+        }
       }
       if (selected < 0) return;
       yield indexes[selected].items[offsets[selected]--]!.event;
@@ -598,7 +820,7 @@ export class LogStore {
   }
 
   /** Field names and the most common values for the current search input. */
-  fieldSuggestions(input = '', serverId?: string): { fields: string[]; values: SuggestedValue[]; } {
+  fieldSuggestions(input = '', serverId?: string): { fields: string[]; values: SuggestedValue[] } {
     const fields = new Set(BUILTIN_FIELDS);
     const values = new Map<string, number>();
     const target = completionTarget(input);
@@ -616,24 +838,34 @@ export class LogStore {
       const key = JSON.stringify([target.field, wantedServer ?? null, this.total, this.discarded]);
       let counts = this.suggestionCache?.key === key ? this.suggestionCache.counts : undefined;
       if (!counts) {
-        const tally = counts = new Map<string, number>();
+        const tally = (counts = new Map<string, number>());
         const count = (event: LogEvent) => {
           const value = fieldValue(event, target.field!);
-          if (value !== undefined) { const text = String(value); tally.set(text, (tally.get(text) ?? 0) + 1); }
+          if (value !== undefined) {
+            const text = String(value);
+            tally.set(text, (tally.get(text) ?? 0) + 1);
+          }
         };
         if (wantedServer === undefined) {
           for (let i = 0; i < this.size; i++) count(this.slots[(this.head + i) % this.maxRows]!.event);
-        } else for (const [id, index] of this.serverIndex) {
-          if (id.toLowerCase() !== wantedServer) continue;
-          for (let i = index.start; i < index.items.length; i++) count(index.items[i]!.event);
-        }
+        } else
+          for (const [id, index] of this.serverIndex) {
+            if (id.toLowerCase() !== wantedServer) continue;
+            for (let i = index.start; i < index.items.length; i++) count(index.items[i]!.event);
+          }
         this.suggestionCache = { key, counts };
       }
       for (const [text, total] of counts) if (text.toLowerCase().startsWith(valuePrefix)) values.set(text, total);
     }
     return {
-      fields: [...fields].filter(field => field.toLowerCase().startsWith(fieldPrefix)).sort().slice(0, 40),
-      values: [...values.entries()].sort((a, b) => b[1] - a[1]).slice(0, 20).map(([value, count]) => ({ value, count }))
+      fields: [...fields]
+        .filter((field) => field.toLowerCase().startsWith(fieldPrefix))
+        .sort()
+        .slice(0, 40),
+      values: [...values.entries()]
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 20)
+        .map(([value, count]) => ({ value, count })),
     };
   }
 
@@ -649,10 +881,14 @@ export class LogStore {
     return analyzeEvents(this.filtered(options), options);
   }
 
-  serverIds(): string[] { return [...this.serverIndex.keys()]; }
+  serverIds(): string[] {
+    return [...this.serverIndex.keys()];
+  }
 
   /** Exact source count for agent sharing; unlike viewer selection this is case-sensitive. */
-  serverEventCount(serverId: string): number { return this.serverIndex.get(serverId)?.length ?? 0; }
+  serverEventCount(serverId: string): number {
+    return this.serverIndex.get(serverId)?.length ?? 0;
+  }
 
   sessionEventCount(serverId: string, sessionId: string): number {
     const index = this.serverIndex.get(serverId);
@@ -661,7 +897,10 @@ export class LogStore {
 
   sessionIds(serverId?: string): string[] {
     const ids = new Set<string>();
-    const indexes = serverId === undefined ? [...this.serverIndex.values()] : [this.serverIndex.get(serverId)].filter((index): index is ServerIndex => Boolean(index));
+    const indexes =
+      serverId === undefined
+        ? [...this.serverIndex.values()]
+        : [this.serverIndex.get(serverId)].filter((index): index is ServerIndex => Boolean(index));
     for (const index of indexes) for (const id of index.sessions.keys()) ids.add(id);
     return [...ids];
   }
@@ -674,41 +913,81 @@ export class LogStore {
 
   stats(): Stats {
     return {
-      total: this.total, retained: this.size, discarded: this.discarded,
-      truncated: this.truncated, bytes: this.bytes, maxBytes: this.maxBytes, maxRows: this.maxRows
+      total: this.total,
+      retained: this.size,
+      discarded: this.discarded,
+      truncated: this.truncated,
+      bytes: this.bytes,
+      maxBytes: this.maxBytes,
+      maxRows: this.maxRows,
     };
   }
 
   private *columnKeys(serverId?: string): Iterable<string> {
-    if (serverId === undefined) { yield* this.columnCache; return; }
+    if (serverId === undefined) {
+      yield* this.columnCache;
+      return;
+    }
     const wanted = serverId.toLowerCase();
     for (const [key, index] of this.serverIndex) if (key.toLowerCase() === wanted) yield* index.fields.keys();
   }
 
   columnFields(serverId?: string): string[] {
     const fields = new Set<string>();
-    for (const field of this.columnKeys(serverId)) { fields.add(field); if (fields.size === 200) break; }
+    for (const field of this.columnKeys(serverId)) {
+      fields.add(field);
+      if (fields.size === 200) break;
+    }
     return [...fields].sort(fieldCollator.compare);
   }
 
   columns(serverId?: string): string[] {
     const known = this.columnFields(serverId);
-    const preferred = ['service', 'logger', 'requestId', 'traceId', 'method', 'path', 'status', 'statusCode', 'durationMs', 'host', 'environment'];
+    const preferred = [
+      'service',
+      'logger',
+      'requestId',
+      'traceId',
+      'method',
+      'path',
+      'status',
+      'statusCode',
+      'durationMs',
+      'host',
+      'environment',
+    ];
     const chosen: string[] = [];
     const groups = new Set<string>();
     for (const field of preferred) {
-      const key = known.includes(field) ? field : known.find(key => canonicalField(key) === canonicalField(field));
-      if (key && !groups.has(canonicalField(key))) { chosen.push(key); groups.add(canonicalField(key)); }
+      const key = known.includes(field) ? field : known.find((key) => canonicalField(key) === canonicalField(field));
+      if (key && !groups.has(canonicalField(key))) {
+        chosen.push(key);
+        groups.add(canonicalField(key));
+      }
     }
     for (const key of known) {
       if (chosen.length >= 6) break;
       const canonical = canonicalField(key);
-      if (groups.has(canonical) || ['level', 'message'].includes(canonical)
-        || ['@timestamp', 'ecs.version', 'severityNumber', 'SeverityNumber', 'timeUnixNano', 'observedTimeUnixNano', 'body.stringValue', 'Body.stringValue'].includes(key)) continue;
+      if (
+        groups.has(canonical) ||
+        ['level', 'message'].includes(canonical) ||
+        [
+          '@timestamp',
+          'ecs.version',
+          'severityNumber',
+          'SeverityNumber',
+          'timeUnixNano',
+          'observedTimeUnixNano',
+          'body.stringValue',
+          'Body.stringValue',
+        ].includes(key)
+      )
+        continue;
       // Bare aliases of nested fields remain searchable, but need not duplicate
       // their dotted column in the small automatic selection.
-      if (!key.includes('.') && known.some(other => other.endsWith('.' + key))) continue;
-      chosen.push(key); groups.add(canonical);
+      if (!key.includes('.') && known.some((other) => other.endsWith('.' + key))) continue;
+      chosen.push(key);
+      groups.add(canonical);
     }
     return chosen.slice(0, 6);
   }
@@ -716,7 +995,9 @@ export class LogStore {
   /** Every field observed in retained payloads, for sort and autocomplete controls. */
   fieldNames(): string[] {
     if (!this.fieldNamesCache) {
-      const extra = [...this.columnCache].filter(field => !BUILTIN_FIELDS.includes(field)).sort(fieldCollator.compare);
+      const extra = [...this.columnCache]
+        .filter((field) => !BUILTIN_FIELDS.includes(field))
+        .sort(fieldCollator.compare);
       this.fieldNamesCache = [...BUILTIN_FIELDS, ...extra.slice(0, 200)].sort(fieldCollator.compare);
     }
     return this.fieldNamesCache.slice();

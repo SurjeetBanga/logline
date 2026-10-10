@@ -10,21 +10,49 @@ import { RE2 } from 're2-wasm';
 const FIELD_GROUPS: string[][] = [
   ['level', 'severity', 'log.level', 'severityText', 'SeverityText'],
   ['message', 'msg', 'body', 'Body'],
-  ['status', 'statusCode', 'status_code', 'res.statusCode', 'http.response.status_code', 'attributes.http.response.status_code'],
-  ['service', 'service_name', 'serviceName', 'service.name', 'resource.service.name', 'resource.attributes.service.name'],
+  [
+    'status',
+    'statusCode',
+    'status_code',
+    'res.statusCode',
+    'http.response.status_code',
+    'attributes.http.response.status_code',
+  ],
+  [
+    'service',
+    'service_name',
+    'serviceName',
+    'service.name',
+    'resource.service.name',
+    'resource.attributes.service.name',
+  ],
   ['logger', 'logger_name', 'log.logger'],
   ['method', 'req.method', 'http.request.method', 'attributes.http.request.method', 'http.method', 'requestMethod'],
-  ['path', 'req.url', 'url.path', 'url', 'url.full', 'http.route', 'http.target', 'http.url', 'requestUrl', 'requestUri', 'uri'],
+  [
+    'path',
+    'req.url',
+    'url.path',
+    'url',
+    'url.full',
+    'http.route',
+    'http.target',
+    'http.url',
+    'requestUrl',
+    'requestUri',
+    'uri',
+  ],
   ['host', 'hostname', 'host.name'],
   ['environment', 'service.environment', 'deployment.environment.name'],
   ['requestId', 'request_id', 'req.id', 'http.request.id'],
   ['traceId', 'trace_id', 'trace.id', 'TraceId'],
   ['spanId', 'span_id', 'span.id', 'SpanId'],
   ['parentSpanId', 'parent_span_id', 'parentId'],
-  ['durationMs', 'duration', 'duration_ms', 'responseTime']
+  ['durationMs', 'duration', 'duration_ms', 'responseTime'],
 ];
 
-const FIELD_ALIASES = new Map(FIELD_GROUPS.flatMap(names => names.map(name => [name.toLowerCase(), names] as const)));
+const FIELD_ALIASES = new Map(
+  FIELD_GROUPS.flatMap((names) => names.map((name) => [name.toLowerCase(), names] as const)),
+);
 
 export interface Token {
   negate: boolean;
@@ -68,7 +96,7 @@ export function parseQuery(input = ''): ParsedQuery {
     if (token === 'OR' || token === 'or') groups.push([]);
     else groups.at(-1)!.push(parseToken(token));
   }
-  return groups.filter(group => group.length);
+  return groups.filter((group) => group.length);
 }
 
 function parseToken(token: string): Token {
@@ -86,7 +114,11 @@ function parseToken(token: string): Token {
   const canonical = field === undefined ? undefined : canonicalField(field);
   const quoted = value.startsWith('"') && value.endsWith('"');
   if (quoted) {
-    try { value = JSON.parse(value); } catch { value = value.slice(1, -1); }
+    try {
+      value = JSON.parse(value);
+    } catch {
+      value = value.slice(1, -1);
+    }
   }
   // Compiled once here, at parse time, rather than once per event in matchesQuery.
   let regex: RE2 | null | undefined;
@@ -97,14 +129,18 @@ function parseToken(token: string): Token {
   const regexMatch = quoted ? null : value.match(/^\/(.+)\/([dgimsuvy]*)$/);
   let regexError: string | undefined;
   if (regexMatch) {
-    const unsupported = [...new Set(regexMatch[2].split('').filter(flag => !'gimsuy'.includes(flag)))];
-    if (unsupported.length) regexError = `Unsupported regular expression flag${unsupported.length === 1 ? '' : 's'}: ${unsupported.join(', ')}`;
+    const unsupported = [...new Set(regexMatch[2].split('').filter((flag) => !'gimsuy'.includes(flag)))];
+    if (unsupported.length)
+      regexError = `Unsupported regular expression flag${unsupported.length === 1 ? '' : 's'}: ${unsupported.join(', ')}`;
     try {
       if (!regexError) {
         const flags = regexMatch[2].includes('u') ? regexMatch[2] : `${regexMatch[2]}u`;
         regex = new RE2(regexMatch[1], flags);
       } else regex = null;
-    } catch { regex = null; regexError = 'Unsupported or invalid regular expression syntax.'; }
+    } catch {
+      regex = null;
+      regexError = 'Unsupported or invalid regular expression syntax.';
+    }
   }
   // Regex syntax and input are case-sensitive unless the expression uses /i.
   // Lowercasing a pattern also changes escapes such as \D into \d.
@@ -114,26 +150,50 @@ function parseToken(token: string): Token {
   // the joining spaces, so those keep the original joined comparison.
   let search: RegExp | undefined;
   if (field === undefined && regex === undefined && value && !value.includes(' ')) {
-    try { search = new RegExp(value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i'); } catch { search = undefined; }
+    try {
+      search = new RegExp(value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
+    } catch {
+      search = undefined;
+    }
   }
   const comparison = !quoted && value.match(/^(>=|<=|>|<)\s*(-?\d+(?:\.\d+)?)$/);
-  const numericComparison = comparison ? {
-    operator: comparison[1] as '>' | '>=' | '<' | '<=', target: Number(comparison[2])
-  } : undefined;
+  const numericComparison = comparison
+    ? {
+        operator: comparison[1] as '>' | '>=' | '<' | '<=',
+        target: Number(comparison[2]),
+      }
+    : undefined;
   const range = !quoted && value.match(/^\[(-?\d+(?:\.\d+)?)\s+to\s+(-?\d+(?:\.\d+)?)\]$/);
-  const numericRange = range ? [Number(range[1]), Number(range[2])] as [number, number] : undefined;
-  const compare = !quoted && (numericComparison !== undefined || numericRange !== undefined || /^\[.*\s+to\s+.*\]$/.test(value));
-  const timestampRange = (canonical === 'timestamp' || canonical === 'time') && !quoted
-    ? value.match(/^\[([^\s]+)\s+to\s+([^\]]+)\]$/i)
-    : null;
+  const numericRange = range ? ([Number(range[1]), Number(range[2])] as [number, number]) : undefined;
+  const compare =
+    !quoted && (numericComparison !== undefined || numericRange !== undefined || /^\[.*\s+to\s+.*\]$/.test(value));
+  const timestampRange =
+    (canonical === 'timestamp' || canonical === 'time') && !quoted
+      ? value.match(/^\[([^\s]+)\s+to\s+([^\]]+)\]$/i)
+      : null;
   const parsedTimestampRange = timestampRange
-    ? [Date.parse(timestampRange[1]), Date.parse(timestampRange[2])] as [number, number]
+    ? ([Date.parse(timestampRange[1]), Date.parse(timestampRange[2])] as [number, number])
     : undefined;
   const last = canonical === 'last' ? value.match(/^(\d+)(s|m|h|d)$/) : null;
-  const relativeMs = last ? Number(last[1]) * ({ s: 1000, m: 60000, h: 3600000, d: 86400000 } as Record<string, number>)[last[2]] : undefined;
+  const relativeMs = last
+    ? Number(last[1]) * ({ s: 1000, m: 60000, h: 3600000, d: 86400000 } as Record<string, number>)[last[2]]
+    : undefined;
   const changed = canonical === 'changed' && /^(?:true|false)$/.test(value) ? value === 'true' : undefined;
-  return { negate, field, canonical, value, regex, regexError, search, compare, numericComparison, numericRange,
-    timestampRange: parsedTimestampRange, relativeMs, changed };
+  return {
+    negate,
+    field,
+    canonical,
+    value,
+    regex,
+    regexError,
+    search,
+    compare,
+    numericComparison,
+    numericRange,
+    timestampRange: parsedTimestampRange,
+    relativeMs,
+    changed,
+  };
 }
 
 /** Return a user-facing parse error for a query before it reaches the store. */
@@ -144,7 +204,7 @@ export function queryError(input = ''): string | undefined {
 
 /** Whether a query has a `changed:` term, whose answer depends on the working tree rather than the event alone. */
 export function usesChangedScope(query: ParsedQuery): boolean {
-  return query.some(group => group.some(token => token.changed !== undefined));
+  return query.some((group) => group.some((token) => token.changed !== undefined));
 }
 
 /**
@@ -152,62 +212,82 @@ export function usesChangedScope(query: ParsedQuery): boolean {
  * event came from code changed since the last commit); without it, no event
  * came from changed code.
  */
-export function matchesQuery(event: LogEvent, input: string | ParsedQuery, queryNow?: number, changed?: (event: LogEvent) => boolean): boolean {
+export function matchesQuery(
+  event: LogEvent,
+  input: string | ParsedQuery,
+  queryNow?: number,
+  changed?: (event: LogEvent) => boolean,
+): boolean {
   const groups = Array.isArray(input) ? input : parseQuery(input);
   if (!groups.length) return true;
-  return groups.some(group => group.every(token => {
-    if (token.changed !== undefined) {
-      const matched = (changed?.(event) ?? false) === token.changed;
+  return groups.some((group) =>
+    group.every((token) => {
+      if (token.changed !== undefined) {
+        const matched = (changed?.(event) ?? false) === token.changed;
+        return token.negate ? !matched : matched;
+      }
+      if (token.canonical === 'last') {
+        const matched =
+          token.relativeMs !== undefined && (event.timestampMs ?? 0) >= (queryNow ?? Date.now()) - token.relativeMs;
+        return token.negate ? !matched : matched;
+      }
+      if (token.canonical === 'exists') {
+        const present = getField(event, token.value) !== undefined;
+        return token.negate ? !present : present;
+      }
+      if (token.canonical === 'timestamp' || token.canonical === 'time') {
+        let matched: boolean;
+        if (token.timestampRange)
+          matched =
+            (event.timestampMs ?? 0) >= token.timestampRange[0] && (event.timestampMs ?? 0) <= token.timestampRange[1];
+        else matched = (event.timestamp ?? '').toLowerCase().includes(token.value);
+        return token.negate ? !matched : matched;
+      }
+      // Free text never reaches the numeric or status branches below, so it skips
+      // straight to the substring test instead of coercing a long joined string.
+      if (token.search) {
+        const found =
+          (event.level !== undefined && token.search.test(event.level)) ||
+          (event.message !== undefined && token.search.test(event.message)) ||
+          (event.raw !== undefined && token.search.test(event.raw));
+        return token.negate ? !found : found;
+      }
+      const actualValue: FieldValue = token.field
+        ? getField(event, token.field)
+        : `${event.level} ${event.message} ${event.raw}`;
+      const actual = token.regex === undefined ? String(actualValue ?? '').toLowerCase() : String(actualValue ?? '');
+      let matched: boolean | undefined;
+      const numeric = token.compare && actual !== '' ? Number(actual) : NaN;
+      const isNumeric = Number.isFinite(numeric);
+      if (token.regex !== undefined) {
+        // Global and sticky expressions carry a cursor between calls.
+        if (token.regex) token.regex.lastIndex = 0;
+        matched = token.regex ? token.regex.test(actual) : false;
+      } else if (token.field && isNumeric && token.numericComparison) {
+        const { operator, target } = token.numericComparison;
+        matched =
+          operator === '>'
+            ? numeric > target
+            : operator === '>='
+              ? numeric >= target
+              : operator === '<'
+                ? numeric < target
+                : numeric <= target;
+      } else if (token.field && isNumeric && token.numericRange) {
+        matched = numeric >= token.numericRange[0] && numeric <= token.numericRange[1];
+      } else if (token.field && isNumeric && token.compare) {
+        // Preserve the old behavior for malformed numeric ranges: a numeric
+        // field must not fall back to a substring match for a comparison token.
+        matched = false;
+      }
+      if (matched === undefined) {
+        if (token.canonical === 'status' && /^\dxx$/.test(token.value)) matched = actual.startsWith(token.value[0]);
+        else if (token.canonical === 'status' && /^\d{3}$/.test(token.value)) matched = actual === token.value;
+        else matched = actual.includes(token.value);
+      }
       return token.negate ? !matched : matched;
-    }
-    if (token.canonical === 'last') {
-      const matched = token.relativeMs !== undefined && (event.timestampMs ?? 0) >= (queryNow ?? Date.now()) - token.relativeMs;
-      return token.negate ? !matched : matched;
-    }
-    if (token.canonical === 'exists') {
-      const present = getField(event, token.value) !== undefined;
-      return token.negate ? !present : present;
-    }
-    if (token.canonical === 'timestamp' || token.canonical === 'time') {
-      let matched: boolean;
-      if (token.timestampRange) matched = (event.timestampMs ?? 0) >= token.timestampRange[0] && (event.timestampMs ?? 0) <= token.timestampRange[1];
-      else matched = (event.timestamp ?? '').toLowerCase().includes(token.value);
-      return token.negate ? !matched : matched;
-    }
-    // Free text never reaches the numeric or status branches below, so it skips
-    // straight to the substring test instead of coercing a long joined string.
-    if (token.search) {
-      const found = (event.level !== undefined && token.search.test(event.level))
-        || (event.message !== undefined && token.search.test(event.message))
-        || (event.raw !== undefined && token.search.test(event.raw));
-      return token.negate ? !found : found;
-    }
-    const actualValue: FieldValue = token.field ? getField(event, token.field) : `${event.level} ${event.message} ${event.raw}`;
-    const actual = token.regex === undefined ? String(actualValue ?? '').toLowerCase() : String(actualValue ?? '');
-    let matched: boolean | undefined;
-    const numeric = token.compare && actual !== '' ? Number(actual) : NaN;
-    const isNumeric = Number.isFinite(numeric);
-    if (token.regex !== undefined) {
-      // Global and sticky expressions carry a cursor between calls.
-      if (token.regex) token.regex.lastIndex = 0;
-      matched = token.regex ? token.regex.test(actual) : false;
-    } else if (token.field && isNumeric && token.numericComparison) {
-      const { operator, target } = token.numericComparison;
-      matched = operator === '>' ? numeric > target : operator === '>=' ? numeric >= target : operator === '<' ? numeric < target : numeric <= target;
-    } else if (token.field && isNumeric && token.numericRange) {
-      matched = numeric >= token.numericRange[0] && numeric <= token.numericRange[1];
-    } else if (token.field && isNumeric && token.compare) {
-      // Preserve the old behavior for malformed numeric ranges: a numeric
-      // field must not fall back to a substring match for a comparison token.
-      matched = false;
-    }
-    if (matched === undefined) {
-      if (token.canonical === 'status' && /^\dxx$/.test(token.value)) matched = actual.startsWith(token.value[0]);
-      else if (token.canonical === 'status' && /^\d{3}$/.test(token.value)) matched = actual === token.value;
-      else matched = actual.includes(token.value);
-    }
-    return token.negate ? !matched : matched;
-  }));
+    }),
+  );
 }
 
 // 'time' has no matching `.time` property on LogEvent (only `.timestamp`

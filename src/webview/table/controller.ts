@@ -8,20 +8,33 @@ import type { ViewerActions, WebviewApi } from '../types';
 import { layoutColumnWidths } from './layout';
 import { createRows } from './rows';
 
-export function createTable(elements: Elements, scrollViewport: HTMLElement, state: ViewerState, api: WebviewApi, formatTimestamp: (event: LogEvent) => string | undefined, actions: ViewerActions, scope: EventScope, onRowsChanged: () => void = () => {}) {
+export function createTable(
+  elements: Elements,
+  scrollViewport: HTMLElement,
+  state: ViewerState,
+  api: WebviewApi,
+  formatTimestamp: (event: LogEvent) => string | undefined,
+  actions: ViewerActions,
+  scope: EventScope,
+  onRowsChanged: () => void = () => {},
+) {
   const { request, saveState, updateFollowControl, updateModeLabel } = actions;
-  function totalColumnCount() { return displayedColumns.length; }
+  function totalColumnCount() {
+    return displayedColumns.length;
+  }
 
   const { buildRow, buildDetailRow, fillQuickActions } = createRows(state, () => displayedColumns, formatTimestamp);
   // Quick actions are built for the row under the pointer only. Remember
   // which one, so a re-render under a still pointer rebuilds them.
   let hoveredId: string | undefined;
-  scope.listen(elements.logs, 'pointerover', event => {
+  scope.listen(elements.logs, 'pointerover', (event) => {
     const row = (event.target as HTMLElement).closest?.<HTMLElement>('tr.event-row');
     hoveredId = row?.dataset.id;
     if (row) fillQuickActions(row);
   });
-  scope.listen(elements.logs, 'pointerleave', () => { hoveredId = undefined; });
+  scope.listen(elements.logs, 'pointerleave', () => {
+    hoveredId = undefined;
+  });
 
   // Only the rows scrolled into view are ever built, bracketed by two
   // height-only spacer rows that stand in for the rest of the page. That keeps
@@ -55,7 +68,7 @@ export function createTable(elements: Elements, scrollViewport: HTMLElement, sta
   // its event object and on state that bumps the revision, so scrolling, and
   // refreshes that keep the same row objects, build only the rows entering
   // the window instead of the whole window again.
-  let rowCache = new Map<number, { event: LogEvent; row: HTMLTableRowElement; }>();
+  let rowCache = new Map<number, { event: LogEvent; row: HTMLTableRowElement }>();
 
   let rowCacheRevision = -1;
 
@@ -64,20 +77,27 @@ export function createTable(elements: Elements, scrollViewport: HTMLElement, sta
   // A snapshot updates the toolbar before the rows. Reading the viewport after
   // those writes would force a layout of the half-updated page, so the viewer
   // measures it first and rendering uses that measurement until released.
-  let measured: { top: number; height: number; } | undefined;
-  function viewportTop() { return measured?.top ?? scrollViewport.scrollTop; }
-  function viewportHeight() { return measured?.height ?? scrollViewport.clientHeight; }
+  let measured: { top: number; height: number } | undefined;
+  function viewportTop() {
+    return measured?.top ?? scrollViewport.scrollTop;
+  }
+  function viewportHeight() {
+    return measured?.height ?? scrollViewport.clientHeight;
+  }
   function scrollViewportTo(top: number) {
     scrollViewport.scrollTop = top;
     // The browser clamps a position past the end; only zero is known without layout.
     measured = top === 0 && measured ? { ...measured, top } : undefined;
   }
-  function measureViewport() { measured = { top: scrollViewport.scrollTop, height: scrollViewport.clientHeight }; }
-  function releaseViewport() { measured = undefined; }
+  function measureViewport() {
+    measured = { top: scrollViewport.scrollTop, height: scrollViewport.clientHeight };
+  }
+  function releaseViewport() {
+    measured = undefined;
+  }
 
   function ensureSpacers() {
-    if (topSpacer)
-      return;
+    if (topSpacer) return;
     topSpacer = document.createElement('tr');
     topSpacer.className = 'virtual-spacer';
     topSpacer.append(document.createElement('td'));
@@ -90,9 +110,15 @@ export function createTable(elements: Elements, scrollViewport: HTMLElement, sta
   // measurement covers the whole table. Retried lazily since it can read 0
   // while the view is hidden.
   function ensureRowHeight() {
-    if (rowHeightMeasured)
-      return;
-    const probe = buildRow({ id: -1, timestamp: '00:00:00.000', message: 'sample', level: 'info', stream: '', fields: {} });
+    if (rowHeightMeasured) return;
+    const probe = buildRow({
+      id: -1,
+      timestamp: '00:00:00.000',
+      message: 'sample',
+      level: 'info',
+      stream: '',
+      fields: {},
+    });
     probe.style.visibility = 'hidden';
     elements.logs.append(probe);
     const measured = probe.getBoundingClientRect().height;
@@ -109,34 +135,34 @@ export function createTable(elements: Elements, scrollViewport: HTMLElement, sta
     ensureSpacers();
     ensureRowHeight();
     const total = virtualEvents.length;
-    const selectedIndex = virtualEvents.findIndex(event => event.id === state.selected);
-    if (selectedIndex < 0)
-      expandedHeight = 0;
+    const selectedIndex = virtualEvents.findIndex((event) => event.id === state.selected);
+    if (selectedIndex < 0) expandedHeight = 0;
     else {
       const detail = elements.logs.querySelector<HTMLTableRowElement>('.detail-row');
-      if (detail)
-        expandedHeight = detail.getBoundingClientRect().height;
+      if (detail) expandedHeight = detail.getBoundingClientRect().height;
     }
     const overscan = 8;
     const top = viewportTop();
     const height = viewportHeight();
     const visibleCount = Math.max(1, Math.ceil(height / rowHeight)) + overscan * 2;
     const detailTop = (selectedIndex + 1) * rowHeight;
-    const offset = atTail ? Math.max(0, total * rowHeight - height)
+    const offset = atTail
+      ? Math.max(0, total * rowHeight - height)
       : selectedIndex >= 0 && top > detailTop
-      ? top - Math.min(expandedHeight, top - detailTop)
-      : top;
+        ? top - Math.min(expandedHeight, top - detailTop)
+        : top;
     let start = Math.floor(offset / rowHeight) - overscan;
     start = Math.max(0, Math.min(start, Math.max(0, total - visibleCount)));
     const end = Math.min(total, start + visibleCount);
     const totalCols = totalColumnCount();
     (topSpacer!.firstChild as HTMLTableCellElement).colSpan = totalCols;
-    (topSpacer!.firstChild as HTMLTableCellElement).style.height = `${start * rowHeight + (selectedIndex >= 0 && selectedIndex < start ? expandedHeight : 0)}px`;
+    (topSpacer!.firstChild as HTMLTableCellElement).style.height =
+      `${start * rowHeight + (selectedIndex >= 0 && selectedIndex < start ? expandedHeight : 0)}px`;
     (bottomSpacer!.firstChild as HTMLTableCellElement).colSpan = totalCols;
-    (bottomSpacer!.firstChild as HTMLTableCellElement).style.height = `${(total - end) * rowHeight + (selectedIndex >= end ? expandedHeight : 0)}px`;
+    (bottomSpacer!.firstChild as HTMLTableCellElement).style.height =
+      `${(total - end) * rowHeight + (selectedIndex >= end ? expandedHeight : 0)}px`;
     const windowKey = `${start}:${end}:${renderRevision}:${rowsVersion}`;
-    if (renderedWindow === windowKey)
-      return;
+    if (renderedWindow === windowKey) return;
     renderedWindow = windowKey;
     // Capture focus before moving the expanded row into a fragment. Rebuilding
     // must never scroll a focused event back into view during wheel scrolling.
@@ -144,13 +170,14 @@ export function createTable(elements: Elements, scrollViewport: HTMLElement, sta
     const focusedRow = !!focused && elements.logs.contains(focused) ? focused.closest('tr') : undefined;
     const refocusId = focusedRow?.classList.contains('event-row') ? focusedRow.dataset.id : undefined;
     const refocusColumn = focused?.dataset.column;
-    const detailScrollers = [...(expandedRow?.querySelectorAll<HTMLElement>('.event-details, pre') ?? [])]
-      .map(element => ({ element, top: element.scrollTop, left: element.scrollLeft }));
+    const detailScrollers = [...(expandedRow?.querySelectorAll<HTMLElement>('.event-details, pre') ?? [])].map(
+      (element) => ({ element, top: element.scrollTop, left: element.scrollLeft }),
+    );
     if (rowCacheRevision !== renderRevision) {
       rowCache = new Map();
       rowCacheRevision = renderRevision;
     }
-    const builtRows = new Map<number, { event: LogEvent; row: HTMLTableRowElement; }>();
+    const builtRows = new Map<number, { event: LogEvent; row: HTMLTableRowElement }>();
     const wanted: HTMLTableRowElement[] = [];
     for (let i = start; i < end; i++) {
       const event = virtualEvents[i];
@@ -174,7 +201,9 @@ export function createTable(elements: Elements, scrollViewport: HTMLElement, sta
     placeRows(wanted);
     rowCache = builtRows;
     if (hoveredId !== undefined) {
-      const hovered = [...elements.logs.querySelectorAll<HTMLElement>('.event-row')].find(row => row.dataset.id === hoveredId);
+      const hovered = [...elements.logs.querySelectorAll<HTMLElement>('.event-row')].find(
+        (row) => row.dataset.id === hoveredId,
+      );
       if (hovered) fillQuickActions(hovered);
     }
     onRowsChanged();
@@ -182,12 +211,15 @@ export function createTable(elements: Elements, scrollViewport: HTMLElement, sta
       element.scrollTop = top;
       element.scrollLeft = left;
     }
-    if (focused && !!focused && elements.logs.contains(focused))
-      focused.focus({ preventScroll: true });
+    if (focused && !!focused && elements.logs.contains(focused)) focused.focus({ preventScroll: true });
     else if (refocusId !== undefined) {
-      const row = [...elements.logs.querySelectorAll<HTMLTableRowElement>('.event-row')].find(row => row.dataset.id === refocusId);
+      const row = [...elements.logs.querySelectorAll<HTMLTableRowElement>('.event-row')].find(
+        (row) => row.dataset.id === refocusId,
+      );
       const target = refocusColumn
-        ? [...(row?.querySelectorAll<HTMLElement>('td[data-column]') ?? [])].find(cell => cell.dataset.column === refocusColumn)
+        ? [...(row?.querySelectorAll<HTMLElement>('td[data-column]') ?? [])].find(
+            (cell) => cell.dataset.column === refocusColumn,
+          )
         : row?.querySelector<HTMLElement>('.message-button');
       target?.focus({ preventScroll: true });
     }
@@ -203,7 +235,11 @@ export function createTable(elements: Elements, scrollViewport: HTMLElement, sta
   function placeRows(wanted: HTMLTableRowElement[]) {
     const logs = elements.logs;
     // When every row is new, as with a busy live stream, one swap is cheaper.
-    if (topSpacer!.parentNode !== logs || bottomSpacer!.parentNode !== logs || !wanted.some(row => row.parentNode === logs)) {
+    if (
+      topSpacer!.parentNode !== logs ||
+      bottomSpacer!.parentNode !== logs ||
+      !wanted.some((row) => row.parentNode === logs)
+    ) {
       logs.replaceChildren(topSpacer!, ...wanted, bottomSpacer!);
       return;
     }
@@ -222,8 +258,7 @@ export function createTable(elements: Elements, scrollViewport: HTMLElement, sta
 
   function scheduleRenderWindow(followTail = false) {
     followTailRequested ||= followTail === true;
-    if (windowRenderQueued)
-      return;
+    if (windowRenderQueued) return;
     windowRenderQueued = true;
     scope.frame(() => {
       windowRenderQueued = false;
@@ -242,15 +277,19 @@ export function createTable(elements: Elements, scrollViewport: HTMLElement, sta
 
   scope.listen(scrollViewport, 'scroll', () => scheduleRenderWindow());
 
-  scope.observer(() => {
-    rowHeightMeasured = false;
-    renderRevision++;
-    layoutColumns();
-    scheduleRenderWindow(state.following && !state.paused && !state.selectedSort);
-  }).observe(scrollViewport);
+  scope
+    .observer(() => {
+      rowHeightMeasured = false;
+      renderRevision++;
+      layoutColumns();
+      scheduleRenderWindow(state.following && !state.paused && !state.selectedSort);
+    })
+    .observe(scrollViewport);
 
   /** Newest first puts Live at the top; a sorted view keeps the host's order. */
-  function liveAtTop() { return state.newestFirst && !state.selectedSort; }
+  function liveAtTop() {
+    return state.newestFirst && !state.selectedSort;
+  }
 
   function renderRows(events: LogEvent[]) {
     const followTail = state.following && !state.paused && !state.selectedSort;
@@ -262,7 +301,7 @@ export function createTable(elements: Elements, scrollViewport: HTMLElement, sta
     virtualEvents = liveAtTop() ? [...events].reverse() : events;
     rowsVersion++;
     if (anchor) {
-      const index = virtualEvents.findIndex(event => event.id === anchor.id);
+      const index = virtualEvents.findIndex((event) => event.id === anchor.id);
       if (index >= 0 && index !== anchorIndex) scrollViewportTo(viewportTop() + (index - anchorIndex) * rowHeight);
     }
     if (followTail && liveAtTop()) {
@@ -282,8 +321,10 @@ export function createTable(elements: Elements, scrollViewport: HTMLElement, sta
 
   let currentColumns: string[] = [];
   const baseColumns = [
-    { key: 'base:time', label: 'Time' }, { key: 'base:level', label: 'Level' },
-    { key: 'base:message', label: 'Message' }, { key: 'base:source', label: 'Source' }
+    { key: 'base:time', label: 'Time' },
+    { key: 'base:level', label: 'Level' },
+    { key: 'base:message', label: 'Message' },
+    { key: 'base:source', label: 'Source' },
   ];
 
   let displayedColumns = [...baseColumns];
@@ -306,121 +347,158 @@ export function createTable(elements: Elements, scrollViewport: HTMLElement, sta
 
   function updateColumns(columns: string[], force = false) {
     const detected = Array.isArray(columns) ? columns : [];
-    if (!automaticColumnsLocked)
-      automaticColumns = detected;
-    const next = [...new Set([...automaticColumns, ...state.extraColumns.filter(field => state.columnFields.includes(field))])];
-    if (columnsInitialized && !force && JSON.stringify(next) === JSON.stringify(availableColumns))
-      return;
+    if (!automaticColumnsLocked) automaticColumns = detected;
+    const next = [
+      ...new Set([...automaticColumns, ...state.extraColumns.filter((field) => state.columnFields.includes(field))]),
+    ];
+    if (columnsInitialized && !force && JSON.stringify(next) === JSON.stringify(availableColumns)) return;
     columnsInitialized = true;
     renderRevision++;
     availableColumns = next;
-    currentColumns = next.filter(label => !state.hiddenColumns.has(`field:${label}`));
-    const allColumns = [...baseColumns, ...currentColumns.map(label => ({ key: `field:${label}`, label }))];
-    const known = new Map(allColumns.map(column => [column.key, column]));
-    displayedColumns = [...state.columnOrder.map(key => known.get(key)).filter((column): column is { key: string; label: string; } => Boolean(column)), ...allColumns.filter(column => !state.columnOrder.includes(column.key))];
-    state.columnOrder = displayedColumns.map(column => column.key);
-    columnElements = new Map(displayedColumns.map(column => {
-      const col = document.createElement('col');
-      col.dataset.column = column.key;
-      return [column.key, col];
-    }));
+    currentColumns = next.filter((label) => !state.hiddenColumns.has(`field:${label}`));
+    const allColumns = [...baseColumns, ...currentColumns.map((label) => ({ key: `field:${label}`, label }))];
+    const known = new Map(allColumns.map((column) => [column.key, column]));
+    displayedColumns = [
+      ...state.columnOrder
+        .map((key) => known.get(key))
+        .filter((column): column is { key: string; label: string } => Boolean(column)),
+      ...allColumns.filter((column) => !state.columnOrder.includes(column.key)),
+    ];
+    state.columnOrder = displayedColumns.map((column) => column.key);
+    columnElements = new Map(
+      displayedColumns.map((column) => {
+        const col = document.createElement('col');
+        col.dataset.column = column.key;
+        return [column.key, col];
+      }),
+    );
     element('eventColumns').replaceChildren(...columnElements.values());
     layoutColumns();
     const head = element('head-row');
-    head.replaceChildren(...displayedColumns.map(column => {
-      const { key, label } = column;
-      const th = document.createElement('th');
-      const grip = document.createElement('span');
-      grip.className = 'column-grip';
-      grip.textContent = '⠿';
-      grip.title = `Drag to move ${label}`;
-      grip.draggable = true;
-      th.append(grip);
-      const sortButton = document.createElement('button');
-      sortButton.type = 'button';
-      sortButton.className = 'column-sort';
-      const labelText = document.createElement('span');
-      labelText.className = 'column-label';
-      labelText.textContent = label;
-      sortButton.append(labelText);
-      const sortKey = key === 'base:time' ? 'timestampMs' : key === 'base:level' ? 'level' : key === 'base:message' ? 'message' : key === 'base:source' ? 'stream' : label;
-      const indicator = document.createElement('span');
-      indicator.className = 'sort-indicator';
-      indicator.textContent = state.selectedSort === sortKey ? (state.selectedSortDirection === 'asc' ? '↑' : '↓') : '↕';
-      indicator.setAttribute('aria-hidden', 'true');
-      sortButton.append(indicator);
-      th.append(sortButton);
-      th.setAttribute('aria-sort', state.selectedSort === sortKey ? (state.selectedSortDirection === 'asc' ? 'ascending' : 'descending') : 'none');
-      sortButton.title = `Sort by ${label}${state.selectedSort === sortKey ? (state.selectedSortDirection === 'asc' ? ' descending' : ' ascending') : ''}`;
-      sortButton.setAttribute('aria-label', sortButton.title);
-      th.dataset.column = key;
-      scope.listen(sortButton, 'click', () => {
-        state.sort(sortKey);
-        updateModeLabel();
-        saveState();
-        updateColumns(automaticColumns, true);
-        updateModeLabel();
-        request(true);
-        scrollViewport.scrollTop = 0;
-        head.querySelectorAll<HTMLElement>('.column-sort')[displayedColumns.findIndex(column => column.key === key)]?.focus();
-      });
-      scope.listen(grip, 'dragstart', event => {
-        draggedColumn = key;
-        th.classList.add?.('column-dragging');
-        event.dataTransfer?.setData('text/plain', key);
-        if (event.dataTransfer)
-          event.dataTransfer.effectAllowed = 'move';
-      });
-      scope.listen(th, 'dragover', event => {
-        if (draggedColumn && draggedColumn !== key) {
+    head.replaceChildren(
+      ...displayedColumns.map((column) => {
+        const { key, label } = column;
+        const th = document.createElement('th');
+        const grip = document.createElement('span');
+        grip.className = 'column-grip';
+        grip.textContent = '⠿';
+        grip.title = `Drag to move ${label}`;
+        grip.draggable = true;
+        th.append(grip);
+        const sortButton = document.createElement('button');
+        sortButton.type = 'button';
+        sortButton.className = 'column-sort';
+        const labelText = document.createElement('span');
+        labelText.className = 'column-label';
+        labelText.textContent = label;
+        sortButton.append(labelText);
+        const sortKey =
+          key === 'base:time'
+            ? 'timestampMs'
+            : key === 'base:level'
+              ? 'level'
+              : key === 'base:message'
+                ? 'message'
+                : key === 'base:source'
+                  ? 'stream'
+                  : label;
+        const indicator = document.createElement('span');
+        indicator.className = 'sort-indicator';
+        indicator.textContent =
+          state.selectedSort === sortKey ? (state.selectedSortDirection === 'asc' ? '↑' : '↓') : '↕';
+        indicator.setAttribute('aria-hidden', 'true');
+        sortButton.append(indicator);
+        th.append(sortButton);
+        th.setAttribute(
+          'aria-sort',
+          state.selectedSort === sortKey
+            ? state.selectedSortDirection === 'asc'
+              ? 'ascending'
+              : 'descending'
+            : 'none',
+        );
+        sortButton.title = `Sort by ${label}${state.selectedSort === sortKey ? (state.selectedSortDirection === 'asc' ? ' descending' : ' ascending') : ''}`;
+        sortButton.setAttribute('aria-label', sortButton.title);
+        th.dataset.column = key;
+        scope.listen(sortButton, 'click', () => {
+          state.sort(sortKey);
+          updateModeLabel();
+          saveState();
+          updateColumns(automaticColumns, true);
+          updateModeLabel();
+          request(true);
+          scrollViewport.scrollTop = 0;
+          head
+            .querySelectorAll<HTMLElement>('.column-sort')
+            [displayedColumns.findIndex((column) => column.key === key)]?.focus();
+        });
+        scope.listen(grip, 'dragstart', (event) => {
+          draggedColumn = key;
+          th.classList.add?.('column-dragging');
+          event.dataTransfer?.setData('text/plain', key);
+          if (event.dataTransfer) event.dataTransfer.effectAllowed = 'move';
+        });
+        scope.listen(th, 'dragover', (event) => {
+          if (draggedColumn && draggedColumn !== key) {
+            event.preventDefault();
+            th.classList.add('column-drop-target');
+          }
+        });
+        scope.listen(th, 'dragleave', () => th.classList.remove?.('column-drop-target'));
+        scope.listen(th, 'drop', (event) => {
           event.preventDefault();
-          th.classList.add('column-drop-target');
+          th.classList.remove?.('column-drop-target');
+          const source = draggedColumn || event.dataTransfer?.getData('text/plain');
+          if (!source || source === key) return;
+          const order = displayedColumns.map((item) => item.key);
+          const from = order.indexOf(source);
+          const to = order.indexOf(key);
+          if (from < 0 || to < 0) return;
+          order.splice(from, 1);
+          order.splice(to, 0, source);
+          state.columnOrder = order;
+          saveState();
+          updateColumns(automaticColumns, true);
+          renderWindow();
+        });
+        scope.listen(grip, 'dragend', () => {
+          draggedColumn = undefined;
+          th.classList.remove?.('column-dragging', 'column-drop-target');
+          for (const item of head.querySelectorAll?.('.column-drop-target') ?? [])
+            item.classList.remove?.('column-drop-target');
+        });
+        const handle = document.createElement('span');
+        handle.className = 'resize-handle';
+        handle.dataset.column = key;
+        handle.setAttribute('aria-label', `Resize ${label} column`);
+        handle.title = `Drag to resize ${label}`;
+        handle.draggable = false;
+        scope.listen(handle, 'pointerdown', (event) => {
+          event.stopPropagation?.();
+          resizeFromPointer(event, key, th);
+        });
+        scope.listen(handle, 'click', (event) => event.stopPropagation?.());
+        th.append(handle);
+        if (key.startsWith('field:')) {
+          const remove = document.createElement('button');
+          remove.type = 'button';
+          remove.className = 'remove-column';
+          remove.textContent = '×';
+          remove.title = `Remove ${label} column`;
+          remove.setAttribute('aria-label', `Remove ${label} column`);
+          scope.listen(remove, 'click', (event) => {
+            event.stopPropagation?.();
+            state.hiddenColumns.add(key);
+            state.columnOrder = state.columnOrder.filter((item) => item !== key);
+            saveState();
+            updateColumns(automaticColumns, true);
+            renderWindow();
+          });
+          th.append(remove);
         }
-      });
-      scope.listen(th, 'dragleave', () => th.classList.remove?.('column-drop-target'));
-      scope.listen(th, 'drop', event => {
-        event.preventDefault();
-        th.classList.remove?.('column-drop-target');
-        const source = draggedColumn || event.dataTransfer?.getData('text/plain');
-        if (!source || source === key)
-          return;
-        const order = displayedColumns.map(item => item.key);
-        const from = order.indexOf(source);
-        const to = order.indexOf(key);
-        if (from < 0 || to < 0)
-          return;
-        order.splice(from, 1);
-        order.splice(to, 0, source);
-        state.columnOrder = order;
-        saveState();
-        updateColumns(automaticColumns, true);
-        renderWindow();
-      });
-      scope.listen(grip, 'dragend', () => {
-        draggedColumn = undefined; th.classList.remove?.('column-dragging', 'column-drop-target'); for (const item of head.querySelectorAll?.('.column-drop-target') ?? [])
-          item.classList.remove?.('column-drop-target');
-      });
-      const handle = document.createElement('span');
-      handle.className = 'resize-handle';
-      handle.dataset.column = key;
-      handle.setAttribute('aria-label', `Resize ${label} column`);
-      handle.title = `Drag to resize ${label}`;
-      handle.draggable = false;
-      scope.listen(handle, 'pointerdown', event => { event.stopPropagation?.(); resizeFromPointer(event, key, th); });
-      scope.listen(handle, 'click', event => event.stopPropagation?.());
-      th.append(handle);
-      if (key.startsWith('field:')) {
-        const remove = document.createElement('button');
-        remove.type = 'button';
-        remove.className = 'remove-column';
-        remove.textContent = '×';
-        remove.title = `Remove ${label} column`;
-        remove.setAttribute('aria-label', `Remove ${label} column`);
-        scope.listen(remove, 'click', event => { event.stopPropagation?.(); state.hiddenColumns.add(key); state.columnOrder = state.columnOrder.filter(item => item !== key); saveState(); updateColumns(automaticColumns, true); renderWindow(); });
-        th.append(remove);
-      }
-      return th;
-    }));
+        return th;
+      }),
+    );
     renderFieldList();
     state.lastRows = undefined;
   }
@@ -430,13 +508,22 @@ export function createTable(elements: Elements, scrollViewport: HTMLElement, sta
     automaticColumnsLocked = false;
   }
 
-  function lockAutomaticColumns() { if (automaticColumns.length) automaticColumnsLocked = true; }
+  function lockAutomaticColumns() {
+    if (automaticColumns.length) automaticColumnsLocked = true;
+  }
 
-  function layoutColumns() { layoutColumnWidths(displayedColumns, columnElements, state.columnWidths, scrollViewport.clientWidth || 0, element('eventsTable')); }
+  function layoutColumns() {
+    layoutColumnWidths(
+      displayedColumns,
+      columnElements,
+      state.columnWidths,
+      scrollViewport.clientWidth || 0,
+      element('eventsTable'),
+    );
+  }
 
   function resizeFromPointer(event: PointerEvent, key: string, header: HTMLElement) {
-    if (event.button !== undefined && event.button !== 0)
-      return;
+    if (event.button !== undefined && event.button !== 0) return;
     (event.currentTarget as HTMLElement | null)?.setPointerCapture?.(event.pointerId);
     const startX = event.clientX;
     const startWidth = header.getBoundingClientRect().width || Number(state.columnWidths[key]) || 80;
@@ -469,8 +556,8 @@ export function createTable(elements: Elements, scrollViewport: HTMLElement, sta
     const available = new Set([...availableColumns, ...state.columnFields]);
     const known = new Set(fieldChoiceOrder);
     fieldChoiceOrder = [
-      ...fieldChoiceOrder.filter(field => available.has(field)),
-      ...[...available].filter(field => !known.has(field))
+      ...fieldChoiceOrder.filter((field) => available.has(field)),
+      ...[...available].filter((field) => !known.has(field)),
     ];
     return fieldChoiceOrder;
   }
@@ -481,12 +568,10 @@ export function createTable(elements: Elements, scrollViewport: HTMLElement, sta
       const key = `field:${label}`;
       if (visible) {
         state.hiddenColumns.delete(key);
-        if (!state.extraColumns.includes(label))
-          state.extraColumns.push(label);
-      }
-      else {
+        if (!state.extraColumns.includes(label)) state.extraColumns.push(label);
+      } else {
         state.hiddenColumns.add(key);
-        state.extraColumns = state.extraColumns.filter(field => field !== label);
+        state.extraColumns = state.extraColumns.filter((field) => field !== label);
       }
     }
     saveState();
@@ -499,45 +584,45 @@ export function createTable(elements: Elements, scrollViewport: HTMLElement, sta
   scope.listen(elements.fieldsNone, 'click', () => setAllFields(false));
 
   function renderFieldList() {
-    if (!elements.fieldList)
-      return;
+    if (!elements.fieldList) return;
     const choices = fieldChoices();
-    elements.fieldsAll.disabled = !choices.length || choices.every(label => currentColumns.includes(label));
-    elements.fieldsNone.disabled = !choices.length || choices.every(label => !currentColumns.includes(label));
+    elements.fieldsAll.disabled = !choices.length || choices.every((label) => currentColumns.includes(label));
+    elements.fieldsNone.disabled = !choices.length || choices.every((label) => !currentColumns.includes(label));
     const signature = JSON.stringify([choices, currentColumns]);
-    if (signature === fieldListSignature)
-      return;
+    if (signature === fieldListSignature) return;
     fieldListSignature = signature;
     if (!choices.length) {
-      elements.fieldList.replaceChildren(emptyMessage('Additional fields will appear when structured logs are received.'));
+      elements.fieldList.replaceChildren(
+        emptyMessage('Additional fields will appear when structured logs are received.'),
+      );
       return;
     }
-    elements.fieldList.replaceChildren(...choices.map(label => {
-      const row = document.createElement('label');
-      row.className = 'field-toggle';
-      row.dataset.field = label;
-      const input = document.createElement('input');
-      input.type = 'checkbox';
-      input.checked = currentColumns.includes(label);
-      scope.listen(input, 'change', () => {
-        const key = `field:${label}`;
-        if (input.checked) {
-          state.hiddenColumns.delete(key);
-          if (!state.extraColumns.includes(label))
-            state.extraColumns.push(label);
-        }
-        else {
-          state.hiddenColumns.add(key);
-          state.extraColumns = state.extraColumns.filter(field => field !== label);
-        }
-        saveState();
-        updateColumns(automaticColumns, true);
-        renderWindow();
-        request(true);
-      });
-      row.append(input, document.createTextNode(label));
-      return row;
-    }));
+    elements.fieldList.replaceChildren(
+      ...choices.map((label) => {
+        const row = document.createElement('label');
+        row.className = 'field-toggle';
+        row.dataset.field = label;
+        const input = document.createElement('input');
+        input.type = 'checkbox';
+        input.checked = currentColumns.includes(label);
+        scope.listen(input, 'change', () => {
+          const key = `field:${label}`;
+          if (input.checked) {
+            state.hiddenColumns.delete(key);
+            if (!state.extraColumns.includes(label)) state.extraColumns.push(label);
+          } else {
+            state.hiddenColumns.add(key);
+            state.extraColumns = state.extraColumns.filter((field) => field !== label);
+          }
+          saveState();
+          updateColumns(automaticColumns, true);
+          renderWindow();
+          request(true);
+        });
+        row.append(input, document.createTextNode(label));
+        return row;
+      }),
+    );
   }
 
   function toggleExpand(id: number) {
@@ -556,25 +641,63 @@ export function createTable(elements: Elements, scrollViewport: HTMLElement, sta
     updateModeLabel();
     renderWindow();
     if (rowOffset !== undefined && Number.isFinite(rowOffset)) {
-      const newTop = elements.logs.querySelector<HTMLTableRowElement>(`tr.event-row[data-id="${id}"]`)?.getBoundingClientRect().top;
-      if (newTop !== undefined && Number.isFinite(newTop))
-        scrollViewport.scrollTop += newTop - viewportTop - rowOffset;
+      const newTop = elements.logs
+        .querySelector<HTMLTableRowElement>(`tr.event-row[data-id="${id}"]`)
+        ?.getBoundingClientRect().top;
+      if (newTop !== undefined && Number.isFinite(newTop)) scrollViewport.scrollTop += newTop - viewportTop - rowOffset;
     }
   }
   /** Rebuild rows whose content depends on display settings, such as the timezone. */
-  function invalidateRows() { renderRevision++; }
-  function resetDetails() { expandedHeight = 0; expandedRow = undefined; detailResizeObserver.disconnect(); renderRevision++; }
-  function receiveDetails(data: Extract<HostMessage, { type: 'details'; }>) {
+  function invalidateRows() {
+    renderRevision++;
+  }
+  function resetDetails() {
+    expandedHeight = 0;
+    expandedRow = undefined;
+    detailResizeObserver.disconnect();
+    renderRevision++;
+  }
+  function receiveDetails(data: Extract<HostMessage, { type: 'details' }>) {
     if (data.id !== state.selected) return;
-    state.selectedDetailText = data.text; state.selectedExceptions = data.exceptions;
-    state.selectedLinks = { site: data.site, traceId: data.traceId, findings: data.findings, crash: data.crash, attachedTo: data.attachedTo };
-    resetDetails(); renderWindow();
+    state.selectedDetailText = data.text;
+    state.selectedExceptions = data.exceptions;
+    state.selectedLinks = {
+      site: data.site,
+      traceId: data.traceId,
+      findings: data.findings,
+      crash: data.crash,
+      attachedTo: data.attachedTo,
+    };
+    resetDetails();
+    renderWindow();
   }
 
   return {
-    updateColumns, resetAutomaticColumns, lockAutomaticColumns, layoutColumns, renderFieldList, renderRows, renderWindow, scheduleRenderWindow, toggleExpand, resetDetails, receiveDetails, invalidateRows,
-    measureViewport, releaseViewport,
-    get currentColumns() { return currentColumns; }, get automaticColumns() { return automaticColumns; },
-    get events() { return sourceEvents; }, get expandedHeight() { return expandedHeight; }
+    updateColumns,
+    resetAutomaticColumns,
+    lockAutomaticColumns,
+    layoutColumns,
+    renderFieldList,
+    renderRows,
+    renderWindow,
+    scheduleRenderWindow,
+    toggleExpand,
+    resetDetails,
+    receiveDetails,
+    invalidateRows,
+    measureViewport,
+    releaseViewport,
+    get currentColumns() {
+      return currentColumns;
+    },
+    get automaticColumns() {
+      return automaticColumns;
+    },
+    get events() {
+      return sourceEvents;
+    },
+    get expandedHeight() {
+      return expandedHeight;
+    },
   };
 }

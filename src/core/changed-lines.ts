@@ -30,21 +30,35 @@ export function parseDiffRanges(diff: string): LineRanges {
   let inHunk = false;
   for (const text of diff.split(/\r?\n/)) {
     const hunk = text.match(/^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@/);
-    if (hunk) { line = Number(hunk[1]); inHunk = true; continue; }
-    if (text.startsWith('diff --git ')) { inHunk = false; continue; }
+    if (hunk) {
+      line = Number(hunk[1]);
+      inHunk = true;
+      continue;
+    }
+    if (text.startsWith('diff --git ')) {
+      inHunk = false;
+      continue;
+    }
     if (!inHunk) continue;
-    if (text.startsWith('+')) { ranges.push([line, line]); line++; }
-    else if (text.startsWith('-')) ranges.push([Math.max(1, line), Math.max(1, line)]);
+    if (text.startsWith('+')) {
+      ranges.push([line, line]);
+      line++;
+    } else if (text.startsWith('-')) ranges.push([Math.max(1, line), Math.max(1, line)]);
     else if (text.startsWith(' ') || text === '') line++;
   }
   return merge(ranges);
 }
 
-const normalize = (file: string) => file.replace(/^file:\/\//, '').replace(/\\/g, '/').replace(/^\/?([A-Za-z]):\//, (_, drive: string) => `${drive.toLowerCase()}:/`);
+const normalize = (file: string) =>
+  file
+    .replace(/^file:\/\//, '')
+    .replace(/\\/g, '/')
+    .replace(/^\/?([A-Za-z]):\//, (_, drive: string) => `${drive.toLowerCase()}:/`);
 const basename = (file: string) => file.slice(file.lastIndexOf('/') + 1);
 
 function inRanges(ranges: LineRanges, line: number): boolean {
-  let low = 0, high = ranges.length - 1;
+  let low = 0,
+    high = ranges.length - 1;
   while (low <= high) {
     const middle = (low + high) >> 1;
     if (line < ranges[middle][0]) high = middle - 1;
@@ -60,17 +74,25 @@ export class ChangedLines {
   private files = new Map<string, LineRanges>();
   private byBasename = new Map<string, string[]>();
 
-  get fileCount(): number { return this.files.size; }
+  get fileCount(): number {
+    return this.files.size;
+  }
 
   /** Replace every file's ranges; the version changes only when something did. */
   set(files: ReadonlyMap<string, LineRanges>): void {
-    const next = new Map([...files].filter(([, ranges]) => ranges.length).map(([file, ranges]) => [normalize(file), ranges] as const));
-    if (next.size === this.files.size && [...next].every(([file, ranges]) => JSON.stringify(this.files.get(file)) === JSON.stringify(ranges))) return;
+    const next = new Map(
+      [...files].filter(([, ranges]) => ranges.length).map(([file, ranges]) => [normalize(file), ranges] as const),
+    );
+    if (
+      next.size === this.files.size &&
+      [...next].every(([file, ranges]) => JSON.stringify(this.files.get(file)) === JSON.stringify(ranges))
+    )
+      return;
     this.files = next;
     this.byBasename = new Map();
     for (const file of next.keys()) {
       const name = basename(file);
-      this.byBasename.set(name, [...this.byBasename.get(name) ?? [], file]);
+      this.byBasename.set(name, [...(this.byBasename.get(name) ?? []), file]);
     }
     this.version++;
   }
@@ -112,16 +134,27 @@ export class ChangeScope {
   private cache = new WeakMap<LogEvent, boolean>();
   private cachedVersion = '';
 
-  constructor(readonly changes: ChangedLines, private readonly sites?: LogSiteIndex) { }
+  constructor(
+    readonly changes: ChangedLines,
+    private readonly sites?: LogSiteIndex,
+  ) {}
 
   /** Changes whenever an event already tested could now answer differently. */
-  get version(): string { return `${this.changes.version}.${this.sites?.version ?? 0}`; }
+  get version(): string {
+    return `${this.changes.version}.${this.sites?.version ?? 0}`;
+  }
 
   matches(event: LogEvent): boolean {
     const version = this.version;
-    if (version !== this.cachedVersion) { this.cache = new WeakMap(); this.cachedVersion = version; }
+    if (version !== this.cachedVersion) {
+      this.cache = new WeakMap();
+      this.cachedVersion = version;
+    }
     let touched = this.cache.get(event);
-    if (touched === undefined) { touched = touchesChanges(event, this.changes, this.sites); this.cache.set(event, touched); }
+    if (touched === undefined) {
+      touched = touchesChanges(event, this.changes, this.sites);
+      this.cache.set(event, touched);
+    }
     return touched;
   }
 }

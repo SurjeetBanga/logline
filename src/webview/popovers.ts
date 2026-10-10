@@ -1,5 +1,10 @@
 import { EventScope } from './event-scope';
-export interface Popover { container: HTMLElement; isOpen(): boolean; close(restoreFocus?: boolean): void; open(): void; }
+export interface Popover {
+  container: HTMLElement;
+  isOpen(): boolean;
+  close(restoreFocus?: boolean): void;
+  open(): void;
+}
 export function createPopovers(scope: EventScope) {
   // A handful of toolbar buttons open a small panel (level filter, search
   // syntax help). Only one is open at a time, and clicking outside or pressing
@@ -12,13 +17,10 @@ export function createPopovers(scope: EventScope) {
       close(restoreFocus = false) {
         panel.hidden = true;
         button.setAttribute('aria-expanded', 'false');
-        if (restoreFocus)
-          button.focus();
+        if (restoreFocus) button.focus();
       },
       open() {
-        for (const other of popovers)
-          if (other !== api)
-            other.close();
+        for (const other of popovers) if (other !== api) other.close();
         panel.hidden = false;
         button.setAttribute('aria-expanded', 'true');
         // Keep menus inside the panel even when their trigger wraps to a new row.
@@ -32,10 +34,16 @@ export function createPopovers(scope: EventScope) {
         // clipped to the toolbar's height, which makes All levels and Saved
         // searches appear not to open. Anchor every toolbar menu to the
         // viewport so it can escape that clipping layer.
-        if (panel.classList.contains('fields-panel') || panel.classList.contains('cheat-sheet')
-          || panel.classList.contains('level-menu') || panel.classList.contains('saved-searches')
-          || panel.classList.contains('actions-menu') || panel.classList.contains('session-menu')
-          || panel.classList.contains('scope-menu') || panel.classList.contains('doctor-panel')) {
+        if (
+          panel.classList.contains('fields-panel') ||
+          panel.classList.contains('cheat-sheet') ||
+          panel.classList.contains('level-menu') ||
+          panel.classList.contains('saved-searches') ||
+          panel.classList.contains('actions-menu') ||
+          panel.classList.contains('session-menu') ||
+          panel.classList.contains('scope-menu') ||
+          panel.classList.contains('doctor-panel')
+        ) {
           const trigger = button.getBoundingClientRect();
           const margin = 8;
           const spaceBelow = window.innerHeight - trigger.bottom - margin;
@@ -78,13 +86,12 @@ export function createPopovers(scope: EventScope) {
           panel.style.top = '';
           panel.style.bottom = 'calc(100% + 4px)';
           panel.style.maxHeight = `${cap(spaceAbove)}px`;
-        }
-        else {
+        } else {
           panel.style.maxHeight = `${cap(spaceBelow)}px`;
         }
-      }
+      },
     };
-    scope.listen(button, 'click', event => {
+    scope.listen(button, 'click', (event) => {
       event.stopPropagation();
       api.isOpen() ? api.close() : api.open();
     });
@@ -92,23 +99,18 @@ export function createPopovers(scope: EventScope) {
     return api;
   }
 
-  scope.listen(document, 'click', event => {
+  scope.listen(document, 'click', (event) => {
     for (const popover of popovers)
-      if (popover.isOpen() && !popover.container.contains(event.target as Node))
-        popover.close();
+      if (popover.isOpen() && !popover.container.contains(event.target as Node)) popover.close();
   });
 
-  scope.listen(document, 'keydown', event => {
-    if (event.key !== 'Escape')
-      return;
-    for (const popover of popovers)
-      if (popover.isOpen())
-        popover.close(true);
+  scope.listen(document, 'keydown', (event) => {
+    if (event.key !== 'Escape') return;
+    for (const popover of popovers) if (popover.isOpen()) popover.close(true);
   });
 
   scope.listen(window, 'resize', () => {
-    for (const popover of popovers)
-      popover.close();
+    for (const popover of popovers) popover.close();
   });
   return { popovers, createPopover };
 }

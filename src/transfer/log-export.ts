@@ -2,7 +2,18 @@ import type { LogEvent } from '../core/types';
 import { setImmediate as yieldToHost } from 'node:timers/promises';
 import { createRedactor, type RedactionOptions } from '../core/redaction';
 
-export const CSV_BASE_COLUMNS = ['id', 'timestamp', 'timestampMs', 'level', 'message', 'stream', 'server', 'serverId', 'sessionId', 'raw'];
+export const CSV_BASE_COLUMNS = [
+  'id',
+  'timestamp',
+  'timestampMs',
+  'level',
+  'message',
+  'stream',
+  'server',
+  'serverId',
+  'sessionId',
+  'raw',
+];
 export const CSV_FIELD_LIMIT = 200;
 
 export type ExportFormat = 'jsonl' | 'json' | 'csv';
@@ -23,44 +34,71 @@ export function csvCell(value: unknown): string {
   return /[",\n\r]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
 }
 
-function* exportParts(events: readonly LogEvent[], format: ExportFormat, transform: (event: LogEvent) => LogEvent): Generator<string> {
+function* exportParts(
+  events: readonly LogEvent[],
+  format: ExportFormat,
+  transform: (event: LogEvent) => LogEvent,
+): Generator<string> {
   if (format === 'json') {
-    if (!events.length) { yield '[]\n'; return; }
+    if (!events.length) {
+      yield '[]\n';
+      return;
+    }
     yield '[\n';
     for (let i = 0; i < events.length; i++) {
       yield JSON.stringify(transform(events[i]), null, 2).replace(/^/gm, '  ') + (i < events.length - 1 ? ',\n' : '\n');
     }
-    yield ']\n'; return;
+    yield ']\n';
+    return;
   }
-  if (format === 'jsonl') { for (const event of events) yield JSON.stringify(transform(event)) + '\n'; return; }
+  if (format === 'jsonl') {
+    for (const event of events) yield JSON.stringify(transform(event)) + '\n';
+    return;
+  }
   // Field columns are always prefixed, even when a field's name doesn't collide
   // with a base column, so a header never ambiguously refers to either source
   // depending on which events happen to be in the export.
   const fields = new Set<string>();
-  outer: for (const event of events) for (const key of Object.keys(event.fields ?? {})) {
-    fields.add(key);
-    if (fields.size >= CSV_FIELD_LIMIT) break outer;
-  }
-  const columns = [...CSV_BASE_COLUMNS, ...[...fields].sort().map(key => `field:${key}`)];
-  const descriptors: ({ column: string; field: string } | { column: string; key: keyof LogEvent })[] = columns.map(column => column.startsWith('field:')
-    ? { column, field: column.slice('field:'.length) }
-    : { column, key: column as keyof LogEvent });
-  yield descriptors.map(descriptor => csvCell(descriptor.column)).join(',') + '\n';
+  outer: for (const event of events)
+    for (const key of Object.keys(event.fields ?? {})) {
+      fields.add(key);
+      if (fields.size >= CSV_FIELD_LIMIT) break outer;
+    }
+  const columns = [...CSV_BASE_COLUMNS, ...[...fields].sort().map((key) => `field:${key}`)];
+  const descriptors: ({ column: string; field: string } | { column: string; key: keyof LogEvent })[] = columns.map(
+    (column) =>
+      column.startsWith('field:')
+        ? { column, field: column.slice('field:'.length) }
+        : { column, key: column as keyof LogEvent },
+  );
+  yield descriptors.map((descriptor) => csvCell(descriptor.column)).join(',') + '\n';
   for (const original of events) {
     const event = transform(original);
-    yield descriptors.map(descriptor => 'field' in descriptor
-      ? csvCell(event.fields && Object.hasOwn(event.fields, descriptor.field) ? event.fields[descriptor.field] : undefined)
-      : csvCell(event[descriptor.key])).join(',') + '\n';
+    yield descriptors
+      .map((descriptor) =>
+        'field' in descriptor
+          ? csvCell(
+              event.fields && Object.hasOwn(event.fields, descriptor.field)
+                ? event.fields[descriptor.field]
+                : undefined,
+            )
+          : csvCell(event[descriptor.key]),
+      )
+      .join(',') + '\n';
   }
 }
 
 export function serializeExport(events: readonly LogEvent[], format: ExportFormat): string {
-  return [...exportParts(events, format, event => event)].join('');
+  return [...exportParts(events, format, (event) => event)].join('');
 }
 
 /** One bounded batch plus one record; yield even when records are very small. */
-export async function* exportChunks(events: readonly LogEvent[], format: ExportFormat, options: RedactionOptions = {},
-  cancelled = () => false): AsyncGenerator<Uint8Array> {
+export async function* exportChunks(
+  events: readonly LogEvent[],
+  format: ExportFormat,
+  options: RedactionOptions = {},
+  cancelled = () => false,
+): AsyncGenerator<Uint8Array> {
   const redactor = createRedactor(options);
   const transform = (event: LogEvent) => {
     if (cancelled()) throw new Error('Export cancelled.');
@@ -71,10 +109,12 @@ export async function* exportChunks(events: readonly LogEvent[], format: ExportF
   for (const part of exportParts(events, format, transform)) {
     if (cancelled()) throw new Error('Export cancelled.');
     const buffer = Buffer.from(part, 'utf8');
-    parts.push(buffer); bytes += buffer.length;
+    parts.push(buffer);
+    bytes += buffer.length;
     if (bytes >= 256 * 1024 || parts.length >= 128) {
       yield Buffer.concat(parts, bytes);
-      parts = []; bytes = 0;
+      parts = [];
+      bytes = 0;
       await yieldToHost();
     }
   }

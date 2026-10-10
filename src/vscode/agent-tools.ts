@@ -17,16 +17,19 @@ const runtimeVscode = vscode as unknown as LanguageModelRuntime;
 /** A tool result as bounded JSON text, the same for Copilot and MCP clients. */
 export function boundedText(value: unknown): string {
   const json = JSON.stringify(value);
-  const oversized = value && typeof value === 'object' ? value as Record<string, unknown> : {};
-  const text = Buffer.byteLength(json, 'utf8') <= MAX_BYTES ? json : JSON.stringify({
-    error: 'RESULT_TOO_LARGE',
-    message: 'The bounded result exceeded 64 KiB; narrow the query or inspect individual events.',
-    partial: true,
-    truncated: true,
-    ...(typeof oversized.hasMore === 'boolean' ? { hasMore: oversized.hasMore } : {}),
-    ...(Number.isSafeInteger(oversized.matched) ? { matched: oversized.matched } : {}),
-    ...(Number.isSafeInteger(oversized.newest) ? { newest: oversized.newest } : {})
-  });
+  const oversized = value && typeof value === 'object' ? (value as Record<string, unknown>) : {};
+  const text =
+    Buffer.byteLength(json, 'utf8') <= MAX_BYTES
+      ? json
+      : JSON.stringify({
+          error: 'RESULT_TOO_LARGE',
+          message: 'The bounded result exceeded 64 KiB; narrow the query or inspect individual events.',
+          partial: true,
+          truncated: true,
+          ...(typeof oversized.hasMore === 'boolean' ? { hasMore: oversized.hasMore } : {}),
+          ...(Number.isSafeInteger(oversized.matched) ? { matched: oversized.matched } : {}),
+          ...(Number.isSafeInteger(oversized.newest) ? { newest: oversized.newest } : {}),
+        });
   return text;
 }
 
@@ -34,13 +37,15 @@ const textResult = (value: unknown) => {
   const text = boundedText(value);
   const Result = runtimeVscode.LanguageModelToolResult;
   const TextPart = runtimeVscode.LanguageModelTextPart;
-  return Result ? new Result(TextPart ? [new TextPart(text)] : [{ type: 'text', value: text }]) : { content: [{ type: 'text', value: text }] };
+  return Result
+    ? new Result(TextPart ? [new TextPart(text)] : [{ type: 'text', value: text }])
+    : { content: [{ type: 'text', value: text }] };
 };
 
 function inputOf(options: unknown): ToolInput {
   if (!options || typeof options !== 'object') return {};
   const input = (options as { input?: unknown }).input;
-  return input && typeof input === 'object' && !Array.isArray(input) ? input as ToolInput : {};
+  return input && typeof input === 'object' && !Array.isArray(input) ? (input as ToolInput) : {};
 }
 
 function invoke(access: AgentLogAccess, callback: ToolCallback) {
@@ -49,50 +54,82 @@ function invoke(access: AgentLogAccess, callback: ToolCallback) {
       const MarkdownString = runtimeVscode.MarkdownString;
       const status = access.status();
       const runCount = status.sources.reduce((sum, source) => sum + source.runs.length, 0);
-      const message = status.scope === 'all'
-        ? 'Read-only access to existing and new captured Logline runs in this window until sharing stops. Results are redacted.'
-        : `Read-only access to ${runCount} explicitly shared Logline run${runCount === 1 ? '' : 's'}; future commands are not included.`;
-      return { invocationMessage: 'Reading shared Logline runs', confirmationMessages: { title: 'Read shared Logline runs', message: MarkdownString ? new MarkdownString(message) : message } };
+      const message =
+        status.scope === 'all'
+          ? 'Read-only access to existing and new captured Logline runs in this window until sharing stops. Results are redacted.'
+          : `Read-only access to ${runCount} explicitly shared Logline run${runCount === 1 ? '' : 's'}; future commands are not included.`;
+      return {
+        invocationMessage: 'Reading shared Logline runs',
+        confirmationMessages: {
+          title: 'Read shared Logline runs',
+          message: MarkdownString ? new MarkdownString(message) : message,
+        },
+      };
     },
     async invoke(options: unknown, token?: CancellationTokenLike) {
       return textResult(await callTool(callback, inputOf(options), token));
-    }
+    },
   };
 }
 
 async function callTool(callback: ToolCallback, input: ToolInput, token?: CancellationTokenLike): Promise<unknown> {
-  try { return await callback(input, token); }
-  catch (error) { const e = error instanceof AgentAccessError ? error : new AgentAccessError('INVALID_INPUT', String(error)); return { error: e.code, message: e.message }; }
+  try {
+    return await callback(input, token);
+  } catch (error) {
+    const e = error instanceof AgentAccessError ? error : new AgentAccessError('INVALID_INPUT', String(error));
+    return { error: e.code, message: e.message };
+  }
 }
 
 /** The Logline tools, by name. Copilot and MCP clients such as Claude Code and Codex call the same ones. */
 export function agentToolHandlers(access: AgentLogAccess): Map<string, ToolCallback> {
   return new Map<string, ToolCallback>([
-    ['logline_list_shared_sources', input => access.list(input)],
-    ['logline_search_logs', input => access.search(input as unknown as AgentSearchInput)],
-    ['logline_inspect_event', input => {
-      if (typeof input.shareId !== 'string' || !Number.isSafeInteger(input.id) || (input.id as number) < 0) throw new AgentAccessError('INVALID_INPUT', 'shareId and a non-negative integer id are required.');
-      if (input.context !== undefined && (!Number.isSafeInteger(input.context) || (input.context as number) < 0 || (input.context as number) > 25)) throw new AgentAccessError('INVALID_INPUT', 'context must be an integer from 0 to 25.');
-      return access.inspect(input.shareId, input.id as number, input.context as number | undefined);
-    }],
-    ['logline_analyze_logs', input => access.analyze(input as unknown as AgentSearchInput)],
-    ['logline_get_trace', input => {
-      if (typeof input.shareId !== 'string' || typeof input.traceId !== 'string') throw new AgentAccessError('INVALID_INPUT', 'shareId and traceId are required.');
-      return access.trace(input.shareId, input.traceId);
-    }],
-    ['logline_wait_for_logs', (input, token) => {
-      if (!Number.isSafeInteger(input.watermark) || (input.watermark as number) < 0) throw new AgentAccessError('INVALID_INPUT', 'watermark must be a non-negative integer.');
-      const timeoutMs = input.timeoutMs === undefined ? 5000 : Number(input.timeoutMs);
-      return access.wait(input as unknown as AgentSearchInput, input.watermark as number, timeoutMs, token);
-    }]
+    ['logline_list_shared_sources', (input) => access.list(input)],
+    ['logline_search_logs', (input) => access.search(input as unknown as AgentSearchInput)],
+    [
+      'logline_inspect_event',
+      (input) => {
+        if (typeof input.shareId !== 'string' || !Number.isSafeInteger(input.id) || (input.id as number) < 0)
+          throw new AgentAccessError('INVALID_INPUT', 'shareId and a non-negative integer id are required.');
+        if (
+          input.context !== undefined &&
+          (!Number.isSafeInteger(input.context) || (input.context as number) < 0 || (input.context as number) > 25)
+        )
+          throw new AgentAccessError('INVALID_INPUT', 'context must be an integer from 0 to 25.');
+        return access.inspect(input.shareId, input.id as number, input.context as number | undefined);
+      },
+    ],
+    ['logline_analyze_logs', (input) => access.analyze(input as unknown as AgentSearchInput)],
+    [
+      'logline_get_trace',
+      (input) => {
+        if (typeof input.shareId !== 'string' || typeof input.traceId !== 'string')
+          throw new AgentAccessError('INVALID_INPUT', 'shareId and traceId are required.');
+        return access.trace(input.shareId, input.traceId);
+      },
+    ],
+    [
+      'logline_wait_for_logs',
+      (input, token) => {
+        if (!Number.isSafeInteger(input.watermark) || (input.watermark as number) < 0)
+          throw new AgentAccessError('INVALID_INPUT', 'watermark must be a non-negative integer.');
+        const timeoutMs = input.timeoutMs === undefined ? 5000 : Number(input.timeoutMs);
+        return access.wait(input as unknown as AgentSearchInput, input.watermark as number, timeoutMs, token);
+      },
+    ],
   ]);
 }
 
 /** Run one tool for an MCP client and return its bounded JSON text. */
-export async function runAgentTool(access: AgentLogAccess, name: string, input: unknown, token?: CancellationTokenLike): Promise<string> {
+export async function runAgentTool(
+  access: AgentLogAccess,
+  name: string,
+  input: unknown,
+  token?: CancellationTokenLike,
+): Promise<string> {
   const callback = agentToolHandlers(access).get(name);
   if (!callback) return boundedText({ error: 'INVALID_INPUT', message: `Unknown Logline tool: ${name}` });
-  const args = input && typeof input === 'object' && !Array.isArray(input) ? input as ToolInput : {};
+  const args = input && typeof input === 'object' && !Array.isArray(input) ? (input as ToolInput) : {};
   return boundedText(await callTool(callback, args, token));
 }
 

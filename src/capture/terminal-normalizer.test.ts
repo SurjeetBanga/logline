@@ -4,14 +4,17 @@ import { TerminalNormalizer, terminalLevel } from './terminal-normalizer';
 
 test('terminal normalizer handles split ANSI sequences and redraws', () => {
   const lines: string[] = [];
-  const normalizer = new TerminalNormalizer(line => lines.push(line.text));
-  normalizer.write('\x1b[3'); normalizer.write('1m[ERROR] failed\x1b[0m\nprogress 1'); normalizer.write('\rprogress 2\n'); normalizer.end();
+  const normalizer = new TerminalNormalizer((line) => lines.push(line.text));
+  normalizer.write('\x1b[3');
+  normalizer.write('1m[ERROR] failed\x1b[0m\nprogress 1');
+  normalizer.write('\rprogress 2\n');
+  normalizer.end();
   assert.deepEqual(lines, ['[ERROR] failed', 'progress 2']);
 });
 
 test('terminal normalizer skips alternate screen content and bounds lines', () => {
   const lines: { text: string; truncated: boolean }[] = [];
-  const normalizer = new TerminalNormalizer(line => lines.push(line), 4);
+  const normalizer = new TerminalNormalizer((line) => lines.push(line), 4);
   normalizer.write('\x1b[?1049hsecret\n\x1b[?1049lhello world\n');
   assert.deepEqual(lines, [{ text: 'hell', truncated: true }]);
 });
@@ -23,21 +26,22 @@ test('terminal levels require an explicit leading marker', () => {
 
 test('terminal normalizer preserves ordinary CRLF line endings across chunks', () => {
   const lines: string[] = [];
-  const normalizer = new TerminalNormalizer(line => lines.push(line.text));
-  normalizer.write('first\r'); normalizer.write('\nsecond\r\n');
+  const normalizer = new TerminalNormalizer((line) => lines.push(line.text));
+  normalizer.write('first\r');
+  normalizer.write('\nsecond\r\n');
   assert.deepEqual(lines, ['first', 'second']);
 });
 
 test('terminal normalizer removes OSC hyperlinks without leaking terminator bytes', () => {
   const lines: string[] = [];
-  const normalizer = new TerminalNormalizer(line => lines.push(line.text));
+  const normalizer = new TerminalNormalizer((line) => lines.push(line.text));
   normalizer.write('\u001b]8;;https://example.test\u001b\\click me\u001b]8;;\u001b\\\n');
   assert.deepEqual(lines, ['click me']);
 });
 
 test('terminal normalizer bounds an unterminated escape sequence', () => {
   const lines: string[] = [];
-  const normalizer = new TerminalNormalizer(line => lines.push(line.text), 32);
+  const normalizer = new TerminalNormalizer((line) => lines.push(line.text), 32);
   normalizer.write('\u001b]' + 'x'.repeat(100_000));
   normalizer.write('recovered\n');
   assert.deepEqual(lines, []);
@@ -45,14 +49,14 @@ test('terminal normalizer bounds an unterminated escape sequence', () => {
 
 test('terminal normalizer resynchronises after a malformed escape at a line boundary', () => {
   const lines: string[] = [];
-  const normalizer = new TerminalNormalizer(line => lines.push(line.text));
+  const normalizer = new TerminalNormalizer((line) => lines.push(line.text));
   normalizer.write('\u001b]bad OSC without terminator\nrecovered\n');
   assert.deepEqual(lines, ['recovered']);
 });
 
 test('terminal normalizer ends the line before an oversized malformed escape', () => {
   const lines: string[] = [];
-  const normalizer = new TerminalNormalizer(line => lines.push(line.text));
+  const normalizer = new TerminalNormalizer((line) => lines.push(line.text));
   normalizer.write(`before\u001b[${'1;'.repeat(4096)}`);
   normalizer.write('still escape\nafter\n');
   assert.deepEqual(lines, ['before', 'after']);
@@ -60,7 +64,7 @@ test('terminal normalizer ends the line before an oversized malformed escape', (
 
 test('terminal normalizer keeps complete ANSI sequences in long chunks', () => {
   const lines: { text: string; truncated: boolean }[] = [];
-  const normalizer = new TerminalNormalizer(line => lines.push(line));
+  const normalizer = new TerminalNormalizer((line) => lines.push(line));
   normalizer.write(`\u001b[32m${'x'.repeat(5000)}\u001b[0m\n`);
   normalizer.end();
   assert.equal(lines.length, 1);

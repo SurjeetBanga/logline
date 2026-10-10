@@ -18,6 +18,12 @@ test('value suggestions read only the selected server index and handle an incomp
   const store = new LogStore();
   store.add({ id: 1, level: 'info', serverId: 'api', fields: { service: 'API west' } });
   store.add({ id: 2, level: 'info', serverId: 'worker', fields: { service: 'worker' } });
-  Object.defineProperty(store.find(2)!.fields!, 'service', { get() { throw new Error('Unrelated server read'); } });
-  assert.deepEqual(store.fieldSuggestions('level:info service:"API w', 'API').values, [{ value: 'API west', count: 1 }]);
+  Object.defineProperty(store.find(2)!.fields!, 'service', {
+    get() {
+      throw new Error('Unrelated server read');
+    },
+  });
+  assert.deepEqual(store.fieldSuggestions('level:info service:"API w', 'API').values, [
+    { value: 'API west', count: 1 },
+  ]);
 });
