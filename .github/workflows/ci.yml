@@ -54,6 +54,8 @@ jobs:
           npm run compile
           git diff --exit-code -- media/ || { echo "::error::media/ is stale; run npm run compile and commit the result."; exit 1; }
       - run: npm run typecheck
+      - run: npm run lint
+        if: runner.os == 'Linux'
       - run: npm test
       - run: npm run package
         if: runner.os == 'Linux'

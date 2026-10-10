@@ -113,13 +113,13 @@ test('controller routes an individual stop without stopping sibling runs', { tim
   } finally { await p.dispose(); }
 });
 
-test('snapshot projects selected custom columns and exposes server-scoped payload choices', () => {
+test('snapshot projects selected custom columns and exposes server-scoped payload choices', async () => {
   const p = provider();
   p.store.add({ id: 1, level: 'info', serverId: 'api', fields: { service: 'api', logger: 'main', requestId: 'r1', traceId: 't1', method: 'GET', path: '/', custom: 'value' } });
   p.store.add({ id: 2, level: 'info', serverId: 'worker', fields: { workerOnly: true } });
   const messages: Record<string, any>[] = [];
 
-  p.handleMessage(message => { messages.push(message); }, { type: 'snapshot', serverId: 'api', columns: ['custom', 'workerOnly'] });
+  await p.handleMessage(message => { messages.push(message); }, { type: 'snapshot', serverId: 'api', columns: ['custom', 'workerOnly'] });
   assert.ok(messages[0].columnFields.includes('custom'));
   assert.ok(!messages[0].columnFields.includes('workerOnly'));
   assert.equal(messages[0].events[0].fields.custom, 'value');
@@ -127,13 +127,13 @@ test('snapshot projects selected custom columns and exposes server-scoped payloa
   assert.ok(!messages[0].columns.includes('custom'), 'the selected field is outside the automatic six');
 });
 
-test('configured canonical columns resolve aliases in structured payloads', () => {
+test('configured canonical columns resolve aliases in structured payloads', async () => {
   const p = provider();
   settings.set('columns', ['service', 'status']);
   p.store.add({ id: 1, level: 'info', fields: { 'service.name': 'api', 'http.response.status_code': 201 } });
   const messages: Record<string, any>[] = [];
 
-  p.handleMessage(message => { messages.push(message); }, { type: 'snapshot' });
+  await p.handleMessage(message => { messages.push(message); }, { type: 'snapshot' });
   assert.deepEqual(messages[0].events[0].fields, { service: 'api', status: 201 });
 });
 

@@ -21,3 +21,4 @@ scripts/**
 CLAUDE.md
 out/mcp/**
 .vscode-test/**
+.oxlintrc.json
