@@ -819,7 +819,8 @@
     "publish:ovsx": "ovsx publish -p $OVSX_PAT",
     "lint": "oxlint --type-aware --tsconfig tsconfig.test.json src",
     "format": "prettier --write .",
-    "format:check": "prettier --check ."
+    "format:check": "prettier --check .",
+    "coverage": "node scripts/test.mjs --coverage"
   },
   "devDependencies": {
     "@types/node": "^20.19.43",
