@@ -7,6 +7,7 @@ import { resolveRunTarget } from '../core/server-config';
 import type { Settings } from '../core/settings';
 import { parseViewRequest, type DetailLinks, type DoctorAction, type HostMessage, type Snapshot, type ViewRequest } from '../protocol/messages';
 import type { LogEvent } from '../core/types';
+import type { MetricSeriesView } from '../core/metrics';
 import type { TraceSummary, TraceView } from '../core/traces';
 import type { SavedSearches } from '../storage/saved-searches';
 import type { LogTransfer } from './log-transfer';
@@ -28,11 +29,13 @@ interface MessageServices {
   openLogSite(id: number): Promise<void>;
   traceView(traceId: string): TraceView;
   traceList(): TraceSummary[];
+  metricList(): MetricSeriesView[];
   toggleOtlp(enabled: boolean): Promise<void>;
   breakOnEvent(id: number): Promise<void>;
   breakOnQuery(query: string, levels: string[]): Promise<void>;
   doctorAction(action: DoctorAction, siteId?: string): Promise<void>;
   connectAgent(): Promise<void>;
+  showStatus(): Promise<void>;
 }
 export async function handleMessage(services: MessageServices, send: (message: HostMessage) => void, value: unknown): Promise<void> {
   const msg = parseViewRequest(value);
@@ -50,6 +53,7 @@ export async function handleMessage(services: MessageServices, send: (message: H
     case 'openLogSite': await services.openLogSite(msg.id); return;
     case 'trace': send({ type: 'trace', trace: services.traceView(msg.traceId) }); return;
     case 'traces': send({ type: 'traces', traces: services.traceList() }); return;
+    case 'metrics': send({ type: 'metrics', metrics: services.metricList() }); return;
     case 'toggleOtlp': await services.toggleOtlp(msg.enabled); return;
     case 'breakOnEvent': await services.breakOnEvent(msg.id); return;
     case 'doctorAction': await services.doctorAction(msg.action, msg.siteId); return;
@@ -69,6 +73,7 @@ export async function handleMessage(services: MessageServices, send: (message: H
     case 'shareWithAgent': await services.shareWithAgent(msg.sourceIds, msg.anchor, msg.sessionIds, msg.chooseRuns); return;
     case 'stopSharing': services.stopSharing(); return;
     case 'connectAgent': await services.connectAgent(); return;
+    case 'showStatus': await services.showStatus(); return;
     case 'askCopilot': await services.askCopilot(msg.anchor); return;
     case 'shareEvent': {
       const event = store.find(msg.id);

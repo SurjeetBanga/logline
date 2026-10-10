@@ -195,7 +195,7 @@
       section2.append(svg, chartLegend([{ className: "swatch-average", label: "average" }, { className: "swatch-p95", label: "p95" }]));
       return section2;
     }
-    function sparkline(values) {
+    function sparkline2(values) {
       const el = document.createElement("span");
       el.className = "sparkline";
       el.setAttribute("aria-hidden", "true");
@@ -228,10 +228,10 @@
       const name = document.createElement("span");
       name.className = "tile-label";
       name.textContent = label;
-      const number = document.createElement("strong");
-      number.className = "tile-value";
-      number.textContent = value;
-      element2.append(name, number);
+      const number2 = document.createElement("strong");
+      number2.className = "tile-value";
+      number2.textContent = value;
+      element2.append(name, number2);
       if (detail) {
         const note = document.createElement("span");
         note.className = "tile-detail";
@@ -354,7 +354,7 @@
       }
       row.append(amount, share, body);
       if (item.isNew) row.append(newBadge());
-      row.append(sparkline(item.trend ?? []));
+      row.append(sparkline2(item.trend ?? []));
       return row;
     }
     function seen(group, range) {
@@ -646,6 +646,7 @@
       shareAgent: element("shareAgent"),
       shareSpecificRuns: element("shareSpecificRuns"),
       connectAgent: element("connectAgent"),
+      statusAction: element("statusAction"),
       shareScope: element("shareScope"),
       status: element("status"),
       sessions: element("sessions"),
@@ -671,6 +672,13 @@
       tracesRows: element("tracesRows"),
       tracesErrorsOnly: element("tracesErrorsOnly"),
       tracesStartReceiver: element("tracesStartReceiver"),
+      metrics: element("metrics"),
+      metricCount: element("metricCount"),
+      metricsDialog: element("metricsDialog"),
+      metricsClose: element("metricsClose"),
+      metricsFilter: element("metricsFilter"),
+      metricsStatus: element("metricsStatus"),
+      metricsRows: element("metricsRows"),
       otlpStatus: element("otlpStatus"),
       traceTitle: element("traceTitle"),
       traceStatus: element("traceStatus"),
@@ -823,7 +831,8 @@
     { codes: ["contextless"], title: "Errors without a request or trace id" },
     { codes: ["noisy"], title: "Noisy statements" },
     { codes: ["oversized"], title: "Oversized events" },
-    { codes: ["unstructured"], title: "Values formatted into messages" }
+    { codes: ["unstructured"], title: "Values formatted into messages" },
+    { codes: ["unnamed-service", "span-name-ids", "unmarked-error", "missing-route", "old-attributes", "unit-in-name"], title: "OpenTelemetry conventions" }
   ];
   function siteLabel(file, line) {
     return `${file.slice(file.lastIndexOf("/") + 1)}:${line}`;
@@ -843,7 +852,7 @@
     showEvents: "Filter the Logs panel to the events this statement logged",
     open: "Open the log statement in the editor"
   };
-  function createDoctor(button, count, panel, list, api, scope, closePanel, showExample = () => void 0) {
+  function createDoctor(button, count, panel, list, api, scope, closePanel, showExample = () => void 0, showTrace = () => void 0) {
     let revision;
     let findings = [];
     function receive(doctor) {
@@ -862,7 +871,7 @@
       count.textContent = total.toLocaleString();
       const warnings = findings.filter((finding) => finding.severity === "warning").length;
       button.className = !total ? "doctor-chip is-clear" : warnings ? "doctor-chip has-warnings" : "doctor-chip";
-      button.title = total ? `Log doctor found ${total.toLocaleString()} problem${total === 1 ? "" : "s"} with log statements${warnings ? `, ${warnings.toLocaleString()} of them warnings` : ""}. Click to review.` : "Log doctor checks what your logs actually contain: secrets and personal data in any source, and on matched log statements, failures logged below warning, errors without the exception or a request id, and noisy or oversized statements. Nothing found so far.";
+      button.title = total ? `Log doctor found ${total.toLocaleString()} problem${total === 1 ? "" : "s"} with log statements${warnings ? `, ${warnings.toLocaleString()} of them warnings` : ""}. Click to review.` : "Log doctor checks what your logs actually contain: secrets and personal data in any source; on matched log statements, failures logged below warning, errors without the exception or a request id, and noisy or oversized statements; and OpenTelemetry spans and metrics against the semantic conventions. Nothing found so far.";
       button.setAttribute("aria-label", `Log issues: ${total.toLocaleString()}`);
       if (changed) render(total);
     }
@@ -930,6 +939,11 @@
         example.dataset.eventId = String(finding.eventId);
         actions.append(example);
       }
+      if (finding.traceId !== void 0) {
+        const trace = doctorButton("trace", "Show trace", "Open a trace that shows it");
+        trace.dataset.traceId = finding.traceId;
+        actions.append(trace);
+      }
       row.append(location, message, actions);
       return row;
     }
@@ -940,6 +954,11 @@
       if (action === "example") {
         if (panel.contains(target)) closePanel();
         showExample(Number(target.dataset.eventId));
+        return true;
+      }
+      if (action === "trace") {
+        if (panel.contains(target)) closePanel();
+        showTrace(target.dataset.traceId);
         return true;
       }
       api.postMessage({ type: "doctorAction", action, ...target.dataset.siteId ? { siteId: target.dataset.siteId } : {} });
@@ -1074,7 +1093,7 @@
     site.dataset.id = breakpoint.dataset.id = String(id);
     investigate.append(...leadingActions, trace, site, breakpoint);
     const copy = eventAction("copy-button", "copy", "Copy", "Copy the original event to the clipboard");
-    const share = eventAction("share-source-button", "agent", "Share with agent", "Share the logs of this event's source with Copilot, so it can read them");
+    const share = eventAction("share-source-button", "agent", "Share with agent", "Share the logs of this event's source with agents, such as Copilot, Claude Code, or Codex, so they can read them");
     copy.dataset.id = share.dataset.id = String(id);
     output.append(copy, share);
     for (const finding of links.findings ?? []) {
@@ -1524,6 +1543,138 @@ Trace ${trace.traceId}`;
       }));
     }
     return { show, receive, receiverChanged };
+  }
+
+  // src/webview/inspection/metrics.ts
+  var MEASURE_LABELS = { value: "", rate: "rate", p95: "p95", average: "avg" };
+  var DURATION_MS = { ns: 1e-6, us: 1e-3, "\u03BCs": 1e-3, ms: 1, s: 1e3, min: 6e4, h: 36e5 };
+  function number(value) {
+    const magnitude = Math.abs(value);
+    if (magnitude >= 1e4) return new Intl.NumberFormat(void 0, { notation: "compact", maximumFractionDigits: 1 }).format(value);
+    if (magnitude >= 100 || Number.isInteger(value)) return Math.round(value).toLocaleString();
+    return value.toPrecision(magnitude >= 1 ? 3 : 2).replace(/\.?0+$/, "").replace(/^-?0$/, "0");
+  }
+  function bytes(value) {
+    const units = ["B", "KiB", "MiB", "GiB", "TiB"];
+    let index = 0;
+    while (Math.abs(value) >= 1024 && index < units.length - 1) {
+      value /= 1024;
+      index++;
+    }
+    return `${number(value)} ${units[index]}`;
+  }
+  function formatMetric(value, unit = "", rate = false) {
+    const suffix = rate ? "/s" : "";
+    if (DURATION_MS[unit] !== void 0 && !rate) return formatDuration(value * DURATION_MS[unit]);
+    if (unit === "By") return `${bytes(value)}${suffix}`;
+    if (unit === "%") return `${number(value)}%${suffix}`;
+    const label = unit === "1" ? "" : unit.replace(/^\{(.*)\}$/, "$1");
+    return `${number(value)}${label ? ` ${label}` : ""}${suffix}`;
+  }
+  function sparkline(points) {
+    const namespace = "http://www.w3.org/2000/svg";
+    const svg = document.createElementNS(namespace, "svg");
+    svg.setAttribute("class", "metric-spark");
+    svg.setAttribute("viewBox", "0 0 100 24");
+    svg.setAttribute("preserveAspectRatio", "none");
+    svg.setAttribute("aria-hidden", "true");
+    if (points.length < 2) return svg;
+    const values = points.map((point) => point.value);
+    const low = Math.min(...values), high = Math.max(...values);
+    const first = points[0].timeMs, span = Math.max(1, points[points.length - 1].timeMs - first);
+    const line = document.createElementNS(namespace, "polyline");
+    line.setAttribute("points", points.map((point) => {
+      const x = (point.timeMs - first) / span * 100;
+      const y = high === low ? 12 : 22 - (point.value - low) / (high - low) * 20;
+      return `${x.toFixed(2)},${y.toFixed(2)}`;
+    }).join(" "));
+    line.setAttribute("vector-effect", "non-scaling-stroke");
+    svg.append(line);
+    return svg;
+  }
+  function details(series) {
+    const rate = series.measure === "rate";
+    const format = (value) => formatMetric(value, series.unit);
+    const parts = [
+      series.description,
+      series.total !== void 0 ? `Total ${formatMetric(series.total, series.unit)}` : "",
+      series.count !== void 0 ? `${series.count.toLocaleString()} recorded in the latest interval` : "",
+      series.average !== void 0 && series.measure !== "average" ? `avg ${format(series.average)}` : "",
+      series.p50 !== void 0 ? `p50 ${format(series.p50)}` : "",
+      series.min !== void 0 ? `min ${format(series.min)}` : "",
+      series.max !== void 0 ? `max ${format(series.max)}` : "",
+      rate ? "Rate per second between the latest two points" : series.bound ? "At most this: the histogram's buckets are too wide to estimate the p95 more closely. Set bucket boundaries that suit the unit." : series.measure === "p95" ? "p95 of the values recorded in the latest interval" : "",
+      `${series.kind}${series.unit ? ` \xB7 unit ${series.unit}` : ""}`
+    ];
+    return parts.filter(Boolean).join("\n");
+  }
+  function createMetricList(elements, api, scope) {
+    let metrics = [];
+    let revision;
+    let pending = false;
+    function load() {
+      if (pending) return;
+      pending = true;
+      api.postMessage({ type: "metrics" });
+    }
+    function show() {
+      elements.metricsStatus.textContent = "Loading\u2026";
+      elements.metricsRows.replaceChildren();
+      if (!elements.metricsDialog.open) elements.metricsDialog.showModal();
+      load();
+    }
+    scope.listen(elements.metrics, "click", show);
+    scope.listen(elements.metricsClose, "click", () => elements.metricsDialog.close());
+    scope.listen(elements.metricsFilter, "input", render);
+    function receive(list) {
+      pending = false;
+      metrics = list;
+      if (elements.metricsDialog.open) render();
+    }
+    function update(summary2) {
+      elements.metrics.hidden = !summary2;
+      elements.metricCount.textContent = summary2 ? summary2.series.toLocaleString() : "";
+      elements.metrics.title = summary2 ? `${summary2.series.toLocaleString()} OpenTelemetry metric series. Show their latest values and trends.` : "";
+      const changed = summary2?.revision !== revision;
+      revision = summary2?.revision;
+      if (changed && elements.metricsDialog.open) load();
+    }
+    function render() {
+      const terms = elements.metricsFilter.value.trim().toLowerCase().split(/\s+/).filter(Boolean);
+      const shown = terms.length ? metrics.filter((series) => {
+        const text = `${series.name} ${series.service} ${series.attributes.map(([key, value]) => `${key}=${value}`).join(" ")}`.toLowerCase();
+        return terms.every((term) => text.includes(term));
+      }) : metrics;
+      if (!metrics.length) {
+        elements.metricsStatus.textContent = "No metrics yet. Apps started while the OpenTelemetry receiver runs send metrics every 5 seconds.";
+        elements.metricsRows.replaceChildren();
+        return;
+      }
+      const services = new Set(metrics.map((series) => series.service)).size;
+      elements.metricsStatus.textContent = `${metrics.length.toLocaleString()} series from ${services.toLocaleString()} ${services === 1 ? "service" : "services"}` + (shown.length < metrics.length ? ` \xB7 ${shown.length.toLocaleString()} match` : "");
+      elements.metricsRows.replaceChildren(...shown.map((series) => {
+        const row = document.createElement("tr");
+        row.className = "metrics-row";
+        const name = cell(series.name, "metric-name");
+        name.title = details(series);
+        const service = cell("", "traces-services");
+        const chip = document.createElement("span");
+        chip.className = "service-chip";
+        chip.textContent = chip.title = series.service;
+        service.append(chip);
+        const pairs = series.attributes.map(([key, value]) => `${key}=${value}`).join(" ");
+        const attributes = cell(pairs, "metric-attributes");
+        attributes.title = series.attributes.map(([key, value]) => `${key}: ${value}`).join("\n");
+        const label = MEASURE_LABELS[series.measure];
+        const latest = cell(series.latest === void 0 ? "\u2013" : `${label ? `${label} ` : ""}${series.bound ? "\u2264 " : ""}${formatMetric(series.latest, series.unit, series.measure === "rate")}`, "metric-latest");
+        latest.title = details(series);
+        const trend = cell("", "metric-trend");
+        trend.append(sparkline(series.points));
+        row.append(name, service, attributes, latest, trend);
+        return row;
+      }));
+    }
+    return { show, receive, update };
   }
 
   // src/webview/popovers.ts
@@ -2221,8 +2372,8 @@ Trace ${trace.traceId}`;
       return row;
     }
     function buildDetailRow(event) {
-      const details = document.createElement("tr");
-      details.className = "detail-row";
+      const details2 = document.createElement("tr");
+      details2.className = "detail-row";
       const container = cell("", "detail-cell");
       container.colSpan = columns().length;
       const context = eventAction("context-button", "context", "Surrounding logs", "Show the logs just before and after this event from the same run");
@@ -2238,8 +2389,8 @@ Trace ${trace.traceId}`;
         hint.append(document.createTextNode("Tip: right-click any cell in the table to include or exclude its value."), dismiss);
         container.append(hint);
       }
-      details.append(container);
-      return details;
+      details2.append(container);
+      return details2;
     }
     function fillQuickActions(row) {
       const slot = row.querySelector(".row-quick");
@@ -3025,6 +3176,7 @@ Trace ${trace.traceId}`;
       startReceiver: () => api.postMessage({ type: "toggleOtlp", enabled: true }),
       receiver: () => ({ running: otlpRunning, endpoint: otlpEndpoint })
     });
+    const metricList = createMetricList(elements, api, scope);
     const doctor = createDoctor(
       elements.doctor,
       elements.doctorCount,
@@ -3033,7 +3185,8 @@ Trace ${trace.traceId}`;
       api,
       scope,
       () => doctorPopover.close(),
-      (id) => inspection.showContext(id)
+      (id) => inspection.showContext(id),
+      (traceId) => traceView.show(traceId)
     );
     let otlpRunning = false;
     let changedFiles;
@@ -3112,6 +3265,10 @@ Trace ${trace.traceId}`;
         traceList.receive(data.traces);
         return;
       }
+      if (data.type === "metrics") {
+        metricList.receive(data.metrics);
+        return;
+      }
       if (data.type === "details") {
         if (data.target === "context") inspection.receiveDetails(data);
         else table.receiveDetails(data);
@@ -3160,6 +3317,7 @@ Trace ${trace.traceId}`;
       doctor.receive(data.doctor);
       changedFiles = data.changes?.files;
       updateChangesControl();
+      metricList.update(data.metrics);
       elements.traceCount.hidden = !data.traceCount;
       elements.traceCount.textContent = data.traceCount ? numberFormat.format(data.traceCount) : "";
       elements.traces.title = data.traceCount ? `${numberFormat.format(data.traceCount)} traces received from OpenTelemetry. Show requests across services.` : "Requests across services, from OpenTelemetry spans and logs with a trace id";
@@ -3273,9 +3431,9 @@ Trace ${trace.traceId}`;
         updateCopyResultsControl();
         bridge.refreshRequested = true;
       }
-      const number = (value) => numberFormat.format(value);
+      const number2 = (value) => numberFormat.format(value);
       const budget = Number.isFinite(data.maxBytes) ? (data.maxBytes / 1048576).toFixed(0) : "?";
-      elements.counts.textContent = `${number(data.total)} received \xB7 ${number(data.retained)} retained \xB7 ${number(data.discarded)} discarded \xB7 ${(data.bytes / 1048576).toFixed(1)} / ${budget} MiB \xB7 ${data.truncated} truncated` + (data.persistDropped ? ` \xB7 ${number(data.persistDropped)} disk writes skipped` : "");
+      elements.counts.textContent = `${number2(data.total)} received \xB7 ${number2(data.retained)} retained \xB7 ${number2(data.discarded)} discarded \xB7 ${(data.bytes / 1048576).toFixed(1)} / ${budget} MiB \xB7 ${data.truncated} truncated` + (data.persistDropped ? ` \xB7 ${number2(data.persistDropped)} disk writes skipped` : "");
       updateModeLabel();
       if (Array.isArray(data.columnFields))
         state.columnFields = data.columnFields;
@@ -3294,7 +3452,7 @@ Trace ${trace.traceId}`;
         heldEvents = void 0;
         state.page = data.page ?? 0;
         state.pages = data.pages ?? 1;
-        elements.page.textContent = `Page ${state.page + 1} of ${state.pages} \xB7 ${number(data.matched ?? 0)} matches`;
+        elements.page.textContent = `Page ${state.page + 1} of ${state.pages} \xB7 ${number2(data.matched ?? 0)} matches`;
         elements.older.disabled = state.page >= state.pages - 1;
         elements.newer.disabled = state.page === 0;
         if (rows !== table.events || state.lastRows === void 0) {
@@ -3521,7 +3679,7 @@ Trace ${trace.traceId}`;
       table.toggleExpand(id);
     }
     const actionsMenu = createPopover(actionsContainer, elements.moreActions, elements.actionsMenu);
-    const actionItems = [elements.shareSpecificRuns, elements.connectAgent, elements.export, elements.import, elements.breakOnLogs, elements.otlpToggle, elements.manage, elements.config, elements.help];
+    const actionItems = [elements.shareSpecificRuns, elements.connectAgent, elements.export, elements.import, elements.breakOnLogs, elements.otlpToggle, elements.manage, elements.statusAction, elements.config, elements.help];
     scope.listen(elements.moreActions, "click", () => {
       if (actionsMenu.isOpen()) actionItems[0].focus();
     });
@@ -3564,6 +3722,7 @@ Trace ${trace.traceId}`;
     });
     scope.listen(elements.shareSpecificRuns, "click", () => api.postMessage({ type: "shareWithAgent", chooseRuns: true }));
     scope.listen(elements.connectAgent, "click", () => api.postMessage({ type: "connectAgent" }));
+    scope.listen(elements.statusAction, "click", () => api.postMessage({ type: "showStatus" }));
     scope.listen(elements.saveSearch, "click", () => {
       for (const popover of popovers)
         popover.close();

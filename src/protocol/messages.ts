@@ -5,6 +5,7 @@ import type { PageOptions, Stats, SuggestedValue } from '../core/log-store';
 import type { LogEvent } from '../core/types';
 import type { SavedSearch } from '../storage/saved-searches';
 import type { AgentShareStatus } from '../core/agent-types';
+import type { MetricSeriesView } from '../core/metrics';
 import type { TraceSummary, TraceView } from '../core/traces';
 import type { ReceiverStatus } from '../capture/otlp-receiver';
 
@@ -28,9 +29,11 @@ export type ViewRequest =
   | { type: 'openLogSite' | 'breakOnEvent'; id: number; }
   | { type: 'doctorAction'; action: DoctorAction; siteId?: string; }
   | { type: 'connectAgent'; }
+  | { type: 'showStatus'; }
   | ({ type: 'breakOnQuery'; } & Filter)
   | { type: 'trace'; traceId: string; }
   | { type: 'traces'; }
+  | { type: 'metrics'; }
   | { type: 'toggleOtlp'; enabled: boolean; }
   | { type: 'exportContext'; ids: number[]; }
   | { type: 'shareWithAgent'; sourceIds?: string[]; sessionIds?: string[]; anchor?: number; chooseRuns?: boolean; }
@@ -70,6 +73,8 @@ export interface Snapshot extends Stats {
   otlp?: ReceiverStatus;
   /** Traces with spans currently retained. */
   traceCount?: number;
+  /** OpenTelemetry metric series retained, and a revision that changes with every new data point. */
+  metrics?: { series: number; revision: number };
   /**
    * Log doctor findings, worst first, while log doctor is on. `findings` is
    * left out when the view already has this revision.
@@ -96,6 +101,8 @@ export type FindingSeverity = 'warning' | 'information' | 'hint';
 export interface DoctorFindingView {
   siteId?: string; code: string; severity: FindingSeverity; message: string; file?: string; line?: number;
   source?: string; eventId?: number;
+  /** A trace that shows an OpenTelemetry finding. */
+  traceId?: string;
 }
 /** What the Logs panel can do with a finding; `report` opens the health report. */
 export type DoctorAction = 'open' | 'showEvents' | 'fix' | 'report';
@@ -122,7 +129,8 @@ export type HostMessage = Snapshot
   | { type: 'autocomplete'; input: string; serverId?: string; fields: string[]; values: SuggestedValue[]; }
   | { type: 'analysis'; analysis: AnalysisResult; }
   | { type: 'trace'; trace: TraceView; }
-  | { type: 'traces'; traces: TraceSummary[]; };
+  | { type: 'traces'; traces: TraceSummary[]; }
+  | { type: 'metrics'; metrics: MetricSeriesView[]; };
   // Sharing status is also included in snapshots so the webview can render a
   // durable indicator after a notification-driven refresh.
 
@@ -169,7 +177,7 @@ export function parseViewRequest(value: unknown): ViewRequest | undefined {
       return action && (action === 'report' || siteId) ? { type: msg.type, action, ...(siteId ? { siteId } : {}) } : undefined;
     }
     case 'breakOnQuery': return { type: msg.type, query: filter.query, levels: filter.levels };
-    case 'traces': return { type: msg.type };
+    case 'traces': case 'metrics': return { type: msg.type };
     case 'trace': {
       const traceId = string('traceId');
       return traceId && /^[A-Za-z0-9_-]{1,128}$/.test(traceId) ? { type: msg.type, traceId } : undefined;
@@ -177,7 +185,7 @@ export function parseViewRequest(value: unknown): ViewRequest | undefined {
     case 'toggleOtlp': return { type: msg.type, enabled: msg.enabled === true };
     case 'exportContext': return Array.isArray(msg.ids) ? { type: msg.type, ids: msg.ids.filter((id): id is number => Number.isSafeInteger(id) && id >= 0) } : undefined;
     case 'shareWithAgent': return { type: msg.type, sourceIds: strings('sourceIds'), sessionIds: strings('sessionIds'), anchor: index('anchor'), chooseRuns: msg.chooseRuns === true };
-    case 'stopSharing': case 'connectAgent': return { type: msg.type };
+    case 'stopSharing': case 'connectAgent': case 'showStatus': return { type: msg.type };
     case 'askCopilot': return { type: msg.type, anchor: index('anchor') };
     case 'shareEvent': { const id = index('id'); return id === undefined ? undefined : { type: msg.type, id }; }
     case 'toggleTerminalCapture': return { type: msg.type, enabled: msg.enabled === true };

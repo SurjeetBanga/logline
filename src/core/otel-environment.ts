@@ -1,7 +1,8 @@
 /**
  * Standard OpenTelemetry SDK variables that point an instrumented app at
  * Logline's receiver. Batch delays are shortened so telemetry appears within
- * a second during development instead of after the SDK default of 5 seconds.
+ * a second during development instead of after the SDK default of 5 seconds,
+ * and metrics are exported every 5 seconds instead of every minute.
  */
 export function otelDefaults(endpoint: string, serviceName?: string): Record<string, string> {
   return {
@@ -9,6 +10,8 @@ export function otelDefaults(endpoint: string, serviceName?: string): Record<str
     OTEL_EXPORTER_OTLP_PROTOCOL: 'http/protobuf',
     OTEL_TRACES_EXPORTER: 'otlp',
     OTEL_LOGS_EXPORTER: 'otlp',
+    OTEL_METRICS_EXPORTER: 'otlp',
+    OTEL_METRIC_EXPORT_INTERVAL: '5000',
     OTEL_BSP_SCHEDULE_DELAY: '500',
     OTEL_BLRP_SCHEDULE_DELAY: '500',
     ...(serviceName ? { OTEL_SERVICE_NAME: serviceName } : {})

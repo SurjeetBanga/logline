@@ -35,15 +35,15 @@
     "debug console",
     "codelens",
     "structured logs",
-    "server",
+    "metrics",
     "Copilot",
     "Claude Code",
     "Codex",
     "MCP",
     "logs",
-    "tail",
+    "cursor",
     "jsonl",
-    "ndjson",
+    "windsurf",
     "pino",
     "winston",
     "log4j",
@@ -200,6 +200,11 @@
       {
         "command": "logline.connectAgent",
         "title": "Connect Claude Code or Codex",
+        "category": "Logline"
+      },
+      {
+        "command": "logline.showStatus",
+        "title": "Show Status",
         "category": "Logline"
       },
       {

@@ -7,22 +7,22 @@
 *Logline running in VS Code with a [small demo app](samples/README.md) and [Docker Compose sample logs](samples/compose-demo.log).*
 
 - Capture anything: terminals, F5 debug sessions, tasks, files, Docker Compose and Kubernetes
-- OpenTelemetry logs and traces with waterfalls, no collector needed
+- OpenTelemetry logs, traces and metrics with waterfalls and trends, no collector needed
 - Live hit counts above log statements, and break the debugger when a log fires
-- Log doctor catches secrets, personal data and swallowed exceptions
-- Share redacted logs with Copilot, Claude Code or Codex
+- Log doctor catches secrets, personal data, swallowed exceptions, and spans that break OpenTelemetry conventions
+- Share redacted logs with Copilot, Claude Code, Codex, or the agent in Cursor, Windsurf or Kiro, with skills to verify a change, triage errors and explain slow requests
 - Works with JSON, logfmt, plain text, Pino, Winston, Log4j2, ECS
 
 ## Get started
 
-1. Open your project in **VS Code 1.99+** with Logline installed. Logline requires a trusted workspace and does not support virtual workspaces.
+1. Open your project in **VS Code 1.99+** with Logline installed. Logline requires a trusted workspace and does not support virtual workspaces. In Cursor, Windsurf, or Kiro, install the VSIX from the [latest release](https://github.com/SurjeetBanga/logline/releases/latest) with **Extensions: Install from VSIX…** ([details](docs/usage.md#editors-other-than-vs-code)).
 2. Open the Command Palette (`Cmd+Shift+P` on macOS, `Ctrl+Shift+P` on Windows/Linux) and run **Logline: Run Command**.
 3. Enter your server command, such as `npm run dev`. Its stdout and stderr appear in the **Logs** panel.
 4. Type `level:error` in the search box and press **Enter**. Click an event's message to inspect it; choose **Resume** to follow live output again.
 
 **Debugging with F5?** Whatever the Debug Console shows appears in Logs automatically, for every debugger. For launch configurations that print to the integrated terminal (the Python and Java default), turn on terminal capture.
 
-**Using OpenTelemetry?** Choose **More actions → Start OpenTelemetry receiver**. Instrumented apps you start from Logline, a debug session, or a new terminal send their logs and traces to Logline with no collector and no code changes. Choose **Traces** to see recent requests, or the trace button on any row to see that request across services.
+**Using OpenTelemetry?** Choose **More actions → Start OpenTelemetry receiver**. Instrumented apps you start from Logline, a debug session, or a new terminal send their logs, traces, and metrics to Logline with no collector and no code changes. Choose **Traces** to see recent requests, or the trace button on any row to see that request across services. **Metrics** shows each series' latest value and trend.
 
 **Running Docker Compose?** Run **Logline: Follow Docker Compose Project**, or run `docker compose up` with **Run Command** or in a captured terminal. Each service becomes its own source, and its JSON or logfmt lines keep their level and fields.
 
@@ -30,7 +30,7 @@
 
 **Try it with a file:** run **Logline: Import Logs** and select [samples/demo-logs.jsonl](samples/demo-logs.jsonl) from this repository. You can also import JSON, JSONL/NDJSON, CSV, and plain-text logs.
 
-Open **Help** in the toolbar for the offline visual guide, or run **Logline: What’s New** for release highlights. See [Development](#development) to build and install from source.
+Open **Help** in the toolbar for the offline visual guide, or run **Logline: What’s New** for release highlights. If something isn't working, run **Logline: Show Status** to see the receiver, agent connections, sharing, and capture, with a fix for anything off. See [Development](#development) to build and install from source.
 
 ## Terminal capture and Copilot sharing
 
@@ -44,10 +44,10 @@ Logline can also capture commands you run in supported VS Code terminals. Turn *
 | --- | --- |
 | **Capture** | Capture supported terminal commands and debug sessions, run several servers at once, follow log files on disk like `tail -F`, split Docker Compose and Kubernetes output into one source per service, receive OpenTelemetry logs and traces, save commands with **Manage servers**, filter by source or run, and capture VS Code tasks. |
 | **Search** | Field/value autocomplete, editable filter chips, right-click **Include value** / **Exclude value**, any combination of log levels, **My changes** for logs from code changed since the last commit, and up to 50 saved searches. |
-| **Inspect** | Expand JSON, read structured exceptions and nested causes, see multi-line plain-text stack traces as one event, open stack-frame source locations, share an event’s exact run, view up to 25 surrounding events on each side from the same run, browse recent traces, and follow a request across services in a trace waterfall. |
+| **Inspect** | Expand JSON, read structured exceptions and nested causes, see multi-line plain-text stack traces as one event, open stack-frame source locations, share an event’s exact run, view up to 25 surrounding events on each side from the same run, browse recent traces, follow a request across services in a trace waterfall, and see OpenTelemetry metrics as rates, p95s, and trends. |
 | **Code** | See a CodeLens with live hit counts, errors, and recent values above the log statements in your editor, jump from any event to the statement that logged it, and find statements that never fired. |
 | **Debug** | Stop the debugger on the statement that logged an event with **Break here** on an expanded event, or pause a debug session right after it logs anything that matches a search. |
-| **Fix** | **Log doctor** shows statements that logged secrets or personal data, failures logged at info, errors without their exception or request id, and noisy or oversized statements in the Problems panel, with masked evidence and quick fixes. It also finds secrets and personal data in output from libraries, imports, and terminals. |
+| **Fix** | **Log doctor** shows statements that logged secrets or personal data, failures logged at info, errors without their exception or request id, and noisy or oversized statements in the Problems panel, with masked evidence and quick fixes. It also finds secrets and personal data in output from libraries, imports, and terminals, and checks OpenTelemetry spans and metrics for unnamed services, ids in span names, unmarked 5xx errors, missing routes, and outdated attribute names. |
 | **Arrange** | Auto-detected fields, custom and nested columns, sorting, drag-to-reorder, and resizable column widths. |
 | **Analyze** | Error rate and p95 latency at a glance, volume and latency over time, status codes, top values of fields like service and path, error groups, and log patterns for the current filter. Click any bar, value, pattern, or group to filter to its logs. |
 | **Share** | Export filtered JSONL, JSON, CSV, or Markdown context for AI tools, or share retained sources (including new runs) or specific command runs with Copilot, Claude Code, Codex, or another MCP client for read-only live investigation. Exports and **Copy results** redact common credentials by default; agent tools always redact them. |
@@ -100,7 +100,7 @@ Set `autoStart` to `true` to start when Logline activates. Set `jsonOnly` to `tr
 
 **Already using VS Code tasks?** Run **Logline: Convert VS Code Task to Logline** to create a captured wrapper, including supported dependencies. Logline observes ordinary task lifecycle events automatically; retaining their stdout/stderr requires a captured wrapper. You can also define a task with `"type": "logline"` directly—see [task configuration](docs/usage.md#tasks).
 
-**Working with an agent?** Share all retained Logline sources, choose specific runs, or share the exact run behind an expanded event. Sharing grants read-only access to redacted results in the current VS Code window; it does not execute commands or send logs into chat automatically. Copilot sees the Logline tools in this window. For **Claude Code** or **Codex**, run **Logline: Connect Claude Code or Codex** once; the agent then reads the same shared logs through Logline's MCP server, from the terminal or its own extension. See [agents](docs/usage.md#claude-code-codex-and-other-mcp-clients).
+**Working with an agent?** Share all retained Logline sources, choose specific runs, or share the exact run behind an expanded event. Sharing grants read-only access to redacted results in the current VS Code window; it does not execute commands or send logs into chat automatically. Copilot sees the Logline tools in this window. For **Claude Code**, **Codex**, or the agent built into **Cursor**, **Windsurf**, or **Kiro**, run **Logline: Connect Claude Code or Codex** once; the agent then reads the same shared logs through Logline's MCP server, from the terminal or its own extension. Claude Code and Codex also get three skills: `logline-verify` checks a change in fresh logs, `logline-triage` ranks what is failing, and `logline-slow-request` explains where a request spends its time. See [agents](docs/usage.md#claude-code-codex-and-other-mcp-clients).
 
 ## Settings and retention
 

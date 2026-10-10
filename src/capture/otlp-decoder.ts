@@ -1,10 +1,11 @@
 import * as path from 'node:path';
 import { Worker } from 'node:worker_threads';
-import { decodeLogsRequest, decodeTraceRequest, ProtoError } from '../core/otlp-proto';
+import { decodeLogsRequest, decodeMetricsRequest, decodeTraceRequest, ProtoError } from '../core/otlp-proto';
+import { readMetrics, type MetricPoint } from '../core/metrics';
 import { readLogs, readSpans, type OtlpLog, type Span } from '../core/otlp';
 
-export type OtlpSignal = 'logs' | 'traces';
-export type Decoded = { logs: OtlpLog[] } | { spans: Span[] };
+export type OtlpSignal = 'logs' | 'traces' | 'metrics';
+export type Decoded = { logs: OtlpLog[] } | { spans: Span[] } | { metrics: MetricPoint[] };
 
 /** Thrown for request bodies that are not valid OTLP; the message is safe to return to the client. */
 export class MalformedRequest extends Error { }
@@ -14,11 +15,11 @@ export function decodeRequest(signal: OtlpSignal, json: boolean, body: Uint8Arra
   let request: unknown;
   try {
     request = json ? JSON.parse(Buffer.from(body.buffer, body.byteOffset, body.byteLength).toString('utf8'))
-      : signal === 'logs' ? decodeLogsRequest(body) : decodeTraceRequest(body);
+      : signal === 'logs' ? decodeLogsRequest(body) : signal === 'metrics' ? decodeMetricsRequest(body) : decodeTraceRequest(body);
   } catch (error) {
     throw new MalformedRequest(error instanceof ProtoError || error instanceof SyntaxError ? `Malformed request: ${error.message}` : 'Malformed request.');
   }
-  return signal === 'logs' ? { logs: readLogs(request) } : { spans: readSpans(request) };
+  return signal === 'logs' ? { logs: readLogs(request) } : signal === 'metrics' ? { metrics: readMetrics(request) } : { spans: readSpans(request) };
 }
 
 interface Pending { worker: Worker; resolve(value: Decoded): void; reject(error: Error): void; }

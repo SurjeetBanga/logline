@@ -10,14 +10,15 @@ const GROUPS: { codes: string[]; title: string; }[] = [
   { codes: ['contextless'], title: 'Errors without a request or trace id' },
   { codes: ['noisy'], title: 'Noisy statements' },
   { codes: ['oversized'], title: 'Oversized events' },
-  { codes: ['unstructured'], title: 'Values formatted into messages' }
+  { codes: ['unstructured'], title: 'Values formatted into messages' },
+  { codes: ['unnamed-service', 'span-name-ids', 'unmarked-error', 'missing-route', 'old-attributes', 'unit-in-name'], title: 'OpenTelemetry conventions' }
 ];
 
 /** A short location for a statement, `File.java:38`, with the full path kept for tooltips. */
 export function siteLabel(file: string, line: number): string { return `${file.slice(file.lastIndexOf('/') + 1)}:${line}`; }
 
 /** What a finding's buttons do; `example` is handled in the panel, the rest by the host. */
-type PanelAction = DoctorAction | 'example';
+type PanelAction = DoctorAction | 'example' | 'trace';
 
 /** A button that acts on a finding. */
 export function doctorButton(action: PanelAction, label: string, title: string, siteId?: string): HTMLButtonElement {
@@ -42,7 +43,7 @@ export const DOCTOR_ACTION_TITLES = {
  * log doctor reports in the Problems panel is also visible next to the logs.
  */
 export function createDoctor(button: HTMLButtonElement, count: HTMLElement, panel: HTMLElement, list: HTMLElement, api: WebviewApi, scope: EventScope, closePanel: () => void,
-  showExample: (id: number) => void = () => undefined) {
+  showExample: (id: number) => void = () => undefined, showTrace: (traceId: string) => void = () => undefined) {
   // The host sends the list only when it changes; this is the revision on screen.
   let revision: number | undefined;
   let findings: DoctorFindingView[] = [];
@@ -60,7 +61,7 @@ export function createDoctor(button: HTMLButtonElement, count: HTMLElement, pane
     button.className = !total ? 'doctor-chip is-clear' : warnings ? 'doctor-chip has-warnings' : 'doctor-chip';
     button.title = total
       ? `Log doctor found ${total.toLocaleString()} problem${total === 1 ? '' : 's'} with log statements${warnings ? `, ${warnings.toLocaleString()} of them warnings` : ''}. Click to review.`
-      : 'Log doctor checks what your logs actually contain: secrets and personal data in any source, and on matched log statements, failures logged below warning, errors without the exception or a request id, and noisy or oversized statements. Nothing found so far.';
+      : 'Log doctor checks what your logs actually contain: secrets and personal data in any source; on matched log statements, failures logged below warning, errors without the exception or a request id, and noisy or oversized statements; and OpenTelemetry spans and metrics against the semantic conventions. Nothing found so far.';
     button.setAttribute('aria-label', `Log issues: ${total.toLocaleString()}`);
     if (changed) render(total);
   }
@@ -130,6 +131,11 @@ export function createDoctor(button: HTMLButtonElement, count: HTMLElement, pane
       example.dataset.eventId = String(finding.eventId);
       actions.append(example);
     }
+    if (finding.traceId !== undefined) {
+      const trace = doctorButton('trace', 'Show trace', 'Open a trace that shows it');
+      trace.dataset.traceId = finding.traceId;
+      actions.append(trace);
+    }
     row.append(location, message, actions);
     return row;
   }
@@ -142,6 +148,11 @@ export function createDoctor(button: HTMLButtonElement, count: HTMLElement, pane
     if (action === 'example') {
       if (panel.contains(target)) closePanel();
       showExample(Number(target.dataset.eventId));
+      return true;
+    }
+    if (action === 'trace') {
+      if (panel.contains(target)) closePanel();
+      showTrace(target.dataset.traceId!);
       return true;
     }
     api.postMessage({ type: 'doctorAction', action, ...(target.dataset.siteId ? { siteId: target.dataset.siteId } : {}) });

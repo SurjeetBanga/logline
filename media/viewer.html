@@ -41,6 +41,7 @@
             <button id="otlpToggle" type="button" role="menuitem" tabindex="-1" title="Receive OpenTelemetry logs and traces from instrumented apps on this machine">Start OpenTelemetry receiver</button>
             <div class="menu-separator" role="separator"></div>
             <button id="manage" type="button" role="menuitem" tabindex="-1">Manage servers…</button>
+            <button id="statusAction" type="button" role="menuitem" tabindex="-1" title="What Logline is doing: the OpenTelemetry receiver, agent connections, sharing, and capture, with a fix for anything off or broken">Status and troubleshooting…</button>
             <button id="config" type="button" role="menuitem" tabindex="-1">Settings</button>
             <div class="menu-separator" role="separator"></div>
             <button id="help" type="button" role="menuitem" tabindex="-1" aria-label="Open the Logline Guide" title="Open the Logline Guide"><span id="helpLabel">Help</span><span id="helpBadge" class="new-badge" hidden>New</span></button>
@@ -103,6 +104,7 @@
       </div>
       <button id="analyze" type="button" class="toolbar-divider" title="Charts of levels, sources, errors, and patterns in the logs matching your current filter"><svg class="tb-icon" aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M3 13.5V8M6.5 13.5V4M10 13.5V9.5M13.5 13.5V6"/></svg><span class="button-label">Analyze</span></button>
       <button id="traces" type="button" title="Requests across services, from OpenTelemetry spans and logs with a trace id"><svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14"><path d="M2 3.5h7M4 7.5h8M7 11.5h7" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>Traces<span id="traceCount" class="count-badge" hidden></span></button>
+      <button id="metrics" type="button" hidden><svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14"><path d="M1.5 11.5 5 7l3 3 5.5-6.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>Metrics<span id="metricCount" class="count-badge"></span></button>
       <div class="popover-container doctor-container">
         <button id="doctor" class="doctor-chip" type="button" aria-haspopup="true" aria-expanded="false" aria-controls="doctorPanel" hidden><svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2.5 14.5 13.5h-13zM8 6.5v3"/><circle cx="8" cy="11.6" r=".4" fill="currentColor"/></svg>Log issues<span id="doctorCount" class="count-badge"></span></button>
         <div id="doctorPanel" class="popover doctor-panel" hidden>
@@ -154,6 +156,13 @@
     <p id="tracesStatus" role="status">Loading…</p>
     <div class="trace-scroll">
       <table class="trace-table traces-table" aria-label="Recent traces"><thead><tr><th>Started</th><th>Operation</th><th>Services</th><th>Duration</th><th>Spans and logs</th></tr></thead><tbody id="tracesRows"></tbody></table>
+    </div>
+  </dialog>
+  <dialog id="metricsDialog" aria-labelledby="metricsTitle">
+    <div class="context-header"><strong id="metricsTitle">Metrics</strong><span><input id="metricsFilter" type="search" placeholder="Filter by name, service, or attribute" aria-label="Filter metrics"><button id="metricsClose" autofocus>Back to results</button></span></div>
+    <p id="metricsStatus" role="status">Loading…</p>
+    <div class="trace-scroll">
+      <table class="trace-table metrics-table" aria-label="OpenTelemetry metrics"><thead><tr><th>Metric</th><th>Service</th><th>Attributes</th><th>Latest</th><th>Trend</th></tr></thead><tbody id="metricsRows"></tbody></table>
     </div>
   </dialog>
   <dialog id="analysisDialog" aria-labelledby="analysisTitle">

@@ -1316,6 +1316,24 @@ test('a leak in output no statement accounts for names its source and opens an e
   assert.deepEqual(messages.slice(sent).map(message => [message.type, message.id]), [['context', 77]]);
 });
 
+test('an OpenTelemetry convention finding names its service and opens a trace that shows it', () => {
+  const { get, receive, messages } = viewer();
+  const finding = { code: 'span-name-ids', severity: 'warning', message: 'Names 4 spans with ids in them.', source: 'api', traceId: 'abc123' };
+  receive({
+    type: 'snapshot', generation: 1, newest: 1, status: 'Running', command: '', running: true,
+    total: 0, retained: 0, discarded: 0, bytes: 0, maxBytes: 1, truncated: 0, events: [], columns: [], page: 0, pages: 1, matched: 0,
+    doctor: { revision: 1, findings: [finding], total: 1 }
+  });
+  assert.match(get('doctorList').querySelectorAll('.doctor-group')[0].children[0].textContent, /OpenTelemetry conventions · 1/);
+  const item = get('doctorList').querySelectorAll('.doctor-item')[0];
+  assert.equal(item.querySelector('.doctor-source')!.textContent, 'api');
+  const trace = item.querySelector('.doctor-action')!;
+  assert.equal(trace.textContent, 'Show trace');
+  get('doctorPanel').listeners.get('click')!({ target: { closest: (wanted: string) => wanted === '[data-doctor-action]' ? trace : undefined } });
+  assert.equal(get('traceDialog').open, true);
+  assert.deepEqual(JSON.parse(JSON.stringify(messages.at(-1))), { type: 'trace', traceId: 'abc123' });
+});
+
 test('Got it hides the first-run tip for good', () => {
   const { get, receive, savedStates } = viewer();
   assert.equal(get('rowHint').hidden, false);
@@ -1564,6 +1582,47 @@ test('snapshots apply editor requests once and reflect the OpenTelemetry receive
   assert.equal(get('otlpStatus').hidden, true);
   assert.equal(get('traceCount').hidden, true);
   assert.equal(get('otlpToggle').textContent, 'Start OpenTelemetry receiver');
+});
+
+test('the Metrics button appears once metrics arrive and lists series with their latest values', () => {
+  const { get, receive, messages } = viewer();
+  const snapshot = (extra: Record<string, unknown>) => receive({
+    type: 'snapshot', generation: 1, newest: 100, status: 'Running', command: '', running: false, total: 0, retained: 0, discarded: 0, bytes: 0,
+    maxBytes: 1, truncated: 0, events: [], columns: [], page: 0, pages: 1, matched: 0, ...extra
+  });
+  snapshot({});
+  assert.equal(get('metrics').hidden, true, 'no button before any metric arrives');
+  snapshot({ metrics: { series: 2, revision: 5 } });
+  assert.equal(get('metrics').hidden, false);
+  assert.equal(get('metricCount').textContent, '2');
+  get('metrics').listeners.get('click')!();
+  assert.equal(get('metricsDialog').open, true);
+  assert.deepEqual(JSON.parse(JSON.stringify(messages.at(-1))), { type: 'metrics' });
+  const series = (extra: Record<string, unknown>) => ({ key: String(extra.name), kind: 'gauge', measure: 'value', service: 'api', attributes: [], timeMs: 0,
+    points: [{ timeMs: 0, value: 1 }, { timeMs: 5000, value: 3 }], ...extra });
+  receive({ type: 'metrics', metrics: [
+    series({ name: 'http.server.duration', kind: 'histogram', measure: 'p95', unit: 's', latest: 0.18, attributes: [['http.route', '/orders']] }),
+    series({ name: 'orders.placed', kind: 'sum', measure: 'rate', unit: '{order}', latest: 2.5, total: 120, service: 'checkout' })
+  ] });
+  assert.match(get('metricsStatus').textContent, /2 series from 2 services/);
+  const rows = get('metricsRows').children;
+  assert.deepEqual(rows.map(row => row.children[3].textContent), ['p95 180 ms', 'rate 2.5 order/s']);
+  receive({ type: 'metrics', metrics: [series({ name: 'coarse', kind: 'histogram', measure: 'p95', unit: 's', latest: 0.9, bound: true })] });
+  assert.equal(get('metricsRows').children[0].children[3].textContent, 'p95 ≤ 900 ms');
+  assert.match(get('metricsRows').children[0].children[3].title, /buckets are too wide/);
+  receive({ type: 'metrics', metrics: [
+    series({ name: 'http.server.duration', kind: 'histogram', measure: 'p95', unit: 's', latest: 0.18, attributes: [['http.route', '/orders']] }),
+    series({ name: 'orders.placed', kind: 'sum', measure: 'rate', unit: '{order}', latest: 2.5, total: 120, service: 'checkout' })
+  ] });
+  assert.equal(rows[0].children[2].textContent, 'http.route=/orders');
+  assert.match(rows[1].children[3].title, /Total 120 order/);
+  get('metricsFilter').value = 'checkout';
+  get('metricsFilter').listeners.get('input')!();
+  assert.equal(get('metricsRows').children.length, 1);
+  assert.match(get('metricsStatus').textContent, /1 match/);
+  const before = messages.length;
+  snapshot({ metrics: { series: 2, revision: 6 } });
+  assert.deepEqual(JSON.parse(JSON.stringify(messages.slice(before).filter(message => message.type === 'metrics'))), [{ type: 'metrics' }], 'an open list refreshes when new points arrive');
 });
 
 test('My changes appears in a git repository and adds or removes changed:true', () => {
