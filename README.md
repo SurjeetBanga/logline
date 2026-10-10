@@ -142,6 +142,7 @@ Press **F5** to launch an Extension Development Host. To install a packaged buil
 
 Host code lives in `src/` and compiles to `out/`. The webview entry point is `src/webview/main.ts`; `npm run compile` generates `media/viewer.js`. Run `npm run smoke` for the isolated VS Code activation/task smoke test, or `npm run benchmark` for diagnostic performance measurements.
 
+- [Contributing](CONTRIBUTING.md): setup, checks, tests, and pull requests.
 - [Architecture](ARCHITECTURE.md): modules, state ownership, and testing.
 - [Usage reference](docs/usage.md): detailed feature behavior and configuration.
 - [Changelog](CHANGELOG.md): complete release history.

@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Report a security vulnerability
+    url: https://github.com/SurjeetBanga/logline/security/advisories/new
+    about: Report privately, not in a public issue. See SECURITY.md.
+  - name: Usage reference
+    url: https://github.com/SurjeetBanga/logline/blob/main/docs/usage.md
+    about: How each feature and setting works.
