@@ -49,7 +49,7 @@ export function readWindows(directory: string, alive: (pid: number) => boolean =
   return windows;
 }
 
-/** The window for a working directory: the one with the closest enclosing folder, or the only one. */
+/** The window for a working directory: the one with the closest enclosing folder, or the only one when it has no folders. */
 export function pickWindow(windows: BridgeWindow[], cwd: string, workspace?: string): { window?: BridgeWindow; error?: string } {
   if (!windows.length) return { error: NOT_RUNNING };
   const target = resolve(workspace || cwd);
@@ -59,7 +59,9 @@ export function pickWindow(windows: BridgeWindow[], cwd: string, workspace?: str
     if (contains(folder) && (!best || folder.length > best.length)) best = { window, length: folder.length };
   }
   if (best) return { window: best.window };
-  if (windows.length === 1 && !workspace) return { window: windows[0] };
+  // A window's logs belong to its project; an agent started in another
+  // project must not read them. A window without folders has no project.
+  if (windows.length === 1 && !windows[0].folders.length && !workspace) return { window: windows[0] };
   const names = windows.map(window => window.name || window.folders[0] || `window ${window.pid}`).join(', ');
   return { error: `Logline is open in ${windows.length === 1 ? 'a VS Code window' : `${windows.length} VS Code windows`} (${names}), but none contains ${target}. Start the agent in the project folder, or set LOGLINE_WORKSPACE to the folder of the window to use.` };
 }

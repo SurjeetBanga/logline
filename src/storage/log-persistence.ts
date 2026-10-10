@@ -1,4 +1,4 @@
-import { appendFile, mkdir, rename, stat, writeFile } from 'node:fs/promises';
+import { appendFile, chmod, mkdir, rename, stat, writeFile } from 'node:fs/promises';
 import * as path from 'node:path';
 import type { Settings } from '../core/settings';
 
@@ -66,7 +66,8 @@ export class LogPersistence {
     const folder = this.workspaceFolder();
     if (!folder) throw new Error('No workspace folder is available.');
     const file = path.join(folder, '.logline', 'latest.log');
-    await mkdir(path.dirname(file), { recursive: true });
+    // Persisted logs are unredacted; only this user may read them.
+    await mkdir(path.dirname(file), { recursive: true, mode: 0o700 });
     // Persisted logs are unredacted; keep them out of version control.
     await writeFile(path.join(path.dirname(file), '.gitignore'), '*\n', { flag: 'wx' }).catch(error => {
       if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
@@ -75,13 +76,16 @@ export class LogPersistence {
     // Roll to latest.log.1 rather than discarding history outright.
     if (this.persistedBytes === undefined) {
       this.persistedBytes = (await stat(file).catch(() => undefined))?.size ?? 0;
+      // Tighten folders and files written by earlier versions with default permissions.
+      await chmod(path.dirname(file), 0o700).catch(() => undefined);
+      if (this.persistedBytes) await chmod(file, 0o600).catch(() => undefined);
     }
     const size = Buffer.byteLength(batch);
     if (this.persistedBytes > 0 && this.persistedBytes + size > max) {
       await rename(file, file + '.1');
       this.persistedBytes = 0;
     }
-    await appendFile(file, batch, 'utf8');
+    await appendFile(file, batch, { encoding: 'utf8', mode: 0o600 });
     this.persistedBytes += size;
   }
 }

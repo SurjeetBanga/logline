@@ -9,6 +9,31 @@ export interface RedactionOptions {
 const DEFAULT_REPLACEMENT = '[REDACTED]';
 const SENSITIVE_KEY = /(?:password|passphrase|secret|token|api[-_ ]?key|authorization|cookie|private[-_ ]?key|access[-_ ]?key|credential)/i;
 
+// Credentials recognizable by their value alone, wherever they appear. Each
+// pattern starts on a fixed prefix and repeats only over characters it
+// consumes, so it stays linear; the `hint` test skips plain lines cheaply.
+const SECRET_VALUES: { hint: string; pattern: RegExp; keep?: number }[] = [
+  { hint: 'PRIVATE KEY', pattern: /-----BEGIN [A-Z ]{0,20}PRIVATE KEY-----[A-Za-z0-9+/=\s\\]*(?:-----END [A-Z ]{0,20}PRIVATE KEY-----)?/g },
+  { hint: 'eyJ', pattern: /\beyJ[A-Za-z0-9_-]{8,}\.eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}/g },
+  { hint: 'earer ', pattern: /\b([Bb]earer )[A-Za-z0-9._~+/-]{16,}=*/g, keep: 1 },
+  { hint: 'IA', pattern: /\b(?:AKIA|ASIA)[A-Z0-9]{16}\b/g },
+  { hint: 'gh', pattern: /\b(?:gh[pousr]_[A-Za-z0-9]{36,}|github_pat_[A-Za-z0-9_]{40,})/g },
+  { hint: 'xox', pattern: /\bxox[abprs]-[A-Za-z0-9-]{10,}/g },
+  { hint: 'AIza', pattern: /\bAIza[0-9A-Za-z_-]{35}\b/g },
+  { hint: '_live_', pattern: /\b[rs]k_live_[0-9A-Za-z]{16,}/g },
+  // The password in `scheme://user:password@host`.
+  { hint: '://', pattern: /(\b[a-z][a-z0-9+.-]{0,30}:\/\/[^\s:/@"']{1,256}:)[^\s/@"']{1,256}(?=@)/gi, keep: 1 }
+];
+
+function redactSecretValues(text: string, replacement: string): string {
+  for (const { hint, pattern, keep } of SECRET_VALUES) {
+    if (!text.includes(hint)) continue;
+    text = text.replace(pattern, (match, prefix: unknown) =>
+      match.includes(replacement) ? match : (keep && typeof prefix === 'string' ? prefix : '') + replacement);
+  }
+  return text;
+}
+
 function normalizedKey(key: string): string {
   return key.toLowerCase().replace(/[^a-z0-9]/g, '');
 }
@@ -170,7 +195,7 @@ export function createRedactor(options: RedactionOptions = {}): Redactor {
   const replacement = options.replacement ?? DEFAULT_REPLACEMENT;
   const configuredFields = [...(options.fields ?? [])];
   const redactTextInternal = (text: string): string => enabled
-    ? redactAssignments(text, replacement, key => isSensitiveKey(key, configuredFields))
+    ? redactSecretValues(redactAssignments(text, replacement, key => isSensitiveKey(key, configuredFields)), replacement)
     : text;
 
   const redactValueInternal = (value: unknown, key?: string): unknown => {

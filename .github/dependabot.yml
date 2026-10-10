@@ -1,0 +1,19 @@
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      dev-dependencies:
+        dependency-type: development
+    ignore:
+      # Types must match the runtime of the lowest supported VS Code (engines.vscode):
+      # its extension host runs Node 20, and vsce rejects @types/vscode newer than engines.vscode.
+      - dependency-name: '@types/node'
+        update-types: ['version-update:semver-major']
+      - dependency-name: '@types/vscode'
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly

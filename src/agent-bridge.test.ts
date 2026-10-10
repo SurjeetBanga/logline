@@ -100,7 +100,9 @@ test('an agent reaches the window whose workspace contains its working directory
   assert.equal(pickWindow([api, web], '/work/shared').window, web);
   assert.equal(pickWindow([api, web], '/work/apix').window, undefined, 'a sibling with a common prefix is not inside');
   assert.match(pickWindow([api, web], '/elsewhere').error!, /2 VS Code windows \(api, web\).*LOGLINE_WORKSPACE/);
-  assert.equal(pickWindow([api], '/elsewhere').window, api, 'with one window open, it is the one');
+  assert.match(pickWindow([api], '/elsewhere').error!, /a VS Code window \(api\), but none contains .*elsewhere/, 'an agent in another project cannot read this one');
+  const empty = { ...api, folders: [], name: 'Untitled' };
+  assert.equal(pickWindow([empty], '/elsewhere').window, empty, 'a single window without folders is the one');
   assert.equal(pickWindow([api, web], '/elsewhere', '/work/web').window, web, 'LOGLINE_WORKSPACE chooses explicitly');
   assert.match(pickWindow([], '/work/api').error!, /No VS Code window with Logline is running/);
 });
@@ -269,4 +271,19 @@ test('stopping sharing cuts agents off at once, including a wait in progress', a
   assert.notEqual(renewed, shareId);
   assert.equal((await call('logline_search_logs', { shareId: renewed })).body.events.length, 3);
   await bridge.stop();
+});
+
+test('overlapping starts share one listener and a stop during start leaves nothing running', async () => {
+  const directory = join(temp(), 'agents');
+  const bridge = new AgentBridge({ run: async () => '{}', folders: () => [], name: () => 'w', directory, pid: process.pid });
+  await Promise.all([bridge.start(), bridge.start(), bridge.start()]);
+  const server = bridge['server'];
+  await bridge.start();
+  assert.equal(bridge['server'], server, 'a running bridge is not started again');
+  await bridge.stop();
+  const starting = bridge.start();
+  await bridge.stop();
+  await starting;
+  assert.equal(bridge.running, false);
+  assert.deepEqual(readdirSync(directory), []);
 });

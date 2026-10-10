@@ -197,9 +197,11 @@ export class OtlpReceiver {
     return new Promise<Buffer>((resolve, reject) => {
       const chunks: Buffer[] = [];
       let size = 0;
+      let tooLarge = false;
       request.on('data', (chunk: Buffer) => {
         size += chunk.length;
         if (size > MAX_BODY) {
+          tooLarge = true;
           // Discard the rest so the 413 reply can still be delivered.
           request.removeAllListeners('data');
           request.resume();
@@ -210,6 +212,8 @@ export class OtlpReceiver {
       });
       request.on('error', reject);
       request.on('end', () => {
+        // Already refused; do not decompress the truncated body.
+        if (tooLarge) return;
         const body = Buffer.concat(chunks);
         if (encoding === 'identity') { resolve(body); return; }
         (encoding === 'gzip' ? gunzip : inflate)(body, { maxOutputLength: MAX_DECODED }, (error, result) => {

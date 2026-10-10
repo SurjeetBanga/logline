@@ -26,6 +26,7 @@ const RECENT_MS = 10 * 60 * 1000;
  */
 export class AgentBridge {
   private server?: Server;
+  private starting?: Promise<void>;
   private file?: string;
   private port = 0;
   private readonly token = randomBytes(32).toString('hex');
@@ -40,8 +41,13 @@ export class AgentBridge {
 
   get running(): boolean { return Boolean(this.server); }
 
-  async start(): Promise<void> {
-    if (this.server) return;
+  /** Start listening; overlapping calls, such as quick setting toggles, share one listener. */
+  start(): Promise<void> {
+    if (this.server) return Promise.resolve();
+    return this.starting ??= this.listen().finally(() => { this.starting = undefined; });
+  }
+
+  private async listen(): Promise<void> {
     const server = createServer(socket => this.accept(socket));
     await new Promise<void>((resolve, reject) => {
       server.once('error', reject);
@@ -67,6 +73,7 @@ export class AgentBridge {
   }
 
   async stop(): Promise<void> {
+    await this.starting?.catch(() => undefined);
     const server = this.server;
     this.server = undefined;
     if (this.file) { try { unlinkSync(this.file); } catch { /* already gone */ } this.file = undefined; }

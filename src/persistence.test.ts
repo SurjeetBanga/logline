@@ -90,3 +90,25 @@ test('persistence rolls the bounded workspace file before appending a new batch'
     await rm(folder, { recursive: true, force: true });
   }
 });
+
+test('persisted logs are readable only by this user, including files from earlier versions', { skip: process.platform === 'win32' }, async () => {
+  const { chmod, mkdir, stat, writeFile } = await import('node:fs/promises');
+  const folder = await mkdtemp(path.join(os.tmpdir(), 'logline-perms-'));
+  try {
+    settings.clear();
+    settings.set('persistLogs', true);
+    const config = { get: <T>(key: string, fallback: T) => (settings.get(key) ?? fallback) as T };
+    await new LogPersistence(config, () => folder, () => undefined).writeBatch('fresh\n');
+    assert.equal((await stat(path.join(folder, '.logline'))).mode & 0o777, 0o700);
+    assert.equal((await stat(path.join(folder, '.logline', 'latest.log'))).mode & 0o777, 0o600);
+
+    const old = await mkdtemp(path.join(os.tmpdir(), 'logline-perms-old-'));
+    await mkdir(path.join(old, '.logline'));
+    await chmod(path.join(old, '.logline'), 0o755);
+    await writeFile(path.join(old, '.logline', 'latest.log'), 'old\n', { mode: 0o644 });
+    await new LogPersistence(config, () => old, () => undefined).writeBatch('new\n');
+    assert.equal((await stat(path.join(old, '.logline'))).mode & 0o777, 0o700);
+    assert.equal((await stat(path.join(old, '.logline', 'latest.log'))).mode & 0o777, 0o600);
+    await rm(old, { recursive: true, force: true });
+  } finally { await rm(folder, { recursive: true, force: true }); }
+});
