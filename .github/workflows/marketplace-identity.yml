@@ -1,0 +1,35 @@
+name: Marketplace identity
+
+# Run by hand once, and again if the publishing identity changes. It signs in as the Azure managed identity that the
+# release workflow publishes with (federated with the `release` environment, so there is no stored token) and prints
+# the ID to add as a Contributor on the Marketplace publisher. The Marketplace knows the identity only after this
+# first sign-in.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  identity:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    environment: release
+    permissions:
+      id-token: write
+    steps:
+      - uses: azure/login@a641126d1b8aa4d1fa005f4f92df94a3a4c4c906 # v3.1.0
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          allow-no-subscriptions: true
+      - name: Print the identity's Marketplace ID
+        run: |
+          id=$(az rest --url https://app.vssps.visualstudio.com/_apis/profile/profiles/me \
+            --resource 499b84ac-1321-427f-aa17-267ca6975798 --query id --output tsv)
+          echo "Add $id as a Contributor on the surjeetbanga publisher at https://marketplace.visualstudio.com/manage"
+          {
+            echo '## Marketplace identity'
+            echo
+            echo "Add \`$id\` as a **Contributor** on the \`surjeetbanga\` publisher: https://marketplace.visualstudio.com/manage → publisher → **Members** → **Add**."
+          } >> "$GITHUB_STEP_SUMMARY"
