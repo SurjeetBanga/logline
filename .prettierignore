@@ -9,3 +9,5 @@ CHANGELOG.md
 *.md
 # Kept as recorded in media/demo.gif.
 samples/
+coverage/
+performance/

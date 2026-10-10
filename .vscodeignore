@@ -31,3 +31,5 @@ CODE_OF_CONDUCT.md
 SECURITY.md
 .gitattributes
 .nvmrc
+coverage/**
+performance/**

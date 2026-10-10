@@ -7,3 +7,5 @@ out/
 .logline/
 out-tests/
 .vscode-test/
+coverage/
+performance/

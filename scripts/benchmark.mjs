@@ -316,12 +316,27 @@ sized('snapshot-refresh', 'Live refresh message after 50 new events', 'KiB', asy
   return JSON.stringify(refresh).length / 1024;
 });
 
-// Last, because it adds events to the shared store.
-timed('stream', 'Sorted page while 50 events stream in', async () => {
-  await retained();
+timed('stream', 'Sorted page while 1,000 events stream in, 50 at a time', async () => {
+  const { LogStore } = await load('core/log-store.js');
+  const { parseLogLine } = await load('core/log-event.js');
+  // A store of its own, filled with copies of one parsed event: parsing is measured by `ingest`, and the shared
+  // store stays as other cases expect it.
+  const template = parseLogLine(line(1), 'stdout', 1, receivedAt);
+  template.serverId = 'api';
+  let next = 0;
+  const copy = () => {
+    next++;
+    return { ...template, id: next, fields: { ...template.fields, durationMs: (next * 7919) % 1000 } };
+  };
+  const store = new LogStore(RETAINED, 100 * 1024 * 1024);
+  for (let i = 0; i < RETAINED; i++) store.add(copy());
+  store.page({ sort: 'durationMs', sortDirection: 'desc' });
+  // Twenty refreshes per measurement, so an occasional full re-sort weighs the same in every sample.
   return () => {
-    addEvents(50);
-    fixture.store.page({ sort: 'durationMs', sortDirection: 'desc' });
+    for (let refresh = 0; refresh < 20; refresh++) {
+      for (let i = 0; i < 50; i++) store.add(copy());
+      store.page({ sort: 'durationMs', sortDirection: 'desc' });
+    }
   };
 });
 
