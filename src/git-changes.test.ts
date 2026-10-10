@@ -47,7 +47,11 @@ test('git changes follow the working tree of each repository', async () => {
 
     const changes = new ChangedLines();
     let notified: Listener = () => { };
-    const next = () => new Promise<void>(resolve => { notified = resolve; });
+    // The tracker's own timers are unref'd; this one keeps the process alive while waiting, and fails a wait that never ends.
+    const next = () => new Promise<void>((resolve, reject) => {
+      const guard = setTimeout(() => reject(new Error('GitChanges reported no change')), 10000);
+      notified = () => { clearTimeout(guard); resolve(); };
+    });
     let ready = next();
     const tracker = new GitChanges(changes, () => notified());
     try {
