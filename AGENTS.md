@@ -6,7 +6,7 @@ A VS Code extension that captures logs from terminals, debug sessions, tasks, fi
 
 - `npm run check`: compile, typecheck, lint, format check, and unit tests. Run it before you finish.
 - `npm run format`: format with Prettier.
-- `npm test`: unit tests only.
+- `npm test`: unit tests only. `npm run coverage` also enforces the coverage minimums in `scripts/test.mjs`; add tests rather than lowering them.
 - `npm run smoke`: the extension in a real VS Code; needs a desktop VS Code, or `VSCODE_VERSION=stable` to download one.
 
 ## Rules

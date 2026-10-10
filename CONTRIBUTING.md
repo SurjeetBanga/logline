@@ -31,9 +31,10 @@ The webview's source is `src/webview/`. `npm run compile` bundles it into `media
 | `npm run format` | Formats the code with Prettier. |
 | `npm run lint` | Finds promises that are neither awaited nor handled. |
 | `npm test` | Runs the unit tests only. |
+| `npm run coverage` | Runs the unit tests and measures coverage of the TypeScript sources. It fails when line, branch, or function coverage falls below the minimums in `scripts/test.mjs`. CI runs it on Linux. |
 | `npm run smoke` | Starts a real VS Code with the extension and runs the smoke test. Set `VSCODE_VERSION=stable` to download VS Code instead of using your installed `code`. |
 
-CI runs the checks and the tests on Linux, Windows, and macOS, then runs the smoke test on the packaged extension in VS Code 1.99.0 and the latest stable. A pull request can be merged only when **CI passed** is green.
+CI runs the checks and the tests on Linux, Windows, and macOS, checks pull requests for new dependencies with known vulnerabilities, then runs the smoke test on the packaged extension in VS Code 1.99.0 and the latest stable. A pull request can be merged only when **CI passed** is green.
 
 ## Tests
 
