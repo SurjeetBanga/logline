@@ -2,8 +2,10 @@ import { spawnSync } from 'node:child_process';
 import { appendFileSync, readFileSync, rmSync, readdirSync } from 'node:fs';
 
 // --coverage measures the TypeScript sources (through source maps) and fails below these floors,
-// set just under the current numbers so coverage can only drop by a small margin.
-const COVERAGE_FLOORS = { lines: 92, branches: 85, functions: 86 };
+// set just under the current numbers so coverage can only drop by a small margin. They are measured
+// on Node 22 (.nvmrc, CI), which counts lines without code, such as type declarations, as uncovered;
+// newer Node versions report higher line coverage for the same tests.
+const COVERAGE_FLOORS = { lines: 90, branches: 85, functions: 86 };
 const coverage = process.argv.includes('--coverage');
 const report = 'out-tests/coverage.txt';
 
