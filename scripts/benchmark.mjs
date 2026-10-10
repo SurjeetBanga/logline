@@ -79,6 +79,7 @@ async function retained() {
   const { LogStore } = await load('core/log-store.js');
   const { parseLogLine } = await load('core/log-event.js');
   gc();
+  gc();
   const heapBefore = process.memoryUsage().heapUsed;
   const store = new LogStore(RETAINED, 100 * 1024 * 1024);
   for (let id = 1; id <= RETAINED; id++) {
@@ -86,6 +87,7 @@ async function retained() {
     event.serverId = 'api';
     store.add(event);
   }
+  gc();
   gc();
   const heap = process.memoryUsage().heapUsed - heapBefore;
   assert.equal(store.size, RETAINED);
@@ -127,6 +129,11 @@ function addEvents(count) {
     store.add(event);
   }
 }
+
+// Memory first: the heap the fixture retains is measured before any other case has run, so what other cases
+// leave behind (compiled code, caches awaiting collection) cannot change it.
+sized('heap', 'Heap retained by 50,000 events', 'MiB', async () => (await retained()).heap / 1048576);
+sized('estimate', 'Retention estimate for 50,000 events', 'MiB', async () => (await retained()).store.bytes / 1048576);
 
 // Ingestion: what every captured line costs.
 timed('ingest', 'Parse and retain 10,000 JSON lines', async () => {
@@ -294,8 +301,6 @@ timed('snapshot', 'Live snapshot of the newest page', async () => {
 });
 
 // Sizes and memory: deterministic, so any growth is real.
-sized('heap', 'Heap retained by 50,000 events', 'MiB', async () => (await retained()).heap / 1048576);
-sized('estimate', 'Retention estimate for 50,000 events', 'MiB', async () => (await retained()).store.bytes / 1048576);
 sized('snapshot-full', 'Full snapshot message', 'KiB', async () => {
   const { sources, buildSnapshot } = await snapshotSources();
   return JSON.stringify(buildSnapshot({ type: 'snapshot' }, sources)).length / 1024;
