@@ -197,7 +197,14 @@ export class MetricStore {
   }
 
   /** Every series, most recently updated first. */
-  list(): MetricSeriesView[] { return [...this.series.values()].reverse().map(series => ({ ...series.view, points: [...series.view.points] })); }
+  list(maxPoints = this.maxPoints): MetricSeriesView[] {
+    return [...this.series.values()].reverse().map(series => ({ ...series.view, points: sample(series.view.points, maxPoints) }));
+  }
+
+  /** Every series without its points, for checks that only need names and attributes. */
+  names(): Pick<MetricSeriesView, 'service' | 'name' | 'unit' | 'attributes'>[] {
+    return [...this.series.values()].map(({ view }) => ({ service: view.service, name: view.name, unit: view.unit, attributes: view.attributes }));
+  }
 
   clear(): void { this.series.clear(); this.revision++; }
 
@@ -251,6 +258,14 @@ function measureOf(point: MetricPoint): MetricMeasure {
   if (point.kind === 'summary' && point.quantiles?.some(value => Math.abs(value.quantile - .95) < 1e-9)) return 'p95';
   if (point.kind === 'histogram' || point.kind === 'exponentialHistogram' || point.kind === 'summary') return 'average';
   return 'value';
+}
+
+/** At most `max` points spread evenly over the series, always ending with the newest. */
+function sample<T>(points: readonly T[], max: number): T[] {
+  if (points.length <= max) return [...points];
+  if (max <= 1) return max === 1 ? [points[points.length - 1]] : [];
+  const step = (points.length - 1) / (max - 1);
+  return Array.from({ length: max }, (_, index) => points[Math.round(index * step)]);
 }
 
 function perSecond(amount: number, ms: number): number | undefined { return ms > 0 ? amount / (ms / 1000) : undefined; }

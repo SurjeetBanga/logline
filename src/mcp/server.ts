@@ -50,6 +50,17 @@ export function readWindows(directory: string, alive: (pid: number) => boolean =
   return windows;
 }
 
+/**
+ * The folder named by `--workspace`, else LOGLINE_WORKSPACE. Editors that
+ * expand variables in their MCP settings pass the open folder; one that does
+ * not leaves `${workspaceFolder}` as is, which names no folder.
+ */
+export function workspaceArgument(argv: readonly string[], env: NodeJS.ProcessEnv = process.env): string | undefined {
+  const flag = argv.indexOf('--workspace');
+  const value = flag >= 0 ? argv[flag + 1] : undefined;
+  return (value && !/^\$\{.*\}$/.test(value) ? value : undefined) || env.LOGLINE_WORKSPACE || undefined;
+}
+
 /** The window for a working directory: the one with the closest enclosing folder, or the only one when it has no folders. */
 export function pickWindow(windows: BridgeWindow[], cwd: string, workspace?: string): { window?: BridgeWindow; error?: string } {
   if (!windows.length) return { error: NOT_RUNNING };

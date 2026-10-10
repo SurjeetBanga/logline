@@ -165,7 +165,7 @@ export function createViewer(api: WebviewApi) {
     elements.otlpStatus.hidden = !otlpRunning;
     if (otlpRunning) {
       elements.otlpStatus.textContent = `OpenTelemetry ${data.otlp?.endpoint?.replace(/^https?:\/\//, '') ?? ''}`.trim();
-      elements.otlpStatus.title = `Receiving OpenTelemetry logs and traces on ${data.otlp?.endpoint ?? 'localhost'}. Click to see traces.`;
+      elements.otlpStatus.title = `Receiving OpenTelemetry logs, traces, and metrics on ${data.otlp?.endpoint ?? 'localhost'}. Click to see traces.`;
     }
     doctor.receive(data.doctor);
     changedFiles = data.changes?.files;
@@ -179,7 +179,7 @@ export function createViewer(api: WebviewApi) {
     elements.otlpToggle.textContent = otlpRunning ? 'Stop OpenTelemetry receiver' : 'Start OpenTelemetry receiver';
     elements.otlpToggle.title = otlpRunning
       ? `Receiving OpenTelemetry on ${data.otlp?.endpoint ?? 'localhost'}${data.otlp?.error ? ` (${data.otlp.error})` : ''}`
-      : 'Receive OpenTelemetry logs and traces from instrumented apps on this machine';
+      : 'Receive OpenTelemetry logs, traces, and metrics from instrumented apps on this machine';
     if (data.generation < minimumSnapshotGeneration) {
       bridge.flush();
       return;

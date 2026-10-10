@@ -127,9 +127,13 @@ test('the metric store bounds series and points per series', () => {
   const store = new MetricStore(2, 3);
   for (let i = 0; i < 5; i++) store.add(point({ kind: 'gauge', timeMs: ms(i), value: i }));
   assert.deepEqual(store.list()[0].points.map(p => p.value), [2, 3, 4]);
+  assert.deepEqual(store.list(2)[0].points.map(p => p.value), [2, 4], 'a sampled list spreads its points and ends with the newest');
+  assert.deepEqual(store.list(1)[0].points.map(p => p.value), [4]);
   store.add(point({ kind: 'gauge', name: 'b', value: 1 }));
   store.add(point({ kind: 'gauge', name: 'a', attributes: Object.assign(Object.create(null), { host: 'x' }), value: 1 }));
   assert.deepEqual(store.list().map(series => [series.name, series.attributes]), [['a', [['host', 'x']]], ['b', []]], 'the least recently updated series goes first');
+  assert.deepEqual(store.names().map(series => [series.name, series.attributes]), [['b', []], ['a', [['host', 'x']]]], 'names leave the points out');
+  assert.equal('points' in store.names()[0], false);
   const revision = store.revision;
   store.clear();
   assert.equal(store.size, 0);
@@ -152,4 +156,25 @@ test('the receiver keeps metrics, and instrumented apps are asked to export them
   assert.equal(status, 200);
   assert.deepEqual(metrics.list().map(series => [series.service, series.name, series.latest]), [['checkout', 'orders', 3]]);
   assert.deepEqual([otelDefaults(endpoint!).OTEL_METRICS_EXPORTER, otelDefaults(endpoint!).OTEL_METRIC_EXPORT_INTERVAL], ['otlp', '5000']);
+});
+
+test('large protobuf metrics requests are decoded on the worker thread', async t => {
+  const metrics = new MetricStore();
+  const receiver = new OtlpReceiver({ get<T>(_key: string, fallback: T): T { return fallback; } }, new SessionRegistry(),
+    new Ingestion(new LogStore(), () => { }), new RuntimeState(() => { }), new SpanStore(), 1, metrics);
+  const { endpoint } = await receiver.start(0);
+  t.after(() => receiver.stop());
+  // ExportMetricsServiceRequest { resource_metrics { resource, scope_metrics { metrics { name, sum { data_points, temporality, monotonic } } } } }
+  const dataPoint = [...fixed64(2, NS), ...fixed64(3, NS + 10_000_000_000n), ...double(4, 50), ...kv('route', '/orders', 7)];
+  const sum = [...bytes(1, dataPoint), ...num(2, 2), ...num(3, 1)];
+  const metric = [...str(1, 'http.requests'), ...str(3, '{request}'), ...bytes(7, sum)];
+  const body = Buffer.from(bytes(1, [...resource('checkout'), ...bytes(2, bytes(2, metric))]));
+  const status = await new Promise<number>((resolve, reject) => {
+    const request = httpRequest(`${endpoint}/v1/metrics`, { method: 'POST', headers: { 'content-type': 'application/x-protobuf' } }, response => { response.resume(); resolve(response.statusCode!); });
+    request.on('error', reject);
+    request.end(body);
+  });
+  assert.equal(status, 200);
+  const [series] = metrics.list();
+  assert.deepEqual([series.service, series.name, series.measure, series.total, series.latest, series.attributes], ['checkout', 'http.requests', 'rate', 50, 5, [['route', '/orders']]]);
 });

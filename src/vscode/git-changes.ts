@@ -1,3 +1,4 @@
+import { stat } from 'node:fs/promises';
 import * as vscode from 'vscode';
 import { parseDiffRanges, WHOLE_FILE, type ChangedLines, type LineRanges } from '../core/changed-lines';
 
@@ -33,12 +34,15 @@ const SETTLE_MS = 750;
 /**
  * Keeps `ChangedLines` matched to the working tree: what each repository's
  * files changed since its HEAD commit. Files are diffed when they first show
- * up as changed and again when saved; a new HEAD diffs everything again.
+ * up as changed and again when they change on disk, whether saved in the
+ * editor or written by an agent or a formatter; a new HEAD diffs everything again.
  */
 export class GitChanges implements vscode.Disposable {
   private readonly disposables: vscode.Disposable[] = [];
   private readonly repositories = new Map<GitRepository, { head?: string; listener: vscode.Disposable }>();
   private readonly ranges = new Map<string, LineRanges>();
+  /** Each diffed file's modification time when it was diffed. */
+  private readonly modified = new Map<string, number | undefined>();
   private readonly stale = new Set<string>();
   private timer?: ReturnType<typeof setTimeout>;
   private running?: Promise<void>;
@@ -120,11 +124,14 @@ export class GitChanges implements vscode.Disposable {
       }
     }
     this.changedFiles = wanted.size;
-    for (const file of [...this.ranges.keys()]) if (!wanted.has(file)) this.ranges.delete(file);
+    for (const file of [...this.ranges.keys()]) if (!wanted.has(file)) { this.ranges.delete(file); this.modified.delete(file); }
     for (const [file, { repository, whole }] of [...wanted].slice(0, MAX_FILES)) {
       if (this.disposed) return;
-      if (this.ranges.has(file) && !this.stale.has(file)) continue;
+      // Agents and command-line tools write files without a save event, so a new modification time also means a new diff.
+      const mtime = (await stat(file).catch(() => undefined))?.mtimeMs;
+      if (this.ranges.has(file) && !this.stale.has(file) && this.modified.get(file) === mtime) continue;
       this.stale.delete(file);
+      this.modified.set(file, mtime);
       if (whole) { this.ranges.set(file, WHOLE_FILE); continue; }
       try { this.ranges.set(file, parseDiffRanges(await repository.diffWith('HEAD', file))); }
       catch { this.ranges.delete(file); }

@@ -25,7 +25,12 @@ const SECRET_VALUES: { hint: string; pattern: RegExp; keep?: number }[] = [
   { hint: '://', pattern: /(\b[a-z][a-z0-9+.-]{0,30}:\/\/[^\s:/@"']{1,256}:)[^\s/@"']{1,256}(?=@)/gi, keep: 1 }
 ];
 
+// Any prefix one of the patterns needs. Most text has none, so one scan
+// skips every pattern; short hints such as `gh` alone would match ordinary words.
+const ANY_SECRET = /PRIVATE KEY|eyJ|earer |AKIA|ASIA|gh[pousr]_|github_pat_|xox[abprs]-|AIza|_live_|:\/\//;
+
 function redactSecretValues(text: string, replacement: string): string {
+  if (!ANY_SECRET.test(text)) return text;
   for (const { hint, pattern, keep } of SECRET_VALUES) {
     if (!text.includes(hint)) continue;
     text = text.replace(pattern, (match, prefix: unknown) =>

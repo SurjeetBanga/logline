@@ -1585,7 +1585,7 @@ test('snapshots apply editor requests once and reflect the OpenTelemetry receive
 });
 
 test('the Metrics button appears once metrics arrive and lists series with their latest values', () => {
-  const { get, receive, messages } = viewer();
+  const { get, receive, messages, timers } = viewer();
   const snapshot = (extra: Record<string, unknown>) => receive({
     type: 'snapshot', generation: 1, newest: 100, status: 'Running', command: '', running: false, total: 0, retained: 0, discarded: 0, bytes: 0,
     maxBytes: 1, truncated: 0, events: [], columns: [], page: 0, pages: 1, matched: 0, ...extra
@@ -1621,8 +1621,15 @@ test('the Metrics button appears once metrics arrive and lists series with their
   assert.equal(get('metricsRows').children.length, 1);
   assert.match(get('metricsStatus').textContent, /1 match/);
   const before = messages.length;
+  const refreshes = () => messages.slice(before).filter(message => message.type === 'metrics').length;
+  const pending = new Set(timers.keys());
   snapshot({ metrics: { series: 2, revision: 6 } });
-  assert.deepEqual(JSON.parse(JSON.stringify(messages.slice(before).filter(message => message.type === 'metrics'))), [{ type: 'metrics' }], 'an open list refreshes when new points arrive');
+  snapshot({ metrics: { series: 2, revision: 7 } });
+  assert.equal(refreshes(), 0, 'new points do not reload the list at once');
+  const scheduled = [...timers].filter(([id]) => !pending.has(id));
+  assert.equal(scheduled.length, 1, 'one refresh is scheduled for both');
+  for (const [id, callback] of scheduled) { timers.delete(id); callback(); }
+  assert.equal(refreshes(), 1, 'an open list refreshes once per export interval, however many points arrived');
 });
 
 test('My changes appears in a git repository and adds or removes changed:true', () => {

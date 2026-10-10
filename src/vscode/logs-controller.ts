@@ -42,6 +42,9 @@ import { openSourceLocation } from './source-navigation';
 const SHARE_ALL_CONFIRMED_KEY = 'logline.shareAllLogsConfirmed.v1';
 
 /** Composition root for services used by commands, tasks and the Logs view. */
+// A trend line is 100 units wide; more points than this only make the message bigger.
+const METRIC_TREND_POINTS = 60;
+
 export class LogsController {
   readonly config = new Configuration();
   readonly notifications = new ViewNotifications(this.config);
@@ -390,13 +393,13 @@ export class LogsController {
   telemetryFindings(): { findings: TelemetryFinding[]; version: number } {
     const basis = `${this.spans.revision}:${this.metrics.revision}`;
     if (this.telemetryCache?.basis !== basis) {
-      this.telemetryCache = { basis, version: (this.telemetryCache?.version ?? 0) + 1, findings: telemetryFindings(this.spans.entries(), this.metrics.list()) };
+      this.telemetryCache = { basis, version: (this.telemetryCache?.version ?? 0) + 1, findings: telemetryFindings(this.spans.entries(), this.metrics.names()) };
     }
     return this.telemetryCache;
   }
   private telemetryCache?: { basis: string; findings: TelemetryFinding[]; version: number };
-  /** Recent OpenTelemetry metric series, most recently updated first. */
-  metricList(): MetricSeriesView[] { return this.metrics.list(); }
+  /** Recent OpenTelemetry metric series, most recently updated first, with enough points for a trend line. */
+  metricList(): MetricSeriesView[] { return this.metrics.list(METRIC_TREND_POINTS); }
   async toggleTerminalCapture(enabled: boolean): Promise<void> {
     await vscode.workspace.getConfiguration('logline').update('captureTerminals', enabled, vscode.ConfigurationTarget.Workspace);
     this.terminalCapture.setEnabled(enabled);
