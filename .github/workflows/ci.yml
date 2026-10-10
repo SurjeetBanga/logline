@@ -123,12 +123,18 @@ jobs:
           if [ "$RUNNER_OS" = Linux ]; then xvfb-run -a node scripts/smoke.mjs --vsix "$vsix"; else node scripts/smoke.mjs --vsix "$vsix"; fi
 
   # The one check branch protection requires, so the matrix above can change without editing repository settings.
-  # Compares this build with the one it changes, on the same runner, and fails when a hot path is slower or a
-  # payload or retained memory is larger. Scheduled and manual runs have nothing to compare with.
-  performance:
+  # Compares this build with the one it changes and with the baseline, on the same runner, and fails when a hot path is
+  # slower or a payload or retained memory is larger. The cases are split across four runners to finish sooner; each
+  # comparison still runs on one machine. Scheduled and manual runs have nothing to compare with.
+  performance-shard:
+    name: performance (shard ${{ matrix.shard }}/4)
     if: github.event_name == 'pull_request' || github.event_name == 'push'
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -156,10 +162,38 @@ jobs:
             build "$baseline" "$RUNNER_TEMP/baseline"
             echo "BASELINE=$RUNNER_TEMP/baseline" >> "$GITHUB_ENV"
           fi
-      - name: Compare performance with the base and the baseline
+      - name: Compare this shard's cases with the base and the baseline
+        # The verdict comes from the merge below, which also sees a shard that failed to finish.
+        continue-on-error: true
         run: >-
           node scripts/perf-compare.mjs --base "$RUNNER_TEMP/base" --baseline "$BASELINE"
-          --report performance/report.md --json performance/results.json
+          --shard ${{ matrix.shard }}/4 --json shard/${{ matrix.shard }}.json
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: performance-shard-${{ matrix.shard }}
+          path: shard/
+          retention-days: 1
+
+  # One table and one verdict from the four shards. A missing shard fails the merge.
+  performance:
+    needs: performance-shard
+    if: always() && (github.event_name == 'pull_request' || github.event_name == 'push')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: performance-shard-*
+          path: shards
+          merge-multiple: true
+      - name: Merge the shards
+        run: |
+          [ "$(ls shards/*.json | wc -l)" -eq 4 ] || { echo "::error::Only $(ls shards/*.json | wc -l) of 4 shards reported."; exit 1; }
+          node scripts/perf-compare.mjs --merge shards/*.json --report performance/report.md --json performance/results.json
       # Kept for every run, including pushes to main, as a history of the numbers.
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: always()

@@ -4,6 +4,7 @@
 //   node --expose-gc scripts/benchmark.mjs --root <dir>    measure the build in <dir>/out
 //   node --expose-gc scripts/benchmark.mjs --json <file>   also write the results as JSON
 //   node --expose-gc scripts/benchmark.mjs --only a,b      measure only these cases
+//   node scripts/benchmark.mjs --list                      print the case names, in order, as JSON
 //
 // scripts/perf-compare.mjs runs this against two builds on the same machine and fails on regressions.
 // Each case is independent: one that cannot load in an older build is reported as unavailable.
@@ -15,7 +16,12 @@ import { pathToFileURL } from 'node:url';
 import { parseArgs } from 'node:util';
 
 const { values: args } = parseArgs({
-  options: { root: { type: 'string', default: '.' }, json: { type: 'string' }, only: { type: 'string' } },
+  options: {
+    root: { type: 'string', default: '.' },
+    json: { type: 'string' },
+    only: { type: 'string' },
+    list: { type: 'boolean', default: false },
+  },
 });
 const root = path.resolve(args.root);
 const only = args.only ? new Set(args.only.split(',')) : undefined;
@@ -340,6 +346,10 @@ timed('stream', 'Sorted page while 1,000 events stream in, 50 at a time', async 
   };
 });
 
+if (args.list) {
+  console.log(JSON.stringify(cases.map(({ name }) => name)));
+  process.exit(0);
+}
 for (const { name, label, unit, prepare, measure } of cases) {
   if (only && !only.has(name)) continue;
   try {
