@@ -32,15 +32,30 @@ The webview's source is `src/webview/`. `npm run compile` bundles it into `media
 | `npm run lint` | Finds promises that are neither awaited nor handled. |
 | `npm test` | Runs the unit tests only. |
 | `npm run coverage` | Runs the unit tests and measures coverage of the TypeScript sources. It fails when line, branch, or function coverage falls below the minimums in `scripts/test.mjs`. CI runs it on Linux. |
+| `npm run benchmark` | Measures the hot paths (ingestion, search, analysis, snapshots, and more) and the sizes of messages and retained memory. |
+| `npm run perf:compare -- --base <dir>` | Compares this build with the one in `<dir>` and fails when a case is more than 25% slower or a size grows by more than 5%. CI runs it on every pull request against its base. |
 | `npm run smoke` | Starts a real VS Code with the extension and runs the smoke test. Set `VSCODE_VERSION=stable` to download VS Code instead of using your installed `code`. |
 
-CI runs the checks and the tests on Linux, Windows, and macOS, checks pull requests for new dependencies with known vulnerabilities, then runs the smoke test on the packaged extension in VS Code 1.99.0 and the latest stable. A pull request can be merged only when **CI passed** is green.
+CI runs the checks and the tests on Linux, Windows, and macOS, checks pull requests for new dependencies with known vulnerabilities, compares performance with the base branch, then runs the smoke test on the packaged extension in VS Code 1.99.0 and the latest stable. A pull request can be merged only when **CI passed** is green.
 
 ## Tests
 
 - Put a test next to the module it tests: `src/core/query.test.ts` tests `src/core/query.ts`.
 - Test `core`, `capture`, and `storage` modules directly. Only tests of VS Code adapters need `withVscode` from `src/test/vscode-mock.ts`.
 - Use made-up log data. Build strings that look like real credentials at runtime (for example, `['ghp', 'x'.repeat(36)].join('_')`), because GitHub blocks pushes that contain them literally.
+
+## Performance
+
+The `performance` job in CI compares your branch with the branch it merges into. To run the same comparison locally:
+
+```sh
+git worktree add ../logline-main main
+(cd ../logline-main && npm ci && npm run compile)
+npm run compile
+npm run perf:compare -- --base ../logline-main
+```
+
+If you add or change a hot path (something that runs per captured line, per search, or per refresh), add a case for it to `scripts/benchmark.mjs`. A change that is slower on purpose, because it does more, needs a note in the pull request.
 
 ## Changelog and documentation
 
