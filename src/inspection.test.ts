@@ -51,21 +51,21 @@ function setup(stack = 'Error: Failed\n    at run (src/main.ts:42:9)') {
   return provider;
 }
 
-test('details and context messages return bounded structured data to the right view', () => {
+test('details and context messages return bounded structured data to the right view', async () => {
   const provider = setup();
   const messages: Record<string, any>[] = [];
 
-  provider.handleMessage(message => { messages.push(message); }, { type: 'details', id: 2, target: 'context' });
+  await provider.handleMessage(message => { messages.push(message); }, { type: 'details', id: 2, target: 'context' });
   assert.equal(messages[0].target, 'context');
   assert.equal(messages[0].exceptions[0].lines[1].source.file, 'src/main.ts');
   assert.equal(JSON.parse(messages[0].text).message, 'Failed');
-  provider.handleMessage(message => { messages.push(message); }, { type: 'context', id: 2, levels: ['error'], query: 'Failed' });
+  await provider.handleMessage(message => { messages.push(message); }, { type: 'context', id: 2, levels: ['error'], query: 'Failed' });
   assert.deepEqual(messages[1].events.map((event: { id: number; }) => event.id), [2]);
   provider.store.clear();
-  provider.handleMessage(message => { messages.push(message); }, { type: 'details', id: 2, target: 'context' });
+  await provider.handleMessage(message => { messages.push(message); }, { type: 'details', id: 2, target: 'context' });
   assert.deepEqual(messages[2].exceptions, []);
   assert.match(messages[2].text, /discarded/);
-  provider.handleMessage(message => { messages.push(message); }, { type: 'context', id: 2 });
+  await provider.handleMessage(message => { messages.push(message); }, { type: 'context', id: 2 });
   assert.equal(messages[3].missing, true);
 });
 

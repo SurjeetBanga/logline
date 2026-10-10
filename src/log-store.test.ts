@@ -149,6 +149,14 @@ test('newline-free output is bounded and parsing recovers after a truncated line
   assert.deepEqual(output, [{ line: 'x'.repeat(16), truncated: true }, { line: '{"ok":true}', truncated: false }]);
 });
 
+test('a line whose callback throws is not glued onto the next line', () => {
+  const output: string[] = [];
+  const reader = new LineReader(line => { if (line === 'poison') throw new Error('rejected'); output.push(line); });
+  assert.throws(() => reader.write(Buffer.from('poison\n')), /rejected/);
+  reader.write(Buffer.from('after\n'));
+  assert.deepEqual(output, ['after']);
+});
+
 test('messages preserve repeated spaces and Pino numeric levels', () => {
   const event = parseLogLine('{"level":50,"msg":"a  b    c"}', 'stdout', 1, new Date());
   assert.equal(event.message, 'a  b    c');
