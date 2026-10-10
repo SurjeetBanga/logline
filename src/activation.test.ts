@@ -47,7 +47,7 @@ test('activation registers the provider, command/task surfaces, autostart, and i
   const context = { extensionUri: { fsPath: extensionPath }, subscriptions: [], globalState: { get: (_key: string, fallback: unknown) => fallback, update: async () => undefined } } as any;
   const result = activate(context);
   assert.ok(result.provider);
-  assert.equal(registeredCommands.length, 23);
+  assert.equal(registeredCommands.length, 24);
   assert.ok(context.subscriptions.length >= 20);
   await new Promise(resolve => setTimeout(resolve, 50));
   assert.ok(existsSync(join(process.env.HOME, '.logline', 'mcp.js')), 'the MCP server script is installed at a stable path');

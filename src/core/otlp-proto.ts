@@ -1,5 +1,6 @@
-// A minimal protobuf decoder for the two OTLP export requests Logline
-// accepts: ExportLogsServiceRequest and ExportTraceServiceRequest. Messages
+// A minimal protobuf decoder for the OTLP export requests Logline accepts:
+// ExportLogsServiceRequest, ExportTraceServiceRequest, and
+// ExportMetricsServiceRequest. Messages
 // decode into the OTLP/JSON shape (lowerCamelCase keys, hex trace and span
 // IDs, 64-bit integers as decimal strings), so a single normalizer handles
 // both encodings. Unknown fields are skipped, as protobuf requires.
@@ -42,6 +43,21 @@ class Reader {
     const value = new DataView(this.buf.buffer, this.buf.byteOffset + this.pos, 8).getFloat64(0, true);
     this.pos += 8;
     return value;
+  }
+
+  float64Field(wire: number): number {
+    // A double is fixed64 on the wire; read the bits as a float.
+    if (wire !== 1) throw new ProtoError('Expected a double');
+    return this.double();
+  }
+
+  /** A repeated fixed64 or double field, packed (wire type 2) or not (wire type 1). */
+  packed64(wire: number, read: (reader: Reader) => void): void {
+    if (wire === 1) { read(this); return; }
+    const bytes = this.bytes();
+    const inner = new Reader(bytes);
+    if (bytes.length % 8) throw new ProtoError('Truncated packed field');
+    while (!inner.done) read(inner);
   }
 
   bytes(): Uint8Array {
@@ -225,8 +241,123 @@ function resourceGroup(itemsKey: string, scopeKey: string, item: (reader: Reader
   };
 }
 
+// NumberDataPoint { start = 2; time = 3; as_double = 4; as_int = 6 (sfixed64); attributes = 7; }
+function numberPoint(r: Reader, depth: number): Json {
+  const value: Json = { attributes: [] };
+  r.fields((field, wire) => {
+    if (field === 2 && wire === 1) value.startTimeUnixNano = r.fixed64().toString();
+    else if (field === 3 && wire === 1) value.timeUnixNano = r.fixed64().toString();
+    else if (field === 4 && wire === 1) value.asDouble = r.double();
+    else if (field === 6 && wire === 1) value.asInt = BigInt.asIntN(64, r.fixed64()).toString();
+    else if (field === 7 && wire === 2) (value.attributes as Json[]).push(sub(r, depth, keyValue));
+    else return false;
+    return true;
+  });
+  return value;
+}
+
+// HistogramDataPoint { start = 2; time = 3; count = 4; sum = 5; bucket_counts = 6; explicit_bounds = 7; attributes = 9; min = 11; max = 12; }
+function histogramPoint(r: Reader, depth: number): Json {
+  const value: Json = { attributes: [], bucketCounts: [], explicitBounds: [] };
+  r.fields((field, wire) => {
+    if (field === 2 && wire === 1) value.startTimeUnixNano = r.fixed64().toString();
+    else if (field === 3 && wire === 1) value.timeUnixNano = r.fixed64().toString();
+    else if (field === 4 && wire === 1) value.count = r.fixed64().toString();
+    else if (field === 5) value.sum = r.float64Field(wire);
+    else if (field === 6 && (wire === 1 || wire === 2)) r.packed64(wire, inner => (value.bucketCounts as string[]).push(inner.fixed64().toString()));
+    else if (field === 7 && (wire === 1 || wire === 2)) r.packed64(wire, inner => (value.explicitBounds as number[]).push(inner.double()));
+    else if (field === 9 && wire === 2) (value.attributes as Json[]).push(sub(r, depth, keyValue));
+    else if (field === 11) value.min = r.float64Field(wire);
+    else if (field === 12) value.max = r.float64Field(wire);
+    else return false;
+    return true;
+  });
+  return value;
+}
+
+// ExponentialHistogramDataPoint { attributes = 1; start = 2; time = 3; count = 4; sum = 5; min = 12; max = 13; }
+// Its buckets are not read: Logline shows the average, minimum, and maximum.
+function exponentialPoint(r: Reader, depth: number): Json {
+  const value: Json = { attributes: [] };
+  r.fields((field, wire) => {
+    if (field === 1 && wire === 2) (value.attributes as Json[]).push(sub(r, depth, keyValue));
+    else if (field === 2 && wire === 1) value.startTimeUnixNano = r.fixed64().toString();
+    else if (field === 3 && wire === 1) value.timeUnixNano = r.fixed64().toString();
+    else if (field === 4 && wire === 1) value.count = r.fixed64().toString();
+    else if (field === 5) value.sum = r.float64Field(wire);
+    else if (field === 12) value.min = r.float64Field(wire);
+    else if (field === 13) value.max = r.float64Field(wire);
+    else return false;
+    return true;
+  });
+  return value;
+}
+
+// SummaryDataPoint { start = 2; time = 3; count = 4; sum = 5; quantile_values = 6 { quantile = 1; value = 2; }; attributes = 7; }
+function summaryPoint(r: Reader, depth: number): Json {
+  const value: Json = { attributes: [], quantileValues: [] };
+  r.fields((field, wire) => {
+    if (field === 2 && wire === 1) value.startTimeUnixNano = r.fixed64().toString();
+    else if (field === 3 && wire === 1) value.timeUnixNano = r.fixed64().toString();
+    else if (field === 4 && wire === 1) value.count = r.fixed64().toString();
+    else if (field === 5) value.sum = r.float64Field(wire);
+    else if (field === 6 && wire === 2) (value.quantileValues as Json[]).push(sub(r, depth, inner => {
+      const quantile: Json = {};
+      inner.fields((f, w) => {
+        if (f === 1) quantile.quantile = inner.float64Field(w);
+        else if (f === 2) quantile.value = inner.float64Field(w);
+        else return false;
+        return true;
+      });
+      return quantile;
+    }));
+    else if (field === 7 && wire === 2) (value.attributes as Json[]).push(sub(r, depth, keyValue));
+    else return false;
+    return true;
+  });
+  return value;
+}
+
+// Gauge/Sum/Histogram/... { repeated DataPoint data_points = 1; aggregation_temporality = 2; is_monotonic = 3 (Sum only); }
+function metricData(point: (reader: Reader, depth: number) => Json) {
+  return (r: Reader, depth: number): Json => {
+    const value: Json = { dataPoints: [] };
+    r.fields((field, wire) => {
+      if (field === 1 && wire === 2) (value.dataPoints as Json[]).push(sub(r, depth, point));
+      else if (field === 2 && wire === 0) value.aggregationTemporality = r.number();
+      else if (field === 3 && wire === 0) value.isMonotonic = r.varint() !== 0n;
+      else return false;
+      return true;
+    });
+    return value;
+  };
+}
+
+const METRIC_DATA: Record<number, [string, (reader: Reader, depth: number) => Json]> = {
+  5: ['gauge', metricData(numberPoint)],
+  7: ['sum', metricData(numberPoint)],
+  9: ['histogram', metricData(histogramPoint)],
+  10: ['exponentialHistogram', metricData(exponentialPoint)],
+  11: ['summary', metricData(summaryPoint)]
+};
+
+// Metric { name = 1; description = 2; unit = 3; oneof data { gauge = 5; sum = 7; histogram = 9; exponential_histogram = 10; summary = 11; } }
+function metric(r: Reader, depth: number): Json {
+  const value: Json = {};
+  r.fields((field, wire) => {
+    if (field === 1 && wire === 2) value.name = r.string();
+    else if (field === 2 && wire === 2) value.description = r.string();
+    else if (field === 3 && wire === 2) value.unit = r.string();
+    else if (METRIC_DATA[field] && wire === 2) value[METRIC_DATA[field][0]] = sub(r, depth, METRIC_DATA[field][1]);
+    else return false;
+    return true;
+  });
+  return value;
+}
+
 const resourceLogs = resourceGroup('logRecords', 'scopeLogs', logRecord);
 const resourceSpans = resourceGroup('spans', 'scopeSpans', span);
+const resourceMetrics = resourceGroup('metrics', 'scopeMetrics', metric);
 
 export function decodeLogsRequest(bytes: Uint8Array): Json {
   return { resourceLogs: repeated(new Reader(bytes), 1, 0, resourceLogs) };
@@ -234,4 +365,8 @@ export function decodeLogsRequest(bytes: Uint8Array): Json {
 
 export function decodeTraceRequest(bytes: Uint8Array): Json {
   return { resourceSpans: repeated(new Reader(bytes), 1, 0, resourceSpans) };
+}
+
+export function decodeMetricsRequest(bytes: Uint8Array): Json {
+  return { resourceMetrics: repeated(new Reader(bytes), 1, 0, resourceMetrics) };
 }

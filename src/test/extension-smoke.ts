@@ -14,7 +14,7 @@ export async function run(): Promise<void> {
     const commands = await vscode.commands.getCommands();
     for (const command of ['showLogs', 'runCommand', 'followFile', 'stopCommand', 'export', 'import', 'exportForAI', 'convertTask', 'captureTask', 'showGuide', 'showWhatsNew',
       'enableTerminalCapture', 'disableTerminalCapture', 'manageTerminalCapture', 'shareWithAgent', 'shareSpecificRuns', 'stopSharing', 'askCopilot',
-      'startOtlpReceiver', 'stopOtlpReceiver', 'showTrace', 'showQuietLogStatements', 'showLogSite']) {
+      'startOtlpReceiver', 'stopOtlpReceiver', 'showTrace', 'showQuietLogStatements', 'showLogSite', 'connectAgent', 'showStatus']) {
       assert.ok(commands.includes(`logline.${command}`), `${command} is registered`);
     }
     await vscode.workspace.getConfiguration('logline').update('persistLogs', true, vscode.ConfigurationTarget.Workspace);
@@ -78,18 +78,22 @@ export async function run(): Promise<void> {
     const traceId = '4bf92f3577b34da6a3ce929d0e0e4736';
     const body = JSON.stringify({ resourceLogs: [{ resource: { attributes: [{ key: 'service.name', value: { stringValue: 'smoke' } }] },
       scopeLogs: [{ logRecords: [{ timeUnixNano: String(BigInt(Date.now()) * 1000000n), severityNumber: 9, body: { stringValue: 'smoke otel record' }, traceId }] }] }] });
-    const status = await new Promise<number>((resolve, reject) => {
-      const post = request({ host: '127.0.0.1', port: Number(process.env.LOGLINE_SMOKE_OTLP_PORT), path: '/v1/logs', method: 'POST', headers: { 'content-type': 'application/json' } },
+    const send = (path: string, payload: string) => new Promise<number>((resolve, reject) => {
+      const post = request({ host: '127.0.0.1', port: Number(process.env.LOGLINE_SMOKE_OTLP_PORT), path, method: 'POST', headers: { 'content-type': 'application/json' } },
         response => { response.resume(); resolve(response.statusCode ?? 0); });
       post.on('error', reject);
-      post.end(body);
+      post.end(payload);
     });
-    assert.equal(status, 200, 'the OpenTelemetry receiver accepts OTLP/JSON');
+    assert.equal(await send('/v1/logs', body), 200, 'the OpenTelemetry receiver accepts OTLP/JSON');
+    const metrics = JSON.stringify({ resourceMetrics: [{ resource: { attributes: [{ key: 'service.name', value: { stringValue: 'smoke' } }] },
+      scopeMetrics: [{ metrics: [{ name: 'smoke.orders', unit: '{order}', gauge: { dataPoints: [{ timeUnixNano: String(BigInt(Date.now()) * 1000000n), asInt: '3' }] } }] }] }] });
+    assert.equal(await send('/v1/metrics', metrics), 200, 'the OpenTelemetry receiver accepts metrics');
+    assert.equal(await send('/v1/metrics', '{"resourceMetrics":'), 400, 'malformed metrics are refused');
     assert.match(await persistedText('smoke otel record'), /smoke otel record/, 'received telemetry is captured');
     await vscode.commands.executeCommand('logline.showTrace', traceId);
     await vscode.commands.executeCommand('logline.stopOtlpReceiver');
     await writeFile(result, JSON.stringify({ passed: true, checks: ['activation', 'commands', 'webview focus', 'task discovery', 'captured task completion', 'captured task output', 'stop',
-      'debug capture', 'log lens', 'OpenTelemetry receiver', 'trace command'] }));
+      'debug capture', 'log lens', 'OpenTelemetry receiver', 'metrics', 'trace command'] }));
   } catch (error) {
     await writeFile(result, JSON.stringify({ passed: false, error: String(error) }));
     throw error;

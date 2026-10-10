@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import { SENSITIVE_LABELS, uncaughtExceptionVariable, type SourceSensitive } from '../core/log-findings';
 import { siteQuery, type LogSite, type LogSiteIndex, type LogSiteTracker, type SiteStats } from '../core/log-sites';
 import type { Settings } from '../core/settings';
+import type { TelemetryCode, TelemetryFinding } from '../core/telemetry-findings';
 import type { DoctorAction, DoctorFindingView } from '../protocol/messages';
 import type { LogLens } from './log-lens';
 
@@ -24,13 +25,17 @@ export interface DoctorSources {
   tracker: LogSiteTracker;
   lens: LogLens;
   /** Ask Copilot to change a statement, with the evidence in the prompt. */
-  askCopilot(prompt: string): Promise<void>;
+  askCopilot(prompt: string): Promise<unknown>;
+  /** Whether Copilot chat is available; without it, Fix with Copilot is not offered. */
+  copilot?(): boolean;
   /** Filter the Logs panel, used to show a statement's events. */
   showQuery?(query: string): Promise<void>;
   /** Called when the findings shown in the Logs panel change. */
   onChanged?(): void;
   /** Sensitive values in events no statement claimed, scanned up to now. */
   unclaimed?(): { findings: SourceSensitive[]; version: number; more?: boolean };
+  /** Semantic convention problems in the OpenTelemetry spans and metrics received. */
+  telemetry?(): { findings: TelemetryFinding[]; version: number };
 }
 
 /** A sensitive value in a source's output that no indexed statement accounts for. */
@@ -137,6 +142,10 @@ function sourceView(finding: SourceFinding): DoctorFindingView {
   return { code: finding.code, severity: finding.severity, message: finding.message, source: finding.server, eventId: finding.eventId };
 }
 
+function telemetryView(finding: TelemetryFinding): DoctorFindingView {
+  return { code: finding.code, severity: finding.severity, message: finding.message, source: finding.service, ...(finding.traceId ? { traceId: finding.traceId } : {}) };
+}
+
 /** Findings for sensitive values that no statement accounts for, one per source and kind. */
 export function sourceFindings(found: readonly SourceSensitive[]): SourceFinding[] {
   return found.map(({ serverId, server, value, count, lastId }) => ({
@@ -156,6 +165,7 @@ export class LogDoctor implements vscode.Disposable, vscode.CodeActionProvider {
   private readonly findingsByDiagnostic = new WeakMap<vscode.Diagnostic, Finding>();
   private current: Finding[] = [];
   private unclaimedFindings: SourceFinding[] = [];
+  private telemetryFindings: TelemetryFinding[] = [];
   private timer?: ReturnType<typeof setTimeout>;
   private run = 0;
   // What the last refresh was computed from; lenses also change on a clock
@@ -195,8 +205,11 @@ export class LogDoctor implements vscode.Disposable, vscode.CodeActionProvider {
   /** Findings in output that no statement accounts for. */
   get unclaimed(): readonly SourceFinding[] { return this.unclaimedFindings; }
 
+  /** Semantic convention problems in OpenTelemetry data, per service. */
+  get telemetry(): readonly TelemetryFinding[] { return this.telemetryFindings; }
+
   /** Every finding the Logs panel counts. */
-  get total(): number { return this.current.length + this.unclaimedFindings.length; }
+  get total(): number { return this.current.length + this.unclaimedFindings.length + this.telemetryFindings.length; }
 
   schedule(): void {
     if (this.timer || doctorMode(this.sources.config) === 'off') return;
@@ -209,9 +222,10 @@ export class LogDoctor implements vscode.Disposable, vscode.CodeActionProvider {
     const mode = doctorMode(this.sources.config);
     const { tracker, index, lens } = this.sources;
     const unclaimed = mode === 'off' ? undefined : this.sources.unclaimed?.();
+    const telemetry = mode === 'all' ? this.sources.telemetry?.() : undefined;
     // The scan works through a large backlog in steps.
     if (unclaimed?.more) this.schedule();
-    const computedFrom = `${mode}:${tracker.findings}:${index.version}:${tracker.watermark}:${tracker.total}:${tracker.stats.size}:${unclaimed?.version}`;
+    const computedFrom = `${mode}:${tracker.findings}:${index.version}:${tracker.watermark}:${tracker.total}:${tracker.stats.size}:${unclaimed?.version}:${telemetry?.version}`;
     if (computedFrom === this.computedFrom) return;
     if (index.version !== this.sourceVersion) { this.sourceCache.clear(); this.sourceVersion = index.version; }
     const findings: Finding[] = [];
@@ -257,6 +271,7 @@ export class LogDoctor implements vscode.Disposable, vscode.CodeActionProvider {
     const rank = { warning: 0, information: 1, hint: 2 };
     this.current = findings.sort((a, b) => rank[a.severity] - rank[b.severity] || a.site.file.localeCompare(b.site.file) || a.site.line - b.site.line);
     this.unclaimedFindings = sourceFindings(unclaimed?.findings ?? []);
+    this.telemetryFindings = telemetry?.findings ?? [];
     this.findingsChanged();
   }
 
@@ -266,7 +281,7 @@ export class LogDoctor implements vscode.Disposable, vscode.CodeActionProvider {
   /** Findings as the Logs panel shows them, worst first. */
   views(): DoctorFindingView[] {
     // Leaked values come first wherever they were found; the list is capped for the panel.
-    return this.viewCache ??= [...this.unclaimedFindings.map(sourceView), ...this.current.map(view)]
+    return this.viewCache ??= [...this.unclaimedFindings.map(sourceView), ...this.current.map(view), ...this.telemetryFindings.map(telemetryView)]
       .sort((a, b) => Number(a.severity !== 'warning') - Number(b.severity !== 'warning')).slice(0, 200);
   }
 
@@ -289,7 +304,8 @@ export class LogDoctor implements vscode.Disposable, vscode.CodeActionProvider {
     }
     this.bySite = bySite;
     const signature = JSON.stringify([this.current.map(finding => [finding.site.id, finding.code, finding.message]),
-      this.unclaimedFindings.map(finding => [finding.serverId, finding.message, finding.eventId])]);
+      this.unclaimedFindings.map(finding => [finding.serverId, finding.message, finding.eventId]),
+      this.telemetryFindings.map(finding => [finding.service, finding.message, finding.traceId])]);
     if (signature === this.viewSignature) return;
     this.viewSignature = signature;
     this.viewCache = undefined;
@@ -338,7 +354,7 @@ export class LogDoctor implements vscode.Disposable, vscode.CodeActionProvider {
           if (close !== undefined) fix(`Pass '${finding.detail}' to the log call`, edit => edit.insert(document.uri, new vscode.Position(line.lineNumber, close), `, ${finding.detail}`), true);
         }
       }
-      if (['secret', 'personal', 'unstructured', 'missing-exception', 'oversized', 'contextless'].includes(finding.code)) {
+      if (this.sources.copilot?.() !== false && ['secret', 'personal', 'unstructured', 'missing-exception', 'oversized', 'contextless'].includes(finding.code)) {
         const action = new vscode.CodeAction('Fix with Copilot', vscode.CodeActionKind.QuickFix);
         action.diagnostics = [diagnostic];
         action.command = { title: 'Fix with Copilot', command: 'logline.fixLogStatementWithCopilot', arguments: [document.uri, finding.site.line, finding.message] };
@@ -361,7 +377,7 @@ export class LogDoctor implements vscode.Disposable, vscode.CodeActionProvider {
   }
 
   private apply(): void {
-    if (doctorMode(this.sources.config) === 'off') { this.sources.tracker.findings = false; this.diagnostics.clear(); this.published.clear(); this.computedFrom = undefined; this.current = []; this.unclaimedFindings = []; this.findingsChanged(); return; }
+    if (doctorMode(this.sources.config) === 'off') { this.sources.tracker.findings = false; this.diagnostics.clear(); this.published.clear(); this.computedFrom = undefined; this.current = []; this.unclaimedFindings = []; this.telemetryFindings = []; this.findingsChanged(); return; }
     // A stale index version makes the lens recount retained events, now with evidence.
     if (!this.sources.tracker.findings) { this.sources.tracker.findings = true; this.sources.tracker.indexVersion = -1; this.sources.lens.schedule(0); }
     this.schedule();
@@ -386,19 +402,25 @@ export class LogDoctor implements vscode.Disposable, vscode.CodeActionProvider {
     await this.refresh();
     const findings = this.current;
     const unclaimed = this.unclaimedFindings;
-    const count = (codes: FindingCode[]) => findings.filter(finding => codes.includes(finding.code)).length
-      + unclaimed.filter(finding => codes.includes(finding.code)).length;
+    const telemetry = this.telemetryFindings;
+    const count = (codes: (FindingCode | TelemetryCode)[]) => findings.filter(finding => codes.includes(finding.code)).length
+      + unclaimed.filter(finding => codes.includes(finding.code)).length + telemetry.filter(finding => codes.includes(finding.code)).length;
     const sites = this.sources.tracker.stats.size;
     const lines = [
       '# Log health', '',
       `Checked ${sites.toLocaleString()} log ${sites === 1 ? 'statement' : 'statements'} that produced ${this.sources.tracker.total.toLocaleString()} retained events, and every source's output for secrets and personal data.`, '',
       ...REPORT.filter(rule => count([rule.code])).map(rule => `- **${count([rule.code])}** ${rule.summary}`)
     ];
-    if (!findings.length && !unclaimed.length) lines.push('No problems found in the logs Logline has retained. Findings come only from events that were actually logged.');
+    if (!findings.length && !unclaimed.length && !telemetry.length) lines.push('No problems found in the logs Logline has retained. Findings come only from events that were actually logged.');
     if (unclaimed.length) {
       lines.push('', '## In output not matched to a statement', '', 'From libraries, other repositories, imported files, terminals or OpenTelemetry. Open an example from log doctor in the Logs panel.', '',
         '| Source | Finding |', '| --- | --- |');
       for (const finding of unclaimed) lines.push(`| ${finding.server.replace(/\|/g, '\\|')} | ${finding.message.replace(/\|/g, '\\|')} |`);
+    }
+    if (telemetry.length) {
+      lines.push('', '## In OpenTelemetry data', '', 'Checked against the OpenTelemetry semantic conventions, in the spans and metrics each service sent.', '',
+        '| Service | Finding |', '| --- | --- |');
+      for (const finding of telemetry) lines.push(`| ${finding.service.replace(/\|/g, '\\|')} | ${finding.message.replace(/\|/g, '\\|')} |`);
     }
     if (findings.length) {
       lines.push('', '## On log statements', '', '| Statement | Finding |', '| --- | --- |');
@@ -416,7 +438,7 @@ export class LogDoctor implements vscode.Disposable, vscode.CodeActionProvider {
 }
 
 /** Each check as the health report explains it, in the order it lists them. */
-const REPORT: { code: FindingCode; title: string; summary: string; advice: string }[] = [
+const REPORT: { code: FindingCode | TelemetryCode; title: string; summary: string; advice: string }[] = [
   { code: 'secret', title: 'Secrets', summary: 'logged secrets such as tokens or keys',
     advice: 'Anyone who can read the logs can use these. Remove the value or log a masked form, and rotate any credential that reached shared logs.' },
   { code: 'personal', title: 'Personal data', summary: 'logged personal data such as email addresses or card numbers',
@@ -432,7 +454,19 @@ const REPORT: { code: FindingCode; title: string; summary: string; advice: strin
   { code: 'oversized', title: 'Oversized events', summary: 'logged very large events',
     advice: 'Large events are slow to search, get cut at the line limit, and cost the most to ship and store. Log the fields you need rather than whole objects or payloads.' },
   { code: 'unstructured', title: 'Values formatted into messages', summary: 'format values into text instead of fields',
-    advice: 'Values inside the text cannot be filtered, grouped, or charted. Keep the message constant and pass the values as fields.' }
+    advice: 'Values inside the text cannot be filtered, grouped, or charted. Keep the message constant and pass the values as fields.' },
+  { code: 'unnamed-service', title: 'Services without a name', summary: 'services sent telemetry without a service name',
+    advice: 'Every unnamed service shares one name, so their traces and metrics mix. Set OTEL_SERVICE_NAME; Logline sets it for servers and tasks it starts.' },
+  { code: 'span-name-ids', title: 'Ids in span names', summary: 'services put ids in span names',
+    advice: 'A span name with an id in it is unique to one request, so the same operation never groups together in traces or hotspots. Name the operation and record the id as an attribute.' },
+  { code: 'unmarked-error', title: 'Failed requests not marked as errors', summary: 'services returned 5xx without an error status',
+    advice: 'Traces count and highlight spans whose status is Error. Server spans that returned 5xx should set it; current HTTP instrumentation does this for you.' },
+  { code: 'missing-route', title: 'HTTP spans without a route', summary: 'services recorded HTTP server spans without http.route',
+    advice: 'Without the route template, each URL counts as its own endpoint. Framework instrumentation sets http.route; with plain HTTP instrumentation, set it where the route is matched.' },
+  { code: 'old-attributes', title: 'Older attribute names', summary: 'services used attribute names from before the stable conventions',
+    advice: 'Instrumentation released before the HTTP, database, and network conventions became stable uses older names. Update the OpenTelemetry instrumentation packages.' },
+  { code: 'unit-in-name', title: 'Units in metric names', summary: 'services put units in metric names',
+    advice: 'OpenTelemetry metrics carry their unit separately, so tools can convert and label it. Drop the unit from the name and set it as the unit.' }
 ];
 
 const ERROR_CALL = /\b(?:error|Error|exception|severe|fatal|critical|warn|warning|Warn|log)\s*\(/;

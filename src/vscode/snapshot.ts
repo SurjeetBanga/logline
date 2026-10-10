@@ -31,6 +31,7 @@ export interface SnapshotSources {
   guideStatus: GuideStatus; agentAccess: AgentLogAccess; terminalCapture?: { status(): { state: 'off' | 'waiting' | 'capturing' | 'attention'; detail: string; active: number; failed: number } };
   otlp?: { status(): ReceiverStatus };
   spans?: { traceCount: number };
+  metrics?: { size: number; revision: number };
   /** What each row links to: its log statement and that statement's worst finding. */
   rowLinks?(event: LogEvent): Pick<RowEvent, 'site' | 'finding'>;
   doctor?: { revision: number; total: number; findings?: DoctorFindingView[] };
@@ -60,7 +61,7 @@ function keptRows(msg: Extract<ViewRequest, { type: 'snapshot'; }>, events: LogE
   return undefined;
 }
 export function buildSnapshot(msg: Extract<ViewRequest, { type: 'snapshot'; }>,
-  { store, config, registry, state, ingestion, persistence, searches, running, guideStatus, agentAccess, terminalCapture, otlp, spans, rowLinks, doctor, agentClients, rowLinksVersion, changes }: SnapshotSources): Snapshot {
+  { store, config, registry, state, ingestion, persistence, searches, running, guideStatus, agentAccess, terminalCapture, otlp, spans, metrics, rowLinks, doctor, agentClients, rowLinksVersion, changes }: SnapshotSources): Snapshot {
   const options = { query: msg.query, serverId: msg.serverId, sessionId: msg.sessionId, levels: msg.levels,
     page: msg.page, before: msg.before, sort: msg.sort, sortDirection: msg.sortDirection };
   const configured = config.get<string[]>('columns', []);
@@ -109,6 +110,7 @@ export function buildSnapshot(msg: Extract<ViewRequest, { type: 'snapshot'; }>,
     timezone: config.get('timezone', 'local'), newestFirst: config.get('newestFirst', true), guideStatus, agentSharing: agentAccess.status(),
     captureTerminals: config.get('captureTerminals', false), captureStatus: terminalCapture?.status(), otlp: otlp?.status(),
     traceCount: spans?.traceCount ?? 0,
+    ...(metrics?.size ? { metrics: { series: metrics.size, revision: metrics.revision } } : {}),
     ...(doctor ? { doctor } : {}),
     ...(agentClients?.length ? { agentClients } : {}),
     ...(changes ? { changes } : {})

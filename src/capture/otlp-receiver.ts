@@ -6,6 +6,7 @@ import { isEntrySpan, logLine, readLogs, readSpans, spanLine, type OtlpLog, type
 import { MalformedRequest, OtlpDecoder } from './otlp-decoder';
 import type { Settings } from '../core/settings';
 import type { SpanStore } from '../core/traces';
+import { MetricStore, readMetrics, type MetricPoint } from '../core/metrics';
 import type { SessionSummary } from '../core/types';
 import type { Ingestion } from './ingestion';
 import type { RuntimeState } from './runtime-state';
@@ -24,7 +25,8 @@ class HttpError extends Error { constructor(readonly status: number, message: st
 
 /**
  * A local OTLP/HTTP receiver. Log records become Logline events, spans go to
- * the span store (and optionally appear as rows), and each service that
+ * the span store (and optionally appear as rows), metric data points go to
+ * the metric store, and each service that
  * sends telemetry becomes a source. It binds to loopback only and refuses
  * browser requests, so web pages cannot inject telemetry.
  */
@@ -40,7 +42,7 @@ export class OtlpReceiver {
 
   constructor(private readonly config: Settings, private readonly registry: SessionRegistry,
     private readonly ingestion: Ingestion, private readonly state: RuntimeState, private readonly spans: SpanStore,
-    decodeThreshold?: number) {
+    decodeThreshold?: number, private readonly metrics = new MetricStore()) {
     this.decoder = new OtlpDecoder(decodeThreshold);
   }
 
@@ -80,6 +82,16 @@ export class OtlpReceiver {
 
   /** Accept a decoded OTLP traces request; returns the number of new spans. */
   acceptSpans(request: unknown): number { return this.ingestSpans(readSpans(request)); }
+
+  /** Accept a decoded OTLP metrics request; returns the number of new data points. */
+  acceptMetrics(request: unknown): number { return this.ingestMetrics(readMetrics(request)); }
+
+  private ingestMetrics(points: readonly MetricPoint[]): number {
+    let accepted = 0;
+    for (const point of points) if (this.metrics.add(point)) accepted++;
+    if (accepted) this.state.notify();
+    return accepted;
+  }
 
   private ingestLogs(logs: readonly OtlpLog[]): number {
     let accepted = 0;
@@ -164,23 +176,22 @@ export class OtlpReceiver {
       if (!['127.0.0.1', 'localhost', '[::1]'].some(name => host === `${name}:${port}`)) throw new HttpError(403, 'Unexpected Host header.');
       const path = (request.url ?? '').split('?')[0];
       if (request.method === 'GET' && path === '/') { reply(200, 'Logline OpenTelemetry receiver (OTLP/HTTP)\n'); return; }
-      if (!['/v1/logs', '/v1/traces', '/v1/metrics'].includes(path)) throw new HttpError(404, 'Use /v1/logs or /v1/traces.');
+      if (!['/v1/logs', '/v1/traces', '/v1/metrics'].includes(path)) throw new HttpError(404, 'Use /v1/logs, /v1/traces, or /v1/metrics.');
       if (request.method !== 'POST') throw new HttpError(405, 'Use POST.');
       const contentType = (request.headers['content-type'] ?? '').split(';')[0].trim().toLowerCase();
       const json = contentType === 'application/json';
       if (!json && contentType !== 'application/x-protobuf') throw new HttpError(415, 'Use application/json or application/x-protobuf.');
       const body = await this.readBody(request);
-      // Metrics are accepted and dropped so exporters configured for every signal do not log errors.
-      if (path !== '/v1/metrics') {
-        const decoded = await this.decoder.decode(path === '/v1/logs' ? 'logs' : 'traces', json, body).catch(error => {
-          throw error instanceof MalformedRequest ? new HttpError(400, error.message) : error;
-        });
-        const items: readonly (OtlpLog | Span)[] = 'logs' in decoded ? decoded.logs : decoded.spans;
-        for (let start = 0; start < items.length && this.running; start += CHUNK) {
-          if (start) await new Promise(resolve => setImmediate(resolve));
-          const chunk = items.slice(start, start + CHUNK);
-          if ('logs' in decoded) this.ingestLogs(chunk as OtlpLog[]); else this.ingestSpans(chunk as Span[]);
-        }
+      const decoded = await this.decoder.decode(path === '/v1/logs' ? 'logs' : path === '/v1/metrics' ? 'metrics' : 'traces', json, body).catch(error => {
+        throw error instanceof MalformedRequest ? new HttpError(400, error.message) : error;
+      });
+      const items: readonly (OtlpLog | Span | MetricPoint)[] = 'logs' in decoded ? decoded.logs : 'metrics' in decoded ? decoded.metrics : decoded.spans;
+      for (let start = 0; start < items.length && this.running; start += CHUNK) {
+        if (start) await new Promise(resolve => setImmediate(resolve));
+        const chunk = items.slice(start, start + CHUNK);
+        if ('logs' in decoded) this.ingestLogs(chunk as OtlpLog[]);
+        else if ('metrics' in decoded) this.ingestMetrics(chunk as MetricPoint[]);
+        else this.ingestSpans(chunk as Span[]);
       }
       // An empty ExportServiceResponse means full success in either encoding.
       reply(200, json ? '{}' : Buffer.alloc(0), json ? 'application/json' : 'application/x-protobuf');

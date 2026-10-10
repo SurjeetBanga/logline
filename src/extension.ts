@@ -7,6 +7,7 @@ import { registerTasks } from './vscode/tasks/provider';
 import { GuidePanel } from './vscode/guide-panel';
 import { registerAgentTools, runAgentTool } from './vscode/agent-tools';
 import { AgentBridge, installMcpScript } from './vscode/agent-bridge';
+import { copilotAvailable, refreshInstalledSkills } from './vscode/agent-setup';
 import { registerDebugCapture } from './vscode/debug-capture';
 import { LogBreakpoints } from './vscode/log-breakpoints';
 import { LogDoctor } from './vscode/log-doctor';
@@ -22,7 +23,7 @@ export function activate(context: vscode.ExtensionContext): { provider: LogsProv
   const provider = new LogsProvider(context, controller);
   context.subscriptions.push(
     vscode.window.registerWebviewViewProvider('logline.logs', provider),
-    ...registerCommands(controller, section => guide.open(section)),
+    ...registerCommands(controller, section => guide.open(section), (context.extension?.packageJSON as { version?: string } | undefined)?.version),
     ...registerTasks(controller.runner, controller.registry, controller.tasks),
     ...registerAgentTools(context, controller.agentAccess),
     ...registerDebugCapture(controller.debug),
@@ -42,9 +43,11 @@ export function activate(context: vscode.ExtensionContext): { provider: LogsProv
       controller.doctor = new LogDoctor({
         config: logController.config, index: logController.logSites, tracker: logController.siteTracker, lens: controller.lens,
         askCopilot: prompt => logController.openChat(prompt),
+        copilot: copilotAvailable,
         showQuery: query => logController.showQuery(query),
         onChanged: () => logController.notifications.notify(),
-        unclaimed: () => logController.unclaimedSensitive()
+        unclaimed: () => logController.unclaimedSensitive(),
+        telemetry: () => logController.telemetryFindings()
       });
       context.subscriptions.push(controller.doctor);
     }
@@ -75,7 +78,7 @@ export function activate(context: vscode.ExtensionContext): { provider: LogsProv
   });
   const syncBridge = async () => {
     try {
-      if (agentController.config.get('externalAgents', true)) { installMcpScript(join(context.extensionUri.fsPath, 'out', 'mcp.js')); await bridge.start(); }
+      if (agentController.config.get('externalAgents', true)) { installMcpScript(join(context.extensionUri.fsPath, 'out', 'mcp.js')); refreshInstalledSkills(); await bridge.start(); }
       else await bridge.stop();
     } catch (error) { console.warn(`Logline could not start the agent bridge: ${error instanceof Error ? error.message : String(error)}`); }
   };

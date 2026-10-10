@@ -128,7 +128,7 @@ export function buildEventDetails(id: number, text: string | undefined, exceptio
   site.dataset.id = breakpoint.dataset.id = String(id);
   investigate.append(...leadingActions, trace, site, breakpoint);
   const copy = eventAction('copy-button', 'copy', 'Copy', 'Copy the original event to the clipboard');
-  const share = eventAction('share-source-button', 'agent', 'Share with agent', 'Share the logs of this event\'s source with Copilot, so it can read them');
+  const share = eventAction('share-source-button', 'agent', 'Share with agent', 'Share the logs of this event\'s source with agents, such as Copilot, Claude Code, or Codex, so they can read them');
   copy.dataset.id = share.dataset.id = String(id);
   output.append(copy, share);
   for (const finding of links.findings ?? []) {

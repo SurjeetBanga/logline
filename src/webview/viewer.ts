@@ -9,6 +9,7 @@ import { EventScope } from './event-scope';
 import { createInspection } from './inspection/context';
 import { createTraceView } from './inspection/trace';
 import { createTraceList } from './inspection/traces';
+import { createMetricList } from './inspection/metrics';
 import { createDoctor } from './inspection/doctor';
 import { createPopovers } from './popovers';
 import { createSearch } from './search/controls';
@@ -54,8 +55,9 @@ export function createViewer(api: WebviewApi) {
     startReceiver: () => api.postMessage({ type: 'toggleOtlp', enabled: true }),
     receiver: () => ({ running: otlpRunning, endpoint: otlpEndpoint })
   });
+  const metricList = createMetricList(elements, api, scope);
   const doctor = createDoctor(elements.doctor, elements.doctorCount, elements.doctorPanel, elements.doctorList, api, scope, () => doctorPopover.close(),
-    id => inspection.showContext(id));
+    id => inspection.showContext(id), traceId => traceView.show(traceId));
   let otlpRunning = false;
   // Files changed since the last commit; undefined outside a git repository.
   let changedFiles: number | undefined;
@@ -116,6 +118,7 @@ export function createViewer(api: WebviewApi) {
     if (data.type === 'context') { inspection.receiveContext(data); return; }
     if (data.type === 'trace') { traceView.receive(data.trace); return; }
     if (data.type === 'traces') { traceList.receive(data.traces); return; }
+    if (data.type === 'metrics') { metricList.receive(data.metrics); return; }
     if (data.type === 'details') {
       if (data.target === 'context') inspection.receiveDetails(data); else table.receiveDetails(data);
       return;
@@ -167,6 +170,7 @@ export function createViewer(api: WebviewApi) {
     doctor.receive(data.doctor);
     changedFiles = data.changes?.files;
     updateChangesControl();
+    metricList.update(data.metrics);
     elements.traceCount.hidden = !data.traceCount;
     elements.traceCount.textContent = data.traceCount ? numberFormat.format(data.traceCount) : '';
     elements.traces.title = data.traceCount
@@ -539,7 +543,7 @@ export function createViewer(api: WebviewApi) {
   }
   function toggleExpand(id: number) { table.toggleExpand(id); }
   const actionsMenu = createPopover(actionsContainer, elements.moreActions, elements.actionsMenu);
-  const actionItems = [elements.shareSpecificRuns, elements.connectAgent, elements.export, elements.import, elements.breakOnLogs, elements.otlpToggle, elements.manage, elements.config, elements.help];
+  const actionItems = [elements.shareSpecificRuns, elements.connectAgent, elements.export, elements.import, elements.breakOnLogs, elements.otlpToggle, elements.manage, elements.statusAction, elements.config, elements.help];
   scope.listen(elements.moreActions, 'click', () => {
     if (actionsMenu.isOpen()) actionItems[0].focus();
   });
@@ -587,6 +591,7 @@ export function createViewer(api: WebviewApi) {
   });
   scope.listen(elements.shareSpecificRuns, 'click', () => api.postMessage({ type: 'shareWithAgent', chooseRuns: true }));
   scope.listen(elements.connectAgent, 'click', () => api.postMessage({ type: 'connectAgent' }));
+  scope.listen(elements.statusAction, 'click', () => api.postMessage({ type: 'showStatus' }));
 
   scope.listen(elements.saveSearch, 'click', () => {
     for (const popover of popovers)

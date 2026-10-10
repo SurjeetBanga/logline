@@ -102,7 +102,8 @@ test('log doctor reports runtime evidence on statements and offers fixes', async
   tracker.process(events);
   const lens = { siteUri: () => uri, onDidChangeCodeLenses: () => ({ dispose() { } }), schedule() { } };
   let changes = 0;
-  const doctor = new LogDoctor({ config: { get: <T>(_key: string, fallback: T) => fallback }, index, tracker, lens: lens as never, askCopilot: async () => undefined, onChanged: () => changes++ });
+  let copilot = true;
+  const doctor = new LogDoctor({ config: { get: <T>(_key: string, fallback: T) => fallback }, index, tracker, lens: lens as never, askCopilot: async () => undefined, copilot: () => copilot, onChanged: () => changes++ });
   await doctor.refresh();
   const secretSite = index.sitesIn('src/checkout.ts')[0];
   assert.deepEqual(doctor.findingsFor(secretSite.id).map(finding => finding.code), ['secret']);
@@ -136,6 +137,9 @@ test('log doctor reports runtime evidence on statements and offers fixes', async
   const lower = actions('noisy').find(action => action.title === 'Lower to debug')!;
   assert.equal(lower.edit!.edits[0].text, 'debug');
   assert.ok(actions('secret').some(action => action.title === 'Fix with Copilot'));
+  copilot = false;
+  assert.ok(!actions('secret').some(action => action.title === 'Fix with Copilot'), 'editors without Copilot are not offered it');
+  copilot = true;
   const ignore = actions('secret').find(action => action.title === 'Ignore this secret finding')!;
   assert.equal(ignore.edit!.edits[0].text, '  // logline-ignore: secret\n');
 
@@ -251,5 +255,39 @@ test('log doctor flags quiet failures, oversized events and errors without reque
   assert.match(report, /- \*\*1\*\* logged secrets such as tokens or keys/);
   assert.match(report, /## In output not matched to a statement\n[\s\S]*\| Vendor SDK \| Vendor SDK logged a JSON Web Token/);
   assert.match(report, /\*\*Failures logged below warning\.\*\* Error filters, alerts/);
+  doctor.dispose();
+});
+
+test('log doctor lists OpenTelemetry convention findings per service, in the panel and the health report', async () => {
+  let report = '';
+  const mock = {
+    Range, Position, Diagnostic, WorkspaceEdit, CodeAction,
+    CodeActionKind: { QuickFix: 'quickfix' }, DiagnosticSeverity: { Error: 0, Warning: 1, Information: 2, Hint: 3 },
+    languages: { createDiagnosticCollection: () => ({ clear() { }, set() { }, delete() { }, dispose() { } }), registerCodeActionsProvider: () => ({ dispose() { } }) },
+    commands: { registerCommand: () => ({ dispose() { } }) },
+    window: { showTextDocument: async () => undefined },
+    workspace: {
+      textDocuments: [], onDidChangeConfiguration: () => ({ dispose() { } }), onDidChangeTextDocument: () => ({ dispose() { } }),
+      openTextDocument: async ({ content }: { content: string }) => { report = content; return {}; }
+    }
+  };
+  delete require.cache[require.resolve('./vscode/log-doctor')];
+  const { LogDoctor } = withVscode(mock, () => require('./vscode/log-doctor') as typeof import('./vscode/log-doctor'));
+  const index = new LogSiteIndex();
+  const telemetry = { version: 1, findings: [{ code: 'unmarked-error' as const, service: 'api', severity: 'warning' as const, traceId: 'abc', message: 'Returned a 5xx status on 1 server span without marking the span as an error.' }] };
+  let mode = 'all';
+  const lens = { siteUri: () => undefined, onDidChangeCodeLenses: () => ({ dispose() { } }), schedule() { } };
+  const doctor = new LogDoctor({ config: { get: <T>(key: string, fallback: T) => (key === 'logDoctor' ? mode : fallback) as T }, index, tracker: new LogSiteTracker(index),
+    lens: lens as never, askCopilot: async () => undefined, telemetry: () => telemetry });
+  await doctor.refresh();
+  assert.equal(doctor.total, 1);
+  assert.deepEqual(doctor.views(), [{ code: 'unmarked-error', severity: 'warning', source: 'api', traceId: 'abc', message: telemetry.findings[0].message }]);
+  await (doctor as unknown as { showHealth(): Promise<void> }).showHealth();
+  assert.match(report, /## In OpenTelemetry data\n[\s\S]*\| api \| Returned a 5xx status/);
+  assert.match(report, /\*\*Failed requests not marked as errors\.\*\*/);
+  // Convention checks are not security findings.
+  mode = 'security';
+  await doctor.refresh();
+  assert.equal(doctor.total, 0);
   doctor.dispose();
 });

@@ -3,6 +3,7 @@ import { connect } from 'node:net';
 import { join, resolve, sep } from 'node:path';
 import { createInterface } from 'node:readline';
 import { BRIDGE_VERSION, isAlive, type BridgeResponse, type BridgeWindow } from '../protocol/agent-bridge';
+import type { AgentWorkflow } from '../protocol/agent-workflows';
 
 /**
  * The `logline` MCP server that Claude Code, Codex, and other MCP clients
@@ -90,6 +91,8 @@ export function callWindow(window: BridgeWindow, tool: string, input: unknown, c
 
 export interface McpServerOptions {
   tools: McpTool[];
+  /** Investigations offered as prompts, which clients such as Claude Code show as slash commands. */
+  prompts?: readonly AgentWorkflow[];
   version: string;
   windows(): BridgeWindow[];
   cwd: string;
@@ -103,6 +106,7 @@ interface JsonRpcMessage { jsonrpc?: string; id?: JsonRpcId; method?: string; pa
 /** Handles MCP messages; replies are returned rather than written so the protocol can be tested. */
 export function createMcpServer(options: McpServerOptions) {
   const call = options.call ?? callWindow;
+  const prompts = options.prompts ?? [];
   const running = new Map<JsonRpcId, AbortController>();
   let client: string | undefined;
 
@@ -121,13 +125,19 @@ export function createMcpServer(options: McpServerOptions) {
         const requested = typeof params.protocolVersion === 'string' ? params.protocolVersion : '';
         return result(id, {
           protocolVersion: PROTOCOL_VERSIONS.includes(requested) ? requested : PROTOCOL_VERSIONS[0],
-          capabilities: { tools: { listChanged: false } },
+          capabilities: { tools: { listChanged: false }, ...(prompts.length ? { prompts: { listChanged: false } } : {}) },
           serverInfo: { name: 'logline', title: 'Logline', version: options.version },
           instructions: INSTRUCTIONS
         });
       }
       case 'ping': return result(id, {});
       case 'tools/list': return result(id, { tools: options.tools });
+      case 'prompts/list': return result(id, { prompts: prompts.map(prompt => ({ name: prompt.name, title: prompt.title, description: prompt.description })) });
+      case 'prompts/get': {
+        const prompt = prompts.find(candidate => candidate.name === params.name);
+        if (!prompt) return failure(id, -32602, `Unknown prompt: ${String(params.name)}`);
+        return result(id, { description: prompt.description, messages: [{ role: 'user', content: { type: 'text', text: prompt.body } }] });
+      }
       case 'tools/call': {
         const name = params.name;
         if (typeof name !== 'string' || !options.tools.some(tool => tool.name === name)) return failure(id, -32602, `Unknown tool: ${String(name)}`);

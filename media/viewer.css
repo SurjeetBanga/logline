@@ -411,7 +411,7 @@ footer { padding: 8px 14px; font-size: 12px; flex: none; }
 .cell-filter-menu button:focus-visible, td[data-column]:focus-visible { outline: 1px solid var(--vscode-focusBorder, #007fd4); outline-offset: -2px; }
 
 /* Traces: list of recent requests, row shortcut, and receiver status. */
-#traces svg, #run svg { vertical-align: -2px; margin-right: 5px; }
+#traces svg, #metrics svg, #run svg { vertical-align: -2px; margin-right: 5px; }
 .count-badge { display: inline-block; min-width: 14px; margin-left: 6px; padding: 0 5px; border-radius: 8px; background: var(--vscode-badge-background, #4d4d4d); color: var(--vscode-badge-foreground, #fff); font-size: 10px; line-height: 15px; text-align: center; }
 .count-badge[hidden] { display: none; }
 .row-trace-button { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 18px; padding: 0; border: 1px solid transparent; border-radius: 3px; background: transparent; color: var(--vscode-charts-blue, #3794ff); opacity: .75; }
@@ -419,11 +419,23 @@ footer { padding: 8px 14px; font-size: 12px; flex: none; }
 .otlp-chip { padding: 0 8px; border: 1px solid var(--vscode-charts-green, #89d185); border-radius: 10px; background: transparent; color: var(--vscode-charts-green, #89d185); font-size: 11px; line-height: 17px; }
 .otlp-chip::before { content: ''; display: inline-block; width: 6px; height: 6px; margin-right: 6px; border-radius: 50%; background: currentColor; vertical-align: 1px; }
 .otlp-chip[hidden] { display: none; }
-#tracesDialog { width: min(1100px, 96vw); max-width: 96vw; height: 82vh; max-height: 82vh; padding: 14px; color: inherit; background: var(--vscode-editor-background, #1e1e1e); border: 1px solid var(--vscode-panel-border, #555); border-radius: 6px; }
-#tracesDialog[open] { display: flex; flex-direction: column; }
-#tracesDialog::backdrop { background: rgba(0, 0, 0, .5); }
-#tracesStatus { color: var(--vscode-descriptionForeground, #aaa); font-size: 12px; margin: 8px 0; }
-#tracesDialog .context-header > span { display: inline-flex; align-items: center; }
+#tracesDialog, #metricsDialog { width: min(1100px, 96vw); max-width: 96vw; height: 82vh; max-height: 82vh; padding: 14px; color: inherit; background: var(--vscode-editor-background, #1e1e1e); border: 1px solid var(--vscode-panel-border, #555); border-radius: 6px; }
+#tracesDialog[open], #metricsDialog[open] { display: flex; flex-direction: column; }
+#tracesDialog::backdrop, #metricsDialog::backdrop { background: rgba(0, 0, 0, .5); }
+#tracesStatus, #metricsStatus { color: var(--vscode-descriptionForeground, #aaa); font-size: 12px; margin: 8px 0; }
+#tracesDialog .context-header > span, #metricsDialog .context-header > span { display: inline-flex; align-items: center; }
+#metricsFilter { width: 260px; margin-right: 10px; }
+.metrics-table th:nth-child(1) { width: auto; }
+.metrics-table th:nth-child(2) { width: 140px; }
+.metrics-table th:nth-child(3) { width: 26%; }
+.metrics-table th:nth-child(4) { width: 150px; }
+.metrics-table th:nth-child(5) { width: 140px; }
+.metrics-table td { border-bottom: 1px solid var(--vscode-panel-border, rgba(128, 128, 128, .2)); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.metric-name { overflow-wrap: anywhere; }
+.metric-attributes { color: var(--vscode-descriptionForeground, #aaa); font-size: 12px; }
+.metric-latest { font-variant-numeric: tabular-nums; }
+.metric-spark { display: block; width: 100%; height: 24px; }
+.metric-spark polyline { fill: none; stroke: var(--vscode-charts-blue, #3794ff); stroke-width: 1.5; }
 .traces-filter { display: inline-flex; align-items: center; gap: 4px; margin-right: 10px; color: var(--vscode-descriptionForeground, #aaa); font-size: 12px; }
 .traces-filter input[type="checkbox"] { margin: 0; width: auto; height: auto; padding: 0; border: none; background: none; }
 .traces-table th:nth-child(1) { width: 104px; }
@@ -447,6 +459,8 @@ footer { padding: 8px 14px; font-size: 12px; flex: none; }
 .traces-duration-label, .traces-counts { color: var(--vscode-descriptionForeground, #aaa); font-variant-numeric: tabular-nums; white-space: nowrap; font-size: 12px; }
 @media (max-width: 640px) {
   .traces-table th:nth-child(3), .traces-services, .traces-table th:nth-child(5), .traces-counts { width: 0; padding: 0; overflow: hidden; font-size: 0; }
+  .metrics-table th:nth-child(3), .metric-attributes { width: 0; padding: 0; overflow: hidden; font-size: 0; }
+  #metricsFilter { width: 140px; }
 }
 /* Rows show what they link to, and reveal quick actions on hover or focus. */
 .message-button::before { content: '›'; display: inline-block; width: 12px; margin-right: 4px; color: var(--vscode-descriptionForeground, #888); opacity: 0; transition: transform .1s; }
