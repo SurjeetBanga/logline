@@ -19,7 +19,8 @@ export function otelDefaults(endpoint: string, serviceName?: string): Record<str
 }
 
 // Any of these means the user already chose where telemetry goes.
-const DESTINATION = ['OTEL_EXPORTER_OTLP_ENDPOINT', 'OTEL_EXPORTER_OTLP_TRACES_ENDPOINT', 'OTEL_EXPORTER_OTLP_LOGS_ENDPOINT', 'OTEL_TRACES_EXPORTER', 'OTEL_LOGS_EXPORTER', 'OTEL_SDK_DISABLED'];
+const DESTINATION = ['OTEL_EXPORTER_OTLP_ENDPOINT', 'OTEL_EXPORTER_OTLP_TRACES_ENDPOINT', 'OTEL_EXPORTER_OTLP_LOGS_ENDPOINT', 'OTEL_EXPORTER_OTLP_METRICS_ENDPOINT',
+  'OTEL_TRACES_EXPORTER', 'OTEL_LOGS_EXPORTER', 'OTEL_METRICS_EXPORTER', 'OTEL_SDK_DISABLED'];
 
 /**
  * The defaults to add to an environment. A user who configured an exporter
