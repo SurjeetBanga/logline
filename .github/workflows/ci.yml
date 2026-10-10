@@ -8,6 +8,8 @@ on:
   schedule:
     - cron: '0 6 * * 1'
   workflow_dispatch:
+  # The release workflow runs the whole of CI on the tagged commit before it publishes.
+  workflow_call:
 
 permissions:
   contents: read
@@ -125,10 +127,11 @@ jobs:
   # The one check branch protection requires, so the matrix above can change without editing repository settings.
   # Compares this build with the one it changes and with the baseline, on the same runner, and fails when a hot path is
   # slower or a payload or retained memory is larger. The cases are split across four runners to finish sooner; each
-  # comparison still runs on one machine. Scheduled and manual runs have nothing to compare with.
+  # comparison still runs on one machine. Scheduled and manual runs, and releases (a tag push), have nothing to compare
+  # with; a release's commit was compared when it reached main.
   performance-shard:
     name: performance (shard ${{ matrix.shard }}/4)
-    if: github.event_name == 'pull_request' || github.event_name == 'push'
+    if: github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref_type == 'branch')
     runs-on: ubuntu-latest
     timeout-minutes: 20
     strategy:
@@ -177,7 +180,7 @@ jobs:
   # One table and one verdict from the four shards. A missing shard fails the merge.
   performance:
     needs: performance-shard
-    if: always() && (github.event_name == 'pull_request' || github.event_name == 'push')
+    if: always() && (github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref_type == 'branch'))
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:

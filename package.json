@@ -816,7 +816,6 @@
     "test": "node scripts/test.mjs",
     "benchmark": "npm run compile && node --expose-gc scripts/benchmark.mjs",
     "smoke": "npm run compile && tsc -p tsconfig.test.json && node scripts/smoke.mjs",
-    "publish:ovsx": "ovsx publish -p $OVSX_PAT",
     "lint": "oxlint --type-aware --tsconfig tsconfig.test.json src",
     "format": "prettier --write .",
     "format:check": "prettier --check .",

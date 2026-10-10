@@ -68,6 +68,6 @@ If you add or change a hot path (something that runs per captured line, per sear
 
 - Keep each pull request to one change, and fill in the template.
 - Write commit messages as an imperative summary of what the change does (`Report a failed read of a followed file instead of dropping it`), with a body that explains why when it is not obvious.
-- Releases are made by the maintainer.
+- Releases are made by the maintainer, from a version tag; see [Development](README.md#development).
 
 By contributing, you agree that your contributions are licensed under the [MIT License](LICENSE). Everyone taking part is expected to follow the [code of conduct](CODE_OF_CONDUCT.md).
