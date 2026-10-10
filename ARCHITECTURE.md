@@ -13,6 +13,8 @@ Logline has two runtimes: the VS Code extension host and the browser webview. Th
 | `src/webview` | Browser state, request coordination, search, analysis, context inspection, row rendering, column sizing, and virtual scrolling. |
 | `src/test` | VS Code test adapters and the extension-host smoke entry. Excluded from the extension package. |
 
+`src/architecture.test.ts` enforces these boundaries: `core` loads no other layer; `capture`, `storage`, `transfer`, and `protocol` load only `core`; the MCP server loads only `protocol`; the webview loads only `core` at runtime; and only `src/vscode` and `extension.ts` load `vscode`. Type-only imports are exempt. A new top-level folder fails the test until it is given a layer there and here.
+
 ## Construction and ownership
 
 `extension.ts` constructs `LogsController`, registers commands/tasks/the view, and delegates shutdown. `LogsController` wires services together; it does not implement feature algorithms. `LogsProvider` only loads the HTML and connects the view to messages and notifications. `GuidePanel` owns one reusable editor webview for the offline guide; its release acknowledgement is stored in `globalState` and is independent of captured logs.
