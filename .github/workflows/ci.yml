@@ -48,8 +48,7 @@ jobs:
           cache: npm
       - run: npm ci
       - name: Check the generated viewer bundle is up to date
-        # Linux only: Windows checkouts can convert line endings in the committed bundle.
-        if: runner.os == 'Linux'
+        shell: bash
         run: |
           npm run compile
           git diff --exit-code -- media/ || { echo "::error::media/ is stale; run npm run compile and commit the result."; exit 1; }

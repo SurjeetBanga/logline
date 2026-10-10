@@ -1,0 +1,6 @@
+# LF everywhere, so Windows checkouts match the committed bundle and contributors cannot commit CRLF.
+* text=auto eol=lf
+*.png binary
+*.gif binary
+*.vsix binary
+*.wasm binary

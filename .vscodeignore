@@ -25,3 +25,9 @@ out/mcp/**
 .prettierrc.json
 .prettierignore
 .git-blame-ignore-revs
+AGENTS.md
+CONTRIBUTING.md
+CODE_OF_CONDUCT.md
+SECURITY.md
+.gitattributes
+.nvmrc
