@@ -73,6 +73,14 @@ jobs:
       - name: Run the tests with coverage
         if: runner.os == 'Linux'
         run: npm run coverage
+      # The table, the full report, and lcov.info for coverage tools, kept for every run like the performance results.
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always() && runner.os == 'Linux'
+        with:
+          name: coverage
+          path: coverage/
+          if-no-files-found: ignore
+          retention-days: 90
       - run: npm run package
         if: runner.os == 'Linux'
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -115,12 +123,18 @@ jobs:
           if [ "$RUNNER_OS" = Linux ]; then xvfb-run -a node scripts/smoke.mjs --vsix "$vsix"; else node scripts/smoke.mjs --vsix "$vsix"; fi
 
   # The one check branch protection requires, so the matrix above can change without editing repository settings.
-  # Compares this build with the one it changes, on the same runner, and fails when a hot path is slower or a
-  # payload or retained memory is larger. Scheduled and manual runs have nothing to compare with.
-  performance:
+  # Compares this build with the one it changes and with the baseline, on the same runner, and fails when a hot path is
+  # slower or a payload or retained memory is larger. The cases are split across four runners to finish sooner; each
+  # comparison still runs on one machine. Scheduled and manual runs have nothing to compare with.
+  performance-shard:
+    name: performance (shard ${{ matrix.shard }}/4)
     if: github.event_name == 'pull_request' || github.event_name == 'push'
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -131,16 +145,55 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run compile
-      - name: Build the base for comparison
+      - name: Build the base and the baseline for comparison
         env:
           BASE: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
         run: |
-          git worktree add "$RUNNER_TEMP/base" "$BASE"
-          cd "$RUNNER_TEMP/base"
-          npm ci
-          npm run compile
-      - name: Compare performance with the base
-        run: node scripts/perf-compare.mjs --base "$RUNNER_TEMP/base" --report performance/report.md --json performance/results.json
+          build() {
+            git worktree add "$2" "$1"
+            (cd "$2" && npm ci && npm run compile)
+          }
+          build "$BASE" "$RUNNER_TEMP/base"
+          # The commit no change may drift more than 15% above; the same as the base right after it moves.
+          baseline=$(grep -Eo '^[0-9a-f]{40}' .github/performance-baseline)
+          if [ "$(git rev-parse "$baseline")" = "$(git rev-parse "$BASE")" ]; then
+            echo "BASELINE=$RUNNER_TEMP/base" >> "$GITHUB_ENV"
+          else
+            build "$baseline" "$RUNNER_TEMP/baseline"
+            echo "BASELINE=$RUNNER_TEMP/baseline" >> "$GITHUB_ENV"
+          fi
+      - name: Compare this shard's cases with the base and the baseline
+        # The verdict comes from the merge below, which also sees a shard that failed to finish.
+        continue-on-error: true
+        run: >-
+          node scripts/perf-compare.mjs --base "$RUNNER_TEMP/base" --baseline "$BASELINE"
+          --shard ${{ matrix.shard }}/4 --json shard/${{ matrix.shard }}.json
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: performance-shard-${{ matrix.shard }}
+          path: shard/
+          retention-days: 1
+
+  # One table and one verdict from the four shards. A missing shard fails the merge.
+  performance:
+    needs: performance-shard
+    if: always() && (github.event_name == 'pull_request' || github.event_name == 'push')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: performance-shard-*
+          path: shards
+          merge-multiple: true
+      - name: Merge the shards
+        run: |
+          [ "$(ls shards/*.json | wc -l)" -eq 4 ] || { echo "::error::Only $(ls shards/*.json | wc -l) of 4 shards reported."; exit 1; }
+          node scripts/perf-compare.mjs --merge shards/*.json --report performance/report.md --json performance/results.json
       # Kept for every run, including pushes to main, as a history of the numbers.
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: always()
@@ -150,11 +203,12 @@ jobs:
           if-no-files-found: ignore
           retention-days: 90
 
-  # Posts the performance table on the pull request, and updates the same comment on each push. A job of its own, so
-  # the pull request's code never runs with a token that can write; pull requests from forks get no write token.
-  performance-comment:
-    needs: performance
-    if: always() && github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && needs.performance.result != 'skipped'
+  # Posts the performance and coverage tables on the pull request, and updates the same comments on each push. A job
+  # of its own, so the pull request's code never runs with a token that can write; pull requests from forks get no
+  # write token, and no comments.
+  pull-request-comments:
+    needs: [build, performance]
+    if: always() && github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
@@ -164,22 +218,31 @@ jobs:
         continue-on-error: true
         with:
           name: performance
-      - name: Post or update the performance comment
+          path: performance
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        continue-on-error: true
+        with:
+          name: coverage
+          path: coverage
+      - name: Post or update the comments
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
           PR: ${{ github.event.pull_request.number }}
-          RESULT: ${{ needs.performance.result }}
           RUN: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
-          marker='<!-- logline-performance -->'
-          if [ -f report.md ]; then report=$(cat report.md); else report="## Performance
+          # upsert <marker> <file> <title>: replace the comment that starts with the marker, or add one.
+          upsert() {
+            if [ -f "$2" ]; then report=$(cat "$2"); else report="## $3
 
-          The comparison did not finish ($RESULT). See the run for details."; fi
-          body=$(printf '%s\n%s\n\n[Run details and results](%s)\n' "$marker" "$report" "$RUN")
-          id=$(gh api "repos/$REPO/issues/$PR/comments" --paginate --jq ".[] | select(.body | startswith(\"$marker\")) | .id" | head -n 1)
-          if [ -n "$id" ]; then gh api -X PATCH "repos/$REPO/issues/comments/$id" -f body="$body" > /dev/null
-          else gh api "repos/$REPO/issues/$PR/comments" -f body="$body" > /dev/null; fi
+          No results: the job did not finish. See the run for details."; fi
+            body=$(printf '%s\n%s\n\n[Run details and the %s artifact](%s)\n' "$1" "$report" "$4" "$RUN")
+            id=$(gh api "repos/$REPO/issues/$PR/comments" --paginate --jq ".[] | select(.body | startswith(\"$1\")) | .id" | head -n 1)
+            if [ -n "$id" ]; then gh api -X PATCH "repos/$REPO/issues/comments/$id" -f body="$body" > /dev/null
+            else gh api "repos/$REPO/issues/$PR/comments" -f body="$body" > /dev/null; fi
+          }
+          upsert '<!-- logline-performance -->' performance/report.md Performance performance
+          upsert '<!-- logline-coverage -->' coverage/summary.md 'Test coverage' coverage
 
   ci-passed:
     name: CI passed

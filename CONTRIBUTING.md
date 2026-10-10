@@ -33,7 +33,7 @@ The webview's source is `src/webview/`. `npm run compile` bundles it into `media
 | `npm test` | Runs the unit tests only. |
 | `npm run coverage` | Runs the unit tests and measures coverage of the TypeScript sources. It fails when line, branch, or function coverage falls below the minimums in `scripts/test.mjs`. CI runs it on Linux. |
 | `npm run benchmark` | Measures the hot paths (ingestion, search, analysis, snapshots, and more) and the sizes of messages and retained memory. |
-| `npm run perf:compare -- --base <dir>` | Compares this build with the one in `<dir>` and fails when a case is more than 25% slower or a size grows by more than 5%. CI runs it on every pull request against its base. |
+| `npm run perf:compare -- --base <dir>` | Compares this build with the one in `<dir>` and fails when a case is more than 15% slower or a size grows by more than 5%. CI also compares with the baseline commit in `.github/performance-baseline`, so small slowdowns cannot add up past 15%. |
 | `npm run smoke` | Starts a real VS Code with the extension and runs the smoke test. Set `VSCODE_VERSION=stable` to download VS Code instead of using your installed `code`. |
 
 CI runs the checks and the tests on Linux, Windows, and macOS, checks pull requests for new dependencies with known vulnerabilities, compares performance with the base branch, then runs the smoke test on the packaged extension in VS Code 1.99.0 and the latest stable. A pull request can be merged only when **CI passed** is green.
@@ -55,7 +55,9 @@ npm run compile
 npm run perf:compare -- --base ../logline-main
 ```
 
-If you add or change a hot path (something that runs per captured line, per search, or per refresh), add a case for it to `scripts/benchmark.mjs`. A change that is slower on purpose, because it does more, needs a note in the pull request.
+Each pull request gets a comment with the performance table and one with the coverage table, updated on every push; the full results are artifacts of the run.
+
+If you add or change a hot path (something that runs per captured line, per search, or per refresh), add a case for it to `scripts/benchmark.mjs`. A change that is slower on purpose, because it does more, needs a note in the pull request, and may move the baseline in `.github/performance-baseline` to its own merge.
 
 ## Changelog and documentation
 
