@@ -336,7 +336,7 @@ test('agents are named for people, and setup commands quote paths for the shell'
       agentLaunch('C:\\Users\\me\\.logline\\mcp.js', 'C:\\Program Files\\VS Code\\Code.exe'),
       'powershell',
     ),
-    'codex mcp add logline --env ELECTRON_RUN_AS_NODE="1" -- "C:\\Program Files\\VS Code\\Code.exe" "C:\\Users\\me\\.logline\\mcp.js"',
+    "codex mcp add logline --env ELECTRON_RUN_AS_NODE='1' -- 'C:\\Program Files\\VS Code\\Code.exe' 'C:\\Users\\me\\.logline\\mcp.js'",
   );
   assert.equal(
     setupCommand('claude', agentLaunch("/tmp/it's/mcp.js", '/usr/bin/code'), 'posix').endsWith(
@@ -380,7 +380,18 @@ test('agents are named for people, and setup commands quote paths for the shell'
   );
   const codex = 'C:\\Users\\me\\.vscode\\extensions\\openai.chatgpt\\bin\\example-platform\\codex.exe';
   const windows = agentLaunch('C:\\Users\\me\\.logline\\mcp.js', 'C:\\Program Files\\VS Code\\Code.exe');
-  assert.match(setupCommand('codex', windows, 'powershell', codex), /^& "C:.*codex\.exe" mcp add logline /);
+  assert.match(setupCommand('codex', windows, 'powershell', codex), /^& 'C:.*codex\.exe' mcp add logline /);
+  // PowerShell expands $ and ` in double quotes; single quotes keep a path literal, with ' doubled.
+  assert.equal(
+    setupCommand('codex', agentLaunch("C:\\Users\\O'Neil$\\.logline\\mcp.js", 'C:\\Code.exe'), 'powershell').split(
+      ' -- ',
+    )[1],
+    "'C:\\Code.exe' 'C:\\Users\\O''Neil$\\.logline\\mcp.js'",
+  );
+  assert.equal(
+    setupCommand('codex', agentLaunch('C:\\a "b"\\mcp.js', 'C:\\Code.exe'), 'cmd').split(' -- ')[1],
+    '"C:\\Code.exe" "C:\\a ""b""\\mcp.js"',
+  );
   assert.match(
     setupCommand('codex', windows, 'cmd', codex),
     /^"C:.*codex\.exe" mcp add logline /,

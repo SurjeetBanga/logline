@@ -509,3 +509,12 @@ test('log doctor lists OpenTelemetry convention findings per service, in the pan
   assert.equal(doctor.total, 0);
   doctor.dispose();
 });
+
+test('health report cells keep log-derived pipes, backslashes, and line breaks inside the cell', () => {
+  const { tableCell } = withVscode({}, () => require('./log-doctor') as typeof import('./log-doctor'));
+  assert.equal(tableCell('api | worker'), 'api \\| worker');
+  // An escaped pipe in the source must not turn into an escaped backslash and a bare pipe.
+  assert.equal(tableCell('a\\|b'), 'a\\\\\\|b');
+  assert.equal(tableCell('C:\\logs\\'), 'C:\\\\logs\\\\');
+  assert.equal(tableCell('first\r\n  second'), 'first second');
+});

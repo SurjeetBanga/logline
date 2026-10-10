@@ -138,10 +138,14 @@ export function setupCommand(
   shell: Shell = shellKind(vscode.env?.shell),
   cli: string = agent,
 ): string {
+  // PowerShell expands $ and ` inside double quotes, so it gets single quotes, where only ' is special ('').
+  // Command Prompt has only double quotes; programs read "" inside them as one ".
   const quote =
     shell === 'posix'
       ? (value: string) => (/^[\w@%+=:,./-]+$/.test(value) ? value : `'${value.replace(/'/g, `'\\''`)}'`)
-      : (value: string) => `"${value.replace(/"/g, '\\"')}"`;
+      : shell === 'powershell'
+        ? (value: string) => `'${value.replace(/'/g, "''")}'`
+        : (value: string) => `"${value.replace(/"/g, '""')}"`;
   const env = Object.entries(launch.env)
     .map(([key, value]) => `--env ${key}=${quote(value)}`)
     .join(' ');
