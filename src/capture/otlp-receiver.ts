@@ -19,9 +19,20 @@ const MAX_DECODED = 64 * 1024 * 1024;
 const CHUNK = 500;
 export type SpanRows = 'none' | 'entry' | 'all';
 
-export interface ReceiverStatus { running: boolean; endpoint?: string; error?: string; }
+export interface ReceiverStatus {
+  running: boolean;
+  endpoint?: string;
+  error?: string;
+}
 
-class HttpError extends Error { constructor(readonly status: number, message: string) { super(message); } }
+class HttpError extends Error {
+  constructor(
+    readonly status: number,
+    message: string,
+  ) {
+    super(message);
+  }
+}
 
 /**
  * A local OTLP/HTTP receiver. Log records become Logline events, spans go to
@@ -40,19 +51,31 @@ export class OtlpReceiver {
   /** The port asked for at the last start, which can differ from the one in use after a fallback. */
   requestedPort?: number;
 
-  constructor(private readonly config: Settings, private readonly registry: SessionRegistry,
-    private readonly ingestion: Ingestion, private readonly state: RuntimeState, private readonly spans: SpanStore,
-    decodeThreshold?: number, private readonly metrics = new MetricStore()) {
+  constructor(
+    private readonly config: Settings,
+    private readonly registry: SessionRegistry,
+    private readonly ingestion: Ingestion,
+    private readonly state: RuntimeState,
+    private readonly spans: SpanStore,
+    decodeThreshold?: number,
+    private readonly metrics = new MetricStore(),
+  ) {
     this.decoder = new OtlpDecoder(decodeThreshold);
   }
 
-  get running(): boolean { return Boolean(this.server?.listening); }
-  status(): ReceiverStatus { return { running: this.running, endpoint: this.endpoint, error: this.error }; }
+  get running(): boolean {
+    return Boolean(this.server?.listening);
+  }
+  status(): ReceiverStatus {
+    return { running: this.running, endpoint: this.endpoint, error: this.error };
+  }
 
   /** Listen on the preferred port, or an ephemeral one when it is taken. */
   start(port = this.config.get('otlp.port', 4318)): Promise<ReceiverStatus> {
     if (this.running) return Promise.resolve(this.status());
-    return this.starting ??= this.listen(port).finally(() => { this.starting = undefined; });
+    return (this.starting ??= this.listen(port).finally(() => {
+      this.starting = undefined;
+    }));
   }
 
   async stop(): Promise<void> {
@@ -63,12 +86,15 @@ export class OtlpReceiver {
     this.requestedPort = undefined;
     for (const record of this.records.values()) {
       if (record.status !== 'running') continue;
-      record.status = 'exited'; record.endedAt = Date.now(); record.captureComplete = true; record.exitReason = 'receiver stopped';
+      record.status = 'exited';
+      record.endedAt = Date.now();
+      record.captureComplete = true;
+      record.exitReason = 'receiver stopped';
     }
     this.records.clear();
     this.decoder.dispose();
     if (server) {
-      const closed = new Promise<void>(resolve => server.close(() => resolve()));
+      const closed = new Promise<void>((resolve) => server.close(() => resolve()));
       // Exporters keep connections alive; close them so shutdown does not wait on idle sockets.
       server.closeAllConnections?.();
       await closed;
@@ -78,13 +104,19 @@ export class OtlpReceiver {
   }
 
   /** Accept a decoded OTLP logs request; returns the number of records ingested. */
-  acceptLogs(request: unknown): number { return this.ingestLogs(readLogs(request)); }
+  acceptLogs(request: unknown): number {
+    return this.ingestLogs(readLogs(request));
+  }
 
   /** Accept a decoded OTLP traces request; returns the number of new spans. */
-  acceptSpans(request: unknown): number { return this.ingestSpans(readSpans(request)); }
+  acceptSpans(request: unknown): number {
+    return this.ingestSpans(readSpans(request));
+  }
 
   /** Accept a decoded OTLP metrics request; returns the number of new data points. */
-  acceptMetrics(request: unknown): number { return this.ingestMetrics(readMetrics(request)); }
+  acceptMetrics(request: unknown): number {
+    return this.ingestMetrics(readMetrics(request));
+  }
 
   private ingestMetrics(points: readonly MetricPoint[]): number {
     let accepted = 0;
@@ -97,8 +129,16 @@ export class OtlpReceiver {
     let accepted = 0;
     for (const log of logs) {
       const record = this.record(log.service);
-      const event = this.ingestion.accept(logLine(log), 'otlp', { serverId: record.serverId, server: record.server, sessionId: record.id, persist: true });
-      if (event) { record.events++; accepted++; }
+      const event = this.ingestion.accept(logLine(log), 'otlp', {
+        serverId: record.serverId,
+        server: record.server,
+        sessionId: record.id,
+        persist: true,
+      });
+      if (event) {
+        record.events++;
+        accepted++;
+      }
     }
     if (accepted) this.state.notify();
     return accepted;
@@ -115,7 +155,15 @@ export class OtlpReceiver {
       if (!this.spans.add(span)) continue;
       accepted++;
       if (rows === 'none' || (rows === 'entry' && !isEntrySpan(span))) continue;
-      if (this.ingestion.accept(spanLine(span), 'otlp', { serverId: record.serverId, server: record.server, sessionId: record.id, persist: true })) record.events++;
+      if (
+        this.ingestion.accept(spanLine(span), 'otlp', {
+          serverId: record.serverId,
+          server: record.server,
+          sessionId: record.id,
+          persist: true,
+        })
+      )
+        record.events++;
     }
     if (accepted) this.state.notify();
     return accepted;
@@ -125,8 +173,17 @@ export class OtlpReceiver {
     let record = this.records.get(service);
     if (record) return record;
     record = {
-      id: randomBytes(8).toString('hex'), serverId: `otel:${service}`, server: `OTel · ${service}`, status: 'running', startedAt: Date.now(), events: 0,
-      sourceKind: 'otel', owned: false, canStop: false, captureComplete: false, command: `${service} via OpenTelemetry`
+      id: randomBytes(8).toString('hex'),
+      serverId: `otel:${service}`,
+      server: `OTel · ${service}`,
+      status: 'running',
+      startedAt: Date.now(),
+      events: 0,
+      sourceKind: 'otel',
+      owned: false,
+      canStop: false,
+      captureComplete: false,
+      command: `${service} via OpenTelemetry`,
     };
     this.records.set(service, record);
     this.registry.records.set(record.id, record);
@@ -135,30 +192,45 @@ export class OtlpReceiver {
 
   private listen(port: number): Promise<ReceiverStatus> {
     this.requestedPort = port;
-    const attempt = (target: number) => new Promise<Server>((resolve, reject) => {
-      const server = createServer((request, response) => { void this.handle(request, response); });
-      server.once('error', reject);
-      server.listen(target, '127.0.0.1', () => { server.off('error', reject); resolve(server); });
-    });
-    return attempt(port).catch(error => {
-      // Another collector already owns the port; never take it over.
-      if ((error as NodeJS.ErrnoException).code === 'EADDRINUSE' && port !== 0) return attempt(0);
-      throw error;
-    }).then(server => {
-      server.on('error', error => { this.error = error.message; this.state.notify(); });
-      this.server = server;
-      const actual = (server.address() as AddressInfo).port;
-      this.endpoint = `http://127.0.0.1:${actual}`;
-      this.error = port === 0 || actual === port ? undefined : `Port ${port} is in use; receiving on ${actual} instead.`;
-      this.state.status = `OpenTelemetry receiver on ${this.endpoint}`;
-      this.state.notify();
-      return this.status();
-    }, error => {
-      this.error = `Could not start the OpenTelemetry receiver: ${(error as Error).message}`;
-      this.state.status = this.error;
-      this.state.notify();
-      return this.status();
-    });
+    const attempt = (target: number) =>
+      new Promise<Server>((resolve, reject) => {
+        const server = createServer((request, response) => {
+          void this.handle(request, response);
+        });
+        server.once('error', reject);
+        server.listen(target, '127.0.0.1', () => {
+          server.off('error', reject);
+          resolve(server);
+        });
+      });
+    return attempt(port)
+      .catch((error) => {
+        // Another collector already owns the port; never take it over.
+        if ((error as NodeJS.ErrnoException).code === 'EADDRINUSE' && port !== 0) return attempt(0);
+        throw error;
+      })
+      .then(
+        (server) => {
+          server.on('error', (error) => {
+            this.error = error.message;
+            this.state.notify();
+          });
+          this.server = server;
+          const actual = (server.address() as AddressInfo).port;
+          this.endpoint = `http://127.0.0.1:${actual}`;
+          this.error =
+            port === 0 || actual === port ? undefined : `Port ${port} is in use; receiving on ${actual} instead.`;
+          this.state.status = `OpenTelemetry receiver on ${this.endpoint}`;
+          this.state.notify();
+          return this.status();
+        },
+        (error) => {
+          this.error = `Could not start the OpenTelemetry receiver: ${(error as Error).message}`;
+          this.state.status = this.error;
+          this.state.notify();
+          return this.status();
+        },
+      );
   }
 
   private async handle(request: IncomingMessage, response: ServerResponse): Promise<void> {
@@ -173,21 +245,30 @@ export class OtlpReceiver {
       if (request.headers.origin !== undefined) throw new HttpError(403, 'Browser requests are not accepted.');
       const port = (this.server?.address() as AddressInfo | null)?.port;
       const host = request.headers.host ?? '';
-      if (!['127.0.0.1', 'localhost', '[::1]'].some(name => host === `${name}:${port}`)) throw new HttpError(403, 'Unexpected Host header.');
+      if (!['127.0.0.1', 'localhost', '[::1]'].some((name) => host === `${name}:${port}`))
+        throw new HttpError(403, 'Unexpected Host header.');
       const path = (request.url ?? '').split('?')[0];
-      if (request.method === 'GET' && path === '/') { reply(200, 'Logline OpenTelemetry receiver (OTLP/HTTP)\n'); return; }
-      if (!['/v1/logs', '/v1/traces', '/v1/metrics'].includes(path)) throw new HttpError(404, 'Use /v1/logs, /v1/traces, or /v1/metrics.');
+      if (request.method === 'GET' && path === '/') {
+        reply(200, 'Logline OpenTelemetry receiver (OTLP/HTTP)\n');
+        return;
+      }
+      if (!['/v1/logs', '/v1/traces', '/v1/metrics'].includes(path))
+        throw new HttpError(404, 'Use /v1/logs, /v1/traces, or /v1/metrics.');
       if (request.method !== 'POST') throw new HttpError(405, 'Use POST.');
       const contentType = (request.headers['content-type'] ?? '').split(';')[0].trim().toLowerCase();
       const json = contentType === 'application/json';
-      if (!json && contentType !== 'application/x-protobuf') throw new HttpError(415, 'Use application/json or application/x-protobuf.');
+      if (!json && contentType !== 'application/x-protobuf')
+        throw new HttpError(415, 'Use application/json or application/x-protobuf.');
       const body = await this.readBody(request);
-      const decoded = await this.decoder.decode(path === '/v1/logs' ? 'logs' : path === '/v1/metrics' ? 'metrics' : 'traces', json, body).catch(error => {
-        throw error instanceof MalformedRequest ? new HttpError(400, error.message) : error;
-      });
-      const items: readonly (OtlpLog | Span | MetricPoint)[] = 'logs' in decoded ? decoded.logs : 'metrics' in decoded ? decoded.metrics : decoded.spans;
+      const decoded = await this.decoder
+        .decode(path === '/v1/logs' ? 'logs' : path === '/v1/metrics' ? 'metrics' : 'traces', json, body)
+        .catch((error) => {
+          throw error instanceof MalformedRequest ? new HttpError(400, error.message) : error;
+        });
+      const items: readonly (OtlpLog | Span | MetricPoint)[] =
+        'logs' in decoded ? decoded.logs : 'metrics' in decoded ? decoded.metrics : decoded.spans;
       for (let start = 0; start < items.length && this.running; start += CHUNK) {
-        if (start) await new Promise(resolve => setImmediate(resolve));
+        if (start) await new Promise((resolve) => setImmediate(resolve));
         const chunk = items.slice(start, start + CHUNK);
         if ('logs' in decoded) this.ingestLogs(chunk as OtlpLog[]);
         else if ('metrics' in decoded) this.ingestMetrics(chunk as MetricPoint[]);
@@ -204,7 +285,8 @@ export class OtlpReceiver {
 
   private readBody(request: IncomingMessage): Promise<Buffer> {
     const encoding = (request.headers['content-encoding'] ?? 'identity').toLowerCase();
-    if (!['identity', 'gzip', 'deflate'].includes(encoding)) return Promise.reject(new HttpError(415, 'Unsupported content encoding.'));
+    if (!['identity', 'gzip', 'deflate'].includes(encoding))
+      return Promise.reject(new HttpError(415, 'Unsupported content encoding.'));
     return new Promise<Buffer>((resolve, reject) => {
       const chunks: Buffer[] = [];
       let size = 0;
@@ -226,9 +308,18 @@ export class OtlpReceiver {
         // Already refused; do not decompress the truncated body.
         if (tooLarge) return;
         const body = Buffer.concat(chunks);
-        if (encoding === 'identity') { resolve(body); return; }
+        if (encoding === 'identity') {
+          resolve(body);
+          return;
+        }
         (encoding === 'gzip' ? gunzip : inflate)(body, { maxOutputLength: MAX_DECODED }, (error, result) => {
-          if (error) reject(new HttpError((error as NodeJS.ErrnoException).code === 'ERR_BUFFER_TOO_LARGE' ? 413 : 400, 'Could not decompress the request body.'));
+          if (error)
+            reject(
+              new HttpError(
+                (error as NodeJS.ErrnoException).code === 'ERR_BUFFER_TOO_LARGE' ? 413 : 400,
+                'Could not decompress the request body.',
+              ),
+            );
           else resolve(result);
         });
       });

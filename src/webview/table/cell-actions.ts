@@ -3,14 +3,22 @@ import { element, type Elements } from '../dom';
 import type { EventScope } from '../event-scope';
 import { cellFilterQuery, valueForCell, type CellValue } from '../search/cell-filter';
 
-export function createCellActions(elements: Elements, events: () => LogEvent[], query: () => string, apply: (query: string) => void, scope: EventScope) {
+export function createCellActions(
+  elements: Elements,
+  events: () => LogEvent[],
+  query: () => string,
+  apply: (query: string) => void,
+  scope: EventScope,
+) {
   const menu = elements.cellFilterMenu;
   const buttons = [elements.cellFilterInclude, elements.cellFilterExclude];
   let origin: HTMLTableCellElement | undefined;
   let selected: CellValue | undefined;
   let active: { id: string; column: string } | undefined;
 
-  function rows() { return [...elements.logs.querySelectorAll<HTMLTableRowElement>('.event-row')]; }
+  function rows() {
+    return [...elements.logs.querySelectorAll<HTMLTableRowElement>('.event-row')];
+  }
   // A narrow panel collapses the Source column through its <col>. Reading that
   // style instead of measuring each cell keeps a refresh free of forced layout.
   function collapsedColumns() {
@@ -21,11 +29,13 @@ export function createCellActions(elements: Elements, events: () => LogEvent[], 
     return collapsed;
   }
   function cells(row: HTMLTableRowElement, collapsed = collapsedColumns()) {
-    return [...row.querySelectorAll<HTMLTableCellElement>('td[data-column]')].filter(cell => !collapsed.has(cell.dataset.column!));
+    return [...row.querySelectorAll<HTMLTableCellElement>('td[data-column]')].filter(
+      (cell) => !collapsed.has(cell.dataset.column!),
+    );
   }
   function visibleCells() {
     const collapsed = collapsedColumns();
-    return rows().flatMap(row => cells(row, collapsed));
+    return rows().flatMap((row) => cells(row, collapsed));
   }
   function identify(cell: HTMLTableCellElement) {
     return { id: cell.closest<HTMLTableRowElement>('tr.event-row')!.dataset.id!, column: cell.dataset.column! };
@@ -42,7 +52,7 @@ export function createCellActions(elements: Elements, events: () => LogEvent[], 
     origin = undefined;
     if (restoreFocus && previous && elements.logs.contains(previous)) previous.focus({ preventScroll: true });
     else if (focusedMenu) {
-      const fallback = visibleCells().find(cell => cell.tabIndex === 0);
+      const fallback = visibleCells().find((cell) => cell.tabIndex === 0);
       (fallback ?? elements.search).focus({ preventScroll: true });
     }
   }
@@ -59,13 +69,15 @@ export function createCellActions(elements: Elements, events: () => LogEvent[], 
       button.title = choice.reason ?? '';
       return choice;
     });
-    elements.cellFilterReason.textContent = [...new Set(results.map(choice => choice.reason).filter(Boolean))].join(' ');
+    elements.cellFilterReason.textContent = [...new Set(results.map((choice) => choice.reason).filter(Boolean))].join(
+      ' ',
+    );
     elements.cellFilterReason.hidden = !elements.cellFilterReason.textContent;
     return results;
   }
   function open(cell: HTMLTableCellElement, x: number, y: number) {
     const id = identify(cell);
-    const event = events().find(event => String(event.id) === id.id);
+    const event = events().find((event) => String(event.id) === id.id);
     const value = event && valueForCell(event, id.column);
     if (!value) return false;
     origin = cell;
@@ -81,7 +93,7 @@ export function createCellActions(elements: Elements, events: () => LogEvent[], 
     const bounds = menu.getBoundingClientRect();
     menu.style.left = `${Math.max(8, Math.min(x, window.innerWidth - bounds.width - 8))}px`;
     menu.style.top = `${Math.max(8, Math.min(y, window.innerHeight - bounds.height - 8))}px`;
-    (buttons.find(button => !button.disabled) ?? menu).focus({ preventScroll: true });
+    (buttons.find((button) => !button.disabled) ?? menu).focus({ preventScroll: true });
     return true;
   }
   function activate(index: number) {
@@ -93,18 +105,18 @@ export function createCellActions(elements: Elements, events: () => LogEvent[], 
   }
 
   buttons.forEach((button, index) => scope.listen(button, 'click', () => activate(index)));
-  scope.listen(elements.logs, 'contextmenu', event => {
+  scope.listen(elements.logs, 'contextmenu', (event) => {
     const cell = (event.target as HTMLElement).closest<HTMLTableCellElement>('td[data-column]');
     if (!cell?.closest('tr.event-row')) return;
     // Keyboard contextmenu events can have zero pointer coordinates.
     const bounds = cell.getBoundingClientRect();
     if (open(cell, event.clientX || bounds.left, event.clientY || bounds.bottom)) event.preventDefault();
   });
-  scope.listen(elements.logs, 'focusin', event => {
+  scope.listen(elements.logs, 'focusin', (event) => {
     const cell = (event.target as HTMLElement).closest<HTMLTableCellElement>('td[data-column]');
     if (cell?.closest('tr.event-row')) setActive(cell);
   });
-  scope.listen(elements.logs, 'keydown', event => {
+  scope.listen(elements.logs, 'keydown', (event) => {
     const target = event.target as HTMLElement;
     const cell = target.closest<HTMLTableCellElement>('td[data-column]');
     if (!cell?.closest('tr.event-row')) return;
@@ -125,41 +137,62 @@ export function createCellActions(elements: Elements, events: () => LogEvent[], 
     if (event.key === 'ArrowLeft') next = rowCells[Math.max(0, columnIndex - 1)];
     else if (event.key === 'ArrowRight') next = rowCells[Math.min(rowCells.length - 1, columnIndex + 1)];
     else if (event.key === 'ArrowUp' || event.key === 'ArrowDown') {
-      const nextRow = visibleRows[Math.max(0, Math.min(visibleRows.length - 1, rowIndex + (event.key === 'ArrowUp' ? -1 : 1)))];
-      next = cells(nextRow).find(item => item.dataset.column === cell.dataset.column);
+      const nextRow =
+        visibleRows[Math.max(0, Math.min(visibleRows.length - 1, rowIndex + (event.key === 'ArrowUp' ? -1 : 1)))];
+      next = cells(nextRow).find((item) => item.dataset.column === cell.dataset.column);
     }
-    if (next) { event.preventDefault(); setActive(next); next.focus({ preventScroll: true }); next.scrollIntoView({ block: 'nearest', inline: 'nearest' }); }
+    if (next) {
+      event.preventDefault();
+      setActive(next);
+      next.focus({ preventScroll: true });
+      next.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+    }
   });
-  scope.listen(menu, 'keydown', event => {
-    const enabled = buttons.filter(button => !button.disabled);
+  scope.listen(menu, 'keydown', (event) => {
+    const enabled = buttons.filter((button) => !button.disabled);
     const index = enabled.indexOf(document.activeElement as HTMLButtonElement);
     if (event.key === 'ArrowDown' || event.key === 'ArrowUp' || event.key === 'Home' || event.key === 'End') {
       event.preventDefault();
-      const next = event.key === 'Home' ? 0 : event.key === 'End' ? enabled.length - 1
-        : (index + (event.key === 'ArrowDown' ? 1 : -1) + enabled.length) % enabled.length;
+      const next =
+        event.key === 'Home'
+          ? 0
+          : event.key === 'End'
+            ? enabled.length - 1
+            : (index + (event.key === 'ArrowDown' ? 1 : -1) + enabled.length) % enabled.length;
       enabled[next]?.focus({ preventScroll: true });
     } else if (event.key === 'Enter' || event.key === ' ') {
       event.preventDefault();
       if (index >= 0) activate(buttons.indexOf(enabled[index]));
     } else if (event.key === 'Tab') close(true);
   });
-  scope.listen(document, 'keydown', event => {
-    if (event.key === 'Escape' && !menu.hidden) { event.preventDefault(); close(true); }
+  scope.listen(document, 'keydown', (event) => {
+    if (event.key === 'Escape' && !menu.hidden) {
+      event.preventDefault();
+      close(true);
+    }
   });
-  scope.listen(document, 'click', event => {
+  scope.listen(document, 'click', (event) => {
     if (!menu.hidden && !menu.contains(event.target as Node)) close();
   });
-  scope.listen(document, 'scroll', event => {
-    if (!menu.hidden && !menu.contains(event.target as Node)) close();
-  }, { capture: true });
-  scope.listen(window, 'resize', () => { if (!menu.hidden) close(); });
+  scope.listen(
+    document,
+    'scroll',
+    (event) => {
+      if (!menu.hidden && !menu.contains(event.target as Node)) close();
+    },
+    { capture: true },
+  );
+  scope.listen(window, 'resize', () => {
+    if (!menu.hidden) close();
+  });
 
   function rowsChanged() {
     const all = visibleCells();
-    const current = all.find(cell => {
-      const id = identify(cell);
-      return id.id === active?.id && id.column === active.column;
-    }) ?? all[0];
+    const current =
+      all.find((cell) => {
+        const id = identify(cell);
+        return id.id === active?.id && id.column === active.column;
+      }) ?? all[0];
     if (current) setActive(current);
     if (!menu.hidden) close();
   }

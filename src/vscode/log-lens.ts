@@ -1,5 +1,15 @@
 import * as vscode from 'vscode';
-import { extractLogSites, LOG_SITE_EXTENSIONS, siteDurations, siteQuery, type LogSite, type LogSiteIndex, type LogSiteTracker, type SiteDurations, type SiteStats } from '../core/log-sites';
+import {
+  extractLogSites,
+  LOG_SITE_EXTENSIONS,
+  siteDurations,
+  siteQuery,
+  type LogSite,
+  type LogSiteIndex,
+  type LogSiteTracker,
+  type SiteDurations,
+  type SiteStats,
+} from '../core/log-sites';
 import type { LogStore } from '../core/log-store';
 import type { Settings } from '../core/settings';
 import { openSourceLocation } from './source-navigation';
@@ -83,25 +93,35 @@ export class LogLens implements vscode.CodeLensProvider, vscode.HoverProvider, v
   // Basenames already looked up on demand, so each is searched for once.
   private readonly located = new Set<string>();
 
-  constructor(private readonly sources: LensSources, private readonly extensionUri: vscode.Uri) {
-    const selector = LOG_SITE_EXTENSIONS.map(extension => ({ scheme: 'file', pattern: `**/*.${extension}` }));
+  constructor(
+    private readonly sources: LensSources,
+    private readonly extensionUri: vscode.Uri,
+  ) {
+    const selector = LOG_SITE_EXTENSIONS.map((extension) => ({ scheme: 'file', pattern: `**/*.${extension}` }));
     this.disposables.push(
       vscode.languages.registerCodeLensProvider(selector, this),
       vscode.languages.registerHoverProvider(selector, this),
       vscode.commands.registerCommand('logline.showLogSite', (id: unknown) => this.showSite(id)),
       vscode.commands.registerCommand('logline.showQuietLogStatements', () => this.showQuietStatements()),
       vscode.window.onDidChangeVisibleTextEditors(() => this.decorate()),
-      vscode.workspace.onDidChangeConfiguration(event => { if (event.affectsConfiguration('logline.logLenses')) this.applyMode(); })
+      vscode.workspace.onDidChangeConfiguration((event) => {
+        if (event.affectsConfiguration('logline.logLenses')) this.applyMode();
+      }),
     );
     this.applyMode();
   }
 
-  get enabled(): boolean { return this.mode !== 'off'; }
+  get enabled(): boolean {
+    return this.mode !== 'off';
+  }
 
   /** Count newly captured events; coalesced to the panel refresh interval. */
   schedule(delay = this.sources.config.get('refreshIntervalMs', 500)): void {
     if (!this.enabled || this.refreshTimer || this.disposed) return;
-    this.refreshTimer = setTimeout(() => { this.refreshTimer = undefined; this.refresh(); }, delay);
+    this.refreshTimer = setTimeout(() => {
+      this.refreshTimer = undefined;
+      this.refresh();
+    }, delay);
     this.refreshTimer.unref?.();
   }
 
@@ -116,7 +136,10 @@ export class LogLens implements vscode.CodeLensProvider, vscode.HoverProvider, v
     const generation = this.sources.generation();
     const cleared = generation !== this.generation;
     const reindexed = tracker.indexVersion !== index.version;
-    if (reindexed && !cleared && now - this.indexedAt < INDEX_SETTLE_MS) { this.schedule(INDEX_SETTLE_MS); return; }
+    if (reindexed && !cleared && now - this.indexedAt < INDEX_SETTLE_MS) {
+      this.schedule(INDEX_SETTLE_MS);
+      return;
+    }
     let changed: boolean;
     if (cleared || reindexed) {
       const hadStats = tracker.stats.size > 0;
@@ -128,7 +151,10 @@ export class LogLens implements vscode.CodeLensProvider, vscode.HoverProvider, v
       // Evicted events are always the oldest, so subtract what they counted.
       changed = tracker.evict(store.eventsAfter(0).next().value?.id ?? Infinity) || changed;
     }
-    if (changed) { this.changeEmitter.fire(); this.decorate(); }
+    if (changed) {
+      this.changeEmitter.fire();
+      this.decorate();
+    }
     const unresolved = index.takeUnresolved();
     if (unresolved.length) void this.indexReported(unresolved);
   }
@@ -144,8 +170,11 @@ export class LogLens implements vscode.CodeLensProvider, vscode.HoverProvider, v
       const name = path.slice(path.lastIndexOf('/') + 1);
       if (!name || this.located.has(name) || this.located.size >= 1000 || !this.indexableName(name)) continue;
       this.located.add(name);
-      const escaped = name.replace(/[[\]{}*?]/g, char => `[${char}]`);
-      const uris = await vscode.workspace.findFiles(`**/${escaped}`, EXCLUDE, 20).then(found => found, () => []);
+      const escaped = name.replace(/[[\]{}*?]/g, (char) => `[${char}]`);
+      const uris = await vscode.workspace.findFiles(`**/${escaped}`, EXCLUDE, 20).then(
+        (found) => found,
+        () => [],
+      );
       if (scan !== this.scan || !this.enabled) return;
       // Keep files whose path agrees with the reported one as far as both go.
       const tail = path.split('/').filter(Boolean).slice(-3).join('/');
@@ -163,47 +192,65 @@ export class LogLens implements vscode.CodeLensProvider, vscode.HoverProvider, v
       const stats = this.sources.tracker.stats.get(site.id);
       if (!stats?.hits || site.line > document.lineCount) continue;
       const range = new vscode.Range(site.line - 1, 0, site.line - 1, 0);
-      lenses.push(new vscode.CodeLens(range, {
-        title: lensTitle(stats, now), command: 'logline.showLogSite', arguments: [site.id],
-        tooltip: `Show the ${stats.hits.toLocaleString()} matching events in the Logs panel`
-      }));
+      lenses.push(
+        new vscode.CodeLens(range, {
+          title: lensTitle(stats, now),
+          command: 'logline.showLogSite',
+          arguments: [site.id],
+          tooltip: `Show the ${stats.hits.toLocaleString()} matching events in the Logs panel`,
+        }),
+      );
     }
     return lenses;
   }
 
   provideHover(document: vscode.TextDocument, position: vscode.Position): vscode.Hover | undefined {
     if (!this.enabled) return undefined;
-    const site = this.sources.index.sitesIn(this.fileId(document.uri)).find(item => item.line === position.line + 1);
+    const site = this.sources.index.sitesIn(this.fileId(document.uri)).find((item) => item.line === position.line + 1);
     const stats = site && this.sources.tracker.stats.get(site.id);
     if (!site || !stats?.hits) return undefined;
     const markdown = new vscode.MarkdownString(undefined, true);
     markdown.isTrusted = { enabledCommands: ['logline.showLogSite'] };
-    const how = stats.exact === stats.hits ? 'matched by the code location in each event'
-      : stats.exact ? 'matched by code location and message text' : 'matched by message text';
+    const how =
+      stats.exact === stats.hits
+        ? 'matched by the code location in each event'
+        : stats.exact
+          ? 'matched by code location and message text'
+          : 'matched by message text';
     markdown.appendMarkdown(`**Logline** · ${lensTitle(stats).replace('$(pulse) ', '')} · ${how}\n\n`);
     const durations = siteDurations(stats);
     if (durations) {
-      const spread = durations.count >= 5
-        ? `p50 ${formatMs(durations.p50)} · p95 ${formatMs(durations.p95)} · p99 ${formatMs(durations.p99)} · max ${formatMs(durations.max)}`
-        : durationText(durations);
-      markdown.appendMarkdown(`Duration ${spread}, from the latest ${durations.count.toLocaleString()} ${durations.count === 1 ? 'event' : 'events'} with \`durationMs\` or a similar field\n\n`);
+      const spread =
+        durations.count >= 5
+          ? `p50 ${formatMs(durations.p50)} · p95 ${formatMs(durations.p95)} · p99 ${formatMs(durations.p99)} · max ${formatMs(durations.max)}`
+          : durationText(durations);
+      markdown.appendMarkdown(
+        `Duration ${spread}, from the latest ${durations.count.toLocaleString()} ${durations.count === 1 ? 'event' : 'events'} with \`durationMs\` or a similar field\n\n`,
+      );
     }
     for (const sample of [...stats.samples].reverse()) {
       markdown.appendMarkdown(`- \`${sample.level.toUpperCase()}\` `);
       markdown.appendText(sample.message);
       markdown.appendMarkdown('\n');
     }
-    markdown.appendMarkdown(`\n[Show in Logs](command:logline.showLogSite?${encodeURIComponent(JSON.stringify([site.id]))})`);
+    markdown.appendMarkdown(
+      `\n[Show in Logs](command:logline.showLogSite?${encodeURIComponent(JSON.stringify([site.id]))})`,
+    );
     return new vscode.Hover(markdown);
   }
 
   /** The file an indexed site was read from, when it was indexed in this window. */
-  siteUri(site: LogSite): vscode.Uri | undefined { return this.uris.get(site.file); }
+  siteUri(site: LogSite): vscode.Uri | undefined {
+    return this.uris.get(site.file);
+  }
 
   /** Open the statement for a site found in the index. */
   async openSite(site: LogSite): Promise<void> {
     const uri = this.uris.get(site.file);
-    if (!uri) { await openSourceLocation(site, 'Choose log statement'); return; }
+    if (!uri) {
+      await openSourceLocation(site, 'Choose log statement');
+      return;
+    }
     const document = await vscode.workspace.openTextDocument(uri);
     const position = new vscode.Position(Math.min(site.line - 1, document.lineCount - 1), Math.max(0, site.column - 1));
     await vscode.window.showTextDocument(document, { preview: true, selection: new vscode.Range(position, position) });
@@ -223,14 +270,36 @@ export class LogLens implements vscode.CodeLensProvider, vscode.HoverProvider, v
 
   private async showQuietStatements(): Promise<void> {
     const editor = vscode.window.activeTextEditor;
-    if (!this.enabled) { void vscode.window.showInformationMessage('Logline log lenses are off. Turn on logline.logLenses to find quiet log statements.'); return; }
+    if (!this.enabled) {
+      void vscode.window.showInformationMessage(
+        'Logline log lenses are off. Turn on logline.logLenses to find quiet log statements.',
+      );
+      return;
+    }
     const sites = editor ? this.sources.index.sitesIn(this.fileId(editor.document.uri)) : [];
-    if (!editor || !sites.length) { void vscode.window.showInformationMessage('Logline found no log statements in the active editor.'); return; }
-    const quiet = sites.filter(site => !this.sources.tracker.stats.get(site.id)?.hits);
-    if (!quiet.length) { void vscode.window.showInformationMessage(`Every log statement in ${vscode.workspace.asRelativePath(editor.document.uri)} produced retained events.`); return; }
-    const picked = await vscode.window.showQuickPick(quiet.map(site => ({
-      label: `Line ${site.line}`, description: site.level, detail: site.template, site
-    })), { title: `${quiet.length} of ${sites.length} log statements produced no retained events`, placeHolder: 'Go to a log statement that has not logged' });
+    if (!editor || !sites.length) {
+      void vscode.window.showInformationMessage('Logline found no log statements in the active editor.');
+      return;
+    }
+    const quiet = sites.filter((site) => !this.sources.tracker.stats.get(site.id)?.hits);
+    if (!quiet.length) {
+      void vscode.window.showInformationMessage(
+        `Every log statement in ${vscode.workspace.asRelativePath(editor.document.uri)} produced retained events.`,
+      );
+      return;
+    }
+    const picked = await vscode.window.showQuickPick(
+      quiet.map((site) => ({
+        label: `Line ${site.line}`,
+        description: site.level,
+        detail: site.template,
+        site,
+      })),
+      {
+        title: `${quiet.length} of ${sites.length} log statements produced no retained events`,
+        placeHolder: 'Go to a log statement that has not logged',
+      },
+    );
     if (picked) await this.openSite(picked.site);
   }
 
@@ -241,15 +310,21 @@ export class LogLens implements vscode.CodeLensProvider, vscode.HoverProvider, v
     this.mode = mode;
     if (mode === 'codelens+gutter' && !this.decoration) {
       this.decoration = vscode.window.createTextEditorDecorationType({
-        gutterIconPath: vscode.Uri.joinPath(this.extensionUri, 'media', 'log-error.svg'), gutterIconSize: '70%',
-        overviewRulerColor: new vscode.ThemeColor('editorError.foreground'), overviewRulerLane: vscode.OverviewRulerLane.Right
+        gutterIconPath: vscode.Uri.joinPath(this.extensionUri, 'media', 'log-error.svg'),
+        gutterIconSize: '70%',
+        overviewRulerColor: new vscode.ThemeColor('editorError.foreground'),
+        overviewRulerLane: vscode.OverviewRulerLane.Right,
       });
     } else if (mode !== 'codelens+gutter' && this.decoration) {
       this.decoration.dispose();
       this.decoration = undefined;
     }
     if (this.enabled && !wasEnabled) this.startIndexing();
-    else if (!this.enabled && wasEnabled) { this.stopIndexing(); this.sources.index.clear(); this.sources.tracker.reset(); }
+    else if (!this.enabled && wasEnabled) {
+      this.stopIndexing();
+      this.sources.index.clear();
+      this.sources.tracker.reset();
+    }
     this.changeEmitter.fire();
     this.decorate();
   }
@@ -257,9 +332,13 @@ export class LogLens implements vscode.CodeLensProvider, vscode.HoverProvider, v
   private decorate(): void {
     if (!this.decoration) return;
     for (const editor of vscode.window.visibleTextEditors ?? []) {
-      const ranges = this.sources.index.sitesIn(this.fileId(editor.document.uri))
-        .filter(site => (this.sources.tracker.stats.get(site.id)?.errors ?? 0) > 0 && site.line <= editor.document.lineCount)
-        .map(site => new vscode.Range(site.line - 1, 0, site.line - 1, 0));
+      const ranges = this.sources.index
+        .sitesIn(this.fileId(editor.document.uri))
+        .filter(
+          (site) =>
+            (this.sources.tracker.stats.get(site.id)?.errors ?? 0) > 0 && site.line <= editor.document.lineCount,
+        )
+        .map((site) => new vscode.Range(site.line - 1, 0, site.line - 1, 0));
       editor.setDecorations(this.decoration, ranges);
     }
   }
@@ -267,7 +346,9 @@ export class LogLens implements vscode.CodeLensProvider, vscode.HoverProvider, v
   // Multi-root workspaces prefix the folder name, so `src/index.ts` in two
   // folders stays two files.
   private fileId(uri: vscode.Uri): string {
-    return vscode.workspace.asRelativePath(uri, (vscode.workspace.workspaceFolders?.length ?? 0) > 1).replace(/\\/g, '/');
+    return vscode.workspace
+      .asRelativePath(uri, (vscode.workspace.workspaceFolders?.length ?? 0) > 1)
+      .replace(/\\/g, '/');
   }
 
   private index(uri: vscode.Uri, text: string): void {
@@ -287,21 +368,41 @@ export class LogLens implements vscode.CodeLensProvider, vscode.HoverProvider, v
     }
     const watcher = vscode.workspace.createFileSystemWatcher(GLOB);
     const reload = (uri: vscode.Uri) => {
-      if (vscode.workspace.textDocuments.some(document => document.uri.toString() === uri.toString() && document.isDirty)) return;
+      if (
+        vscode.workspace.textDocuments.some(
+          (document) => document.uri.toString() === uri.toString() && document.isDirty,
+        )
+      )
+        return;
       void this.indexFromDisk(uri);
     };
-    this.indexing.push(watcher, watcher.onDidChange(reload), watcher.onDidCreate(reload),
-      watcher.onDidDelete(uri => { const file = this.fileId(uri); this.uris.delete(file); this.sources.index.deleteFile(file); this.schedule(); }),
-      vscode.workspace.onDidChangeTextDocument(event => this.documentChanged(event.document)));
+    this.indexing.push(
+      watcher,
+      watcher.onDidChange(reload),
+      watcher.onDidCreate(reload),
+      watcher.onDidDelete((uri) => {
+        const file = this.fileId(uri);
+        this.uris.delete(file);
+        this.sources.index.deleteFile(file);
+        this.schedule();
+      }),
+      vscode.workspace.onDidChangeTextDocument((event) => this.documentChanged(event.document)),
+    );
     // Relative times in CodeLens titles age between bursts of logs.
-    this.clockTimer = setInterval(() => { if (this.sources.tracker.stats.size) this.changeEmitter.fire(); }, 15000);
+    this.clockTimer = setInterval(() => {
+      if (this.sources.tracker.stats.size) this.changeEmitter.fire();
+    }, 15000);
     this.clockTimer.unref?.();
     void (async () => {
-      const uris = await vscode.workspace.findFiles(GLOB, EXCLUDE, Math.max(100, Math.min(50000, this.sources.config.get('logLensMaxFiles', 5000))));
+      const uris = await vscode.workspace.findFiles(
+        GLOB,
+        EXCLUDE,
+        Math.max(100, Math.min(50000, this.sources.config.get('logLensMaxFiles', 5000))),
+      );
       for (let start = 0; start < uris.length; start += 50) {
         if (scan !== this.scan || this.disposed) return;
-        await Promise.all(uris.slice(start, start + 50).map(uri => this.indexFromDisk(uri)));
-        await new Promise(resolve => setImmediate(resolve));
+        await Promise.all(uris.slice(start, start + 50).map((uri) => this.indexFromDisk(uri)));
+        await new Promise((resolve) => setImmediate(resolve));
       }
     })().catch(() => undefined);
   }
@@ -318,7 +419,9 @@ export class LogLens implements vscode.CodeLensProvider, vscode.HoverProvider, v
     this.located.clear();
   }
 
-  private indexable(uri: vscode.Uri): boolean { return this.indexableName(uri.path); }
+  private indexable(uri: vscode.Uri): boolean {
+    return this.indexableName(uri.path);
+  }
 
   private indexableName(name: string): boolean {
     return LOG_SITE_EXTENSIONS.includes(name.slice(name.lastIndexOf('.') + 1).toLowerCase());
@@ -329,10 +432,13 @@ export class LogLens implements vscode.CodeLensProvider, vscode.HoverProvider, v
     if (document.uri.scheme !== 'file' || !this.indexable(document.uri)) return;
     const key = document.uri.toString();
     clearTimeout(this.pendingDocuments.get(key));
-    this.pendingDocuments.set(key, setTimeout(() => {
-      this.pendingDocuments.delete(key);
-      if (this.enabled) this.index(document.uri, document.getText());
-    }, 300));
+    this.pendingDocuments.set(
+      key,
+      setTimeout(() => {
+        this.pendingDocuments.delete(key);
+        if (this.enabled) this.index(document.uri, document.getText());
+      }, 300),
+    );
   }
 
   private async indexFromDisk(uri: vscode.Uri): Promise<void> {
@@ -341,6 +447,8 @@ export class LogLens implements vscode.CodeLensProvider, vscode.HoverProvider, v
       if (stat.size > MAX_FILE_BYTES || !this.enabled) return;
       const bytes = await vscode.workspace.fs.readFile(uri);
       if (this.enabled) this.index(uri, new TextDecoder().decode(bytes));
-    } catch { /* deleted or unreadable files simply have no sites */ }
+    } catch {
+      /* deleted or unreadable files simply have no sites */
+    }
   }
 }

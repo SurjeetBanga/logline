@@ -4,8 +4,18 @@ import { isSensitiveKey } from './redaction';
 import type { LogEvent } from './types';
 
 /** What kind of sensitive value an event carried. */
-export type SensitiveKind = 'jwt' | 'bearer' | 'aws-key' | 'github-token' | 'slack-token' | 'google-key' | 'stripe-key' | 'private-key'
-  | 'credential' | 'email' | 'card';
+export type SensitiveKind =
+  | 'jwt'
+  | 'bearer'
+  | 'aws-key'
+  | 'github-token'
+  | 'slack-token'
+  | 'google-key'
+  | 'stripe-key'
+  | 'private-key'
+  | 'credential'
+  | 'email'
+  | 'card';
 
 export interface SensitiveValue {
   kind: SensitiveKind;
@@ -18,12 +28,26 @@ export interface SensitiveValue {
 }
 
 export const SENSITIVE_LABELS: Record<SensitiveKind, string> = {
-  jwt: 'a JSON Web Token', bearer: 'a bearer token', 'aws-key': 'an AWS access key', 'github-token': 'a GitHub token',
-  'slack-token': 'a Slack token', 'google-key': 'a Google API key', 'stripe-key': 'a Stripe live key', 'private-key': 'a private key',
-  credential: 'a credential', email: 'an email address', card: 'a payment card number'
+  jwt: 'a JSON Web Token',
+  bearer: 'a bearer token',
+  'aws-key': 'an AWS access key',
+  'github-token': 'a GitHub token',
+  'slack-token': 'a Slack token',
+  'google-key': 'a Google API key',
+  'stripe-key': 'a Stripe live key',
+  'private-key': 'a private key',
+  credential: 'a credential',
+  email: 'an email address',
+  card: 'a payment card number',
 };
 
-interface Detector { kind: SensitiveKind; category: 'secret' | 'personal'; hint: string; pattern: RegExp; check?: (match: string) => boolean; }
+interface Detector {
+  kind: SensitiveKind;
+  category: 'secret' | 'personal';
+  hint: string;
+  pattern: RegExp;
+  check?: (match: string) => boolean;
+}
 
 // Each pattern is anchored on a fixed prefix or a bounded character run, and
 // the cheap `hint` substring test runs first, so plain log lines cost one
@@ -31,16 +55,37 @@ interface Detector { kind: SensitiveKind; category: 'secret' | 'personal'; hint:
 // only repeat over a character it consumes.
 const DETECTORS: Detector[] = [
   { kind: 'private-key', category: 'secret', hint: 'PRIVATE KEY', pattern: /-----BEGIN [A-Z ]{0,20}PRIVATE KEY-----/ },
-  { kind: 'jwt', category: 'secret', hint: 'eyJ', pattern: /\beyJ[A-Za-z0-9_-]{8,}\.eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}/ },
+  {
+    kind: 'jwt',
+    category: 'secret',
+    hint: 'eyJ',
+    pattern: /\beyJ[A-Za-z0-9_-]{8,}\.eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}/,
+  },
   { kind: 'bearer', category: 'secret', hint: 'earer ', pattern: /\b[Bb]earer [A-Za-z0-9._~+/-]{16,}=*/ },
   { kind: 'aws-key', category: 'secret', hint: 'IA', pattern: /\b(?:AKIA|ASIA)[A-Z0-9]{16}\b/ },
-  { kind: 'github-token', category: 'secret', hint: 'gh', pattern: /\b(?:gh[pousr]_[A-Za-z0-9]{36,}|github_pat_[A-Za-z0-9_]{40,})/ },
+  {
+    kind: 'github-token',
+    category: 'secret',
+    hint: 'gh',
+    pattern: /\b(?:gh[pousr]_[A-Za-z0-9]{36,}|github_pat_[A-Za-z0-9_]{40,})/,
+  },
   { kind: 'slack-token', category: 'secret', hint: 'xox', pattern: /\bxox[abprs]-[A-Za-z0-9-]{10,}/ },
   { kind: 'google-key', category: 'secret', hint: 'AIza', pattern: /\bAIza[0-9A-Za-z_-]{35}\b/ },
   { kind: 'stripe-key', category: 'secret', hint: '_live_', pattern: /\b[rs]k_live_[0-9A-Za-z]{16,}/ },
-  { kind: 'email', category: 'personal', hint: '@', pattern: /\b[A-Za-z0-9._%+-]{1,64}@[A-Za-z0-9-]{1,63}(?:\.[A-Za-z0-9-]{1,63}){0,8}\.[A-Za-z]{2,24}\b/ },
+  {
+    kind: 'email',
+    category: 'personal',
+    hint: '@',
+    pattern: /\b[A-Za-z0-9._%+-]{1,64}@[A-Za-z0-9-]{1,63}(?:\.[A-Za-z0-9-]{1,63}){0,8}\.[A-Za-z]{2,24}\b/,
+  },
   // 15- and 16-digit card numbers (Amex, Visa, Mastercard, Discover), grouped 4-4-4-4 or Amex 4-6-5.
-  { kind: 'card', category: 'personal', hint: '', pattern: /\b[3-6]\d{3}(?:(?:[ -]?\d{4}){2}[ -]?\d{3,4}|[ -]\d{6}[ -]\d{5})\b/, check: luhn }
+  {
+    kind: 'card',
+    category: 'personal',
+    hint: '',
+    pattern: /\b[3-6]\d{3}(?:(?:[ -]?\d{4}){2}[ -]?\d{3,4}|[ -]\d{6}[ -]\d{5})\b/,
+    check: luhn,
+  },
 ];
 // Long numbers are often ids; a card needs its usual grouping or a field named like one.
 const CARD_GROUPS = /^\d{4}([ -])\d{4}\1\d{4}\1\d{3,4}$|^\d{4}([ -])\d{6}\2\d{5}$/;
@@ -63,13 +108,23 @@ export function findSensitiveValues(event: LogEvent): SensitiveValue[] {
       if (detector.kind === 'card' ? !HAS_DIGIT_RUN.test(text) : !text.includes(detector.hint)) continue;
       const match = detector.pattern.exec(text);
       if (!match || (detector.check && !detector.check(match[0]))) continue;
-      if (detector.kind === 'card' && !CARD_GROUPS.test(match[0]) && !CARD_FIELD.test(path.slice(path.lastIndexOf('.') + 1))) continue;
+      if (
+        detector.kind === 'card' &&
+        !CARD_GROUPS.test(match[0]) &&
+        !CARD_FIELD.test(path.slice(path.lastIndexOf('.') + 1))
+      )
+        continue;
       if (detector.kind === 'email' && EXAMPLE_EMAIL.test(match[0])) continue;
       claimed.add(`${path}\0${detector.category}`);
       const previous = found.get(detector.kind);
       // Report the most specific field path: payloads repeat nested values under bare aliases.
       if (!previous || depth(path) > depth(previous.path)) {
-        found.set(detector.kind, { kind: detector.kind, category: detector.category, path, preview: mask(detector.kind, match[0]) });
+        found.set(detector.kind, {
+          kind: detector.kind,
+          category: detector.category,
+          path,
+          preview: mask(detector.kind, match[0]),
+        });
       }
     }
   };
@@ -79,21 +134,33 @@ export function findSensitiveValues(event: LogEvent): SensitiveValue[] {
     if (typeof value !== 'string' || !value) continue;
     consider(key, value);
     // A field named like a credential, holding a value no detector recognized.
-    if (!claimed.has(`${key}\0secret`) && isSensitiveKey(key.slice(key.lastIndexOf('.') + 1)) && !MASKED.test(value.trim()) && value.trim().length >= 6) {
+    if (
+      !claimed.has(`${key}\0secret`) &&
+      isSensitiveKey(key.slice(key.lastIndexOf('.') + 1)) &&
+      !MASKED.test(value.trim()) &&
+      value.trim().length >= 6
+    ) {
       const previous = found.get('credential');
-      if (!previous || depth(key) > depth(previous.path)) found.set('credential', { kind: 'credential', category: 'secret', path: key, preview: mask('credential', value) });
+      if (!previous || depth(key) > depth(previous.path))
+        found.set('credential', {
+          kind: 'credential',
+          category: 'secret',
+          path: key,
+          preview: mask('credential', value),
+        });
     }
   }
   // A field covered by a specific kind needs no generic credential finding.
   const credential = found.get('credential');
-  if (credential && [...found.values()].some(value => value.kind !== 'credential' && value.path === credential.path)) found.delete('credential');
+  if (credential && [...found.values()].some((value) => value.kind !== 'credential' && value.path === credential.path))
+    found.delete('credential');
   // Plain-text lines and messages carry values outside any field.
-  const text = event.isJson ? event.message ?? '' : event.raw ?? event.message ?? '';
+  const text = event.isJson ? (event.message ?? '') : (event.raw ?? event.message ?? '');
   if (text) consider('message', text.slice(0, 8192));
   return [...found.values()];
 }
 
-const depth = (path: string) => path === 'message' ? -1 : path.split('.').length;
+const depth = (path: string) => (path === 'message' ? -1 : path.split('.').length);
 
 function mask(kind: SensitiveKind, value: string): string {
   if (kind === 'email') {
@@ -112,7 +179,10 @@ function luhn(value: string): boolean {
   let sum = 0;
   for (let index = 0; index < digits.length; index++) {
     let digit = Number(digits[digits.length - 1 - index]);
-    if (index % 2 === 1) { digit *= 2; if (digit > 9) digit -= 9; }
+    if (index % 2 === 1) {
+      digit *= 2;
+      if (digit > 9) digit -= 9;
+    }
     sum += digit;
   }
   return sum % 10 === 0;
@@ -146,7 +216,10 @@ export function uncaughtExceptionVariable(text: string, line: number, language: 
     for (let char = source.length - 1; char >= 0; char--) {
       if (source[char] === '}') depthOpen++;
       else if (source[char] === '{') {
-        if (depthOpen > 0) { depthOpen--; continue; }
+        if (depthOpen > 0) {
+          depthOpen--;
+          continue;
+        }
         const header = source.slice(0, char);
         const caught = /\bcatch\s*\(\s*(?:[\w.<>|\s]+\s+)?([A-Za-z_$][\w$]*)\s*(?::[^)]*)?\)\s*$/.exec(header);
         if (caught) return mentions(call, caught[1]) ? undefined : caught[1];
@@ -172,12 +245,15 @@ function callText(lines: string[], start: number): string {
   return text;
 }
 
-const mentions = (call: string, name: string) => new RegExp(`(?<![\\w$])${name.replace(/\$/g, '\\$')}(?![\\w$])`).test(call);
+const mentions = (call: string, name: string) =>
+  new RegExp(`(?<![\\w$])${name.replace(/\$/g, '\\$')}(?![\\w$])`).test(call);
 
 // Words a failure is described with. A message that denies one ("no errors",
 // "0 failures") is not a failure.
-const FAILURE_WORDS = /\b(?:error|exception|failed|failure|fatal|panic|traceback|unhandled|crash(?:ed)?|refused|timed out|timeout)\b/i;
-const NOT_A_FAILURE = /\b(?:no|0|zero|without|none)\s+(?:errors?|exceptions?|failures?)\b|\b(?:errors?|failures?)\s*[=:]\s*(?:0|none|null|false)\b/i;
+const FAILURE_WORDS =
+  /\b(?:error|exception|failed|failure|fatal|panic|traceback|unhandled|crash(?:ed)?|refused|timed out|timeout)\b/i;
+const NOT_A_FAILURE =
+  /\b(?:no|0|zero|without|none)\s+(?:errors?|exceptions?|failures?)\b|\b(?:errors?|failures?)\s*[=:]\s*(?:0|none|null|false)\b/i;
 const QUIET_LEVELS = new Set(['trace', 'debug', 'info']);
 
 /**
@@ -195,8 +271,12 @@ export function isQuietFailure(event: LogEvent): boolean {
 
 /** A structured event that names the request or trace it belongs to. */
 export function hasRequestContext(event: LogEvent): boolean {
-  return [getField(event, 'traceId'), getField(event, 'requestId'), getField(event, 'correlationId'), getField(event, 'correlation_id')]
-    .some(value => value !== undefined && value !== null && value !== '');
+  return [
+    getField(event, 'traceId'),
+    getField(event, 'requestId'),
+    getField(event, 'correlationId'),
+    getField(event, 'correlation_id'),
+  ].some((value) => value !== undefined && value !== null && value !== '');
 }
 
 export function isStructured(event: LogEvent): boolean {
@@ -205,7 +285,11 @@ export function isStructured(event: LogEvent): boolean {
 
 /** Sensitive values found in one source's events, by kind. */
 export interface SourceSensitive {
-  serverId: string; server: string; value: SensitiveValue; count: number; lastId: number;
+  serverId: string;
+  server: string;
+  value: SensitiveValue;
+  count: number;
+  lastId: number;
 }
 
 /**
@@ -224,7 +308,11 @@ export class SensitiveScanner {
   version = 0;
 
   reset(): void {
-    this.found.clear(); this.carried = []; this.carriedHead = 0; this.watermark = 0; this.version++;
+    this.found.clear();
+    this.carried = [];
+    this.carriedHead = 0;
+    this.watermark = 0;
+    this.version++;
   }
 
   /** Scan events in id order; `claimed` says whether a statement already reports an event. */
@@ -240,8 +328,11 @@ export class SensitiveScanner {
       for (const value of values) {
         const key = `${serverId}\0${value.kind}`;
         const entry = this.found.get(key);
-        if (entry) { entry.count++; entry.lastId = event.id; entry.value = value; }
-        else this.found.set(key, { serverId, server: event.server ?? serverId, value, count: 1, lastId: event.id });
+        if (entry) {
+          entry.count++;
+          entry.lastId = event.id;
+          entry.value = value;
+        } else this.found.set(key, { serverId, server: event.server ?? serverId, value, count: 1, lastId: event.id });
         keys.push(key);
       }
       this.carried.push({ id: event.id, keys });
@@ -264,5 +355,7 @@ export class SensitiveScanner {
     }
   }
 
-  get findings(): SourceSensitive[] { return [...this.found.values()]; }
+  get findings(): SourceSensitive[] {
+    return [...this.found.values()];
+  }
 }

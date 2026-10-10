@@ -5,9 +5,18 @@ export function completionTarget(input: string) {
   const text = last?.[0] ?? '';
   const match = text.match(/^(-?)(@?([A-Za-z_][A-Za-z0-9_.]*):)?(.*)$/)!;
   let value = match[4];
-  try { if (value.startsWith('"')) value = JSON.parse(value); }
-  catch { value = value.slice(1); }
-  return { prefix: input.slice(0, last?.index ?? input.length), negate: match[1], field: match[3], fieldText: match[2], value };
+  try {
+    if (value.startsWith('"')) value = JSON.parse(value);
+  } catch {
+    value = value.slice(1);
+  }
+  return {
+    prefix: input.slice(0, last?.index ?? input.length),
+    negate: match[1],
+    field: match[3],
+    fieldText: match[2],
+    value,
+  };
 }
 
 export function completeQuery(input: string, fields: string[], values: { value: string }[]): string[] {
@@ -15,6 +24,6 @@ export function completeQuery(input: string, fields: string[], values: { value: 
   const prefix = target.prefix + target.negate;
   const options = target.field
     ? values.map(({ value }) => prefix + target.fieldText + JSON.stringify(value))
-    : fields.filter(field => /^[A-Za-z_][A-Za-z0-9_.]*$/.test(field)).map(field => prefix + field + ':');
-  return options.filter(value => value.length <= 256);
+    : fields.filter((field) => /^[A-Za-z_][A-Za-z0-9_.]*$/.test(field)).map((field) => prefix + field + ':');
+  return options.filter((value) => value.length <= 256);
 }

@@ -9,8 +9,17 @@ import { formatDuration } from './trace';
  * The Traces dialog: recent requests across services, from OpenTelemetry
  * spans and from logs that carry a trace id. Choosing one opens its waterfall.
  */
-export function createTraceList(elements: Elements, api: WebviewApi, scope: EventScope,
-  actions: { showTrace(traceId: string): void; formatTime(ms: number): string; startReceiver(): void; receiver(): { running: boolean; endpoint?: string } }) {
+export function createTraceList(
+  elements: Elements,
+  api: WebviewApi,
+  scope: EventScope,
+  actions: {
+    showTrace(traceId: string): void;
+    formatTime(ms: number): string;
+    startReceiver(): void;
+    receiver(): { running: boolean; endpoint?: string };
+  },
+) {
   let traces: TraceSummary[] = [];
 
   function show() {
@@ -23,14 +32,17 @@ export function createTraceList(elements: Elements, api: WebviewApi, scope: Even
   scope.listen(elements.traces, 'click', show);
   scope.listen(elements.tracesClose, 'click', () => elements.tracesDialog.close());
   scope.listen(elements.tracesErrorsOnly, 'change', render);
-  scope.listen(elements.tracesStartReceiver, 'click', () => { actions.startReceiver(); elements.tracesDialog.close(); });
-  scope.listen(elements.tracesRows, 'click', event => {
+  scope.listen(elements.tracesStartReceiver, 'click', () => {
+    actions.startReceiver();
+    elements.tracesDialog.close();
+  });
+  scope.listen(elements.tracesRows, 'click', (event) => {
     const row = (event.target as HTMLElement).closest<HTMLElement>('[data-trace-id]');
     if (!row?.dataset.traceId) return;
     elements.tracesDialog.close();
     actions.showTrace(row.dataset.traceId);
   });
-  scope.listen(elements.tracesRows, 'keydown', event => {
+  scope.listen(elements.tracesRows, 'keydown', (event) => {
     const key = (event as KeyboardEvent).key;
     if (key !== 'Enter' && key !== ' ') return;
     const row = (event.target as HTMLElement).closest<HTMLElement>('[data-trace-id]');
@@ -41,7 +53,9 @@ export function createTraceList(elements: Elements, api: WebviewApi, scope: Even
   });
 
   // The receiver can start or stop while the list is open.
-  function receiverChanged() { if (elements.tracesDialog.open) render(); }
+  function receiverChanged() {
+    if (elements.tracesDialog.open) render();
+  }
 
   function receive(list: TraceSummary[]) {
     traces = list;
@@ -50,8 +64,8 @@ export function createTraceList(elements: Elements, api: WebviewApi, scope: Even
 
   function render() {
     const errorsOnly = elements.tracesErrorsOnly.checked;
-    const shown = errorsOnly ? traces.filter(trace => trace.errors) : traces;
-    const withSpans = traces.filter(trace => trace.spans).length;
+    const shown = errorsOnly ? traces.filter((trace) => trace.errors) : traces;
+    const withSpans = traces.filter((trace) => trace.spans).length;
     const receiver = actions.receiver();
     // Offer to start the receiver only when it is not already running.
     elements.tracesStartReceiver.hidden = receiver.running || withSpans > 0;
@@ -62,52 +76,67 @@ export function createTraceList(elements: Elements, api: WebviewApi, scope: Even
       elements.tracesRows.replaceChildren();
       return;
     }
-    const failed = traces.filter(trace => trace.errors).length;
-    elements.tracesStatus.textContent = `${traces.length.toLocaleString()} recent ${traces.length === 1 ? 'trace' : 'traces'} · ${failed.toLocaleString()} with errors`
-      + (withSpans < traces.length ? ` · ${(traces.length - withSpans).toLocaleString()} from logs only` : '') + ' · Choose one to see its waterfall';
-    const longest = Math.max(1, ...shown.map(trace => trace.durationMs));
-    elements.tracesRows.replaceChildren(...shown.map(trace => {
-      const row = document.createElement('tr');
-      row.className = `traces-row${trace.errors ? ' trace-error' : ''}`;
-      row.dataset.traceId = trace.traceId;
-      row.tabIndex = 0;
-      row.setAttribute('aria-label', `${trace.name}, ${formatDuration(trace.durationMs)}${trace.errors ? `, ${trace.errors} errors` : ''}`);
-      const name = cell('', 'trace-name');
-      // The operation is often long, such as a full request path: it wraps to two lines, and the tooltip has all of it.
-      const nameText = document.createElement('span');
-      nameText.className = 'trace-name-text';
-      nameText.textContent = `${trace.errors ? '⚠ ' : ''}${trace.name || trace.traceId}`;
-      name.append(nameText);
-      name.title = `${trace.name || trace.traceId}\nTrace ${trace.traceId}`;
-      const services = cell('', 'traces-services');
-      for (const service of trace.services.slice(0, 4)) {
-        const chip = document.createElement('span');
-        chip.className = 'service-chip';
-        chip.textContent = service;
-        chip.title = service;
-        services.append(chip);
-      }
-      if (trace.services.length > 4) services.append(document.createTextNode(` +${trace.services.length - 4}`));
-      const duration = cell('', 'traces-duration');
-      // Flex layout goes inside the cell; a flex table cell stops lining up with its row.
-      const durationContent = document.createElement('div');
-      durationContent.className = 'traces-duration-content';
-      const track = document.createElement('div');
-      track.className = 'trace-track';
-      const bar = document.createElement('div');
-      bar.className = 'trace-bar';
-      bar.style.left = '0';
-      bar.style.width = `${Math.max(1, trace.durationMs / longest * 100)}%`;
-      track.append(bar);
-      const label = document.createElement('span');
-      label.className = 'traces-duration-label';
-      label.textContent = formatDuration(trace.durationMs);
-      durationContent.append(track, label);
-      duration.append(durationContent);
-      const counts = [trace.spans ? `${trace.spans} spans` : '', trace.logs ? `${trace.logs} logs` : ''].filter(Boolean).join(' · ');
-      row.append(cell(trace.startMs === undefined ? '' : actions.formatTime(trace.startMs), 'time'), name, services, duration, cell(counts, 'traces-counts'));
-      return row;
-    }));
+    const failed = traces.filter((trace) => trace.errors).length;
+    elements.tracesStatus.textContent =
+      `${traces.length.toLocaleString()} recent ${traces.length === 1 ? 'trace' : 'traces'} · ${failed.toLocaleString()} with errors` +
+      (withSpans < traces.length ? ` · ${(traces.length - withSpans).toLocaleString()} from logs only` : '') +
+      ' · Choose one to see its waterfall';
+    const longest = Math.max(1, ...shown.map((trace) => trace.durationMs));
+    elements.tracesRows.replaceChildren(
+      ...shown.map((trace) => {
+        const row = document.createElement('tr');
+        row.className = `traces-row${trace.errors ? ' trace-error' : ''}`;
+        row.dataset.traceId = trace.traceId;
+        row.tabIndex = 0;
+        row.setAttribute(
+          'aria-label',
+          `${trace.name}, ${formatDuration(trace.durationMs)}${trace.errors ? `, ${trace.errors} errors` : ''}`,
+        );
+        const name = cell('', 'trace-name');
+        // The operation is often long, such as a full request path: it wraps to two lines, and the tooltip has all of it.
+        const nameText = document.createElement('span');
+        nameText.className = 'trace-name-text';
+        nameText.textContent = `${trace.errors ? '⚠ ' : ''}${trace.name || trace.traceId}`;
+        name.append(nameText);
+        name.title = `${trace.name || trace.traceId}\nTrace ${trace.traceId}`;
+        const services = cell('', 'traces-services');
+        for (const service of trace.services.slice(0, 4)) {
+          const chip = document.createElement('span');
+          chip.className = 'service-chip';
+          chip.textContent = service;
+          chip.title = service;
+          services.append(chip);
+        }
+        if (trace.services.length > 4) services.append(document.createTextNode(` +${trace.services.length - 4}`));
+        const duration = cell('', 'traces-duration');
+        // Flex layout goes inside the cell; a flex table cell stops lining up with its row.
+        const durationContent = document.createElement('div');
+        durationContent.className = 'traces-duration-content';
+        const track = document.createElement('div');
+        track.className = 'trace-track';
+        const bar = document.createElement('div');
+        bar.className = 'trace-bar';
+        bar.style.left = '0';
+        bar.style.width = `${Math.max(1, (trace.durationMs / longest) * 100)}%`;
+        track.append(bar);
+        const label = document.createElement('span');
+        label.className = 'traces-duration-label';
+        label.textContent = formatDuration(trace.durationMs);
+        durationContent.append(track, label);
+        duration.append(durationContent);
+        const counts = [trace.spans ? `${trace.spans} spans` : '', trace.logs ? `${trace.logs} logs` : '']
+          .filter(Boolean)
+          .join(' · ');
+        row.append(
+          cell(trace.startMs === undefined ? '' : actions.formatTime(trace.startMs), 'time'),
+          name,
+          services,
+          duration,
+          cell(counts, 'traces-counts'),
+        );
+        return row;
+      }),
+    );
   }
 
   return { show, receive, receiverChanged };

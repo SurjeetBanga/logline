@@ -16,7 +16,12 @@ export interface LinePipelineOptions {
 
 /** Pipeline options from the current settings. */
 export function linePipelineOptions(config: Settings, limit: number, flushMs?: number): LinePipelineOptions {
-  return { join: config.get('joinStackTraces', true), containers: config.get<string>('containerPrefixes', 'auto') !== 'off', limit, flushMs };
+  return {
+    join: config.get('joinStackTraces', true),
+    containers: config.get<string>('containerPrefixes', 'auto') !== 'off',
+    limit,
+    flushMs,
+  };
 }
 
 // A runaway number of distinct prefixes is not container output; lines of
@@ -34,8 +39,12 @@ export class LinePipeline {
   private readonly shared?: StackJoiner;
   private readonly joiners = new Map<string, StackJoiner<ContainerTag>>();
 
-  constructor(private readonly sink: LineSink, private readonly options: LinePipelineOptions) {
-    if (options.join) this.shared = new StackJoiner((line, truncated) => sink(line, truncated), options.limit, options.flushMs);
+  constructor(
+    private readonly sink: LineSink,
+    private readonly options: LinePipelineOptions,
+  ) {
+    if (options.join)
+      this.shared = new StackJoiner((line, truncated) => sink(line, truncated), options.limit, options.flushMs);
   }
 
   write(line: string, truncated: boolean): void {
@@ -44,17 +53,26 @@ export class LinePipeline {
       // A line without a prefix never continues a container's trace, and
       // releasing held lines first keeps the two kinds in arrival order.
       for (const joiner of this.joiners.values()) joiner.flush();
-      if (this.shared) this.shared.write(line, truncated); else this.sink(line, truncated);
+      if (this.shared) this.shared.write(line, truncated);
+      else this.sink(line, truncated);
       return;
     }
     this.shared?.flush();
-    if (!this.options.join) { this.sink(split.payload, truncated, split.tag); return; }
+    if (!this.options.join) {
+      this.sink(split.payload, truncated, split.tag);
+      return;
+    }
     let joiner = this.joiners.get(split.tag.container);
     if (!joiner && this.joiners.size < MAX_CONTAINERS) {
-      joiner = new StackJoiner<ContainerTag>((text, cut, tag) => this.sink(text, cut, tag), this.options.limit, this.options.flushMs);
+      joiner = new StackJoiner<ContainerTag>(
+        (text, cut, tag) => this.sink(text, cut, tag),
+        this.options.limit,
+        this.options.flushMs,
+      );
       this.joiners.set(split.tag.container, joiner);
     }
-    if (joiner) joiner.write(split.payload, truncated, split.tag); else this.sink(split.payload, truncated, split.tag);
+    if (joiner) joiner.write(split.payload, truncated, split.tag);
+    else this.sink(split.payload, truncated, split.tag);
   }
 
   /** Release held lines without ending the stream. */

@@ -3,7 +3,10 @@
  * streams contain control sequences and often split them across chunks, so
  * this deliberately keeps a small amount of state between writes.
  */
-export interface TerminalLine { text: string; truncated: boolean; }
+export interface TerminalLine {
+  text: string;
+  truncated: boolean;
+}
 
 export class TerminalNormalizer {
   private pending = '';
@@ -14,7 +17,12 @@ export class TerminalNormalizer {
   private droppingEscape = false;
   private readonly limit: number;
   private static readonly maxEscape = 4096;
-  constructor(private readonly onLine: (line: TerminalLine) => void, limit = 64 * 1024) { this.limit = limit; }
+  constructor(
+    private readonly onLine: (line: TerminalLine) => void,
+    limit = 64 * 1024,
+  ) {
+    this.limit = limit;
+  }
 
   write(chunk: string): void {
     if (this.droppingEscape) {
@@ -41,11 +49,18 @@ export class TerminalNormalizer {
     for (let i = 0; i < text.length; i++) {
       const code = text.charCodeAt(i);
       if (code === 0x1b) {
-        if (plain) { this.append(plain); plain = ''; }
+        if (plain) {
+          this.append(plain);
+          plain = '';
+        }
         const next = text[i + 1];
         if (next === '[') {
           let found = -1;
-          for (let j = i + 2; j < text.length; j++) if (/[\x40-\x7e]/.test(text[j])) { found = j; break; }
+          for (let j = i + 2; j < text.length; j++)
+            if (/[\x40-\x7e]/.test(text[j])) {
+              found = j;
+              break;
+            }
           if (found < 0) {
             const rest = text.slice(i);
             const newline = rest.search(/[\r\n]/);
@@ -54,7 +69,10 @@ export class TerminalNormalizer {
             // cannot hide every later line until the byte cap is reached.
             if (newline >= 0) {
               this.escape = '';
-              if (plain) { this.append(plain); plain = ''; }
+              if (plain) {
+                this.append(plain);
+                plain = '';
+              }
               this.emit();
               i += newline;
               continue;
@@ -76,15 +94,25 @@ export class TerminalNormalizer {
           let found = -1;
           let endLength = 1;
           for (let j = i + 2; j < text.length; j++) {
-            if (text.charCodeAt(j) === 7) { found = j; break; }
-            if (text.charCodeAt(j) === 0x1b && text[j + 1] === '\\') { found = j; endLength = 2; break; }
+            if (text.charCodeAt(j) === 7) {
+              found = j;
+              break;
+            }
+            if (text.charCodeAt(j) === 0x1b && text[j + 1] === '\\') {
+              found = j;
+              endLength = 2;
+              break;
+            }
           }
           if (found < 0) {
             const rest = text.slice(i);
             const newline = rest.search(/[\r\n]/);
             if (newline >= 0) {
               this.escape = '';
-              if (plain) { this.append(plain); plain = ''; }
+              if (plain) {
+                this.append(plain);
+                plain = '';
+              }
               this.emit();
               i += newline;
               continue;
@@ -99,7 +127,10 @@ export class TerminalNormalizer {
           continue;
         }
         // Drop a two-byte escape sequence and retain an incomplete one.
-        if (i + 1 >= text.length) { this.escape = text.slice(i, i + TerminalNormalizer.maxEscape); break; }
+        if (i + 1 >= text.length) {
+          this.escape = text.slice(i, i + TerminalNormalizer.maxEscape);
+          break;
+        }
         i++;
         continue;
       }
@@ -110,7 +141,10 @@ export class TerminalNormalizer {
         plain = '';
         if (text[i + 1] === '\n') this.pendingCarriageReturn = false;
         else if (i + 1 >= text.length) this.pendingCarriageReturn = true;
-        else { this.pending = ''; this.truncated = false; }
+        else {
+          this.pending = '';
+          this.truncated = false;
+        }
         continue;
       }
       if (code === 10) {
@@ -126,13 +160,18 @@ export class TerminalNormalizer {
   }
 
   end(): void {
-    if (this.escape) { this.escape = ''; }
+    if (this.escape) {
+      this.escape = '';
+    }
     if (this.pending) this.emit();
   }
 
   private append(value: string): void {
     const room = this.limit - this.pending.length;
-    if (room <= 0) { this.truncated = true; return; }
+    if (room <= 0) {
+      this.truncated = true;
+      return;
+    }
     this.pending += value.slice(0, room);
     if (value.length > room) this.truncated = true;
   }

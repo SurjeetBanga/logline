@@ -10,8 +10,12 @@ import { dependencyNames, taskDefinitionLabel } from './definition';
 export class TaskLifecycle {
   readonly executions = new Map<vscode.TaskExecution, SessionSummary>();
   private observing = true;
-  constructor(private readonly registry: SessionRegistry, private readonly ingestion: Ingestion,
-    private readonly state: RuntimeState, private readonly hasProcesses: () => boolean) { }
+  constructor(
+    private readonly registry: SessionRegistry,
+    private readonly ingestion: Ingestion,
+    private readonly state: RuntimeState,
+    private readonly hasProcesses: () => boolean,
+  ) {}
   stop(serverId?: string): void {
     for (const [execution, record] of this.executions) {
       if (serverId && record.serverId !== serverId) continue;
@@ -20,7 +24,10 @@ export class TaskLifecycle {
   }
   stopSessionById(id: string): void {
     for (const [execution, record] of this.executions) {
-      if (record.id === id) { this.terminate(execution, record); return; }
+      if (record.id === id) {
+        this.terminate(execution, record);
+        return;
+      }
     }
   }
   private terminate(execution: vscode.TaskExecution, record: SessionSummary): void {
@@ -29,11 +36,18 @@ export class TaskLifecycle {
     record.taskState = 'stopping';
     this.state.status = `Stopping: ${record.taskName}`;
     this.state.notify();
-    try { execution.terminate(); } catch { /* task may already have ended */ }
+    try {
+      execution.terminate();
+    } catch {
+      /* task may already have ended */
+    }
   }
   /** Release VS Code task observation during extension shutdown. Ordinary tasks
    * belong to the editor and must keep running after Logline deactivates. */
-  disposeObservation(): void { this.observing = false; this.executions.clear(); }
+  disposeObservation(): void {
+    this.observing = false;
+    this.executions.clear();
+  }
   private taskSummary(execution: vscode.TaskExecution): SessionSummary {
     const existing = this.executions.get(execution);
     if (existing) return existing;
@@ -51,12 +65,16 @@ export class TaskLifecycle {
       events: 0,
       taskName,
       taskType: String(definition.type),
-      taskScope, taskLabel: task.name,
+      taskScope,
+      taskLabel: task.name,
       taskState: 'running',
       dependencies: deps,
       dependencyState: this.registry.dependencyState(deps, taskScope),
-      source: task.source, sourceKind: 'task', owned: false, canStop: true,
-      command: taskCommand(task) ?? taskName
+      source: task.source,
+      sourceKind: 'task',
+      owned: false,
+      canStop: true,
+      command: taskCommand(task) ?? taskName,
     };
     this.executions.set(execution, record);
     this.registry.records.set(record.id, record);
@@ -67,12 +85,26 @@ export class TaskLifecycle {
     return record;
   }
 
-  private taskLifecycleEvent(record: SessionSummary, message: string, level: string, extra: Record<string, unknown> = {}): void {
-    const event = this.ingestion.create(JSON.stringify({
-      level, message, taskName: record.taskName, taskType: record.taskType,
-      dependencies: record.dependencies, taskState: record.taskState, dependencyState: record.dependencyState,
-      exitReason: record.exitReason, ...extra
-    }), 'task');
+  private taskLifecycleEvent(
+    record: SessionSummary,
+    message: string,
+    level: string,
+    extra: Record<string, unknown> = {},
+  ): void {
+    const event = this.ingestion.create(
+      JSON.stringify({
+        level,
+        message,
+        taskName: record.taskName,
+        taskType: record.taskType,
+        dependencies: record.dependencies,
+        taskState: record.taskState,
+        dependencyState: record.dependencyState,
+        exitReason: record.exitReason,
+        ...extra,
+      }),
+      'task',
+    );
     event.serverId = record.serverId;
     event.server = record.server;
     event.sessionId = record.id;
@@ -82,12 +114,20 @@ export class TaskLifecycle {
     event.taskState = record.taskState;
     event.dependencyState = record.dependencyState;
     event.exitReason = record.exitReason;
-    const extraFields = Object.fromEntries(Object.entries(extra).filter(([, value]) =>
-      typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean'));
+    const extraFields = Object.fromEntries(
+      Object.entries(extra).filter(
+        ([, value]) => typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean',
+      ),
+    );
     event.fields = {
-      ...(event.fields ?? {}), ...extraFields, taskName: record.taskName ?? '', taskType: record.taskType ?? '',
-      dependencies: record.dependencies?.join(', ') ?? '', taskState: record.taskState ?? '', dependencyState: record.dependencyState ?? '',
-      ...(record.exitReason ? { exitReason: record.exitReason } : {})
+      ...(event.fields ?? {}),
+      ...extraFields,
+      taskName: record.taskName ?? '',
+      taskType: record.taskType ?? '',
+      dependencies: record.dependencies?.join(', ') ?? '',
+      taskState: record.taskState ?? '',
+      dependencyState: record.dependencyState ?? '',
+      ...(record.exitReason ? { exitReason: record.exitReason } : {}),
     };
     record.events++;
     this.ingestion.commit(event, true);
@@ -125,7 +165,12 @@ export class TaskLifecycle {
     if (stopping) record.status = 'exited';
     else if (record.taskState === 'failed') record.status = 'failed';
     this.registry.refreshDependents(record.taskName, record.taskScope, record.taskLabel);
-    this.taskLifecycleEvent(record, `Task process ended: ${record.taskName} (${record.exitReason})`, record.status === 'failed' ? 'error' : 'info', { exitCode });
+    this.taskLifecycleEvent(
+      record,
+      `Task process ended: ${record.taskName} (${record.exitReason})`,
+      record.status === 'failed' ? 'error' : 'info',
+      { exitCode },
+    );
     this.registry.pruneSessionRegistry();
   }
 
@@ -134,11 +179,16 @@ export class TaskLifecycle {
     if (execution.task.definition?.type === 'logline') return;
     const record = this.taskSummary(execution);
     record.endedAt = Date.now();
-    if (record.status !== 'failed') record.status = record.exitCode === undefined || record.exitCode === 0 ? 'exited' : 'failed';
+    if (record.status !== 'failed')
+      record.status = record.exitCode === undefined || record.exitCode === 0 ? 'exited' : 'failed';
     record.taskState = record.status;
     record.exitReason ??= record.status === 'exited' ? 'completed' : 'failed';
     this.registry.refreshDependents(record.taskName, record.taskScope, record.taskLabel);
-    this.taskLifecycleEvent(record, `Task ended: ${record.taskName} (${record.exitReason})`, record.status === 'failed' ? 'error' : 'info');
+    this.taskLifecycleEvent(
+      record,
+      `Task ended: ${record.taskName} (${record.exitReason})`,
+      record.status === 'failed' ? 'error' : 'info',
+    );
     this.executions.delete(execution);
     if (!this.executions.size && !this.hasProcesses()) {
       this.state.status = `Task ${record.status}: ${record.taskName} (${record.exitReason})`;
@@ -150,13 +200,21 @@ export class TaskLifecycle {
 
 /** The command line a task runs, so the run picker can show it instead of an id. */
 export function taskCommand(task: vscode.Task): string | undefined {
-  const execution = task.execution as { commandLine?: unknown; command?: unknown; process?: unknown; args?: unknown } | undefined;
+  const execution = task.execution as
+    { commandLine?: unknown; command?: unknown; process?: unknown; args?: unknown } | undefined;
   if (!execution) return undefined;
   if (typeof execution.commandLine === 'string' && execution.commandLine.trim()) return execution.commandLine.trim();
-  const program = typeof execution.process === 'string' ? execution.process
-    : typeof execution.command === 'string' ? execution.command
-      : (execution.command as { value?: unknown } | undefined)?.value;
+  const program =
+    typeof execution.process === 'string'
+      ? execution.process
+      : typeof execution.command === 'string'
+        ? execution.command
+        : (execution.command as { value?: unknown } | undefined)?.value;
   if (typeof program !== 'string' || !program) return undefined;
-  const args = Array.isArray(execution.args) ? execution.args.map(arg => typeof arg === 'string' ? arg : (arg as { value?: unknown })?.value).filter((arg): arg is string => typeof arg === 'string') : [];
+  const args = Array.isArray(execution.args)
+    ? execution.args
+        .map((arg) => (typeof arg === 'string' ? arg : (arg as { value?: unknown })?.value))
+        .filter((arg): arg is string => typeof arg === 'string')
+    : [];
   return [program, ...args].join(' ');
 }

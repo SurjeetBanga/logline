@@ -11,29 +11,53 @@ import type { ViewerState } from '../state';
 import { LEVELS } from '../state';
 import type { ViewerActions, WebviewApi } from '../types';
 
-export function createSearch(elements: Elements, state: ViewerState, api: WebviewApi, popovers: Popover[], actions: Pick<ViewerActions, 'filterChanged'> & { updateScopeSelection?: () => void; }, scope: EventScope) {
-  const { filterChanged, updateScopeSelection = () => { } } = actions;
+export function createSearch(
+  elements: Elements,
+  state: ViewerState,
+  api: WebviewApi,
+  popovers: Popover[],
+  actions: Pick<ViewerActions, 'filterChanged'> & { updateScopeSelection?: () => void },
+  scope: EventScope,
+) {
+  const { filterChanged, updateScopeSelection = () => {} } = actions;
   const MAX_QUERY_LENGTH = 256;
-  let appliedQuery = queryTokens(elements.search.value.trim()).map(value => value.toLowerCase() === 'or' ? 'OR' : value).join(' ').slice(0, MAX_QUERY_LENGTH);
+  let appliedQuery = queryTokens(elements.search.value.trim())
+    .map((value) => (value.toLowerCase() === 'or' ? 'OR' : value))
+    .join(' ')
+    .slice(0, MAX_QUERY_LENGTH);
   let editingIndex: number | undefined;
   // A checkbox per level (any combination, Kayak-filter style) rather than a
   // single "at least X" choice, so e.g. Info + Error but not Warn is possible.
 
-  const LEVEL_LABELS: Record<string, string> = { trace: 'Trace', debug: 'Debug', info: 'Info', warn: 'Warn', error: 'Error', fatal: 'Fatal', unclassified: 'Unclassified' };
+  const LEVEL_LABELS: Record<string, string> = {
+    trace: 'Trace',
+    debug: 'Debug',
+    info: 'Info',
+    warn: 'Warn',
+    error: 'Error',
+    fatal: 'Fatal',
+    unclassified: 'Unclassified',
+  };
 
   function tokens(query: string) {
-    return queryTokens(query.trim()).map(value => value.toLowerCase() === 'or' ? 'OR' : value);
+    return queryTokens(query.trim()).map((value) => (value.toLowerCase() === 'or' ? 'OR' : value));
   }
 
-  function validDraft(input: string, canStartWithOr = Boolean(appliedQuery)): { values: string[]; error?: string; } {
+  function validDraft(input: string, canStartWithOr = Boolean(appliedQuery)): { values: string[]; error?: string } {
     const value = input.trim();
     if (!value) return { values: [] };
     let escaped = false;
     let quoted = false;
     let brackets = 0;
     for (const character of value) {
-      if (escaped) { escaped = false; continue; }
-      if (character === '\\') { escaped = true; continue; }
+      if (escaped) {
+        escaped = false;
+        continue;
+      }
+      if (character === '\\') {
+        escaped = true;
+        continue;
+      }
       if (character === '"') quoted = !quoted;
       else if (!quoted && character === '[') brackets++;
       else if (!quoted && character === ']') brackets--;
@@ -43,7 +67,11 @@ export function createSearch(elements: Elements, state: ViewerState, api: Webvie
     if (brackets !== 0) return { values: [], error: 'Close the filter range before applying it.' };
     const values = tokens(value);
     if (!values.length) return { values: [], error: 'Enter a filter term.' };
-    if ((values[0] === 'OR' && !canStartWithOr) || values.at(-1) === 'OR' || values.some((item, index) => item === 'OR' && values[index - 1] === 'OR'))
+    if (
+      (values[0] === 'OR' && !canStartWithOr) ||
+      values.at(-1) === 'OR' ||
+      values.some((item, index) => item === 'OR' && values[index - 1] === 'OR')
+    )
       return { values: [], error: 'OR must have a filter on both sides.' };
     return { values };
   }
@@ -67,80 +95,105 @@ export function createSearch(elements: Elements, state: ViewerState, api: Webvie
   function renderChips() {
     const values = tokens(appliedQuery);
     let editingInput: HTMLInputElement | undefined;
-    elements.searchChips.replaceChildren(...values.map((value, index) => {
-      if (value === 'OR') {
-        const separator = document.createElement('span');
-        separator.className = 'search-or';
-        separator.textContent = 'OR';
-        separator.setAttribute('aria-hidden', 'true');
-        return separator;
-      }
-      const chip = document.createElement('span');
-      chip.className = `filter-chip${value.startsWith('-') ? ' exclude' : ''}${editingIndex === index ? ' editing' : ''}`;
-      chip.title = value;
-      if (editingIndex === index) {
-        const input = document.createElement('input');
-        input.type = 'text';
-        input.className = 'filter-chip-input';
-        input.value = value;
-        input.maxLength = MAX_QUERY_LENGTH;
-        input.title = `Edit filter: ${value}`;
-        input.setAttribute('aria-label', `Edit filter: ${value}`);
-        scope.listen(input, 'input', () => setError());
-        scope.listen(input, 'keydown', event => {
-          if (event.key === 'Enter') {
-            event.preventDefault();
-            applyValue(input.value, index);
-          } else if (event.key === 'Escape') {
-            event.preventDefault();
-            cancelEdit();
-          }
+    elements.searchChips.replaceChildren(
+      ...values.map((value, index) => {
+        if (value === 'OR') {
+          const separator = document.createElement('span');
+          separator.className = 'search-or';
+          separator.textContent = 'OR';
+          separator.setAttribute('aria-hidden', 'true');
+          return separator;
+        }
+        const chip = document.createElement('span');
+        chip.className = `filter-chip${value.startsWith('-') ? ' exclude' : ''}${editingIndex === index ? ' editing' : ''}`;
+        chip.title = value;
+        if (editingIndex === index) {
+          const input = document.createElement('input');
+          input.type = 'text';
+          input.className = 'filter-chip-input';
+          input.value = value;
+          input.maxLength = MAX_QUERY_LENGTH;
+          input.title = `Edit filter: ${value}`;
+          input.setAttribute('aria-label', `Edit filter: ${value}`);
+          scope.listen(input, 'input', () => setError());
+          scope.listen(input, 'keydown', (event) => {
+            if (event.key === 'Enter') {
+              event.preventDefault();
+              applyValue(input.value, index);
+            } else if (event.key === 'Escape') {
+              event.preventDefault();
+              cancelEdit();
+            }
+          });
+          editingInput = input;
+          chip.append(input);
+        } else {
+          const label = document.createElement('button');
+          label.type = 'button';
+          label.className = 'filter-chip-label';
+          label.textContent = value;
+          label.title = `Edit filter: ${value}`;
+          label.setAttribute('aria-label', `Edit filter: ${value}`);
+          scope.listen(label, 'click', (event) => {
+            event.stopPropagation();
+            beginEdit(index);
+          });
+          chip.append(label);
+        }
+        const remove = document.createElement('button');
+        remove.type = 'button';
+        remove.className = 'filter-chip-remove';
+        // A drawn cross centres exactly; the × glyph sits on the text baseline and looks off-centre.
+        const cross = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+        for (const [key, value] of Object.entries({
+          viewBox: '0 0 16 16',
+          width: '10',
+          height: '10',
+          'aria-hidden': 'true',
+          fill: 'none',
+          stroke: 'currentColor',
+          'stroke-width': '1.6',
+          'stroke-linecap': 'round',
+        }))
+          cross.setAttribute(key, value);
+        const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+        path.setAttribute('d', 'M4 4l8 8M12 4l-8 8');
+        cross.append(path);
+        remove.append(cross);
+        remove.title = `Remove filter: ${value}`;
+        remove.setAttribute('aria-label', `Remove filter: ${value}`);
+        scope.listen(remove, 'click', (event) => {
+          event.stopPropagation();
+          removeAt(index);
         });
-        editingInput = input;
-        chip.append(input);
-      } else {
-        const label = document.createElement('button');
-        label.type = 'button';
-        label.className = 'filter-chip-label';
-        label.textContent = value;
-        label.title = `Edit filter: ${value}`;
-        label.setAttribute('aria-label', `Edit filter: ${value}`);
-        scope.listen(label, 'click', event => { event.stopPropagation(); beginEdit(index); });
-        chip.append(label);
-      }
-      const remove = document.createElement('button');
-      remove.type = 'button';
-      remove.className = 'filter-chip-remove';
-      // A drawn cross centres exactly; the × glyph sits on the text baseline and looks off-centre.
-      const cross = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-      for (const [key, value] of Object.entries({ viewBox: '0 0 16 16', width: '10', height: '10', 'aria-hidden': 'true', fill: 'none', stroke: 'currentColor', 'stroke-width': '1.6', 'stroke-linecap': 'round' }))
-        cross.setAttribute(key, value);
-      const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-      path.setAttribute('d', 'M4 4l8 8M12 4l-8 8');
-      cross.append(path);
-      remove.append(cross);
-      remove.title = `Remove filter: ${value}`;
-      remove.setAttribute('aria-label', `Remove filter: ${value}`);
-      scope.listen(remove, 'click', event => { event.stopPropagation(); removeAt(index); });
-      chip.append(remove);
-      return chip;
-    }));
-    const editorClasses = elements.searchEditor.className.split(' ').filter(Boolean).filter(value => value !== 'has-chips');
-    if (values.some(value => value !== 'OR')) editorClasses.push('has-chips');
+        chip.append(remove);
+        return chip;
+      }),
+    );
+    const editorClasses = elements.searchEditor.className
+      .split(' ')
+      .filter(Boolean)
+      .filter((value) => value !== 'has-chips');
+    if (values.some((value) => value !== 'OR')) editorClasses.push('has-chips');
     elements.searchEditor.className = editorClasses.join(' ');
-    elements.searchClear.hidden = values.every(value => value === 'OR');
+    elements.searchClear.hidden = values.every((value) => value === 'OR');
     if (editingInput) {
       editingInput.focus();
       editingInput.select?.();
     }
   }
 
-  function query() { return appliedQuery; }
+  function query() {
+    return appliedQuery;
+  }
 
   function setQuery(value: string, notify = false) {
     const normalized = tokens(value).join(' ').slice(0, MAX_QUERY_LENGTH);
     const regexError = queryError(normalized);
-    if (regexError) { setError(regexError); return false; }
+    if (regexError) {
+      setError(regexError);
+      return false;
+    }
     appliedQuery = normalized;
     editingIndex = undefined;
     // Keep the serialized value until focus moves into the editor. This makes
@@ -175,11 +228,16 @@ export function createSearch(elements: Elements, state: ViewerState, api: Webvie
 
   function applyValue(value: string, replacingIndex?: number) {
     const result = validDraft(value, replacingIndex === undefined && Boolean(appliedQuery));
-    if (result.error) { setError(result.error); return false; }
+    if (result.error) {
+      setError(result.error);
+      return false;
+    }
     if (!result.values.length) return false;
     const current = tokens(appliedQuery);
-    const next = replacingIndex === undefined ? [...current, ...result.values]
-      : [...current.slice(0, replacingIndex), ...result.values, ...current.slice(replacingIndex + 1)];
+    const next =
+      replacingIndex === undefined
+        ? [...current, ...result.values]
+        : [...current.slice(0, replacingIndex), ...result.values, ...current.slice(replacingIndex + 1)];
     const normalized = cleanQuery(next).join(' ');
     if (normalized.length > MAX_QUERY_LENGTH) {
       setError(`Filters cannot exceed ${MAX_QUERY_LENGTH} characters.`);
@@ -190,7 +248,9 @@ export function createSearch(elements: Elements, state: ViewerState, api: Webvie
     return true;
   }
 
-  function applyDraft() { return applyValue(elements.search.value); }
+  function applyDraft() {
+    return applyValue(elements.search.value);
+  }
 
   function clear() {
     if (!appliedQuery && !elements.search.value) return;
@@ -199,14 +259,11 @@ export function createSearch(elements: Elements, state: ViewerState, api: Webvie
   }
 
   function updateLevelButtonLabel() {
-    if (state.checkedLevels.size === LEVELS.length)
-      setLabel(elements.levelButton, 'All levels');
-    else if (state.checkedLevels.size === 0)
-      setLabel(elements.levelButton, 'No levels');
+    if (state.checkedLevels.size === LEVELS.length) setLabel(elements.levelButton, 'All levels');
+    else if (state.checkedLevels.size === 0) setLabel(elements.levelButton, 'No levels');
     else if (state.checkedLevels.size === 1)
       setLabel(elements.levelButton, `${LEVEL_LABELS[[...state.checkedLevels][0]]} only`);
-    else
-      setLabel(elements.levelButton, `${state.checkedLevels.size} levels`);
+    else setLabel(elements.levelButton, `${state.checkedLevels.size} levels`);
   }
 
   function setAllLevels(value: boolean) {
@@ -219,11 +276,14 @@ export function createSearch(elements: Elements, state: ViewerState, api: Webvie
   function buildLevelMenu() {
     const actions = document.createElement('div');
     actions.className = 'level-actions';
-    for (const [label, value] of [['All', true], ['None', false]] as const) {
+    for (const [label, value] of [
+      ['All', true],
+      ['None', false],
+    ] as const) {
       const button = document.createElement('button');
       button.type = 'button';
       button.textContent = label;
-      scope.listen(button, 'click', event => {
+      scope.listen(button, 'click', (event) => {
         // buildLevelMenu() below replaces this button's DOM node, detaching it
         // before the document-level click listener runs in the bubble phase —
         // without stopping propagation here, container.contains(event.target)
@@ -233,16 +293,14 @@ export function createSearch(elements: Elements, state: ViewerState, api: Webvie
       });
       actions.append(button);
     }
-    const labels = LEVELS.map(level => {
+    const labels = LEVELS.map((level) => {
       const label = document.createElement('label');
       const input = document.createElement('input');
       input.type = 'checkbox';
       input.checked = state.checkedLevels.has(level);
       scope.listen(input, 'change', () => {
-        if (input.checked)
-          state.checkedLevels.add(level);
-        else
-          state.checkedLevels.delete(level);
+        if (input.checked) state.checkedLevels.add(level);
+        else state.checkedLevels.delete(level);
         updateLevelButtonLabel();
         filterChanged();
       });
@@ -258,10 +316,9 @@ export function createSearch(elements: Elements, state: ViewerState, api: Webvie
 
   let savedSearchSignature: string | undefined;
 
-  function renderSearchState(searches: { saved: SavedSearch[]; }) {
+  function renderSearchState(searches: { saved: SavedSearch[] }) {
     const signature = JSON.stringify(searches.saved ?? []);
-    if (signature === savedSearchSignature)
-      return;
+    if (signature === savedSearchSignature) return;
     savedSearchSignature = signature;
     const makeButton = (item: SavedSearch, label: string, removable = false) => {
       const button = document.createElement('button');
@@ -282,14 +339,12 @@ export function createSearch(elements: Elements, state: ViewerState, api: Webvie
         updateScopeSelection();
         buildLevelMenu();
         updateLevelButtonLabel();
-        for (const popover of popovers)
-          popover.close();
+        for (const popover of popovers) popover.close();
         elements.search.focus();
         state.before = undefined;
         filterChanged();
       });
-      if (!removable)
-        return button;
+      if (!removable) return button;
       const row = document.createElement('div');
       row.className = 'search-item-row';
       row.append(button);
@@ -299,25 +354,31 @@ export function createSearch(elements: Elements, state: ViewerState, api: Webvie
       remove.textContent = '×';
       remove.title = 'Delete saved search';
       remove.setAttribute('aria-label', `Delete saved search: ${item.name}`);
-      scope.listen(remove, 'click', event => { event.stopPropagation(); api.postMessage({ type: 'deleteSavedSearch', id: item.id }); });
+      scope.listen(remove, 'click', (event) => {
+        event.stopPropagation();
+        api.postMessage({ type: 'deleteSavedSearch', id: item.id });
+      });
       row.append(remove);
       return row;
     };
-    const savedItems = (searches.saved ?? []).map(item => makeButton(item, item.name, true));
-    elements.savedSearchList?.replaceChildren(...(savedItems.length ? savedItems : [emptyMessage('Save a search to reuse it here.')]));
+    const savedItems = (searches.saved ?? []).map((item) => makeButton(item, item.name, true));
+    elements.savedSearchList?.replaceChildren(
+      ...(savedItems.length ? savedItems : [emptyMessage('Save a search to reuse it here.')]),
+    );
   }
 
-  function renderAutocomplete(data: Extract<HostMessage, { type: 'autocomplete'; }>) {
-    if (!elements.fieldSuggestions)
-      return;
-    elements.fieldSuggestions.replaceChildren(...completeQuery(data.input, data.fields, data.values).map(value => {
-      const option = document.createElement('option');
-      option.value = value;
-      // Quoting may interrupt the typed prefix in the replacement value.
-      // Native datalists also match labels, so retain that prefix there.
-      if (!value.toLowerCase().includes(data.input.toLowerCase())) option.setAttribute('label', data.input);
-      return option;
-    }));
+  function renderAutocomplete(data: Extract<HostMessage, { type: 'autocomplete' }>) {
+    if (!elements.fieldSuggestions) return;
+    elements.fieldSuggestions.replaceChildren(
+      ...completeQuery(data.input, data.fields, data.values).map((value) => {
+        const option = document.createElement('option');
+        option.value = value;
+        // Quoting may interrupt the typed prefix in the replacement value.
+        // Native datalists also match labels, so retain that prefix there.
+        if (!value.toLowerCase().includes(data.input.toLowerCase())) option.setAttribute('label', data.input);
+        return option;
+      }),
+    );
     // clearAutocomplete removes this association to dismiss the native menu
     // promptly. Restore it whenever fresh suggestions arrive.
     elements.search.setAttribute('list', 'fieldSuggestions');
@@ -330,7 +391,7 @@ export function createSearch(elements: Elements, state: ViewerState, api: Webvie
     elements.search.removeAttribute('list');
   }
 
-  scope.listen(elements.search, 'keydown', event => {
+  scope.listen(elements.search, 'keydown', (event) => {
     if (event.key === 'Enter') {
       event.preventDefault();
       applyDraft();
@@ -341,17 +402,32 @@ export function createSearch(elements: Elements, state: ViewerState, api: Webvie
       const values = tokens(appliedQuery);
       let index = values.length - 1;
       while (index >= 0 && values[index] === 'OR') index--;
-      if (index >= 0) { event.preventDefault(); removeAt(index); }
+      if (index >= 0) {
+        event.preventDefault();
+        removeAt(index);
+      }
     }
   });
   scope.listen(elements.search, 'focus', () => {
-    if (editingIndex === undefined && elements.search.value === appliedQuery)
-      elements.search.value = '';
+    if (editingIndex === undefined && elements.search.value === appliedQuery) elements.search.value = '';
   });
   scope.listen(elements.search, 'input', () => setError());
-  scope.listen(elements.searchClear, 'click', event => { event.stopPropagation(); clear(); });
+  scope.listen(elements.searchClear, 'click', (event) => {
+    event.stopPropagation();
+    clear();
+  });
 
   renderChips();
-  return { updateLevelButtonLabel, buildLevelMenu, renderSearchState, renderAutocomplete, clearAutocomplete,
-    query, draft: () => elements.search.value, setQuery, appendQuery: (value: string) => setQuery(`${appliedQuery} ${value}`, true), clear };
+  return {
+    updateLevelButtonLabel,
+    buildLevelMenu,
+    renderSearchState,
+    renderAutocomplete,
+    clearAutocomplete,
+    query,
+    draft: () => elements.search.value,
+    setQuery,
+    appendQuery: (value: string) => setQuery(`${appliedQuery} ${value}`, true),
+    clear,
+  };
 }

@@ -7,13 +7,17 @@ export interface RedactionOptions {
 }
 
 const DEFAULT_REPLACEMENT = '[REDACTED]';
-const SENSITIVE_KEY = /(?:password|passphrase|secret|token|api[-_ ]?key|authorization|cookie|private[-_ ]?key|access[-_ ]?key|credential)/i;
+const SENSITIVE_KEY =
+  /(?:password|passphrase|secret|token|api[-_ ]?key|authorization|cookie|private[-_ ]?key|access[-_ ]?key|credential)/i;
 
 // Credentials recognizable by their value alone, wherever they appear. Each
 // pattern starts on a fixed prefix and repeats only over characters it
 // consumes, so it stays linear; the `hint` test skips plain lines cheaply.
 const SECRET_VALUES: { hint: string; pattern: RegExp; keep?: number }[] = [
-  { hint: 'PRIVATE KEY', pattern: /-----BEGIN [A-Z ]{0,20}PRIVATE KEY-----[A-Za-z0-9+/=\s\\]*(?:-----END [A-Z ]{0,20}PRIVATE KEY-----)?/g },
+  {
+    hint: 'PRIVATE KEY',
+    pattern: /-----BEGIN [A-Z ]{0,20}PRIVATE KEY-----[A-Za-z0-9+/=\s\\]*(?:-----END [A-Z ]{0,20}PRIVATE KEY-----)?/g,
+  },
   { hint: 'eyJ', pattern: /\beyJ[A-Za-z0-9_-]{8,}\.eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}/g },
   { hint: 'earer ', pattern: /\b([Bb]earer )[A-Za-z0-9._~+/-]{16,}=*/g, keep: 1 },
   { hint: 'IA', pattern: /\b(?:AKIA|ASIA)[A-Z0-9]{16}\b/g },
@@ -22,7 +26,7 @@ const SECRET_VALUES: { hint: string; pattern: RegExp; keep?: number }[] = [
   { hint: 'AIza', pattern: /\bAIza[0-9A-Za-z_-]{35}\b/g },
   { hint: '_live_', pattern: /\b[rs]k_live_[0-9A-Za-z]{16,}/g },
   // The password in `scheme://user:password@host`.
-  { hint: '://', pattern: /(\b[a-z][a-z0-9+.-]{0,30}:\/\/[^\s:/@"']{1,256}:)[^\s/@"']{1,256}(?=@)/gi, keep: 1 }
+  { hint: '://', pattern: /(\b[a-z][a-z0-9+.-]{0,30}:\/\/[^\s:/@"']{1,256}:)[^\s/@"']{1,256}(?=@)/gi, keep: 1 },
 ];
 
 // Any prefix one of the patterns needs. Most text has none, so one scan
@@ -34,7 +38,8 @@ function redactSecretValues(text: string, replacement: string): string {
   for (const { hint, pattern, keep } of SECRET_VALUES) {
     if (!text.includes(hint)) continue;
     text = text.replace(pattern, (match, prefix: unknown) =>
-      match.includes(replacement) ? match : (keep && typeof prefix === 'string' ? prefix : '') + replacement);
+      match.includes(replacement) ? match : (keep && typeof prefix === 'string' ? prefix : '') + replacement,
+    );
   }
   return text;
 }
@@ -45,7 +50,7 @@ function normalizedKey(key: string): string {
 
 export function isSensitiveKey(key: string, fields: string[] = []): boolean {
   const normalized = normalizedKey(key);
-  if (fields.some(field => normalizedKey(field) === normalized)) return true;
+  if (fields.some((field) => normalizedKey(field) === normalized)) return true;
   return SENSITIVE_KEY.test(key) && !/(count|limit|ttl|expires?|duration)$/i.test(key);
 }
 
@@ -76,9 +81,19 @@ function redactAssignments(text: string, replacement: string, sensitive: (key: s
       let escaped = false;
       while (index < text.length) {
         const char = text[index++];
-        if (escaped) { escaped = false; continue; }
-        if (char === '\\') { escaped = true; continue; }
-        if (char === quote) { key = text.slice(keyStart, index - 1); keyEnd = index; break; }
+        if (escaped) {
+          escaped = false;
+          continue;
+        }
+        if (char === '\\') {
+          escaped = true;
+          continue;
+        }
+        if (char === quote) {
+          key = text.slice(keyStart, index - 1);
+          keyEnd = index;
+          break;
+        }
       }
     } else if (isKeyCharacter(text[index]) && !isKeyCharacter(text[index - 1])) {
       while (isKeyCharacter(text[index])) index++;
@@ -91,10 +106,16 @@ function redactAssignments(text: string, replacement: string, sensitive: (key: s
     // An apostrophe or a quoted phrase in prose is not a key. Resume just past
     // the opening quote so assignments inside or after it are still scanned.
     const quotedKey = text[start] === '"' || text[start] === "'";
-    if (key === undefined) { index = start + 1; continue; }
+    if (key === undefined) {
+      index = start + 1;
+      continue;
+    }
     let separatorEnd = keyEnd;
     while (/\s/.test(text[separatorEnd] ?? '')) separatorEnd++;
-    if (text[separatorEnd] !== ':' && text[separatorEnd] !== '=') { index = quotedKey ? start + 1 : Math.max(index, keyEnd); continue; }
+    if (text[separatorEnd] !== ':' && text[separatorEnd] !== '=') {
+      index = quotedKey ? start + 1 : Math.max(index, keyEnd);
+      continue;
+    }
     separatorEnd++;
     while (/\s/.test(text[separatorEnd] ?? '')) separatorEnd++;
     const valueStart = separatorEnd;
@@ -127,7 +148,10 @@ function redactAssignments(text: string, replacement: string, sensitive: (key: s
       const last = text[valueEnd - 1];
       if (valueEnd - valueStart > 1 && (last === '"' || last === "'")) valueEnd--;
     }
-    if (valueEnd === valueStart) { index = Math.max(index, keyEnd); continue; }
+    if (valueEnd === valueStart) {
+      index = Math.max(index, keyEnd);
+      continue;
+    }
     if (!sensitive(key)) {
       // Message fields frequently contain a JSON document as a quoted string.
       // Decode one bounded nesting level so escaped inner keys are visible to
@@ -135,11 +159,16 @@ function redactAssignments(text: string, replacement: string, sensitive: (key: s
       if (quote && depth < 4) {
         const encoded = text.slice(valueStart, valueEnd);
         let decoded: string | undefined;
-        try { decoded = quote === '"' ? JSON.parse(encoded) as string : encoded.slice(1, -1); } catch { /* incomplete value */ }
+        try {
+          decoded = quote === '"' ? (JSON.parse(encoded) as string) : encoded.slice(1, -1);
+        } catch {
+          /* incomplete value */
+        }
         if (typeof decoded === 'string') {
           const redacted = redactAssignments(decoded, replacement, sensitive, depth + 1);
           if (redacted !== decoded) {
-            output += text.slice(cursor, valueStart) + (quote === '"' ? JSON.stringify(redacted) : quote + redacted + quote);
+            output +=
+              text.slice(cursor, valueStart) + (quote === '"' ? JSON.stringify(redacted) : quote + redacted + quote);
             cursor = valueEnd;
           }
         }
@@ -166,23 +195,37 @@ function redactAssignments(text: string, replacement: string, sensitive: (key: s
  * blank unrelated fields that merely share it, such as `success: false` next
  * to `password_reset: false`.
  */
-function redactFields(fields: Record<string, string | number | boolean>, replacement: string, configuredFields: string[], redactText: (text: string) => string): Record<string, string | number | boolean> {
+function redactFields(
+  fields: Record<string, string | number | boolean>,
+  replacement: string,
+  configuredFields: string[],
+  redactText: (text: string) => string,
+): Record<string, string | number | boolean> {
   const sensitivePaths = new Map<string | number | boolean, string[]>();
   for (const [key, value] of Object.entries(fields)) {
     const parts = key.split('.');
-    const sensitivePath = isSensitiveKey(key, configuredFields)
-      || parts.slice(0, -1).some((_part, index) => isSensitiveKey(parts.slice(0, index + 1).join('.'), configuredFields));
-    if (sensitivePath) sensitivePaths.set(value, [...sensitivePaths.get(value) ?? [], key]);
+    const sensitivePath =
+      isSensitiveKey(key, configuredFields) ||
+      parts.slice(0, -1).some((_part, index) => isSensitiveKey(parts.slice(0, index + 1).join('.'), configuredFields));
+    if (sensitivePath) sensitivePaths.set(value, [...(sensitivePaths.get(value) ?? []), key]);
   }
   const redacted: Record<string, string | number | boolean> = {};
   for (const [key, value] of Object.entries(fields)) {
-    const sensitive = isSensitiveKey(key, configuredFields)
-      || (sensitivePaths.get(value)?.some(path => path === key || path.endsWith('.' + key)) ?? false);
+    const sensitive =
+      isSensitiveKey(key, configuredFields) ||
+      (sensitivePaths.get(value)?.some((path) => path === key || path.endsWith('.' + key)) ?? false);
     const safeValue = typeof value === 'string' ? redactText(value) : value;
     if (sensitive) {
-      if (key === '__proto__') Object.defineProperty(redacted, key, { value: replacement, enumerable: true, writable: true, configurable: true });
+      if (key === '__proto__')
+        Object.defineProperty(redacted, key, {
+          value: replacement,
+          enumerable: true,
+          writable: true,
+          configurable: true,
+        });
       else redacted[key] = replacement;
-    } else if (key === '__proto__') Object.defineProperty(redacted, key, { value: safeValue, enumerable: true, writable: true, configurable: true });
+    } else if (key === '__proto__')
+      Object.defineProperty(redacted, key, { value: safeValue, enumerable: true, writable: true, configurable: true });
     else redacted[key] = safeValue;
   }
   return redacted;
@@ -199,35 +242,57 @@ export function createRedactor(options: RedactionOptions = {}): Redactor {
   const enabled = options.enabled !== false;
   const replacement = options.replacement ?? DEFAULT_REPLACEMENT;
   const configuredFields = [...(options.fields ?? [])];
-  const redactTextInternal = (text: string): string => enabled
-    ? redactSecretValues(redactAssignments(text, replacement, key => isSensitiveKey(key, configuredFields)), replacement)
-    : text;
+  const redactTextInternal = (text: string): string =>
+    enabled
+      ? redactSecretValues(
+          redactAssignments(text, replacement, (key) => isSensitiveKey(key, configuredFields)),
+          replacement,
+        )
+      : text;
 
   const redactValueInternal = (value: unknown, key?: string): unknown => {
     if (!enabled) return value;
     if (key !== undefined && isSensitiveKey(key, configuredFields)) return replacement;
     if (typeof value === 'string') return redactTextInternal(value);
-    if (Array.isArray(value)) return value.map(item => redactValueInternal(item));
+    if (Array.isArray(value)) return value.map((item) => redactValueInternal(item));
     if (!value || typeof value !== 'object') return value;
-    return Object.fromEntries(Object.entries(value).map(([entryKey, entryValue]) =>
-      [entryKey, redactValueInternal(entryValue, entryKey)]));
+    return Object.fromEntries(
+      Object.entries(value).map(([entryKey, entryValue]) => [entryKey, redactValueInternal(entryValue, entryKey)]),
+    );
   };
 
   const redactEventInternal = (event: LogEvent): LogEvent => {
     if (!enabled) return { ...event };
     const redacted: LogEvent = {
       ...event,
-      fields: event.fields ? redactFields(event.fields, replacement, configuredFields, redactTextInternal) : event.fields,
-      message: event.message === undefined ? event.message : redactTextInternal(event.message)
+      fields: event.fields
+        ? redactFields(event.fields, replacement, configuredFields, redactTextInternal)
+        : event.fields,
+      message: event.message === undefined ? event.message : redactTextInternal(event.message),
     };
     // Metadata is part of the agent response too. A secret in a terminal label,
     // command, task name, or working directory must not bypass redaction merely
     // because it is outside the structured payload.
-    for (const key of ['timestamp', 'stream', 'serverId', 'server', 'sessionId', 'taskName', 'taskType', 'taskState', 'dependencyState', 'exitReason', 'command', 'cwd', 'captureReason']) {
+    for (const key of [
+      'timestamp',
+      'stream',
+      'serverId',
+      'server',
+      'sessionId',
+      'taskName',
+      'taskType',
+      'taskState',
+      'dependencyState',
+      'exitReason',
+      'command',
+      'cwd',
+      'captureReason',
+    ]) {
       const value = (redacted as unknown as Record<string, unknown>)[key];
       if (typeof value === 'string') (redacted as unknown as Record<string, unknown>)[key] = redactTextInternal(value);
     }
-    if (Array.isArray(redacted.dependencies)) redacted.dependencies = redacted.dependencies.map(value => redactTextInternal(value));
+    if (Array.isArray(redacted.dependencies))
+      redacted.dependencies = redacted.dependencies.map((value) => redactTextInternal(value));
     if (event.raw !== undefined) {
       let value: unknown;
       try {

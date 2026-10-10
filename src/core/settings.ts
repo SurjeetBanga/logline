@@ -1,13 +1,32 @@
 /** Read current settings at use time, so live configuration changes apply. */
-export interface Settings { get<T>(key: string, fallback: T): T; }
+export interface Settings {
+  get<T>(key: string, fallback: T): T;
+}
 
 const LIMITS: Record<string, [number, number]> = {
-  indentation: [1, 8], maxEvents: [1000, 1000000], maxMemoryMb: [10, 2048],
-  refreshIntervalMs: [100, 5000], maxLineLength: [1024, 1048576], maxDiskMb: [10, 10240],
-  'otlp.port': [0, 65535], logLensMaxFiles: [100, 50000]
+  indentation: [1, 8],
+  maxEvents: [1000, 1000000],
+  maxMemoryMb: [10, 2048],
+  refreshIntervalMs: [100, 5000],
+  maxLineLength: [1024, 1048576],
+  maxDiskMb: [10, 10240],
+  'otlp.port': [0, 65535],
+  logLensMaxFiles: [100, 50000],
 };
-const INTEGERS = new Set(['indentation', 'maxEvents', 'refreshIntervalMs', 'maxLineLength', 'otlp.port', 'logLensMaxFiles']);
-const CHOICES: Record<string, string[]> = { containerPrefixes: ['auto', 'off'], logDoctor: ['off', 'security', 'all'], logLenses: ['off', 'codelens', 'codelens+gutter'], 'otlp.showSpans': ['none', 'entry', 'all'] };
+const INTEGERS = new Set([
+  'indentation',
+  'maxEvents',
+  'refreshIntervalMs',
+  'maxLineLength',
+  'otlp.port',
+  'logLensMaxFiles',
+]);
+const CHOICES: Record<string, string[]> = {
+  containerPrefixes: ['auto', 'off'],
+  logDoctor: ['off', 'security', 'all'],
+  logLenses: ['off', 'codelens', 'codelens+gutter'],
+  'otlp.showSpans': ['none', 'entry', 'all'],
+};
 
 /** Normalize settings once at the host boundary; never mutate the source value. */
 export function normalizeSetting(key: string, value: unknown, fallback: unknown): unknown {
@@ -31,16 +50,27 @@ export function normalizeSetting(key: string, value: unknown, fallback: unknown)
 export function normalizeServers(value: unknown): import('./types').ServerConfig[] {
   if (!Array.isArray(value)) return [];
   const seen = new Set<string>();
-  return value.flatMap(item => {
+  return value.flatMap((item) => {
     if (!item || typeof item !== 'object' || Array.isArray(item)) return [];
     const { id, label, command } = item;
-    if (![id, label, command].every(value => typeof value === 'string' && value.trim()) || seen.has(id)) return [];
+    if (![id, label, command].every((value) => typeof value === 'string' && value.trim()) || seen.has(id)) return [];
     seen.add(id);
-    return [{ id, label, command,
-      cwd: typeof item.cwd === 'string' ? item.cwd : undefined,
-      env: item.env && typeof item.env === 'object' && !Array.isArray(item.env)
-        ? Object.fromEntries(Object.entries(item.env).filter(([, value]) => typeof value === 'string')) as Record<string, string> : undefined,
-      autoStart: item.autoStart === true, jsonOnly: item.jsonOnly === true
-    }];
+    return [
+      {
+        id,
+        label,
+        command,
+        cwd: typeof item.cwd === 'string' ? item.cwd : undefined,
+        env:
+          item.env && typeof item.env === 'object' && !Array.isArray(item.env)
+            ? (Object.fromEntries(Object.entries(item.env).filter(([, value]) => typeof value === 'string')) as Record<
+                string,
+                string
+              >)
+            : undefined,
+        autoStart: item.autoStart === true,
+        jsonOnly: item.jsonOnly === true,
+      },
+    ];
   });
 }

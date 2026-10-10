@@ -9,41 +9,67 @@ import type { LogStore } from '../core/log-store';
 import { createRedactor, type RedactionOptions } from '../core/redaction';
 import type { Settings } from '../core/settings';
 import type { LogEvent } from '../core/types';
-import { exportChunks, exportQuery, serializeExport, type ExportFormat, type ExportRequest } from '../transfer/log-export';
+import {
+  exportChunks,
+  exportQuery,
+  serializeExport,
+  type ExportFormat,
+  type ExportRequest,
+} from '../transfer/log-export';
 import { writeExportFile } from '../storage/export-file';
 import { importRecords } from '../transfer/log-import';
 import { LinePipeline, linePipelineOptions } from '../capture/line-pipeline';
 import type { ContainerTag } from '../core/container-prefix';
 
 export class LogTransfer {
-  constructor(private readonly store: LogStore, private readonly config: Settings,
-    private readonly ingestion: Ingestion, private readonly state: RuntimeState) { }
+  constructor(
+    private readonly store: LogStore,
+    private readonly config: Settings,
+    private readonly ingestion: Ingestion,
+    private readonly state: RuntimeState,
+  ) {}
   redactionOptions(): RedactionOptions {
     return {
       enabled: this.config.get('redactExports', true),
       fields: this.config.get<string[]>('redactionFields', []),
-      replacement: this.config.get('redactionReplacement', '[REDACTED]')
+      replacement: this.config.get('redactionReplacement', '[REDACTED]'),
     };
   }
 
   async chooseExportFormat(): Promise<ExportFormat | 'md' | undefined> {
-    const choice = await vscode.window.showQuickPick([
-      { label: 'JSON Lines', description: 'One redacted event per line', format: 'jsonl' as const },
-      { label: 'JSON', description: 'A redacted JSON array', format: 'json' as const },
-      { label: 'CSV', description: 'Rows with common fields as columns', format: 'csv' as const },
-      { label: 'AI context (Markdown)', description: 'Up to 1,000 filtered events for AI tools', format: 'md' as const }
-    ], { title: 'Export retained logs' });
+    const choice = await vscode.window.showQuickPick(
+      [
+        { label: 'JSON Lines', description: 'One redacted event per line', format: 'jsonl' as const },
+        { label: 'JSON', description: 'A redacted JSON array', format: 'json' as const },
+        { label: 'CSV', description: 'Rows with common fields as columns', format: 'csv' as const },
+        {
+          label: 'AI context (Markdown)',
+          description: 'Up to 1,000 filtered events for AI tools',
+          format: 'md' as const,
+        },
+      ],
+      { title: 'Export retained logs' },
+    );
     return choice?.format;
   }
 
-  private async chooseDestination(fileFormat: ExportFormat | 'md', defaultName: string): Promise<vscode.Uri | undefined> {
-    const filters: { [name: string]: string[]; } = fileFormat === 'md' ? { Markdown: ['md'] }
-      : fileFormat === 'csv' ? { CSV: ['csv'] } : fileFormat === 'json' ? { JSON: ['json'] } : { 'JSON Lines': ['jsonl'] };
+  private async chooseDestination(
+    fileFormat: ExportFormat | 'md',
+    defaultName: string,
+  ): Promise<vscode.Uri | undefined> {
+    const filters: { [name: string]: string[] } =
+      fileFormat === 'md'
+        ? { Markdown: ['md'] }
+        : fileFormat === 'csv'
+          ? { CSV: ['csv'] }
+          : fileFormat === 'json'
+            ? { JSON: ['json'] }
+            : { 'JSON Lines': ['jsonl'] };
     const folder = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
     return vscode.window.showSaveDialog({
       ...(folder ? { defaultUri: vscode.Uri.file(path.join(folder, defaultName)) } : {}),
       filters,
-      saveLabel: 'Export'
+      saveLabel: 'Export',
     });
   }
 
@@ -60,12 +86,12 @@ export class LogTransfer {
     return true;
   }
 
-  private latestExportEvents(request: ExportRequest): { events: LogEvent[]; matched: number; } {
+  private latestExportEvents(request: ExportRequest): { events: LogEvent[]; matched: number } {
     // Reuse indexed/cached paging, then fetch full records only for that page.
     // Clipboard and AI exports must not clone or redact all retained history.
     const page = this.store.page(request);
     const redactor = createRedactor(this.redactionOptions());
-    return { matched: page.matched, events: page.events.map(row => redactor.event(this.store.find(row.id)!)) };
+    return { matched: page.matched, events: page.events.map((row) => redactor.event(this.store.find(row.id)!)) };
   }
 
   async exportLogs(request: ExportRequest = {}): Promise<void> {
@@ -74,30 +100,44 @@ export class LogTransfer {
     if (format === 'md') return this.exportForAI(request);
     const uri = await this.chooseDestination(format, `logline-export.${format}`);
     if (!uri) return;
-    await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: 'Exporting logs', cancellable: true }, async (_progress, token) => {
-      try {
-        if (token.isCancellationRequested) return;
-        const events = this.store.exportEvents(request);
-        await writeExportFile(uri.scheme === 'file' ? uri.fsPath : undefined,
-          exportChunks(events, format, this.redactionOptions(), () => token.isCancellationRequested),
-          () => token.isCancellationRequested, bytes => vscode.workspace.fs.writeFile(uri, bytes));
-        void vscode.window.showInformationMessage(`Exported ${events.length.toLocaleString()} logs to ${path.basename(uri.fsPath)}.`);
-      } catch (error) {
-        if (!token.isCancellationRequested) void vscode.window.showErrorMessage(`Could not export logs: ${(error as Error).message}`);
-      }
-    });
+    await vscode.window.withProgress(
+      { location: vscode.ProgressLocation.Notification, title: 'Exporting logs', cancellable: true },
+      async (_progress, token) => {
+        try {
+          if (token.isCancellationRequested) return;
+          const events = this.store.exportEvents(request);
+          await writeExportFile(
+            uri.scheme === 'file' ? uri.fsPath : undefined,
+            exportChunks(events, format, this.redactionOptions(), () => token.isCancellationRequested),
+            () => token.isCancellationRequested,
+            (bytes) => vscode.workspace.fs.writeFile(uri, bytes),
+          );
+          void vscode.window.showInformationMessage(
+            `Exported ${events.length.toLocaleString()} logs to ${path.basename(uri.fsPath)}.`,
+          );
+        } catch (error) {
+          if (!token.isCancellationRequested)
+            void vscode.window.showErrorMessage(`Could not export logs: ${(error as Error).message}`);
+        }
+      },
+    );
   }
 
   async exportForAI(request: ExportRequest = {}): Promise<void> {
     const limit = 1000;
     const { events: selected, matched } = this.latestExportEvents(request);
     const omitted = matched - selected.length;
-    const lines = selected.map(event => JSON.stringify(event)).join('\n');
+    const lines = selected.map((event) => JSON.stringify(event)).join('\n');
     const content = [
-      '# Logline incident context', '',
+      '# Logline incident context',
+      '',
       `Events: ${matched}${omitted > 0 ? ` (latest ${limit} included)` : ''}`,
       `Query: ${exportQuery(request) || '(none)'}`,
-      '', '```jsonl', lines, '```', ''
+      '',
+      '```jsonl',
+      lines,
+      '```',
+      '',
     ].join('\n');
     await this.saveExport(content, 'md', 'logline-ai-context.md');
   }
@@ -112,12 +152,23 @@ export class LogTransfer {
 
   async exportContext(ids: number[]): Promise<void> {
     const redactor = createRedactor(this.redactionOptions());
-    const events = ids.map(id => this.store.find(id)).filter((event): event is LogEvent => event !== undefined)
-      .map(event => redactor.event(event));
+    const events = ids
+      .map((id) => this.store.find(id))
+      .filter((event): event is LogEvent => event !== undefined)
+      .map((event) => redactor.event(event));
     const format = await this.chooseExportFormat();
     if (!format) return;
     if (format === 'md') {
-      const content = ['# Logline context', '', `Events: ${events.length}`, '', '```jsonl', events.map(event => JSON.stringify(event)).join('\n'), '```', ''].join('\n');
+      const content = [
+        '# Logline context',
+        '',
+        `Events: ${events.length}`,
+        '',
+        '```jsonl',
+        events.map((event) => JSON.stringify(event)).join('\n'),
+        '```',
+        '',
+      ].join('\n');
       await this.saveExport(content, 'md', 'logline-context.md');
       return;
     }
@@ -126,9 +177,11 @@ export class LogTransfer {
 
   async importLogs(): Promise<void> {
     const uris = await vscode.window.showOpenDialog({
-      canSelectMany: true, canSelectFiles: true, canSelectFolders: false,
+      canSelectMany: true,
+      canSelectFiles: true,
+      canSelectFolders: false,
       filters: { Logs: ['jsonl', 'ndjson', 'json', 'log', 'txt', 'csv'], CSV: ['csv'], 'Plain text': ['txt', 'log'] },
-      openLabel: 'Import logs'
+      openLabel: 'Import logs',
     });
     if (!uris?.length) return;
     let imported = 0;
@@ -139,27 +192,47 @@ export class LogTransfer {
       try {
         // Native files stream in bounded chunks. Other VS Code filesystem
         // providers expose only readFile, so release their buffer after this file.
-        const chunks = uri.scheme === 'file' ? createReadStream(uri.fsPath, { highWaterMark: 64 * 1024 })
-          : this.importFileChunks(await vscode.workspace.fs.readFile(uri));
+        const chunks =
+          uri.scheme === 'file'
+            ? createReadStream(uri.fsPath, { highWaterMark: 64 * 1024 })
+            : this.importFileChunks(await vscode.workspace.fs.readFile(uri));
         const format = path.extname(uri.path).slice(1).toLowerCase();
         const limit = this.config.get('maxLineLength', 65536);
         let pending = 0;
         const ingest = (raw: string, truncated: boolean, container?: ContainerTag) => {
-          this.ingestion.accept(raw, 'import', { serverId: `imported-${sessionId}`, server: label, sessionId, truncated, container });
+          this.ingestion.accept(raw, 'import', {
+            serverId: `imported-${sessionId}`,
+            server: label,
+            sessionId,
+            truncated,
+            container,
+          });
           imported++;
           pending++;
         };
         // Only line-based text files carry stack traces and container
         // prefixes as separate lines; JSON and CSV records frame themselves.
-        const joiner = format !== 'json' && format !== 'csv' ? new LinePipeline(ingest, linePipelineOptions(this.config, limit, 0)) : undefined;
+        const joiner =
+          format !== 'json' && format !== 'csv'
+            ? new LinePipeline(ingest, linePipelineOptions(this.config, limit, 0))
+            : undefined;
         try {
           for await (const record of importRecords(chunks, format, limit)) {
-            if (joiner) joiner.write(record.raw, record.truncated); else ingest(record.raw, record.truncated);
-            if (pending >= 500) { pending = 0; this.state.notify(); await yieldToHost(); }
+            if (joiner) joiner.write(record.raw, record.truncated);
+            else ingest(record.raw, record.truncated);
+            if (pending >= 500) {
+              pending = 0;
+              this.state.notify();
+              await yieldToHost();
+            }
           }
-        } finally { joiner?.end(); }
+        } finally {
+          joiner?.end();
+        }
       } catch (error) {
-        void vscode.window.showWarningMessage(`Could not finish importing ${path.basename(uri.path)}: ${(error as Error).message}`);
+        void vscode.window.showWarningMessage(
+          `Could not finish importing ${path.basename(uri.path)}: ${(error as Error).message}`,
+        );
       }
     }
     if (imported) {

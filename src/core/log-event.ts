@@ -4,8 +4,28 @@ import { parseLogfmt } from './logfmt';
 import { terminalLevel } from './terminal-level';
 
 const LEVELS = ['trace', 'debug', 'info', 'warn', 'error', 'fatal'];
-const LEVEL_BY_CODE: Record<number, string> = { 10: 'trace', 20: 'debug', 30: 'info', 40: 'warn', 50: 'error', 60: 'fatal' };
-const IGNORED_FIELDS = new Set(['level', 'severity', 'message', 'msg', 'event', 'name', 'timestamp', 'time', 'ts', 'datetime', 'timeMillis', 'contextMap']);
+const LEVEL_BY_CODE: Record<number, string> = {
+  10: 'trace',
+  20: 'debug',
+  30: 'info',
+  40: 'warn',
+  50: 'error',
+  60: 'fatal',
+};
+const IGNORED_FIELDS = new Set([
+  'level',
+  'severity',
+  'message',
+  'msg',
+  'event',
+  'name',
+  'timestamp',
+  'time',
+  'ts',
+  'datetime',
+  'timeMillis',
+  'contextMap',
+]);
 const MAX_FIELDS = 120;
 type JsonObject = Record<string, unknown>;
 
@@ -13,28 +33,50 @@ export function parseLogLine(line: string, stream: string, id: number, receivedA
   const trimmed = stripAnsi(line).trim();
   let value: unknown;
   if (looksLikeJson(trimmed)) {
-    try { value = JSON.parse(trimmed); } catch { value = undefined; }
+    try {
+      value = JSON.parse(trimmed);
+    } catch {
+      value = undefined;
+    }
   }
   // Plain-text lines in logfmt carry the same level/msg/time keys as JSON
   // logs, so they share the field, level and timestamp handling below while
   // staying non-JSON for details, exports and exception extraction.
-  const object: JsonObject | undefined = value && typeof value === 'object' && !Array.isArray(value) ? value as JsonObject
-    : value === undefined ? parseLogfmt(trimmed) : undefined;
+  const object: JsonObject | undefined =
+    value && typeof value === 'object' && !Array.isArray(value)
+      ? (value as JsonObject)
+      : value === undefined
+        ? parseLogfmt(trimmed)
+        : undefined;
   const severity = readValue(object, 'level', 'severity', 'log.level', 'severityText', 'SeverityText');
   const severityNumber = readValue(object, 'severityNumber', 'SeverityNumber');
   // A joined stack trace keeps every frame in `raw`; its row shows the first
   // line, or the error line of a Node crash block rather than its `path:line`.
   const multiline = value === undefined && trimmed.includes('\n');
   const headline = multiline ? plainHeadline(trimmed) : trimmed;
-  const level = severity === undefined && typeof severityNumber === 'number' && severityNumber >= 1 && severityNumber <= 24
-    ? LEVELS[Math.floor((severityNumber - 1) / 4)] : normalizeLevel(severity as string | number | undefined, stream,
-      stream === 'terminal' || stream === 'file' ? plainLevel(headline, multiline ? trimmed : undefined) : undefined);
+  const level =
+    severity === undefined && typeof severityNumber === 'number' && severityNumber >= 1 && severityNumber <= 24
+      ? LEVELS[Math.floor((severityNumber - 1) / 4)]
+      : normalizeLevel(
+          severity as string | number | undefined,
+          stream,
+          stream === 'terminal' || stream === 'file'
+            ? plainLevel(headline, multiline ? trimmed : undefined)
+            : undefined,
+        );
   const message = getMessage(object, value, headline);
   const timestampInfo = getTimestamp(object, receivedAt);
   const fields = object ? extractFields(object) : {};
   return {
-    id, timestamp: timestampInfo.text, timestampMs: timestampInfo.ms, level, message: message.slice(0, 512), stream,
-    isJson: value !== undefined, raw: trimmed, fields
+    id,
+    timestamp: timestampInfo.text,
+    timestampMs: timestampInfo.ms,
+    level,
+    message: message.slice(0, 512),
+    stream,
+    isJson: value !== undefined,
+    raw: trimmed,
+    fields,
   };
 }
 
@@ -53,7 +95,8 @@ function readValue(object: JsonObject | undefined, ...names: string[]): unknown 
     if (object?.[name] !== undefined) return object[name];
     if (!name.includes('.')) continue;
     let value: unknown = object;
-    for (const part of name.split('.')) value = value && typeof value === 'object' ? (value as JsonObject)[part] : undefined;
+    for (const part of name.split('.'))
+      value = value && typeof value === 'object' ? (value as JsonObject)[part] : undefined;
     if (value !== undefined) return value;
   }
   return undefined;
@@ -71,8 +114,12 @@ export function normalizeLevel(level: string | number | undefined, stream: strin
 }
 
 function getMessage(object: JsonObject | undefined, value: unknown, fallback: string): string {
-  const candidate = object?.message ?? object?.msg ?? object?.event ?? object?.name
-    ?? readValue(object, 'body.stringValue', 'Body.stringValue', 'body', 'Body');
+  const candidate =
+    object?.message ??
+    object?.msg ??
+    object?.event ??
+    object?.name ??
+    readValue(object, 'body.stringValue', 'Body.stringValue', 'body', 'Body');
   if (candidate === null || isPrimitive(candidate)) return String(candidate);
   if (value === undefined || typeof value === 'string') return String(value ?? fallback);
   if (Array.isArray(value)) return `Array (${value.length} items)`;
@@ -81,7 +128,12 @@ function getMessage(object: JsonObject | undefined, value: unknown, fallback: st
 
 function getTimestamp(object: JsonObject | undefined, receivedAt: Date): { text: string; ms: number } {
   // timeMillis is Log4j2 JsonLayout's event time (epoch ms); Date() accepts it directly.
-  const candidate = (object?.timestamp ?? object?.time ?? object?.ts ?? object?.datetime ?? object?.timeMillis ?? object?.['@timestamp']) as string | number | undefined;
+  const candidate = (object?.timestamp ??
+    object?.time ??
+    object?.ts ??
+    object?.datetime ??
+    object?.timeMillis ??
+    object?.['@timestamp']) as string | number | undefined;
   if (typeof candidate === 'string' || typeof candidate === 'number') {
     const parsed = new Date(candidate);
     if (!Number.isNaN(parsed.getTime())) return { text: formatTime(parsed), ms: parsed.getTime() };
@@ -112,7 +164,8 @@ function extractFields(object: JsonObject): Record<string, string | number | boo
   let fieldCount = 0;
   const add = (key: string, value: unknown) => {
     if (fieldCount < MAX_FIELDS && isPrimitive(value) && !Object.hasOwn(fields, key)) {
-      if (key === '__proto__') Object.defineProperty(fields, key, { value, enumerable: true, writable: true, configurable: true });
+      if (key === '__proto__')
+        Object.defineProperty(fields, key, { value, enumerable: true, writable: true, configurable: true });
       else fields[key] = value;
       fieldCount++;
     }
@@ -123,7 +176,10 @@ function extractFields(object: JsonObject): Record<string, string | number | boo
     if (!IGNORED_FIELDS.has(key) && isPrimitive(value)) add(key, value);
   }
   const walk = (key: string, value: unknown, depth: number) => {
-    if (isPrimitive(value)) { add(key, value); return; }
+    if (isPrimitive(value)) {
+      add(key, value);
+      return;
+    }
     if (!value || typeof value !== 'object' || Array.isArray(value) || depth >= 4) return;
     for (const [child, childValue] of Object.entries(value as JsonObject)) {
       if (fieldCount >= MAX_FIELDS) break;
@@ -158,7 +214,8 @@ function extractFields(object: JsonObject): Record<string, string | number | boo
   // OTLP JSON encodes attributes as key/value entries containing typed values.
   // Decode only recognized attribute containers, with the same field budget.
   for (const [prefix, attributes] of [
-    ['attributes', object.attributes], ['resource.attributes', readValue(object, 'resource.attributes')]
+    ['attributes', object.attributes],
+    ['resource.attributes', readValue(object, 'resource.attributes')],
   ] as const) {
     if (!Array.isArray(attributes)) continue;
     for (const entry of attributes) {

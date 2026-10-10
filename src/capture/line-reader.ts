@@ -15,7 +15,9 @@ export class LineReader {
     this.decoder = new StringDecoder('utf8');
   }
 
-  write(chunk: Buffer): void { this.consume(this.decoder.write(chunk)); }
+  write(chunk: Buffer): void {
+    this.consume(this.decoder.write(chunk));
+  }
 
   consume(text: string): void {
     let start = 0;
@@ -40,5 +42,8 @@ export class LineReader {
     if (line || truncated) this.onLine(line, truncated);
   }
 
-  end(): void { this.consume(this.decoder.end()); this.emit(); }
+  end(): void {
+    this.consume(this.decoder.end());
+    this.emit();
+  }
 }

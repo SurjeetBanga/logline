@@ -6,8 +6,14 @@ import { EventScope } from '../event-scope';
 import type { WebviewApi } from '../types';
 import { buildEventDetails } from './details';
 
-export function createInspection(elements: Elements, scrollViewport: HTMLElement, api: WebviewApi, formatTimestamp: (event: LogEvent) => string | undefined, scope: EventScope,
-  showTrace?: (traceId: string) => void) {
+export function createInspection(
+  elements: Elements,
+  scrollViewport: HTMLElement,
+  api: WebviewApi,
+  formatTimestamp: (event: LogEvent) => string | undefined,
+  scope: EventScope,
+  showTrace?: (traceId: string) => void,
+) {
   let contextAnchor: number | undefined;
   let contextSelected: number | undefined;
   let contextScrollTop = 0;
@@ -35,7 +41,9 @@ export function createInspection(elements: Elements, scrollViewport: HTMLElement
 
   scope.listen(elements.contextClose, 'click', () => elements.contextDialog.close());
 
-  scope.listen(elements.contextExport, 'click', () => api.postMessage({ type: 'exportContext', ids: contextEvents.map(event => event.id) }));
+  scope.listen(elements.contextExport, 'click', () =>
+    api.postMessage({ type: 'exportContext', ids: contextEvents.map((event) => event.id) }),
+  );
 
   scope.listen(elements.contextDialog, 'close', () => {
     contextAnchor = undefined;
@@ -46,10 +54,9 @@ export function createInspection(elements: Elements, scrollViewport: HTMLElement
     scrollViewport.scrollTop = contextScrollTop;
   });
 
-  scope.listen(elements.contextLogs, 'click', event => {
+  scope.listen(elements.contextLogs, 'click', (event) => {
     const button = (event.target as HTMLElement).closest<HTMLElement>('.context-event');
-    if (button)
-      selectContextEvent(Number(button.dataset.id));
+    if (button) selectContextEvent(Number(button.dataset.id));
   });
 
   scope.listen(elements.contextDetails, 'click', handleDetailAction);
@@ -59,7 +66,12 @@ export function createInspection(elements: Elements, scrollViewport: HTMLElement
     if ((event.target as HTMLElement).closest<HTMLElement>('.event-action')?.dataset.unavailable) return true;
     const source = (event.target as HTMLElement).closest<HTMLElement>('.source-link');
     if (source) {
-      api.postMessage({ type: 'openSource', id: Number(source.dataset.id), block: Number(source.dataset.block), line: Number(source.dataset.line) });
+      api.postMessage({
+        type: 'openSource',
+        id: Number(source.dataset.id),
+        block: Number(source.dataset.block),
+        line: Number(source.dataset.line),
+      });
       return true;
     }
     const copy = (event.target as HTMLElement).closest<HTMLElement>('.copy-button');
@@ -95,35 +107,39 @@ export function createInspection(elements: Elements, scrollViewport: HTMLElement
     }
     return false;
   }
-  function receiveContext(data: Extract<HostMessage, { type: 'context'; }>) {
-
-    if (!elements.contextDialog.open || data.id !== contextAnchor)
-      return;
+  function receiveContext(data: Extract<HostMessage, { type: 'context' }>) {
+    if (!elements.contextDialog.open || data.id !== contextAnchor) return;
     elements.contextStatus.textContent = data.missing
       ? 'This event has been discarded from retained history. Close this view to return to your results.'
       : `${data.server || 'Source'} · Same session · All levels and captured streams · Up to 25 retained events before and after · Snapshot in capture order`;
     contextEvents = data.events ?? [];
-    elements.contextLogs.replaceChildren(...data.events.map(event => {
-      const row = document.createElement('tr');
-      row.dataset.id = String(event.id);
-      row.className = event.id === contextAnchor ? 'context-anchor' : '';
-      const message = cell('');
-      const button = document.createElement('button');
-      button.className = 'context-event';
-      button.dataset.id = String(event.id);
-      button.textContent = `${event.id === contextAnchor ? 'Selected: ' : ''}${event.message ?? ''}${event.truncated ? ' [truncated]' : ''}`;
-      message.append(button);
-      row.append(cell(formatTimestamp(event), 'time'), cell(event.level, `level ${event.level}`), message, cell(event.stream, 'source'));
-      return row;
-    }));
+    elements.contextLogs.replaceChildren(
+      ...data.events.map((event) => {
+        const row = document.createElement('tr');
+        row.dataset.id = String(event.id);
+        row.className = event.id === contextAnchor ? 'context-anchor' : '';
+        const message = cell('');
+        const button = document.createElement('button');
+        button.className = 'context-event';
+        button.dataset.id = String(event.id);
+        button.textContent = `${event.id === contextAnchor ? 'Selected: ' : ''}${event.message ?? ''}${event.truncated ? ' [truncated]' : ''}`;
+        message.append(button);
+        row.append(
+          cell(formatTimestamp(event), 'time'),
+          cell(event.level, `level ${event.level}`),
+          message,
+          cell(event.stream, 'source'),
+        );
+        return row;
+      }),
+    );
     elements.contextLogs.querySelector('.context-anchor')?.scrollIntoView({ block: 'center' });
-    if (!data.missing)
-      selectContextEvent(contextAnchor);
+    if (!data.missing) selectContextEvent(contextAnchor);
     return;
-
   }
-  function receiveDetails(data: Extract<HostMessage, { type: 'details'; }>) {
-    if (elements.contextDialog.open && data.id === contextSelected) elements.contextDetails.replaceChildren(buildEventDetails(data.id, data.text, data.exceptions, data));
+  function receiveDetails(data: Extract<HostMessage, { type: 'details' }>) {
+    if (elements.contextDialog.open && data.id === contextSelected)
+      elements.contextDetails.replaceChildren(buildEventDetails(data.id, data.text, data.exceptions, data));
   }
   return { showContext, selectContextEvent, handleDetailAction, receiveContext, receiveDetails };
 }

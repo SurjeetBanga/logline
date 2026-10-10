@@ -32,12 +32,12 @@ function runtimeImports(file: string): string[] {
 }
 
 const sources = readdirSync(src, { recursive: true, encoding: 'utf8' })
-  .filter(name => name.endsWith('.ts') && !name.endsWith('.test.ts') && !name.endsWith('.d.ts'))
-  .map(name => join(src, name))
-  .filter(file => layerOf(file) !== 'test');
+  .filter((name) => name.endsWith('.ts') && !name.endsWith('.test.ts') && !name.endsWith('.d.ts'))
+  .map((name) => join(src, name))
+  .filter((file) => layerOf(file) !== 'test');
 
 test('every source file belongs to a layer in ARCHITECTURE.md', () => {
-  const unknown = sources.filter(file => !(layerOf(file) in ALLOWED)).map(file => relative(src, file));
+  const unknown = sources.filter((file) => !(layerOf(file) in ALLOWED)).map((file) => relative(src, file));
   assert.deepEqual(unknown, [], 'add the new layer to ALLOWED and to ARCHITECTURE.md');
 });
 

@@ -25,7 +25,10 @@ export function containerSource(serverId: string, tag: ContainerTag): { serverId
 export class Ingestion {
   sequence = 0;
   readonly crashes = new CrashLinker();
-  constructor(readonly store: LogStore, private readonly persist: (raw: string) => void) { }
+  constructor(
+    readonly store: LogStore,
+    private readonly persist: (raw: string) => void,
+  ) {}
 
   create(raw: string, stream: string, receivedAt = new Date()): LogEvent {
     return parseLogLine(raw, stream, ++this.sequence, receivedAt);

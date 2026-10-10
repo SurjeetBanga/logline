@@ -46,9 +46,11 @@ export const SPAN_KINDS = ['unspecified', 'internal', 'server', 'client', 'produ
 const SEVERITY_LEVELS = ['trace', 'debug', 'info', 'warn', 'error', 'fatal'];
 
 type Json = Record<string, unknown>;
-const object = (value: unknown): Json | undefined => value && typeof value === 'object' && !Array.isArray(value) ? value as Json : undefined;
-const list = (value: unknown): unknown[] => Array.isArray(value) ? value : [];
-const text = (value: unknown, max = MAX_STRING): string | undefined => typeof value === 'string' ? value.slice(0, max) : undefined;
+const object = (value: unknown): Json | undefined =>
+  value && typeof value === 'object' && !Array.isArray(value) ? (value as Json) : undefined;
+const list = (value: unknown): unknown[] => (Array.isArray(value) ? value : []);
+const text = (value: unknown, max = MAX_STRING): string | undefined =>
+  typeof value === 'string' ? value.slice(0, max) : undefined;
 
 /** Decode one OTLP AnyValue into plain JSON, bounded in size and depth. */
 export function anyValue(value: unknown, depth = 0): AttrValue {
@@ -65,7 +67,10 @@ export function anyValue(value: unknown, depth = 0): AttrValue {
   if (typeof v.bytesValue === 'string') return v.bytesValue.slice(0, MAX_STRING);
   if (depth >= MAX_DEPTH) return '[nested value]';
   const array = object(v.arrayValue);
-  if (array) return list(array.values).slice(0, MAX_ARRAY).map(item => anyValue(item, depth + 1));
+  if (array)
+    return list(array.values)
+      .slice(0, MAX_ARRAY)
+      .map((item) => anyValue(item, depth + 1));
   const kvlist = object(v.kvlistValue);
   if (kvlist) return attributes(kvlist.values, depth + 1);
   return null;
@@ -129,13 +134,16 @@ export function readLogs(request: unknown, now = Date.now()): OtlpLog[] {
         const severityNumber = Number(record.severityNumber);
         logs.push({
           timeMs: nanosToMs(record.timeUnixNano) ?? nanosToMs(record.observedTimeUnixNano) ?? now,
-          service, resource, scope,
+          service,
+          resource,
+          scope,
           severityNumber: Number.isInteger(severityNumber) && severityNumber > 0 ? severityNumber : undefined,
           severityText: text(record.severityText, 64) || undefined,
           body: anyValue(record.body),
           attributes: attributes(record.attributes),
-          traceId: normalizeId(record.traceId, 16), spanId: normalizeId(record.spanId, 8),
-          eventName: text(record.eventName, 256) || undefined
+          traceId: normalizeId(record.traceId, 16),
+          spanId: normalizeId(record.spanId, 8),
+          eventName: text(record.eventName, 256) || undefined,
         });
       }
     }
@@ -152,20 +160,35 @@ export function readSpans(request: unknown): Span[] {
       const scope = text(object(object(scoped)?.scope)?.name, 256);
       for (const item of list(object(scoped)?.spans)) {
         const record = object(item);
-        const traceId = normalizeId(record?.traceId, 16), spanId = normalizeId(record?.spanId, 8);
+        const traceId = normalizeId(record?.traceId, 16),
+          spanId = normalizeId(record?.spanId, 8);
         const startMs = nanosToMs(record?.startTimeUnixNano);
         if (!record || !traceId || !spanId || startMs === undefined) continue;
         const endMs = Math.max(startMs, nanosToMs(record.endTimeUnixNano) ?? startMs);
         const status = object(record.status);
         const kind = Number(record.kind);
         spans.push({
-          traceId, spanId, parentSpanId: normalizeId(record.parentSpanId, 8), name: text(record.name, 512) || '(unnamed span)',
-          kind: Number.isInteger(kind) && kind >= 0 && kind <= 5 ? kind : 0, startMs, endMs, service, scope,
+          traceId,
+          spanId,
+          parentSpanId: normalizeId(record.parentSpanId, 8),
+          name: text(record.name, 512) || '(unnamed span)',
+          kind: Number.isInteger(kind) && kind >= 0 && kind <= 5 ? kind : 0,
+          startMs,
+          endMs,
+          service,
+          scope,
           attributes: attributes(record.attributes),
-          events: list(record.events).slice(0, MAX_EVENTS).map(event => ({
-            timeMs: nanosToMs(object(event)?.timeUnixNano) ?? startMs, name: text(object(event)?.name, 512) ?? '', attributes: attributes(object(event)?.attributes)
-          })),
-          status: { code: Number(status?.code) === 2 ? 2 : Number(status?.code) === 1 ? 1 : 0, message: text(status?.message, 1024) || undefined }
+          events: list(record.events)
+            .slice(0, MAX_EVENTS)
+            .map((event) => ({
+              timeMs: nanosToMs(object(event)?.timeUnixNano) ?? startMs,
+              name: text(object(event)?.name, 512) ?? '',
+              attributes: attributes(object(event)?.attributes),
+            })),
+          status: {
+            code: Number(status?.code) === 2 ? 2 : Number(status?.code) === 1 ? 1 : 0,
+            message: text(status?.message, 1024) || undefined,
+          },
         });
       }
     }
@@ -178,7 +201,8 @@ export function readSpans(request: unknown): Span[] {
 function assign(target: Json, values: Attributes): void {
   for (const [key, value] of Object.entries(values)) {
     if (Object.hasOwn(target, key)) target[`attributes.${key}`] = value;
-    else if (key === '__proto__') Object.defineProperty(target, key, { value, enumerable: true, writable: true, configurable: true });
+    else if (key === '__proto__')
+      Object.defineProperty(target, key, { value, enumerable: true, writable: true, configurable: true });
     else target[key] = value;
   }
 }
@@ -193,11 +217,15 @@ export function logLine(log: OtlpLog): string {
   const line: Json = { timestamp: new Date(log.timeMs).toISOString() };
   // The severity number is standardized; the text is whatever the logging
   // library calls the level ("E", "Information", "err"), so it is kept as a field.
-  const level = log.severityNumber !== undefined && log.severityNumber <= 24 ? SEVERITY_LEVELS[Math.floor((log.severityNumber - 1) / 4)] : undefined;
+  const level =
+    log.severityNumber !== undefined && log.severityNumber <= 24
+      ? SEVERITY_LEVELS[Math.floor((log.severityNumber - 1) / 4)]
+      : undefined;
   line.level = level ?? log.severityText;
   if (log.severityText && level) line.severityText = log.severityText;
   if (log.severityNumber !== undefined) line.severityNumber = log.severityNumber;
-  if (typeof log.body === 'string' || typeof log.body === 'number' || typeof log.body === 'boolean') line.message = String(log.body);
+  if (typeof log.body === 'string' || typeof log.body === 'number' || typeof log.body === 'boolean')
+    line.message = String(log.body);
   else {
     line.message = log.eventName ?? (log.body === null ? 'log record' : 'structured log record');
     if (log.body !== null) line.body = log.body;
@@ -213,10 +241,14 @@ export function logLine(log: OtlpLog): string {
   return JSON.stringify(line);
 }
 
-export function spanDurationMs(span: Span): number { return Math.round((span.endMs - span.startMs) * 1000) / 1000; }
+export function spanDurationMs(span: Span): number {
+  return Math.round((span.endMs - span.startMs) * 1000) / 1000;
+}
 
 /** Entry spans begin work in a service: trace roots and incoming server or consumer spans. */
-export function isEntrySpan(span: Span): boolean { return !span.parentSpanId || span.kind === 2 || span.kind === 5; }
+export function isEntrySpan(span: Span): boolean {
+  return !span.parentSpanId || span.kind === 2 || span.kind === 5;
+}
 
 /** One JSON log line summarizing a span, so requests appear in the table and Analyze. */
 export function spanLine(span: Span): string {
@@ -225,16 +257,20 @@ export function spanLine(span: Span): string {
     timestamp: new Date(span.startMs).toISOString(),
     level: span.status.code === 2 ? 'error' : 'info',
     message: `${span.name} (${duration < 10 ? duration.toFixed(2) : Math.round(duration)} ms)`,
-    service: span.service, kind: 'span', spanKind: SPAN_KINDS[span.kind] ?? 'unspecified',
-    traceId: span.traceId, spanId: span.spanId, durationMs: duration,
-    spanStatus: span.status.code === 2 ? 'error' : span.status.code === 1 ? 'ok' : 'unset'
+    service: span.service,
+    kind: 'span',
+    spanKind: SPAN_KINDS[span.kind] ?? 'unspecified',
+    traceId: span.traceId,
+    spanId: span.spanId,
+    durationMs: duration,
+    spanStatus: span.status.code === 2 ? 'error' : span.status.code === 1 ? 'ok' : 'unset',
   };
   if (span.parentSpanId) line.parentSpanId = span.parentSpanId;
   if (span.status.message) line.statusMessage = span.status.message;
   assign(line, span.attributes);
   // Instrumentation records exceptions as span events; their stack traces
   // feed Logline's exception view and error grouping.
-  const exception = span.events.find(event => event.name === 'exception');
+  const exception = span.events.find((event) => event.name === 'exception');
   if (exception) assign(line, exception.attributes);
   return JSON.stringify(line);
 }

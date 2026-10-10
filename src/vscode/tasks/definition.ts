@@ -5,7 +5,7 @@ export interface LoglineTaskDefinition extends vscode.TaskDefinition {
   label?: string;
   command: string;
   args?: unknown[];
-  options?: { cwd?: string; env?: Record<string, string>; };
+  options?: { cwd?: string; env?: Record<string, string> };
   /** Run the command through the user's shell. Defaults to argv mode when args are present. */
   shell?: boolean | string;
   /** Drop non-JSON output for this task only. */
@@ -34,8 +34,12 @@ export type ExecutableTask = vscode.Task & {
 
 export function taskDefinitionLabel(task: vscode.Task): string {
   const definition = task.definition as Record<string, unknown>;
-  return task.name || (typeof definition.label === 'string' ? definition.label : undefined)
-    || (typeof definition.task === 'string' ? definition.task : undefined) || 'VS Code task';
+  return (
+    task.name ||
+    (typeof definition.label === 'string' ? definition.label : undefined) ||
+    (typeof definition.task === 'string' ? definition.task : undefined) ||
+    'VS Code task'
+  );
 }
 
 export function shellValue(value: string | vscode.ShellQuotedString): string {
@@ -58,7 +62,11 @@ export function taskToLoglineDefinition(task: vscode.Task): LoglineTaskDefinitio
     type: 'logline' as const,
     label: `Logline: ${label}`,
     taskName: label,
-    taskId: taskIdentity(label, String(definition.type), typeof task.scope === 'object' ? task.scope.uri.toString() : undefined),
+    taskId: taskIdentity(
+      label,
+      String(definition.type),
+      typeof task.scope === 'object' ? task.scope.uri.toString() : undefined,
+    ),
     taskType: String(definition.type),
     detail: task.detail,
     isBackground: task.isBackground || undefined,
@@ -69,7 +77,7 @@ export function taskToLoglineDefinition(task: vscode.Task): LoglineTaskDefinitio
     options: options ? { cwd: options.cwd, env: options.env } : undefined,
     jsonOnly: definition.jsonOnly === true,
     dependsOn: definition.dependsOn,
-    dependsOrder: definition.dependsOrder
+    dependsOrder: definition.dependsOrder,
   };
   if ('process' in execution) {
     return { ...base, command: execution.process, args: [...execution.args], shell: false };
@@ -82,11 +90,16 @@ export function taskToLoglineDefinition(task: vscode.Task): LoglineTaskDefinitio
   // VS Code's extra shellArgs. Refuse that conversion instead of silently
   // changing how the task parses its command line.
   if (shellArgs?.length) return undefined;
-  if (shell.commandLine !== undefined) return { ...base, command: shell.commandLine, shell: executable ? String(executable) : true };
+  if (shell.commandLine !== undefined)
+    return { ...base, command: shell.commandLine, shell: executable ? String(executable) : true };
   if (shell.command === undefined) return { ...base, command: '', shell: true };
   const command = shellValue(shell.command);
   const args = (shell.args ?? []).map(shellValue);
-  return { ...base, command: [command, ...args].map(quoteShell).join(' '), shell: executable ? String(executable) : true };
+  return {
+    ...base,
+    command: [command, ...args].map(quoteShell).join(' '),
+    shell: executable ? String(executable) : true,
+  };
 }
 
 export function taskConversionError(task: vscode.Task): string | undefined {
@@ -95,7 +108,9 @@ export function taskConversionError(task: vscode.Task): string | undefined {
   // no command (custom or dependency-only tasks) are not conversion candidates.
   if (!execution || 'process' in execution || !('command' in execution || 'commandLine' in execution)) return undefined;
   const shellArgs = (execution as vscode.ShellExecution).options?.shellArgs;
-  return shellArgs?.length ? 'This shell task uses shellArgs; conversion was skipped because Logline cannot preserve those quoting options.' : undefined;
+  return shellArgs?.length
+    ? 'This shell task uses shellArgs; conversion was skipped because Logline cannot preserve those quoting options.'
+    : undefined;
 }
 
 export function dependencyNames(task: vscode.Task): string[] {
@@ -104,6 +119,9 @@ export function dependencyNames(task: vscode.Task): string[] {
 }
 
 export function dependencyNamesFromValue(value: unknown): string[] {
-  return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string')
-    : typeof value === 'string' ? [value] : [];
+  return Array.isArray(value)
+    ? value.filter((item): item is string => typeof item === 'string')
+    : typeof value === 'string'
+      ? [value]
+      : [];
 }

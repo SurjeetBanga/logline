@@ -56,6 +56,8 @@ jobs:
       - run: npm run typecheck
       - run: npm run lint
         if: runner.os == 'Linux'
+      - run: npm run format:check
+        if: runner.os == 'Linux'
       - run: npm test
       - run: npm run package
         if: runner.os == 'Linux'

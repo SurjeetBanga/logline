@@ -1,5 +1,12 @@
 import { extractExceptions } from './exceptions';
-import { findSensitiveValues, hasRequestContext, isQuietFailure, isStructured, type SensitiveKind, type SensitiveValue } from './log-findings';
+import {
+  findSensitiveValues,
+  hasRequestContext,
+  isQuietFailure,
+  isStructured,
+  type SensitiveKind,
+  type SensitiveValue,
+} from './log-findings';
 import { getField } from './query';
 import type { LogEvent } from './types';
 
@@ -22,25 +29,118 @@ export interface LogSite {
   matchable: boolean;
 }
 
-export interface SiteMatch { site: LogSite; exact: boolean; }
+export interface SiteMatch {
+  site: LogSite;
+  exact: boolean;
+}
 
 // Source extensions worth scanning, and those whose strings interpolate `$name`.
-export const LOG_SITE_EXTENSIONS = ['ts', 'tsx', 'js', 'jsx', 'mjs', 'cjs', 'py', 'java', 'kt', 'kts', 'scala', 'groovy', 'go', 'cs', 'rs', 'rb', 'php', 'swift', 'dart', 'cpp', 'cc', 'c', 'h', 'hpp'];
+export const LOG_SITE_EXTENSIONS = [
+  'ts',
+  'tsx',
+  'js',
+  'jsx',
+  'mjs',
+  'cjs',
+  'py',
+  'java',
+  'kt',
+  'kts',
+  'scala',
+  'groovy',
+  'go',
+  'cs',
+  'rs',
+  'rb',
+  'php',
+  'swift',
+  'dart',
+  'cpp',
+  'cc',
+  'c',
+  'h',
+  'hpp',
+];
 const DOLLAR_INTERPOLATION = new Set(['kt', 'kts', 'scala', 'groovy', 'php', 'dart']);
 
 const METHODS = [
-  'log', 'info', 'warn', 'warning', 'error', 'debug', 'trace', 'fatal', 'critical', 'exception', 'verbose', 'notice', 'severe', 'fine',
-  'Print', 'Printf', 'Println', 'Info', 'Infof', 'Infow', 'Infoln', 'Warn', 'Warnf', 'Warnw', 'Warning', 'Warningf', 'Error', 'Errorf', 'Errorw',
-  'Debug', 'Debugf', 'Debugw', 'Fatal', 'Fatalf', 'Fatalw', 'Panic', 'Panicf', 'Trace', 'Tracef',
-  'LogInformation', 'LogWarning', 'LogError', 'LogDebug', 'LogTrace', 'LogCritical', 'Information', 'Verbose', 'WriteLine'
+  'log',
+  'info',
+  'warn',
+  'warning',
+  'error',
+  'debug',
+  'trace',
+  'fatal',
+  'critical',
+  'exception',
+  'verbose',
+  'notice',
+  'severe',
+  'fine',
+  'Print',
+  'Printf',
+  'Println',
+  'Info',
+  'Infof',
+  'Infow',
+  'Infoln',
+  'Warn',
+  'Warnf',
+  'Warnw',
+  'Warning',
+  'Warningf',
+  'Error',
+  'Errorf',
+  'Errorw',
+  'Debug',
+  'Debugf',
+  'Debugw',
+  'Fatal',
+  'Fatalf',
+  'Fatalw',
+  'Panic',
+  'Panicf',
+  'Trace',
+  'Tracef',
+  'LogInformation',
+  'LogWarning',
+  'LogError',
+  'LogDebug',
+  'LogTrace',
+  'LogCritical',
+  'Information',
+  'Verbose',
+  'WriteLine',
 ];
 // `receiver.method(` where the receiver may chain calls (`zap.L().Info(`),
 // or a bare `print(`, or a Rust macro such as `info!(`.
-const CALL = new RegExp(String.raw`(?:\b((?:[A-Za-z_$][\w$]*(?:\(\))?\.)+)(${METHODS.join('|')})|\b(print)|\b(info|warn|error|debug|trace|println|eprintln|print|panic)!)\s*\(\s*`, 'g');
+const CALL = new RegExp(
+  String.raw`(?:\b((?:[A-Za-z_$][\w$]*(?:\(\))?\.)+)(${METHODS.join('|')})|\b(print)|\b(info|warn|error|debug|trace|println|eprintln|print|panic)!)\s*\(\s*`,
+  'g',
+);
 const LEVEL_BY_METHOD: Record<string, string> = {
-  trace: 'trace', verbose: 'trace', fine: 'trace', debug: 'debug', info: 'info', information: 'info', notice: 'info',
-  warn: 'warn', warning: 'warn', error: 'error', exception: 'error', severe: 'error', critical: 'fatal', fatal: 'fatal', panic: 'fatal',
-  loginformation: 'info', logwarning: 'warn', logerror: 'error', logdebug: 'debug', logtrace: 'trace', logcritical: 'fatal'
+  trace: 'trace',
+  verbose: 'trace',
+  fine: 'trace',
+  debug: 'debug',
+  info: 'info',
+  information: 'info',
+  notice: 'info',
+  warn: 'warn',
+  warning: 'warn',
+  error: 'error',
+  exception: 'error',
+  severe: 'error',
+  critical: 'fatal',
+  fatal: 'fatal',
+  panic: 'fatal',
+  loginformation: 'info',
+  logwarning: 'warn',
+  logerror: 'error',
+  logdebug: 'debug',
+  logtrace: 'trace',
+  logcritical: 'fatal',
 };
 const MAX_SITES_PER_FILE = 2000;
 const MAX_TEMPLATE = 300;
@@ -62,7 +162,7 @@ export function extractLogSites(file: string, text: string): LogSite[] {
     // Plain `print(` and `.log(` carry no severity; method names like Errorf do.
     const level = LEVEL_BY_METHOD[method];
     const parts = splitTemplate(literal.value, literal.interpolated, DOLLAR_INTERPOLATION.has(extension));
-    const literals = parts.filter(part => part.trim());
+    const literals = parts.filter((part) => part.trim());
     if (!literals.length) continue;
     const template = parts.join('…').slice(0, MAX_TEMPLATE);
     const position = lineOf(lineStarts, match.index);
@@ -70,8 +170,14 @@ export function extractLogSites(file: string, text: string): LogSite[] {
     occurrences.set(template, occurrence);
     const distinctive = literals.join('').replace(/\s+/g, '');
     sites.push({
-      id: `${file}\0${template}\0${occurrence}`, file, line: position.line, column: position.column, level, template, literals,
-      matchable: distinctive.length >= 6 && literals.some(part => part.replace(/\s+/g, '').length >= 4)
+      id: `${file}\0${template}\0${occurrence}`,
+      file,
+      line: position.line,
+      column: position.column,
+      level,
+      template,
+      literals,
+      matchable: distinctive.length >= 6 && literals.some((part) => part.replace(/\s+/g, '').length >= 4),
     });
   }
   return sites;
@@ -105,8 +211,14 @@ class CommentScanner {
       this.lineComment = this.commentStart(lineStart);
     }
     if (offset >= this.lineComment) return true;
-    while (this.nextOpen !== -1 && this.nextOpen <= offset) { this.lastOpen = this.nextOpen; this.nextOpen = this.text.indexOf('/*', this.nextOpen + 1); }
-    while (this.nextClose !== -1 && this.nextClose <= offset) { this.lastClose = this.nextClose; this.nextClose = this.text.indexOf('*/', this.nextClose + 1); }
+    while (this.nextOpen !== -1 && this.nextOpen <= offset) {
+      this.lastOpen = this.nextOpen;
+      this.nextOpen = this.text.indexOf('/*', this.nextOpen + 1);
+    }
+    while (this.nextClose !== -1 && this.nextClose <= offset) {
+      this.lastClose = this.nextClose;
+      this.nextClose = this.text.indexOf('*/', this.nextClose + 1);
+    }
     return this.lastOpen > this.lastClose;
   }
 
@@ -127,10 +239,12 @@ class CommentScanner {
 const LINE_PREFIX = /[^\S\n]*(?:\*|#(?![{\[])|--)/y;
 
 function lineOf(starts: number[], offset: number): { line: number; column: number } {
-  let low = 0, high = starts.length - 1;
+  let low = 0,
+    high = starts.length - 1;
   while (low < high) {
     const middle = (low + high + 1) >> 1;
-    if (starts[middle] <= offset) low = middle; else high = middle - 1;
+    if (starts[middle] <= offset) low = middle;
+    else high = middle - 1;
   }
   return { line: low + 1, column: offset - starts[low] + 1 };
 }
@@ -138,7 +252,10 @@ function lineOf(starts: number[], offset: number): { line: number; column: numbe
 // Reads one string literal, including common prefixes: f"", r"", $"", @"",
 // $@"", template literals, and Python triple quotes. Concatenation and
 // variables as the first argument are not followed.
-function readStringLiteral(text: string, start: number): { value: string; interpolated: boolean; end: number } | undefined {
+function readStringLiteral(
+  text: string,
+  start: number,
+): { value: string; interpolated: boolean; end: number } | undefined {
   let index = start;
   const prefix = text.slice(index, index + 3).match(/^(?:[fFrRbBuU]{1,2}|\$@|@\$|\$|@)?/)![0];
   index += prefix.length;
@@ -159,7 +276,7 @@ function readStringLiteral(text: string, start: number): { value: string; interp
     if (char === '\n' && !multiline) return undefined;
     if (char === '\\' && !raw) {
       const next = text[index + 1];
-      value += next === 'n' || next === 't' || next === 'r' ? ' ' : next ?? '';
+      value += next === 'n' || next === 't' || next === 'r' ? ' ' : (next ?? '');
       index += 2;
       continue;
     }
@@ -172,7 +289,8 @@ function readStringLiteral(text: string, start: number): { value: string; interp
 // Stands for an expression concatenated into a message; a placeholder like any other.
 const EXPRESSION = '\0';
 // Calls whose own first argument is the message format.
-const WRAPPER = /^(?:String\.format|String\.Format|string\.Format|MessageFormat\.format|fmt\.Sprintf|fmt\.Errorf|util\.format|sprintf|format!)\s*\(\s*/;
+const WRAPPER =
+  /^(?:String\.format|String\.Format|string\.Format|MessageFormat\.format|fmt\.Sprintf|fmt\.Errorf|util\.format|sprintf|format!)\s*\(\s*/;
 
 /**
  * The message a logging call logs: its first argument, or the second when
@@ -187,15 +305,24 @@ function readMessage(text: string, start: number): { value: string; interpolated
   return readArgument(text, skipSpace(text, first.end + 1)).message;
 }
 
-function readArgument(text: string, start: number): { message?: { value: string; interpolated: boolean }; end: number } {
+function readArgument(
+  text: string,
+  start: number,
+): { message?: { value: string; interpolated: boolean }; end: number } {
   let index = start;
   const wrapper = text.slice(index, index + 40).match(WRAPPER);
   if (wrapper) index += wrapper[0].length;
-  let value = '', interpolated = false, literals = 0;
+  let value = '',
+    interpolated = false,
+    literals = 0;
   for (let term = 0; term < 32; term++) {
     const literal = readStringLiteral(text, index);
-    if (literal) { value += literal.value; interpolated ||= literal.interpolated; literals++; index = literal.end; }
-    else {
+    if (literal) {
+      value += literal.value;
+      interpolated ||= literal.interpolated;
+      literals++;
+      index = literal.end;
+    } else {
       const end = skipExpression(text, index);
       if (end === index) break;
       value += EXPRESSION;
@@ -208,7 +335,10 @@ function readArgument(text: string, start: number): { message?: { value: string;
   return { message: literals ? { value, interpolated } : undefined, end: index };
 }
 
-const skipSpace = (text: string, index: number) => { while (index < text.length && /\s/.test(text[index])) index++; return index; };
+const skipSpace = (text: string, index: number) => {
+  while (index < text.length && /\s/.test(text[index])) index++;
+  return index;
+};
 
 // Skips one operand of a concatenation (a name, call, member access or
 // bracketed expression), stopping at a top-level `+`, `,` or `)`.
@@ -222,8 +352,10 @@ function skipExpression(text: string, start: number): number {
       if (!literal) return start;
       index = literal.end - 1;
     } else if (char === '(' || char === '[' || char === '{') depth++;
-    else if (char === ')' || char === ']' || char === '}') { if (depth === 0) return index; depth--; }
-    else if (depth === 0 && (char === '+' || char === ',' || char === ';')) return index;
+    else if (char === ')' || char === ']' || char === '}') {
+      if (depth === 0) return index;
+      depth--;
+    } else if (depth === 0 && (char === '+' || char === ',' || char === ';')) return index;
   }
   return start;
 }
@@ -231,7 +363,8 @@ function skipExpression(text: string, start: number): number {
 // Placeholders become empty strings between literal parts. Braces count as
 // placeholders in every language (f-strings, C# interpolation and message
 // templates, SLF4J and Rust `{}`), as do printf verbs.
-const PLACEHOLDER = /\0|\$\{[^}]*\}|#\{[^}]*\}|\{\{|\}\}|\{[^{}]*\}|%%|%(?:\([^)]*\))?[-+ #0]*(?:\d+|\*)?(?:\.\d+)?[sdifoOjJvqxXeEgGtTpcbuUw]/g;
+const PLACEHOLDER =
+  /\0|\$\{[^}]*\}|#\{[^}]*\}|\{\{|\}\}|\{[^{}]*\}|%%|%(?:\([^)]*\))?[-+ #0]*(?:\d+|\*)?(?:\.\d+)?[sdifoOjJvqxXeEgGtTpcbuUw]/g;
 
 function splitTemplate(value: string, interpolated: boolean, dollar: boolean): string[] {
   const parts: string[] = [''];
@@ -259,11 +392,12 @@ const escapeRegex = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$
  * literals are dropped first when the query would exceed its length limit.
  */
 export function siteQuery(site: LogSite): string {
-  const literals = site.literals.map(part => part.trim()).filter(Boolean);
-  const encode = (parts: string[]) => `message:/${parts.map(part => escapeRegex(part).replace(/\s+/g, '\\s+').replace(/"/g, '\\x22')).join('.*')}/`;
+  const literals = site.literals.map((part) => part.trim()).filter(Boolean);
+  const encode = (parts: string[]) =>
+    `message:/${parts.map((part) => escapeRegex(part).replace(/\s+/g, '\\s+').replace(/"/g, '\\x22')).join('.*')}/`;
   let kept = literals;
   while (kept.length > 1 && encode(kept).length > 256) {
-    const shortest = kept.reduce((min, part, index) => part.length < kept[min].length ? index : min, 0);
+    const shortest = kept.reduce((min, part, index) => (part.length < kept[min].length ? index : min), 0);
     kept = kept.filter((_part, index) => index !== shortest);
   }
   return encode(kept).slice(0, 256);
@@ -272,13 +406,25 @@ export function siteQuery(site: LogSite): string {
 /** The code location an event reports about itself: from its capture source or common logger fields. */
 export function eventLocation(event: LogEvent): { file: string; line: number } | undefined {
   if (event.location) return event.location;
-  const text = (name: string) => { const value = getField(event, name); return typeof value === 'string' && value ? value : undefined; };
-  const number = (name: string) => { const value = Number(getField(event, name)); return Number.isSafeInteger(value) && value > 0 ? value : undefined; };
+  const text = (name: string) => {
+    const value = getField(event, name);
+    return typeof value === 'string' && value ? value : undefined;
+  };
+  const number = (name: string) => {
+    const value = Number(getField(event, name));
+    return Number.isSafeInteger(value) && value > 0 ? value : undefined;
+  };
   for (const [fileField, lineField] of [
-    ['code.file.path', 'code.line.number'], ['code.filepath', 'code.lineno'], ['log.origin.file.name', 'log.origin.file.line'],
-    ['source.file', 'source.line'], ['pathname', 'lineno'], ['filename', 'lineno'], ['file', 'line']
+    ['code.file.path', 'code.line.number'],
+    ['code.filepath', 'code.lineno'],
+    ['log.origin.file.name', 'log.origin.file.line'],
+    ['source.file', 'source.line'],
+    ['pathname', 'lineno'],
+    ['filename', 'lineno'],
+    ['file', 'line'],
   ]) {
-    const file = text(fileField), line = number(lineField);
+    const file = text(fileField),
+      line = number(lineField);
     if (file && line) return { file, line };
   }
   // zap, go-kit and pino-caller report `path/file.go:42` or `file:///path/x.js:10:5`.
@@ -293,7 +439,11 @@ const normalizePath = (file: string) => file.replace(/\\/g, '/');
 const WORD = /[A-Za-z][A-Za-z0-9_]{3,}/g;
 const KEY_WORD = /(?<![\w…])[A-Za-z][A-Za-z0-9_]{3,}(?![\w…])/g;
 
-interface Compiled { site: LogSite; parts: RegExp[]; score: number; }
+interface Compiled {
+  site: LogSite;
+  parts: RegExp[];
+  score: number;
+}
 
 /**
  * Whether the literal parts occur in order, separated by anything. Each part
@@ -329,20 +479,41 @@ export class LogSiteIndex {
   setFile(file: string, sites: LogSite[]): void {
     const previous = this.files.get(file);
     if (!sites.length && !previous) return;
-    if (previous && previous.length === sites.length && previous.every((site, index) => site.id === sites[index].id && site.line === sites[index].line)) return;
-    if (sites.length) this.files.set(file, sites); else this.files.delete(file);
+    if (
+      previous &&
+      previous.length === sites.length &&
+      previous.every((site, index) => site.id === sites[index].id && site.line === sites[index].line)
+    )
+      return;
+    if (sites.length) this.files.set(file, sites);
+    else this.files.delete(file);
     this.changed();
   }
 
-  deleteFile(file: string): void { if (this.files.delete(file)) this.changed(); }
-  clear(): void { if (this.files.size) { this.files.clear(); this.changed(); } }
-  sitesIn(file: string): readonly LogSite[] { return this.files.get(file) ?? []; }
-  get size(): number { let count = 0; for (const sites of this.files.values()) count += sites.length; return count; }
-  allSites(): IterableIterator<LogSite[]> { return this.files.values(); }
+  deleteFile(file: string): void {
+    if (this.files.delete(file)) this.changed();
+  }
+  clear(): void {
+    if (this.files.size) {
+      this.files.clear();
+      this.changed();
+    }
+  }
+  sitesIn(file: string): readonly LogSite[] {
+    return this.files.get(file) ?? [];
+  }
+  get size(): number {
+    let count = 0;
+    for (const sites of this.files.values()) count += sites.length;
+    return count;
+  }
+  allSites(): IterableIterator<LogSite[]> {
+    return this.files.values();
+  }
 
   find(id: string): LogSite | undefined {
     const file = id.slice(0, id.indexOf('\0'));
-    return this.files.get(file)?.find(site => site.id === id);
+    return this.files.get(file)?.find((site) => site.id === id);
   }
 
   match(event: LogEvent): SiteMatch | undefined {
@@ -395,8 +566,10 @@ export class LogSiteIndex {
         if (seen.has(candidate)) continue;
         seen.add(candidate);
         if (!inOrder(candidate.parts, message)) continue;
-        if (!best || candidate.score > best.score) { best = candidate; tied = false; }
-        else if (candidate.score === best.score) tied = true;
+        if (!best || candidate.score > best.score) {
+          best = candidate;
+          tied = false;
+        } else if (candidate.score === best.score) tied = true;
       }
     }
     // Two different statements that explain a message equally well are
@@ -407,13 +580,14 @@ export class LogSiteIndex {
   private basenameIndex(): Map<string, LogSite[]> {
     if (this.byBasename) return this.byBasename;
     const index = new Map<string, LogSite[]>();
-    for (const sites of this.files.values()) for (const site of sites) {
-      const name = basename(site.file);
-      const list = index.get(name) ?? [];
-      list.push(site);
-      index.set(name, list);
-    }
-    return this.byBasename = index;
+    for (const sites of this.files.values())
+      for (const site of sites) {
+        const name = basename(site.file);
+        const list = index.get(name) ?? [];
+        list.push(site);
+        index.set(name, list);
+      }
+    return (this.byBasename = index);
   }
 
   // Each matchable site is filed under the rarest word in its literals, so a
@@ -424,28 +598,29 @@ export class LogSiteIndex {
     if (this.byWord) return this.byWord;
     const keyed: [LogSite, string[]][] = [];
     const frequency = new Map<string, number>();
-    for (const sites of this.files.values()) for (const site of sites) {
-      if (!site.matchable) continue;
-      // A word touching a placeholder (`cache_miss_` in `cache_miss_{key}`)
-      // tokenizes differently in the logged message, so only words with real
-      // boundaries in the template can be keys.
-      const words = [...new Set(site.template.match(KEY_WORD)?.map(word => word.toLowerCase()))];
-      if (!words.length) continue;
-      keyed.push([site, words]);
-      for (const word of words) frequency.set(word, (frequency.get(word) ?? 0) + 1);
-    }
+    for (const sites of this.files.values())
+      for (const site of sites) {
+        if (!site.matchable) continue;
+        // A word touching a placeholder (`cache_miss_` in `cache_miss_{key}`)
+        // tokenizes differently in the logged message, so only words with real
+        // boundaries in the template can be keys.
+        const words = [...new Set(site.template.match(KEY_WORD)?.map((word) => word.toLowerCase()))];
+        if (!words.length) continue;
+        keyed.push([site, words]);
+        for (const word of words) frequency.set(word, (frequency.get(word) ?? 0) + 1);
+      }
     const index = new Map<string, Compiled[]>();
     for (const [site, words] of keyed) {
       const key = words.reduce((best, word) => {
         const difference = frequency.get(word)! - frequency.get(best)!;
         return difference < 0 || (difference === 0 && word.length > best.length) ? word : best;
       });
-      const parts = site.literals.map(part => new RegExp(escapeRegex(part).replace(/\s+/g, '\\s+?'), 'g'));
+      const parts = site.literals.map((part) => new RegExp(escapeRegex(part).replace(/\s+/g, '\\s+?'), 'g'));
       const list = index.get(key) ?? [];
       list.push({ site, parts, score: site.literals.join('').replace(/\s+/g, '').length });
       index.set(key, list);
     }
-    return this.byWord = index;
+    return (this.byWord = index);
   }
 
   private changed(): void {
@@ -456,9 +631,18 @@ export class LogSiteIndex {
   }
 }
 
-export interface SiteSample { id: number; level: string; message: string; time?: number; }
+export interface SiteSample {
+  id: number;
+  level: string;
+  message: string;
+  time?: number;
+}
 export interface SiteStats {
-  hits: number; errors: number; lastSeen?: number; samples: SiteSample[]; exact: number;
+  hits: number;
+  errors: number;
+  lastSeen?: number;
+  samples: SiteSample[];
+  exact: number;
   /** Collected when findings are on: sensitive values by kind, with the latest event that carried each. */
   sensitive?: Map<SensitiveKind, { value: SensitiveValue; count: number; lastId: number }>;
   /** Error-level events that carried no stack trace or exception. */
@@ -479,13 +663,27 @@ export interface SiteStats {
 const MAX_DURATIONS = 256;
 
 /** Duration percentiles of a statement's recent events, when they report one. */
-export interface SiteDurations { count: number; min: number; p50: number; p95: number; p99: number; max: number; }
+export interface SiteDurations {
+  count: number;
+  min: number;
+  p50: number;
+  p95: number;
+  p99: number;
+  max: number;
+}
 
 export function siteDurations(stats: SiteStats): SiteDurations | undefined {
   if (!stats.durations?.length) return undefined;
-  const sorted = stats.durations.map(entry => entry.ms).sort((a, b) => a - b);
+  const sorted = stats.durations.map((entry) => entry.ms).sort((a, b) => a - b);
   const at = (share: number) => sorted[Math.min(sorted.length - 1, Math.ceil(sorted.length * share) - 1)];
-  return { count: sorted.length, min: sorted[0], p50: at(0.5), p95: at(0.95), p99: at(0.99), max: sorted[sorted.length - 1] };
+  return {
+    count: sorted.length,
+    min: sorted[0],
+    p50: at(0.5),
+    p95: at(0.95),
+    p99: at(0.99),
+    max: sorted[sorted.length - 1],
+  };
 }
 
 function eventDuration(event: LogEvent): number | undefined {
@@ -512,7 +710,7 @@ export class LogSiteTracker {
   /** Counts resets, after which an event can be attributed differently. */
   generation = 0;
 
-  constructor(readonly index: LogSiteIndex) { }
+  constructor(readonly index: LogSiteIndex) {}
 
   // What each counted event added, oldest first, so evicting an event can
   // subtract it without re-matching every retained event.
@@ -520,9 +718,15 @@ export class LogSiteTracker {
   private countedHead = 0;
 
   reset(watermark = 0): void {
-    this.stats.clear(); this.watermark = watermark; this.indexVersion = this.index.version; this.total = 0; this.generation++;
-    this.structured = 0; this.correlated = 0;
-    this.counted = []; this.countedHead = 0;
+    this.stats.clear();
+    this.watermark = watermark;
+    this.indexVersion = this.index.version;
+    this.total = 0;
+    this.generation++;
+    this.structured = 0;
+    this.correlated = 0;
+    this.counted = [];
+    this.countedHead = 0;
   }
 
   /**
@@ -530,12 +734,14 @@ export class LogSiteTracker {
    * no statement, or `undefined` when the event has not been counted.
    */
   siteOf(id: number): string | null | undefined {
-    let low = this.countedHead, high = this.counted.length - 1;
+    let low = this.countedHead,
+      high = this.counted.length - 1;
     while (low <= high) {
       const middle = (low + high) >> 1;
       const entry = this.counted[middle];
       if (entry.id === id) return entry.site ?? null;
-      if (entry.id < id) low = middle + 1; else high = middle - 1;
+      if (entry.id < id) low = middle + 1;
+      else high = middle - 1;
     }
     return undefined;
   }
@@ -552,7 +758,10 @@ export class LogSiteTracker {
       const stats = this.stats.get(entry.site);
       if (!stats) continue;
       changed = true;
-      if (!--stats.hits) { this.stats.delete(entry.site); continue; }
+      if (!--stats.hits) {
+        this.stats.delete(entry.site);
+        continue;
+      }
       // Durations are kept oldest first, so evicted events leave from the front.
       while (stats.durations?.length && stats.durations[0].id < oldestId) stats.durations.shift();
       if (entry.exact) stats.exact--;
@@ -587,15 +796,32 @@ export class LogSiteTracker {
       const context = this.findings ? requestContext(event) : undefined;
       if (context?.structured) this.structured++;
       if (context?.correlated) this.correlated++;
-      if (!match) { this.counted.push({ id: event.id, ...context }); continue; }
+      if (!match) {
+        this.counted.push({ id: event.id, ...context });
+        continue;
+      }
       let stats = this.stats.get(match.site.id);
-      if (!stats) { stats = { hits: 0, errors: 0, samples: [], exact: 0 }; this.stats.set(match.site.id, stats); }
-      const entry: Counted = { id: event.id, site: match.site.id, exact: match.exact, error: event.level === 'error' || event.level === 'fatal', ...context };
+      if (!stats) {
+        stats = { hits: 0, errors: 0, samples: [], exact: 0 };
+        this.stats.set(match.site.id, stats);
+      }
+      const entry: Counted = {
+        id: event.id,
+        site: match.site.id,
+        exact: match.exact,
+        error: event.level === 'error' || event.level === 'fatal',
+        ...context,
+      };
       stats.hits++;
       if (entry.exact) stats.exact++;
       if (entry.error) stats.errors++;
       stats.lastSeen = event.timestampMs ?? stats.lastSeen;
-      stats.samples.push({ id: event.id, level: event.level, message: (event.message ?? '').slice(0, 200), time: event.timestampMs });
+      stats.samples.push({
+        id: event.id,
+        level: event.level,
+        message: (event.message ?? '').slice(0, 200),
+        time: event.timestampMs,
+      });
       if (stats.samples.length > 3) stats.samples.shift();
       const ms = eventDuration(event);
       if (ms !== undefined) {
@@ -611,10 +837,19 @@ export class LogSiteTracker {
 }
 
 interface Counted {
-  id: number; site?: string; exact?: boolean; error?: boolean;
-  sensitive?: SensitiveKind[]; bareError?: boolean; plain?: boolean;
-  quietFailure?: boolean; chars?: number; truncated?: boolean; contextless?: boolean;
-  structured?: boolean; correlated?: boolean;
+  id: number;
+  site?: string;
+  exact?: boolean;
+  error?: boolean;
+  sensitive?: SensitiveKind[];
+  bareError?: boolean;
+  plain?: boolean;
+  quietFailure?: boolean;
+  chars?: number;
+  truncated?: boolean;
+  contextless?: boolean;
+  structured?: boolean;
+  correlated?: boolean;
 }
 
 function requestContext(event: LogEvent): Pick<Counted, 'structured' | 'correlated'> {
@@ -626,17 +861,36 @@ function collectFindings(stats: SiteStats, event: LogEvent, counted: Counted): v
   for (const value of findSensitiveValues(event)) {
     stats.sensitive ??= new Map();
     const entry = stats.sensitive.get(value.kind);
-    if (entry) { entry.count++; entry.lastId = event.id; entry.value = value; }
-    else stats.sensitive.set(value.kind, { value, count: 1, lastId: event.id });
+    if (entry) {
+      entry.count++;
+      entry.lastId = event.id;
+      entry.value = value;
+    } else stats.sensitive.set(value.kind, { value, count: 1, lastId: event.id });
     (counted.sensitive ??= []).push(value.kind);
   }
-  if ((event.level === 'error' || event.level === 'fatal') && !extractExceptions(event).length) { stats.bareErrors = (stats.bareErrors ?? 0) + 1; counted.bareError = true; }
-  if (!event.isJson && !Object.keys(event.fields ?? {}).length) { stats.plain = (stats.plain ?? 0) + 1; counted.plain = true; }
-  if (isQuietFailure(event)) { stats.quietFailures = (stats.quietFailures ?? 0) + 1; counted.quietFailure = true; }
+  if ((event.level === 'error' || event.level === 'fatal') && !extractExceptions(event).length) {
+    stats.bareErrors = (stats.bareErrors ?? 0) + 1;
+    counted.bareError = true;
+  }
+  if (!event.isJson && !Object.keys(event.fields ?? {}).length) {
+    stats.plain = (stats.plain ?? 0) + 1;
+    counted.plain = true;
+  }
+  if (isQuietFailure(event)) {
+    stats.quietFailures = (stats.quietFailures ?? 0) + 1;
+    counted.quietFailure = true;
+  }
   const chars = (event.raw ?? event.message ?? '').length;
-  if (chars) { stats.chars = (stats.chars ?? 0) + chars; counted.chars = chars; }
-  if (event.truncated) { stats.truncated = (stats.truncated ?? 0) + 1; counted.truncated = true; }
+  if (chars) {
+    stats.chars = (stats.chars ?? 0) + chars;
+    counted.chars = chars;
+  }
+  if (event.truncated) {
+    stats.truncated = (stats.truncated ?? 0) + 1;
+    counted.truncated = true;
+  }
   if (counted.structured && !counted.correlated && ['warn', 'error', 'fatal'].includes(event.level)) {
-    stats.contextless = (stats.contextless ?? 0) + 1; counted.contextless = true;
+    stats.contextless = (stats.contextless ?? 0) + 1;
+    counted.contextless = true;
   }
 }

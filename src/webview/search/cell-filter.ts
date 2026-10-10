@@ -1,15 +1,22 @@
 import { queryTokens } from '../../core/query-tokens';
 import type { LogEvent } from '../../core/types';
 
-export interface CellValue { field: string; value: string | number | boolean | undefined; }
+export interface CellValue {
+  field: string;
+  value: string | number | boolean | undefined;
+}
 export type FilterChoice = { query: string; reason?: never } | { query?: never; reason: string };
 
 export function valueForCell(event: LogEvent, column: string): CellValue | undefined {
   switch (column) {
-    case 'base:time': return { field: 'timestamp', value: event.timestamp };
-    case 'base:level': return { field: 'level', value: event.level };
-    case 'base:message': return { field: 'message', value: event.message };
-    case 'base:source': return { field: 'stream', value: event.stream };
+    case 'base:time':
+      return { field: 'timestamp', value: event.timestamp };
+    case 'base:level':
+      return { field: 'level', value: event.level };
+    case 'base:message':
+      return { field: 'message', value: event.message };
+    case 'base:source':
+      return { field: 'stream', value: event.stream };
   }
   if (column.startsWith('field:')) {
     const field = column.slice(6);
@@ -33,7 +40,7 @@ export function addFilterTerm(input: string, term: string, limit = 256): FilterC
     if (token === 'OR' || token === 'or') groups.push([]);
     else groups.at(-1)!.push(token);
   }
-  const branches = groups.filter(group => group.length);
-  const query = (branches.length ? branches : [[]]).map(group => [...group, term].join(' ')).join(' OR ');
+  const branches = groups.filter((group) => group.length);
+  const query = (branches.length ? branches : [[]]).map((group) => [...group, term].join(' ')).join(' OR ');
   return query.length > limit ? { reason: `This filter would exceed the ${limit}-character search limit.` } : { query };
 }

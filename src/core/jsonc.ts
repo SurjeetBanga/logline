@@ -11,11 +11,17 @@ export function stripJsonComments(text: string): string {
     const ch = text[i];
     const next = text[i + 1];
     if (inLineComment) {
-      if (ch === '\n') { inLineComment = false; result += ch; }
+      if (ch === '\n') {
+        inLineComment = false;
+        result += ch;
+      }
       continue;
     }
     if (inBlockComment) {
-      if (ch === '*' && next === '/') { inBlockComment = false; i++; }
+      if (ch === '*' && next === '/') {
+        inBlockComment = false;
+        i++;
+      }
       continue;
     }
     if (inString) {
@@ -25,9 +31,21 @@ export function stripJsonComments(text: string): string {
       else if (ch === '"') inString = false;
       continue;
     }
-    if (ch === '"') { inString = true; result += ch; continue; }
-    if (ch === '/' && next === '/') { inLineComment = true; i++; continue; }
-    if (ch === '/' && next === '*') { inBlockComment = true; i++; continue; }
+    if (ch === '"') {
+      inString = true;
+      result += ch;
+      continue;
+    }
+    if (ch === '/' && next === '/') {
+      inLineComment = true;
+      i++;
+      continue;
+    }
+    if (ch === '/' && next === '*') {
+      inBlockComment = true;
+      i++;
+      continue;
+    }
     result += ch;
   }
   return result;
