@@ -258,7 +258,7 @@
       element2.textContent = text;
       return element2;
     }
-    function tile(label, value, detail, tone) {
+    function tile2(label, value, detail, tone) {
       const element2 = document.createElement("div");
       element2.className = tone ? `analysis-tile tone-${tone}` : "analysis-tile";
       const name = document.createElement("span");
@@ -276,9 +276,9 @@
       }
       return element2;
     }
-    function percent(part, whole) {
-      if (!whole || !part) return "0%";
-      const share = part / whole * 100;
+    function percent(part, whole2) {
+      if (!whole2 || !part) return "0%";
+      const share = part / whole2 * 100;
       return share < 0.1 ? "<0.1%" : share < 10 ? `${share.toFixed(1)}%` : `${Math.round(share)}%`;
     }
     function duration(ms) {
@@ -293,12 +293,12 @@
     }
     function summaryTiles(analysis) {
       const summary2 = analysis.summary;
-      const tiles = document.createElement("div");
-      tiles.className = "analysis-tiles chart-wide";
-      if (!summary2) return tiles;
-      tiles.append(tile("Events", count(summary2.events), span(analysis.range)));
-      tiles.append(
-        tile(
+      const tiles2 = document.createElement("div");
+      tiles2.className = "analysis-tiles chart-wide";
+      if (!summary2) return tiles2;
+      tiles2.append(tile2("Events", count(summary2.events), span(analysis.range)));
+      tiles2.append(
+        tile2(
           "Errors",
           count(summary2.errors),
           `${percent(summary2.errors, summary2.events)} of events`,
@@ -306,15 +306,15 @@
         )
       );
       if (summary2.latency)
-        tiles.append(
-          tile(
+        tiles2.append(
+          tile2(
             "Latency p95",
             duration(summary2.latency.p95),
             `p50 ${duration(summary2.latency.p50)} \xB7 p99 ${duration(summary2.latency.p99)}`
           )
         );
-      if (summary2.sources > 1) tiles.append(tile("Sources", count(summary2.sources)));
-      return tiles;
+      if (summary2.sources > 1) tiles2.append(tile2("Sources", count(summary2.sources)));
+      return tiles2;
     }
     function barRow(label, value, total, max, target, tone = "") {
       const row = document.createElement("button");
@@ -749,6 +749,28 @@
       metricsFilter: element("metricsFilter"),
       metricsStatus: element("metricsStatus"),
       metricsRows: element("metricsRows"),
+      aiCalls: element("aiCalls"),
+      aiCallCount: element("aiCallCount"),
+      aiCallsView: element("aiCallsView"),
+      aiCallsStatus: element("aiCallsStatus"),
+      aiCallsKind: element("aiCallsKind"),
+      aiCallsErrorsOnly: element("aiCallsErrorsOnly"),
+      aiCallsFilter: element("aiCallsFilter"),
+      aiCallsTiles: element("aiCallsTiles"),
+      aiModelsTable: element("aiModelsTable"),
+      aiModelRows: element("aiModelRows"),
+      aiCallRows: element("aiCallRows"),
+      aiCallView: element("aiCallView"),
+      aiCallBack: element("aiCallBack"),
+      aiCallTitle: element("aiCallTitle"),
+      aiCallNavigation: element("aiCallNavigation"),
+      aiCallPrevious: element("aiCallPrevious"),
+      aiCallPosition: element("aiCallPosition"),
+      aiCallNext: element("aiCallNext"),
+      aiCallTrace: element("aiCallTrace"),
+      aiCallCopy: element("aiCallCopy"),
+      aiCallStatus: element("aiCallStatus"),
+      aiCallTranscript: element("aiCallTranscript"),
       otlpStatus: element("otlpStatus"),
       traceTitle: element("traceTitle"),
       traceStatus: element("traceStatus"),
@@ -1259,15 +1281,15 @@
         (exception, blockIndex) => container.append(exceptionSection(links.crash.id, exception, blockIndex))
       );
     }
-    const pre = document.createElement("pre");
-    pre.textContent = text ?? "Loading\u2026";
+    const pre2 = document.createElement("pre");
+    pre2.textContent = text ?? "Loading\u2026";
     if (exceptions.length || links.crash) {
       const raw = document.createElement("details");
       const summary2 = document.createElement("summary");
       summary2.textContent = "Original event";
-      raw.append(summary2, pre);
+      raw.append(summary2, pre2);
       container.append(raw);
-    } else container.append(pre);
+    } else container.append(pre2);
     return container;
   }
 
@@ -1436,6 +1458,11 @@
       actions.applyQuery(`traceId:${current}`);
     });
     scope.listen(elements.traceRows, "click", (event) => {
+      const chip = event.target.closest(".trace-genai");
+      if (chip?.dataset.spanId && current) {
+        actions.openAiCall(current, chip.dataset.spanId);
+        return;
+      }
       const button = event.target.closest(".trace-log-button");
       if (!button) return;
       actions.showContext(Number(button.dataset.id));
@@ -1552,6 +1579,20 @@
     label.style.paddingInlineStart = `${Math.min(span.depth, 24) * 14}px`;
     label.textContent = `${span.error ? "\u26A0 " : ""}${span.name}`;
     name.append(label);
+    if (span.genAi) {
+      const content = document.createElement("div");
+      content.className = "trace-name-content";
+      const chip = document.createElement("button");
+      chip.type = "button";
+      chip.className = "trace-genai";
+      chip.dataset.spanId = span.spanId;
+      const subject = span.genAi.label.replace(/^tool · /, "");
+      const usage = span.genAi.inputTokens !== void 0 || span.genAi.outputTokens !== void 0 ? `${compactTokens(span.genAi.inputTokens)} \u2192 ${compactTokens(span.genAi.outputTokens)} tok` : "";
+      chip.textContent = [span.name.includes(subject) ? "" : span.genAi.label, usage].filter(Boolean).join(" \xB7 ") || "AI call";
+      chip.title = `${span.genAi.label}${usage ? `, ${usage}` : ""}. Open this call in AI calls.`;
+      content.append(label, chip);
+      name.replaceChildren(content);
+    }
     name.title = [
       `${span.name} (${span.kind})`,
       `Self time: ${formatDuration(span.selfMs)} of ${formatDuration(span.durationMs)}`,
@@ -1572,6 +1613,8 @@
     );
     return row;
   }
+  var tokenFormat = new Intl.NumberFormat(void 0, { notation: "compact", maximumFractionDigits: 1 });
+  var compactTokens = (value) => value === void 0 ? "\u2013" : tokenFormat.format(value);
   function logRow(log, total, depth) {
     const row = document.createElement("tr");
     row.className = "trace-log";
@@ -1862,6 +1905,391 @@ Trace ${trace.traceId}`;
     return { show, hide, receive, update };
   }
 
+  // src/core/otlp.ts
+  var CONTENT_LIMITS = { string: 64 * 1024, array: 256, depth: 12 };
+
+  // src/core/gen-ai.ts
+  var MODEL_OPERATIONS = /* @__PURE__ */ new Set(["chat", "text_completion", "generate_content", "embeddings", "completion"]);
+  var AGENT_OPERATIONS = /* @__PURE__ */ new Set(["invoke_agent", "create_agent"]);
+  var KNOWN_OPERATIONS = /* @__PURE__ */ new Set([
+    ...MODEL_OPERATIONS,
+    ...AGENT_OPERATIONS,
+    "execute_tool",
+    "retrieval",
+    "fetch_response"
+  ]);
+  var PART_LIMIT = 16 * 1024;
+  var ROLE_TITLES = {
+    system: "System",
+    user: "User",
+    assistant: "Assistant",
+    tool: "Tool",
+    tools: "Tools available"
+  };
+  function roleTitle(message) {
+    if (message.output && message.role === "assistant") return "Response";
+    return ROLE_TITLES[message.role] ?? message.role.charAt(0).toUpperCase() + message.role.slice(1);
+  }
+
+  // src/webview/inspection/ai-calls.ts
+  var REFRESH_MS2 = 5e3;
+  var OPEN_BELOW_CHARACTERS = 600;
+  var KIND_GLYPHS = { model: "\u25C6", tool: "\u2699", agent: "\u25B8", other: "\xB7" };
+  var CUT_SHORT = /* @__PURE__ */ new Set(["length", "max_tokens", "content_filter", "max_output_tokens"]);
+  var compact = new Intl.NumberFormat(void 0, { notation: "compact", maximumFractionDigits: 1 });
+  var whole = new Intl.NumberFormat();
+  function tokens(value, short = false) {
+    if (value === void 0) return "\u2013";
+    return short && value >= 1e4 ? compact.format(value) : whole.format(value);
+  }
+  function callLabel(call) {
+    if (call.kind === "tool") return `tool ${call.tool ?? call.name}`;
+    if (call.kind === "agent") return `agent ${call.agent ?? call.name}`;
+    return call.model ? `${call.operation} ${call.model}` : call.name;
+  }
+  function createAiCalls(elements, api, scope, actions) {
+    let summary2;
+    let revision;
+    let pending = false;
+    let loadedAt = -Infinity;
+    let refresh;
+    let current;
+    let detail;
+    function load() {
+      if (pending) return;
+      pending = true;
+      loadedAt = Date.now();
+      api.postMessage({ type: "aiCalls" });
+    }
+    function refreshSoon() {
+      if (refresh) return;
+      refresh = setTimeout(
+        () => {
+          refresh = void 0;
+          if (actions.listVisible()) load();
+        },
+        Math.max(0, loadedAt + REFRESH_MS2 - Date.now())
+      );
+    }
+    function show() {
+      elements.aiCallsStatus.textContent = "Loading\u2026";
+      actions.revealList();
+      load();
+    }
+    function hide() {
+      clearTimeout(refresh);
+      refresh = void 0;
+    }
+    function open(traceId, spanId) {
+      current = { traceId: traceId.toLowerCase(), spanId: spanId.toLowerCase() };
+      detail = void 0;
+      elements.aiCallTitle.textContent = "AI call";
+      elements.aiCallStatus.textContent = "Loading\u2026";
+      elements.aiCallTranscript.replaceChildren();
+      elements.aiCallNavigation.hidden = true;
+      actions.revealCall();
+      api.postMessage({ type: "aiCall", ...current });
+    }
+    function close() {
+      current = void 0;
+      detail = void 0;
+      elements.aiCallTranscript.replaceChildren();
+    }
+    function openRow(target) {
+      const row = target?.closest("[data-span-id]");
+      if (row?.dataset.traceId && row.dataset.spanId) open(row.dataset.traceId, row.dataset.spanId);
+    }
+    scope.listen(elements.aiCallRows, "click", (event) => openRow(event.target));
+    scope.listen(elements.aiCallRows, "keydown", (event) => {
+      const key = event.key;
+      if (key !== "Enter" && key !== " ") return;
+      event.preventDefault();
+      openRow(event.target);
+    });
+    scope.listen(elements.aiModelRows, "click", (event) => {
+      const row = event.target.closest("[data-model]");
+      if (!row?.dataset.model) return;
+      elements.aiCallsFilter.value = row.dataset.model;
+      render();
+    });
+    scope.listen(elements.aiCallsFilter, "input", render);
+    scope.listen(elements.aiCallsKind, "change", render);
+    scope.listen(elements.aiCallsErrorsOnly, "change", render);
+    scope.listen(elements.aiCallBack, "click", show);
+    scope.listen(elements.aiCallTrace, "click", () => {
+      if (current) actions.showTrace(current.traceId);
+    });
+    scope.listen(elements.aiCallCopy, "click", () => {
+      if (current) api.postMessage({ type: "copyAiCall", ...current });
+    });
+    const step = (offset) => {
+      const target = detail?.conversation[detail.position + offset];
+      if (target) open(target.traceId, target.spanId);
+    };
+    scope.listen(elements.aiCallPrevious, "click", () => step(-1));
+    scope.listen(elements.aiCallNext, "click", () => step(1));
+    function update(calls) {
+      elements.aiCalls.hidden = !calls;
+      elements.aiCallCount.textContent = calls ? whole.format(calls.calls) : "";
+      elements.aiCalls.title = calls ? `${whole.format(calls.calls)} LLM calls, tool executions, and agent runs from OpenTelemetry. Show their models, tokens, and conversations.` : "";
+      const changed = calls?.revision !== revision;
+      revision = calls?.revision;
+      if (changed && actions.listVisible()) refreshSoon();
+    }
+    function receive(list) {
+      pending = false;
+      summary2 = list;
+      if (actions.listVisible()) render();
+    }
+    function receiveCall(message) {
+      if (!actions.callVisible() || message.traceId !== current?.traceId || message.spanId !== current.spanId) return;
+      if (!message.detail) {
+        elements.aiCallStatus.textContent = "This call is no longer retained.";
+        return;
+      }
+      detail = message.detail;
+      renderCall(message.detail);
+    }
+    function shown(calls) {
+      const kind = elements.aiCallsKind.value;
+      const errorsOnly = elements.aiCallsErrorsOnly.checked;
+      const terms = elements.aiCallsFilter.value.trim().toLowerCase().split(/\s+/).filter(Boolean);
+      return calls.filter((call) => {
+        if (kind && call.kind !== kind) return false;
+        if (errorsOnly && !call.error) return false;
+        if (!terms.length) return true;
+        const text = [call.name, call.model, call.tool, call.agent, call.provider, call.service, call.operation].filter(Boolean).join(" ").toLowerCase();
+        return terms.every((term) => text.includes(term));
+      });
+    }
+    function render() {
+      if (!summary2) return;
+      if (!summary2.total) {
+        elements.aiCallsStatus.textContent = "No AI calls yet. Apps instrumented with the OpenTelemetry GenAI conventions send their LLM calls, tool executions, and agent runs to the receiver.";
+        elements.aiCallsTiles.replaceChildren();
+        elements.aiModelRows.replaceChildren();
+        elements.aiCallRows.replaceChildren();
+        return;
+      }
+      const rows = shown(summary2.calls);
+      elements.aiCallsStatus.textContent = `${whole.format(summary2.total)} AI ${summary2.total === 1 ? "call" : "calls"}` + (summary2.errors ? ` \xB7 ${whole.format(summary2.errors)} failed` : "") + (summary2.total > summary2.calls.length ? ` \xB7 newest ${whole.format(summary2.calls.length)} listed` : "") + (rows.length < summary2.calls.length ? ` \xB7 ${whole.format(rows.length)} match` : "") + " \xB7 Choose one to read its conversation";
+      elements.aiCallsTiles.replaceChildren(...tiles(summary2));
+      elements.aiModelRows.replaceChildren(...summary2.models.map(modelRow));
+      elements.aiModelsTable.hidden = !summary2.models.length;
+      elements.aiCallRows.replaceChildren(...rows.map(callRow));
+    }
+    function callRow(call) {
+      const row = document.createElement("tr");
+      row.className = `ai-call-row${call.error ? " trace-error" : ""}`;
+      row.dataset.traceId = call.traceId;
+      row.dataset.spanId = call.spanId;
+      row.tabIndex = 0;
+      const label = callLabel(call);
+      row.setAttribute("aria-label", `${label}, ${formatDuration(call.durationMs)}${call.error ? ", failed" : ""}`);
+      const operation = cell(`${KIND_GLYPHS[call.kind]} ${label}`, "trace-name ai-operation");
+      operation.title = [call.name, call.provider, call.service, call.errorMessage && `Error: ${call.errorMessage}`].filter(Boolean).join("\n");
+      const usage = cell(
+        call.inputTokens === void 0 && call.outputTokens === void 0 ? "" : `${tokens(call.inputTokens, true)} \u2192 ${tokens(call.outputTokens, true)}`,
+        "ai-tokens"
+      );
+      if (call.cachedTokens) usage.title = `${tokens(call.cachedTokens)} of the input tokens were cached`;
+      const finish = cell((call.finishReasons ?? []).join(", "), "ai-finish");
+      if (call.finishReasons?.some((reason) => CUT_SHORT.has(reason))) {
+        finish.classList.add("ai-cut-short");
+        finish.title = "The response was cut short by a limit or a filter";
+      }
+      row.append(
+        cell(actions.formatTime(call.startMs), "time"),
+        operation,
+        cell(call.agent ?? "", "ai-agent"),
+        usage,
+        cell(formatDuration(call.durationMs), "trace-duration"),
+        finish
+      );
+      return row;
+    }
+    function renderCall(view) {
+      const { call } = view;
+      elements.aiCallTitle.textContent = `${KIND_GLYPHS[call.kind]} ${callLabel(call)}`;
+      elements.aiCallTitle.title = `${call.name}
+Trace ${call.traceId}
+Span ${call.spanId}`;
+      elements.aiCallStatus.textContent = [
+        call.provider,
+        call.agent && `agent ${call.agent}`,
+        formatDuration(call.durationMs),
+        (call.inputTokens !== void 0 || call.outputTokens !== void 0) && `${tokens(call.inputTokens)} in${call.cachedTokens ? ` (${tokens(call.cachedTokens)} cached)` : ""} \u2192 ${tokens(call.outputTokens)} out`,
+        call.finishReasons?.length && `finish ${call.finishReasons.join(", ")}`,
+        call.error && `failed${call.errorMessage ? `: ${call.errorMessage}` : ""}`
+      ].filter(Boolean).join(" \xB7 ");
+      const count = view.conversation.length;
+      elements.aiCallNavigation.hidden = count < 2;
+      elements.aiCallPosition.textContent = `${view.position + 1} of ${count}`;
+      elements.aiCallPrevious.disabled = view.position <= 0;
+      elements.aiCallNext.disabled = view.position >= count - 1;
+      if (!view.messages.length) {
+        const note = document.createElement("p");
+        note.className = "ai-empty";
+        note.textContent = call.hasContent ? "This call recorded content Logline does not recognize." : "This call has no message content. Most SDKs leave prompts and responses out unless you turn on content capture, for example OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT=true.";
+        elements.aiCallTranscript.replaceChildren(note);
+        return;
+      }
+      elements.aiCallTranscript.replaceChildren(...view.messages.map((message) => messageBlock(message, view)));
+    }
+    return {
+      show,
+      hide,
+      open,
+      close,
+      update,
+      receive,
+      receiveCall
+    };
+  }
+  function tile(label, value, detail) {
+    const element2 = document.createElement("div");
+    element2.className = "analysis-tile";
+    const name = document.createElement("span");
+    name.className = "tile-label";
+    name.textContent = label;
+    const number2 = document.createElement("strong");
+    number2.className = "tile-value";
+    number2.textContent = value;
+    element2.append(name, number2);
+    if (detail) {
+      const note = document.createElement("span");
+      note.className = "tile-detail";
+      note.textContent = detail;
+      element2.append(note);
+    }
+    return element2;
+  }
+  function tiles(summary2) {
+    const modelErrors = summary2.models.reduce((sum, model) => sum + model.errors, 0);
+    const toolErrors = summary2.tools.reduce((sum, tool) => sum + tool.errors, 0);
+    const cached = summary2.inputTokens ? Math.round(summary2.cachedTokens / summary2.inputTokens * 100) : 0;
+    return [
+      tile(
+        "Model calls",
+        whole.format(summary2.modelCalls),
+        modelErrors ? `${whole.format(modelErrors)} failed` : void 0
+      ),
+      tile(
+        "Tokens",
+        `${tokens(summary2.inputTokens, true)} \u2192 ${tokens(summary2.outputTokens, true)}`,
+        cached ? `${cached}% of input cached` : "input \u2192 output"
+      ),
+      ...summary2.p50Ms !== void 0 ? [tile("Latency", `p50 ${formatDuration(summary2.p50Ms)}`, `p95 ${formatDuration(summary2.p95Ms)}`)] : [],
+      tile("Tool calls", whole.format(summary2.toolCalls), toolErrors ? `${whole.format(toolErrors)} failed` : void 0)
+    ];
+  }
+  function modelRow(model) {
+    const row = document.createElement("tr");
+    row.className = "ai-model-row";
+    row.dataset.model = model.model;
+    row.title = `Show only ${model.model}`;
+    const name = cell(model.model, "trace-name");
+    if (model.provider) {
+      const provider = document.createElement("span");
+      provider.className = "ai-provider";
+      provider.textContent = ` \xB7 ${model.provider}`;
+      name.append(provider);
+    }
+    row.append(
+      name,
+      cell(whole.format(model.calls), "ai-number"),
+      cell(tokens(model.inputTokens, true), "ai-number"),
+      cell(tokens(model.outputTokens, true), "ai-number"),
+      cell(formatDuration(model.p95Ms), "trace-duration"),
+      cell(model.errors ? whole.format(model.errors) : "", model.errors ? "ai-number ai-errors" : "ai-number")
+    );
+    return row;
+  }
+  function block(summary2, body, open, className = "ai-block") {
+    const details2 = document.createElement("details");
+    details2.className = className;
+    details2.open = open;
+    const heading = document.createElement("summary");
+    heading.textContent = summary2;
+    details2.append(heading, ...body);
+    return details2;
+  }
+  function pre(text) {
+    const element2 = document.createElement("pre");
+    element2.className = "ai-code";
+    element2.textContent = text;
+    return element2;
+  }
+  function cutNote() {
+    const note = document.createElement("p");
+    note.className = "ai-cut";
+    note.textContent = "Showing the first 16 KB.";
+    return note;
+  }
+  function partBlock(part, detail) {
+    const length = (part.text ?? part.value ?? "").length;
+    const open = length < OPEN_BELOW_CHARACTERS;
+    const cut = part.truncated ? [cutNote()] : [];
+    if (part.kind === "text") {
+      const text = document.createElement("div");
+      text.className = "ai-text";
+      text.textContent = part.text ?? "";
+      if (!cut.length) return text;
+      const wrapper = document.createElement("div");
+      wrapper.append(text, ...cut);
+      return wrapper;
+    }
+    if (part.kind === "reasoning") return block("Reasoning", [pre(part.text ?? ""), ...cut], open);
+    if (part.kind === "tool_call") {
+      const run = part.id ? detail.toolRuns[part.id] : void 0;
+      const outcome = run ? ` \xB7 ${run.error ? "failed" : "ok"} \xB7 ${formatDuration(run.durationMs)}` : "";
+      const body = [pre(part.value ?? ""), ...cut];
+      if (run?.result !== void 0) {
+        const label = document.createElement("p");
+        label.className = "ai-result-label";
+        label.textContent = run.error && run.errorMessage ? `Result \xB7 ${run.errorMessage}` : "Result";
+        body.push(label, pre(run.result), ...run.truncated ? [cutNote()] : []);
+      }
+      const details2 = block(`Tool call ${part.name ?? "tool"}${outcome}`, body, open, "ai-block ai-tool");
+      if (run?.error) details2.classList.add("ai-failed");
+      return details2;
+    }
+    if (part.kind === "tool_result")
+      return block(`Tool result${part.name ? ` ${part.name}` : ""}`, [pre(part.value ?? ""), ...cut], open);
+    return block(part.name ?? "Part", [pre(part.value ?? part.text ?? ""), ...cut], false);
+  }
+  function messageBlock(message, detail) {
+    const article = document.createElement("article");
+    article.className = `ai-message ai-role-${message.role.replace(/[^a-z]/gi, "")}${message.output ? " ai-output" : ""}`;
+    const heading = document.createElement("h4");
+    heading.textContent = roleTitle(message);
+    if (message.role === "system") {
+      const lines = message.parts.reduce((sum, part) => sum + (part.text ?? part.value ?? "").split("\n").length, 0);
+      article.append(
+        block(
+          `System instructions (${lines} ${lines === 1 ? "line" : "lines"})`,
+          message.parts.map((part) => partBlock(part, detail)),
+          false,
+          "ai-block ai-system"
+        )
+      );
+      return article;
+    }
+    if (message.role === "tools") {
+      article.append(
+        block(
+          `${message.parts.length} ${message.parts.length === 1 ? "tool" : "tools"} available`,
+          message.parts.map((part) => block(part.name ?? "tool", [pre(part.value ?? "")], false)),
+          false,
+          "ai-block ai-system"
+        )
+      );
+      return article;
+    }
+    article.append(heading, ...message.parts.map((part) => partBlock(part, detail)));
+    return article;
+  }
+
   // src/webview/popovers.ts
   function createPopovers(scope) {
     const popovers = [];
@@ -1939,8 +2367,8 @@ Trace ${trace.traceId}`;
 
   // src/core/query-completion.ts
   function completionTarget(input) {
-    const tokens = [...input.matchAll(/(?:[^\s"]+|"(?:\\.|[^"\\])*"?)+/g)];
-    const last = /\s$/.test(input) ? void 0 : tokens.at(-1);
+    const tokens2 = [...input.matchAll(/(?:[^\s"]+|"(?:\\.|[^"\\])*"?)+/g)];
+    const last = /\s$/.test(input) ? void 0 : tokens2.at(-1);
     const text = last?.[0] ?? "";
     const match = text.match(/^(-?)(@?([A-Za-z_][A-Za-z0-9_.]*):)?(.*)$/);
     let value = match[4];
@@ -2122,7 +2550,7 @@ Trace ${trace.traceId}`;
       fatal: "Fatal",
       unclassified: "Unclassified"
     };
-    function tokens(query2) {
+    function tokens2(query2) {
       return queryTokens(query2.trim()).map((value) => value.toLowerCase() === "or" ? "OR" : value);
     }
     function validDraft(input, canStartWithOr = Boolean(appliedQuery)) {
@@ -2147,7 +2575,7 @@ Trace ${trace.traceId}`;
       }
       if (quoted) return { values: [], error: "Close the quoted filter before applying it." };
       if (brackets !== 0) return { values: [], error: "Close the filter range before applying it." };
-      const values = tokens(value);
+      const values = tokens2(value);
       if (!values.length) return { values: [], error: "Enter a filter term." };
       if (values[0] === "OR" && !canStartWithOr || values.at(-1) === "OR" || values.some((item, index) => item === "OR" && values[index - 1] === "OR"))
         return { values: [], error: "OR must have a filter on both sides." };
@@ -2168,7 +2596,7 @@ Trace ${trace.traceId}`;
       return cleaned;
     }
     function renderChips() {
-      const values = tokens(appliedQuery);
+      const values = tokens2(appliedQuery);
       let editingInput;
       elements.searchChips.replaceChildren(
         ...values.map((value, index) => {
@@ -2257,7 +2685,7 @@ Trace ${trace.traceId}`;
       return appliedQuery;
     }
     function setQuery(value, notify = false) {
-      const normalized = tokens(value).join(" ").slice(0, MAX_QUERY_LENGTH);
+      const normalized = tokens2(value).join(" ").slice(0, MAX_QUERY_LENGTH);
       const regexError = queryError(normalized);
       if (regexError) {
         setError(regexError);
@@ -2284,7 +2712,7 @@ Trace ${trace.traceId}`;
       elements.search.focus();
     }
     function removeAt(index) {
-      const values = cleanQuery(tokens(appliedQuery).filter((_, itemIndex) => itemIndex !== index));
+      const values = cleanQuery(tokens2(appliedQuery).filter((_, itemIndex) => itemIndex !== index));
       setQuery(values.join(" "), true);
       elements.search.focus();
     }
@@ -2295,7 +2723,7 @@ Trace ${trace.traceId}`;
         return false;
       }
       if (!result.values.length) return false;
-      const current = tokens(appliedQuery);
+      const current = tokens2(appliedQuery);
       const next = replacingIndex === void 0 ? [...current, ...result.values] : [...current.slice(0, replacingIndex), ...result.values, ...current.slice(replacingIndex + 1)];
       const normalized = cleanQuery(next).join(" ");
       if (normalized.length > MAX_QUERY_LENGTH) {
@@ -2430,7 +2858,7 @@ Trace ${trace.traceId}`;
         event.preventDefault();
         cancelEdit();
       } else if (event.key === "Backspace" && !elements.search.value && editingIndex === void 0) {
-        const values = tokens(appliedQuery);
+        const values = tokens2(appliedQuery);
         let index = values.length - 1;
         while (index >= 0 && values[index] === "OR") index--;
         if (index >= 0) {
@@ -3409,12 +3837,12 @@ Trace ${trace.traceId}`;
   }
 
   // src/webview/views.ts
-  var TABS = ["logs", "analysis", "traces", "metrics", "doctor"];
+  var TABS = ["logs", "analysis", "traces", "metrics", "aiCalls", "doctor"];
   function isTabName(value) {
     return typeof value === "string" && TABS.includes(value);
   }
   function tabOf(view) {
-    return view === "trace" ? "traces" : view;
+    return view === "trace" ? "traces" : view === "aiCall" ? "aiCalls" : view;
   }
   function createViews(tabs, panels, scope, activate, changed) {
     let current = "logs";
@@ -3467,6 +3895,7 @@ Trace ${trace.traceId}`;
         analysis: elements.analyze,
         traces: elements.traces,
         metrics: elements.metrics,
+        aiCalls: elements.aiCalls,
         doctor: elements.doctor
       },
       {
@@ -3475,6 +3904,8 @@ Trace ${trace.traceId}`;
         traces: elements.tracesView,
         trace: elements.traceView,
         metrics: elements.metricsView,
+        aiCalls: elements.aiCallsView,
+        aiCall: elements.aiCallView,
         doctor: elements.doctorView
       },
       scope,
@@ -3519,6 +3950,7 @@ Trace ${trace.traceId}`;
         search.setQuery(query, true);
       },
       showList: () => traceList.show(),
+      openAiCall: (traceId, spanId) => aiCalls.open(traceId, spanId),
       reveal: () => views.show("trace"),
       visible: () => views.active() === "trace"
     });
@@ -3533,6 +3965,14 @@ Trace ${trace.traceId}`;
     const metricList = createMetricList(elements, api, scope, {
       reveal: () => views.show("metrics"),
       visible: () => views.active() === "metrics"
+    });
+    const aiCalls = createAiCalls(elements, api, scope, {
+      showTrace: (traceId) => traceView.show(traceId),
+      formatTime: (ms) => formatTimestamp({ id: 0, level: "", timestampMs: ms }) ?? "",
+      revealList: () => views.show("aiCalls"),
+      revealCall: () => views.show("aiCall"),
+      listVisible: () => views.active() === "aiCalls",
+      callVisible: () => views.active() === "aiCall"
     });
     const doctor = createDoctor(
       elements.doctor,
@@ -3640,6 +4080,14 @@ Trace ${trace.traceId}`;
         metricList.receive(data.metrics);
         return;
       }
+      if (data.type === "aiCalls") {
+        aiCalls.receive(data.aiCalls);
+        return;
+      }
+      if (data.type === "aiCall") {
+        aiCalls.receiveCall(data);
+        return;
+      }
       if (data.type === "details") {
         if (data.target === "context") inspection.receiveDetails(data);
         else table.receiveDetails(data);
@@ -3691,6 +4139,7 @@ Trace ${trace.traceId}`;
       changedFiles = data.changes?.files;
       updateChangesControl();
       metricList.update(data.metrics);
+      aiCalls.update(data.aiCalls);
       views.ensureVisible();
       elements.traceCount.hidden = !data.traceCount;
       elements.traceCount.textContent = data.traceCount ? numberFormat.format(data.traceCount) : "";
@@ -4194,11 +4643,14 @@ Trace ${trace.traceId}`;
         requestAnalysis();
       } else if (tab === "traces") traceList.show();
       else if (tab === "metrics") metricList.show();
+      else if (tab === "aiCalls") aiCalls.show();
       else views.show(tab);
     }
     function viewChanged(view, previous) {
       if (previous === "trace") traceView.hide();
       if (previous === "metrics") metricList.hide();
+      if (previous === "aiCalls") aiCalls.hide();
+      if (previous === "aiCall") aiCalls.close();
       state.view = tabOf(view);
       saveState();
     }

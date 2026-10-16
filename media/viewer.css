@@ -301,6 +301,17 @@
 .trace-indent {
   display: inline-block;
 }
+/* A name with a chip: the name is cut to fit, the chip never is. */
+.trace-name-content {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+.trace-name-content .trace-indent {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 .trace-duration {
   text-align: right;
   font-variant-numeric: tabular-nums;
@@ -1618,6 +1629,7 @@ body:not([data-view='logs']) #rowHint {
 /* Traces, Metrics, and Issues have their own filters; the search row is for the logs and their analysis. */
 body[data-view='traces'] .search-toolbar,
 body[data-view='metrics'] .search-toolbar,
+body[data-view='aiCalls'] .search-toolbar,
 body[data-view='doctor'] .search-toolbar {
   display: none;
 }
@@ -1954,6 +1966,182 @@ td[data-column]:focus-visible {
   width: 260px;
   margin-right: 10px;
 }
+/* AI calls: totals, the list of calls, and one call's conversation. */
+#aiCallsFilter {
+  width: 240px;
+}
+#aiCallsKind {
+  height: 26px;
+  padding: 0 6px;
+}
+.ai-scroll,
+.ai-transcript {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+}
+.ai-tiles {
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  margin-bottom: 10px;
+}
+.ai-models-table {
+  margin-bottom: 12px;
+}
+.ai-models-table th:nth-child(1) {
+  width: auto;
+}
+.ai-models-table th:nth-child(n + 2) {
+  width: 84px;
+  text-align: right;
+}
+.ai-calls-table th:nth-child(1) {
+  width: 110px;
+}
+.ai-calls-table th:nth-child(2) {
+  width: auto;
+}
+.ai-calls-table th:nth-child(3) {
+  width: 14%;
+}
+.ai-calls-table th:nth-child(4) {
+  width: 130px;
+  text-align: right;
+}
+.ai-calls-table th:nth-child(5) {
+  width: 90px;
+  text-align: right;
+}
+.ai-calls-table th:nth-child(6) {
+  width: 110px;
+}
+.ai-call-row,
+.ai-model-row {
+  cursor: pointer;
+}
+.ai-call-row:hover,
+.ai-call-row:focus-visible,
+.ai-model-row:hover {
+  background: var(--vscode-list-hoverBackground, #2a2d2e);
+}
+.ai-operation,
+.ai-agent {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ai-agent,
+.ai-finish,
+.ai-provider {
+  color: var(--vscode-descriptionForeground, #aaa);
+}
+.ai-number,
+.ai-tokens {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.ai-errors {
+  color: var(--vscode-errorForeground, #f48771);
+}
+.ai-finish.ai-cut-short {
+  color: var(--vscode-editorWarning-foreground, #cca700);
+}
+.ai-navigation {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+#aiCallPosition {
+  color: var(--vscode-descriptionForeground, #aaa);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+.ai-transcript {
+  max-width: 980px;
+  padding-bottom: 8px;
+}
+.ai-message {
+  padding: 8px 0;
+  border-top: 1px solid var(--vscode-panel-border, #444);
+}
+.ai-message h4 {
+  margin: 0 0 4px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--vscode-descriptionForeground, #aaa);
+}
+.ai-message.ai-output h4 {
+  color: var(--vscode-textLink-foreground, #3794ff);
+}
+.ai-text {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.ai-text + .ai-text {
+  margin-top: 6px;
+}
+.ai-block {
+  margin: 4px 0;
+  border: 1px solid var(--vscode-panel-border, #444);
+  border-radius: 4px;
+}
+.ai-block > summary {
+  padding: 3px 8px;
+  cursor: pointer;
+  font-size: 12px;
+}
+.ai-block.ai-failed > summary {
+  color: var(--vscode-errorForeground, #f48771);
+}
+.ai-system {
+  margin: 0;
+  border: 0;
+}
+.ai-system > summary {
+  padding-inline: 0;
+  color: var(--vscode-descriptionForeground, #aaa);
+}
+.ai-code {
+  max-height: 360px;
+  margin: 0;
+  padding: 6px 8px;
+  overflow: auto;
+  border-top: 1px solid var(--vscode-panel-border, #444);
+  background: var(--vscode-textCodeBlock-background, rgba(255, 255, 255, 0.04));
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: 12px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.ai-result-label,
+.ai-cut,
+.ai-empty {
+  margin: 4px 8px 2px;
+  color: var(--vscode-descriptionForeground, #aaa);
+  font-size: 11px;
+}
+.ai-empty {
+  margin: 8px 0;
+  font-size: 12px;
+}
+/* In the trace waterfall, a GenAI span's model or tool and tokens, which open its conversation. */
+.trace-genai {
+  flex: none;
+  margin-left: 8px;
+  padding: 0 7px;
+  border: 1px solid var(--vscode-panel-border, #444);
+  border-radius: 10px;
+  background: transparent;
+  color: var(--vscode-descriptionForeground, #aaa);
+  font-size: 11px;
+  line-height: 16px;
+}
+.trace-genai:hover,
+.trace-genai:focus-visible {
+  border-color: var(--vscode-focusBorder, #007fd4);
+  color: var(--vscode-foreground, #d4d4d4);
+}
 .metrics-table th:nth-child(1) {
   width: auto;
 }
@@ -2100,6 +2288,14 @@ td[data-column]:focus-visible {
     overflow: hidden;
     font-size: 0;
   }
+  .ai-calls-table th:nth-child(3),
+  .ai-agent,
+  .ai-calls-table th:nth-child(6),
+  .ai-finish,
+  .ai-models-table th:nth-child(4),
+  .ai-models-table td:nth-child(4),
+  .ai-models-table th:nth-child(6),
+  .ai-models-table td:nth-child(6),
   .metrics-table th:nth-child(3),
   .metric-attributes {
     width: 0;

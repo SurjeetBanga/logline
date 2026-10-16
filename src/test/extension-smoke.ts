@@ -241,7 +241,7 @@ export async function run(): Promise<void> {
         .map((line) => JSON.parse(line) as { id: number; result: any })
         .map((reply) => [reply.id, reply.result]),
     );
-    assert.equal(replies.get(2)?.tools?.length, 6, `the MCP server lists the six tools (${output})`);
+    assert.equal(replies.get(2)?.tools?.length, 7, `the MCP server lists the seven tools (${output})`);
     assert.match(
       replies.get(3)?.content?.[0]?.text ?? '',
       /NOT_SHARED/,

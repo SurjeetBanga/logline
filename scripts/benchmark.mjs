@@ -189,6 +189,73 @@ timed('otlp', 'Read an OTLP/JSON request of 2,000 log records', async () => {
   };
   return () => readLogs(request, 0);
 });
+/** An OTLP/JSON trace request of `count` spans, each with `attributes(i)` as its attributes. */
+function spanRequest(count, attributes) {
+  const value = (item) => (typeof item === 'number' ? { intValue: String(item) } : { stringValue: String(item) });
+  return {
+    resourceSpans: [
+      {
+        resource: { attributes: [{ key: 'service.name', value: { stringValue: 'agent' } }] },
+        scopeSpans: [
+          {
+            spans: Array.from({ length: count }, (_, i) => ({
+              traceId: (i >> 4).toString(16).padStart(32, '0'),
+              spanId: (i + 1).toString(16).padStart(16, '0'),
+              name: `span ${i}`,
+              kind: 3,
+              startTimeUnixNano: String(1_700_000_000_000_000_000n + BigInt(i) * 1_000_000n),
+              endTimeUnixNano: String(1_700_000_000_000_000_000n + BigInt(i) * 1_000_000n + 500_000n),
+              attributes: Object.entries(attributes(i)).map(([key, item]) => ({ key, value: value(item) })),
+            })),
+          },
+        ],
+      },
+    ],
+  };
+}
+const httpAttributes = (i) => ({
+  'http.request.method': 'GET',
+  'http.route': '/orders/:id',
+  'http.response.status_code': 200,
+  'url.path': `/orders/${i}`,
+  'server.address': 'api.internal',
+  'user_agent.original': 'checkout/1.0',
+});
+timed('otlp-spans', 'Read an OTLP/JSON request of 2,000 spans', async () => {
+  const { readSpans } = await load('core/otlp.js');
+  const request = spanRequest(2000, httpAttributes);
+  return () => readSpans(request);
+});
+timed('otlp-genai', 'Read 50 LLM call spans with 50 KB of messages each', async () => {
+  const { readSpans } = await load('core/otlp.js');
+  const messages = JSON.stringify([{ role: 'user', parts: [{ type: 'text', content: 'w'.repeat(50 * 1024) }] }]);
+  const request = spanRequest(50, () => ({
+    'gen_ai.operation.name': 'chat',
+    'gen_ai.request.model': 'gpt-4o',
+    'gen_ai.input.messages': messages,
+  }));
+  return () => readSpans(request);
+});
+timed('ai-calls', 'List AI calls among 20,000 spans, 2,000 of them GenAI', async () => {
+  const { readSpans } = await load('core/otlp.js');
+  const { summarizeGenAi } = await load('core/gen-ai.js');
+  const spans = readSpans(
+    spanRequest(20000, (i) =>
+      i % 10
+        ? httpAttributes(i)
+        : {
+            'gen_ai.operation.name': i % 30 ? 'chat' : 'execute_tool',
+            'gen_ai.request.model': i % 20 ? 'gpt-4o' : 'claude-sonnet-5-5',
+            'gen_ai.tool.name': 'get_weather',
+            'gen_ai.usage.input_tokens': 1000 + i,
+            'gen_ai.usage.output_tokens': 100,
+          },
+    ),
+  );
+  const traces = new Map();
+  for (const span of spans) traces.set(span.traceId, [...(traces.get(span.traceId) ?? []), span]);
+  return () => summarizeGenAi(traces);
+});
 timed('redact', 'Redact 1,000 lines that carry credentials', async () => {
   const { createRedactor } = await load('core/redaction.js');
   const redactor = createRedactor();

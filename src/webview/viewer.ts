@@ -10,6 +10,7 @@ import { createInspection } from './inspection/context';
 import { createTraceView } from './inspection/trace';
 import { createTraceList } from './inspection/traces';
 import { createMetricList } from './inspection/metrics';
+import { createAiCalls } from './inspection/ai-calls';
 import { createDoctor } from './inspection/doctor';
 import { createPopovers } from './popovers';
 import { createSearch } from './search/controls';
@@ -40,6 +41,7 @@ export function createViewer(api: WebviewApi) {
       analysis: elements.analyze,
       traces: elements.traces,
       metrics: elements.metrics,
+      aiCalls: elements.aiCalls,
       doctor: elements.doctor,
     },
     {
@@ -48,6 +50,8 @@ export function createViewer(api: WebviewApi) {
       traces: elements.tracesView,
       trace: elements.traceView,
       metrics: elements.metricsView,
+      aiCalls: elements.aiCallsView,
+      aiCall: elements.aiCallView,
       doctor: elements.doctorView,
     },
     scope,
@@ -87,6 +91,7 @@ export function createViewer(api: WebviewApi) {
       search.setQuery(query, true);
     },
     showList: () => traceList.show(),
+    openAiCall: (traceId, spanId) => aiCalls.open(traceId, spanId),
     reveal: () => views.show('trace'),
     visible: () => views.active() === 'trace',
   });
@@ -101,6 +106,14 @@ export function createViewer(api: WebviewApi) {
   const metricList = createMetricList(elements, api, scope, {
     reveal: () => views.show('metrics'),
     visible: () => views.active() === 'metrics',
+  });
+  const aiCalls = createAiCalls(elements, api, scope, {
+    showTrace: (traceId) => traceView.show(traceId),
+    formatTime: (ms) => formatTimestamp({ id: 0, level: '', timestampMs: ms }) ?? '',
+    revealList: () => views.show('aiCalls'),
+    revealCall: () => views.show('aiCall'),
+    listVisible: () => views.active() === 'aiCalls',
+    callVisible: () => views.active() === 'aiCall',
   });
   const doctor = createDoctor(
     elements.doctor,
@@ -215,6 +228,14 @@ export function createViewer(api: WebviewApi) {
       metricList.receive(data.metrics);
       return;
     }
+    if (data.type === 'aiCalls') {
+      aiCalls.receive(data.aiCalls);
+      return;
+    }
+    if (data.type === 'aiCall') {
+      aiCalls.receiveCall(data);
+      return;
+    }
     if (data.type === 'details') {
       if (data.target === 'context') inspection.receiveDetails(data);
       else table.receiveDetails(data);
@@ -273,6 +294,7 @@ export function createViewer(api: WebviewApi) {
     changedFiles = data.changes?.files;
     updateChangesControl();
     metricList.update(data.metrics);
+    aiCalls.update(data.aiCalls);
     views.ensureVisible();
     elements.traceCount.hidden = !data.traceCount;
     elements.traceCount.textContent = data.traceCount ? numberFormat.format(data.traceCount) : '';
@@ -904,12 +926,15 @@ export function createViewer(api: WebviewApi) {
       requestAnalysis();
     } else if (tab === 'traces') traceList.show();
     else if (tab === 'metrics') metricList.show();
+    else if (tab === 'aiCalls') aiCalls.show();
     else views.show(tab);
   }
 
   function viewChanged(view: ViewName, previous: ViewName) {
     if (previous === 'trace') traceView.hide();
     if (previous === 'metrics') metricList.hide();
+    if (previous === 'aiCalls') aiCalls.hide();
+    if (previous === 'aiCall') aiCalls.close();
     state.view = tabOf(view);
     saveState();
   }

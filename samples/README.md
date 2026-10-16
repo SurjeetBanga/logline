@@ -7,6 +7,7 @@ Files for trying Logline without an app of your own.
 | [demo-logs.jsonl](demo-logs.jsonl) | **Logline: Import Logs**: JSON logs from several services, with errors, latency, and stack traces. |
 | [follow-demo.log](follow-demo.log) | **Logline: Follow Log File**: plain text, logfmt, and a stack trace. Append lines to see them arrive. |
 | [compose-demo.log](compose-demo.log) | **Logline: Import Logs**: `docker compose logs --timestamps` output from an `api`, `worker`, and `db` service, which Logline splits into one source each. |
+| [genai-trace.json](genai-trace.json) | Start the OpenTelemetry receiver, then `curl -X POST -H 'Content-Type: application/json' --data @samples/genai-trace.json http://127.0.0.1:4318/v1/traces`: an agent run with two model calls, a tool call, and a rate-limited call, for the **AI calls** tab. |
 | [checkout-demo](checkout-demo) | Open the folder in VS Code (Node.js 18 or later). See below. |
 
 ## Checkout demo

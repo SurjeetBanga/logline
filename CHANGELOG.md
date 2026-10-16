@@ -4,6 +4,13 @@ All notable changes to Logline are documented in this file.
 
 ## Unreleased
 
+### Changes
+
+- **AI calls**: a tab that lists LLM calls, tool executions, and agent runs from OpenTelemetry spans that follow the GenAI semantic conventions. Totals show model calls, input and output tokens with the cached share, p50 and p95 latency, and tool calls, then each model's calls, tokens, p95, and errors. Choosing a call shows its conversation: system instructions, messages, the response, reasoning, and each tool call with the result of its `execute_tool` span, with **Previous** and **Next** through the rest of the conversation, **Trace**, and **Copy** as redacted Markdown. Responses cut short by a token limit stand out, and calls without recorded content still show their model, tokens, and timing. Older forms such as `gen_ai.system`, `gen_ai.usage.prompt_tokens`, OpenLLMetry's `gen_ai.prompt.<n>.*` attributes, and message span events are read too. Try it with [samples/genai-trace.json](samples/genai-trace.json).
+- In the trace waterfall, LLM call and tool spans carry a chip with their tokens that opens the call in **AI calls**.
+- Agents get `logline_get_ai_calls`: totals per model and tool, the newest calls, and with `includeContent` the start of each call's messages and tool results, redacted. The `logline-triage` and `logline-slow-request` skills use it when an app calls an LLM.
+- Prompts, responses, and tool payloads keep up to 64 KiB per attribute when received, instead of being cut at 4 KiB, and stay out of span rows in the table and waterfall tooltips.
+
 ### Behavior changes
 
 The Logs panel is reorganized around tabs, so every view gets more room and new views no longer add toolbar buttons. Nothing was removed; some controls moved:

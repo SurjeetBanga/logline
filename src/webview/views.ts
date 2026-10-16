@@ -1,18 +1,21 @@
 import type { EventScope } from './event-scope';
 
-/** The views of the Logs panel. The Traces tab shows either the list (`traces`) or one trace (`trace`). */
-export type ViewName = 'logs' | 'analysis' | 'traces' | 'trace' | 'metrics' | 'doctor';
+/**
+ * The views of the Logs panel. The Traces tab shows either the list (`traces`)
+ * or one trace (`trace`), and the AI calls tab its list (`aiCalls`) or one call (`aiCall`).
+ */
+export type ViewName = 'logs' | 'analysis' | 'traces' | 'trace' | 'metrics' | 'aiCalls' | 'aiCall' | 'doctor';
 /** A view with its own tab, which is what the panel remembers between sessions. */
-export type TabName = Exclude<ViewName, 'trace'>;
+export type TabName = Exclude<ViewName, 'trace' | 'aiCall'>;
 
-const TABS: readonly TabName[] = ['logs', 'analysis', 'traces', 'metrics', 'doctor'];
+const TABS: readonly TabName[] = ['logs', 'analysis', 'traces', 'metrics', 'aiCalls', 'doctor'];
 
 export function isTabName(value: unknown): value is TabName {
   return typeof value === 'string' && (TABS as readonly string[]).includes(value);
 }
 
 export function tabOf(view: ViewName): TabName {
-  return view === 'trace' ? 'traces' : view;
+  return view === 'trace' ? 'traces' : view === 'aiCall' ? 'aiCalls' : view;
 }
 
 /**

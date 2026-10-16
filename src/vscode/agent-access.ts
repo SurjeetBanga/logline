@@ -10,11 +10,23 @@ import type { SessionRegistry } from '../capture/session-registry';
 import type { LogEvent, SessionSummary } from '../core/types';
 import type { Span } from '../core/otlp';
 import { buildTrace, traceLogs, type SpanStore, type TraceView } from '../core/traces';
+import { genAiCallDetail, summarizeGenAi, type GenAiCall, type GenAiMessage, type GenAiToolRun } from '../core/gen-ai';
 
 // Leaves room under the 64 KiB tool result limit (agent-tools.ts) for the envelope.
 const INSPECT_BUDGET_BYTES = 56 * 1024;
 // Concurrent wait_for_logs calls, for example from Copilot and Claude Code.
 const MAX_WAITS = 4;
+// AI call content is long; an agent gets the start of each part, and asks for one trace to see more calls.
+const AI_PART_CHARACTERS = 2048;
+const AI_CONTENT_CALLS = 20;
+
+export interface AgentAiCallsInput {
+  shareId: string;
+  traceId?: string;
+  model?: string;
+  limit?: number;
+  includeContent?: boolean;
+}
 
 export type AgentErrorCode =
   'NOT_SHARED' | 'SHARE_CHANGED' | 'INVALID_INPUT' | 'EVENT_UNAVAILABLE' | 'CANCELLED' | 'BUSY';
@@ -491,31 +503,109 @@ export class AgentLogAccess {
       this.nextId(),
       200,
     );
-    // Spans belong to the receiver run that accepted them; sharing selected
-    // runs shares only those runs' spans.
-    const sharedSpan = (span: Span) => {
-      const runs = this.shared.get(`otel:${span.service}`);
-      return Boolean(runs) && (this.shareAllRuns || span.sessionId === undefined || runs!.has(span.sessionId));
-    };
-    const spans = (this.spans?.trace(id) ?? []).filter(sharedSpan).map((span) => ({
-      ...span,
-      name: this.redactor.text(span.name),
-      attributes: this.redactor.value(span.attributes) as typeof span.attributes,
-      events: span.events.map((event) => ({
-        ...event,
-        name: this.redactor.text(event.name),
-        attributes: this.redactor.value(event.attributes) as typeof event.attributes,
-      })),
-      status: {
-        ...span.status,
-        message: span.status.message === undefined ? undefined : this.redactor.text(span.status.message),
-      },
-    }));
+    const spans = (this.spans?.trace(id) ?? [])
+      .filter((span) => this.sharedSpan(span))
+      .map((span) => ({
+        ...span,
+        name: this.redactor.text(span.name),
+        attributes: this.redactor.value(span.attributes) as typeof span.attributes,
+        events: span.events.map((event) => ({
+          ...event,
+          name: this.redactor.text(event.name),
+          attributes: this.redactor.value(event.attributes) as typeof event.attributes,
+        })),
+        status: {
+          ...span.status,
+          message: span.status.message === undefined ? undefined : this.redactor.text(span.status.message),
+        },
+      }));
     const logs = traceLogs(read.events, id, spans.length > 0, (event) =>
       this.redactor.text(event.message ?? '').slice(0, 1024),
     ).map((log) => (log.server === undefined ? log : { ...log, server: this.redactor.text(log.server) }));
     const view = buildTrace(id, spans, logs, 300);
     return { ...view, coverage: { spans: spans.length, logs: logs.length, limited: read.hasMore || view.omitted > 0 } };
+  }
+
+  // Spans belong to the receiver run that accepted them; sharing selected
+  // runs shares only those runs' spans.
+  private sharedSpan(span: Span): boolean {
+    const runs = this.shared.get(`otel:${span.service}`);
+    return Boolean(runs) && (this.shareAllRuns || span.sessionId === undefined || runs!.has(span.sessionId));
+  }
+
+  /**
+   * LLM calls, tool executions, and agent runs from shared OpenTelemetry
+   * services: totals per model and tool, the newest calls, and optionally
+   * the start of each call's conversation. Redacted and bounded.
+   */
+  aiCalls(input: AgentAiCallsInput): unknown {
+    if (!input || typeof input !== 'object' || typeof input.shareId !== 'string')
+      throw new AgentAccessError('INVALID_INPUT', 'An input with a string shareId is required.');
+    const { traceId, model, includeContent } = input;
+    if (traceId !== undefined && (typeof traceId !== 'string' || !/^[A-Za-z0-9_-]{1,128}$/.test(traceId)))
+      throw new AgentAccessError('INVALID_INPUT', 'traceId must be letters, digits, - or _.');
+    if (model !== undefined && (typeof model !== 'string' || model.length > 256))
+      throw new AgentAccessError('INVALID_INPUT', 'model must be a string of at most 256 characters.');
+    const limit = input.limit === undefined ? 50 : Number(input.limit);
+    if (!Number.isSafeInteger(limit) || limit < 1 || limit > 200)
+      throw new AgentAccessError('INVALID_INPUT', 'limit must be an integer from 1 to 200.');
+    this.assertShare(input.shareId);
+    const traces = new Map<string, Span[]>();
+    const add = (id: string, spans: readonly Span[]) => {
+      const shared = spans.filter((span) => this.sharedSpan(span));
+      if (shared.length) traces.set(id, shared);
+    };
+    if (traceId) add(traceId.toLowerCase(), this.spans?.trace(traceId.toLowerCase()) ?? []);
+    else for (const [id, spans] of this.spans?.entries() ?? []) add(id, spans);
+    const summary = summarizeGenAi(traces, Infinity);
+    const matching = model ? summary.calls.filter((call) => call.model === model) : summary.calls;
+    const calls: (GenAiCall & { messages?: GenAiMessage[]; toolRuns?: Record<string, GenAiToolRun> })[] = matching
+      .slice(0, limit)
+      .map((call) => ({ ...call }));
+    // The newest calls that recorded content carry the start of their conversation.
+    let withContent = 0;
+    if (includeContent)
+      for (const call of calls) {
+        if (withContent >= AI_CONTENT_CALLS) break;
+        if (!call.hasContent) continue;
+        const detail = genAiCallDetail(traces.get(call.traceId) ?? [], call.spanId);
+        if (!detail) continue;
+        call.messages = detail.messages.map((message) => ({
+          ...message,
+          parts: message.parts.map((part) => shortenPart(part)),
+        }));
+        call.toolRuns = Object.fromEntries(
+          Object.entries(detail.toolRuns).map(([id, run]) => [
+            id,
+            run.result === undefined || run.result.length <= AI_PART_CHARACTERS
+              ? run
+              : { ...run, result: run.result.slice(0, AI_PART_CHARACTERS), truncated: true },
+          ]),
+        );
+        withContent++;
+      }
+    const result = (shown: typeof calls) =>
+      this.redactor.value({
+        ...summary,
+        calls: shown,
+        coverage: {
+          matched: matching.length,
+          listed: shown.length,
+          limited: matching.length > shown.length,
+          contentCalls: shown.filter((call) => call.messages).length,
+        },
+      });
+    // Content goes first when the result would not fit: the newest calls keep theirs longest.
+    let value = result(calls);
+    while (Buffer.byteLength(JSON.stringify(value), 'utf8') > INSPECT_BUDGET_BYTES) {
+      let last = calls.length - 1;
+      while (last >= 0 && !calls[last].messages) last--;
+      if (last >= 0) calls[last] = { ...calls[last], messages: undefined, toolRuns: undefined };
+      else if (calls.length > 1) calls.splice(Math.ceil(calls.length / 2));
+      else break;
+      value = result(calls);
+    }
+    return value;
   }
 
   analyze(input: AgentSearchInput): unknown {
@@ -762,4 +852,14 @@ export class AgentLogAccess {
       throw new AgentAccessError('SHARE_CHANGED', 'The search cursor is no longer valid.');
     }
   }
+}
+
+function shortenPart<T extends { text?: string; value?: string; truncated?: boolean }>(part: T): T {
+  const cut = (text: string | undefined) =>
+    text !== undefined && text.length > AI_PART_CHARACTERS ? text.slice(0, AI_PART_CHARACTERS) : text;
+  const text = cut(part.text),
+    value = cut(part.value);
+  return text === part.text && value === part.value
+    ? part
+    : { ...part, ...(text !== undefined ? { text } : {}), ...(value !== undefined ? { value } : {}), truncated: true };
 }

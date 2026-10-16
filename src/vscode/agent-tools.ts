@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import type { AgentLogAccess, AgentSearchInput } from './agent-access';
+import type { AgentAiCallsInput, AgentLogAccess, AgentSearchInput } from './agent-access';
 import { AgentAccessError } from './agent-access';
 
 const MAX_BYTES = 64 * 1024;
@@ -108,6 +108,7 @@ export function agentToolHandlers(access: AgentLogAccess): Map<string, ToolCallb
         return access.trace(input.shareId, input.traceId);
       },
     ],
+    ['logline_get_ai_calls', (input) => access.aiCalls(input as unknown as AgentAiCallsInput)],
     [
       'logline_wait_for_logs',
       (input, token) => {

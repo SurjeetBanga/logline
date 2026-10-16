@@ -1,7 +1,15 @@
 import * as vscode from 'vscode';
 import { DebugCapture } from '../capture/debug-capture';
 import { OtlpReceiver } from '../capture/otlp-receiver';
+import {
+  genAiCallDetail,
+  genAiMarkdown,
+  summarizeGenAi,
+  type GenAiCallDetail,
+  type GenAiSummary,
+} from '../core/gen-ai';
 import { MetricStore, type MetricSeriesView } from '../core/metrics';
+import { createRedactor } from '../core/redaction';
 import { telemetryFindings, type TelemetryFinding } from '../core/telemetry-findings';
 import { buildTrace, SpanStore, summarizeTraces, traceLogs, type TraceSummary, type TraceView } from '../core/traces';
 import { OtelIntegration } from './otel-integration';
@@ -265,6 +273,9 @@ export class LogsController {
         traceView: (traceId) => this.traceView(traceId),
         traceList: () => this.traceList(),
         metricList: () => this.metricList(),
+        aiCallList: () => this.aiCallList(),
+        aiCallDetail: (traceId, spanId) => this.aiCallDetail(traceId, spanId),
+        copyAiCall: (traceId, spanId) => this.copyAiCall(traceId, spanId),
         toggleOtlp: (enabled) => this.toggleOtlp(enabled),
         breakOnEvent: (id) => this.breakOnEvent(id),
         breakOnQuery: (query, levels) => this.breakOnQuery(query, levels),
@@ -589,6 +600,33 @@ export class LogsController {
     return this.telemetryCache;
   }
   private telemetryCache?: { basis: string; findings: TelemetryFinding[]; version: number };
+  /** LLM calls, tool executions, and agent runs from received spans, recomputed only when spans change. */
+  aiCallList(): GenAiSummary {
+    if (this.aiCallCache?.revision !== this.spans.revision)
+      this.aiCallCache = { revision: this.spans.revision, summary: summarizeGenAi(this.spans.entries()) };
+    return this.aiCallCache.summary;
+  }
+  private aiCallCache?: { revision: number; summary: GenAiSummary };
+  /** One call with its conversation, the tools it ran, and the rest of its conversation across traces. */
+  aiCallDetail(traceId: string, spanId: string): GenAiCallDetail | undefined {
+    const spans = this.spans;
+    return genAiCallDetail(spans.trace(traceId.toLowerCase()), spanId.toLowerCase(), {
+      *[Symbol.iterator]() {
+        for (const [, trace] of spans.entries()) yield* trace;
+      },
+    });
+  }
+  /** Copy a call's conversation as Markdown, redacted like exports. */
+  async copyAiCall(traceId: string, spanId: string): Promise<void> {
+    const detail = this.aiCallDetail(traceId, spanId);
+    if (!detail) {
+      void vscode.window.showWarningMessage('That AI call is no longer retained.');
+      return;
+    }
+    const redactor = createRedactor(this.transfer.redactionOptions());
+    await vscode.env.clipboard.writeText(genAiMarkdown(redactor.value(detail) as GenAiCallDetail));
+    void vscode.window.showInformationMessage('Copied the AI call as Markdown.');
+  }
   /** Recent OpenTelemetry metric series, most recently updated first, with enough points for a trend line. */
   metricList(): MetricSeriesView[] {
     return this.metrics.list(METRIC_TREND_POINTS);

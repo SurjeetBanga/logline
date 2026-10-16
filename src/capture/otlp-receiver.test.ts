@@ -2,6 +2,8 @@ import assert from 'node:assert/strict';
 import { createServer, request as httpRequest } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import test from 'node:test';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { gzipSync } from 'node:zlib';
 import { Ingestion } from './ingestion';
 import { OtlpReceiver } from './otlp-receiver';
@@ -9,6 +11,7 @@ import { RuntimeState } from './runtime-state';
 import { SessionRegistry } from './session-registry';
 import { LogStore } from '../core/log-store';
 import { SpanStore } from '../core/traces';
+import { genAiCallDetail, summarizeGenAi } from '../core/gen-ai';
 
 const TRACE = '4bf92f3577b34da6a3ce929d0e0e4736';
 function harness(settings: Record<string, unknown> = {}, decodeThreshold?: number) {
@@ -161,6 +164,35 @@ test('accepts protobuf and reports a protobuf response', async (t) => {
   const reply = await post(endpoint!, '/v1/traces', body, { 'content-type': 'application/x-protobuf' });
   assert.deepEqual([reply.status, reply.body, reply.type], [200, '', 'application/x-protobuf']);
   assert.equal(h.store.all()[0].message, 'x (0.00 ms)');
+});
+
+test('the GenAI sample arrives over HTTP with its conversations intact and out of table rows', async (t) => {
+  const h = harness({ 'otlp.showSpans': 'all' });
+  const { endpoint } = await h.receiver.start(0);
+  t.after(() => h.receiver.stop());
+  const sample = readFileSync(join(__dirname, '..', '..', 'samples', 'genai-trace.json'), 'utf8');
+  assert.equal((await post(endpoint!, '/v1/traces', sample, { 'content-type': 'application/json' })).status, 200);
+  assert.equal(h.spans.genAiCount, 5);
+  const summary = summarizeGenAi(h.spans.entries());
+  assert.deepEqual(
+    summary.models.map((model) => [model.model, model.calls, model.errors]),
+    [
+      ['claude-sonnet-5-5', 2, 0],
+      ['gpt-4o-mini', 1, 1],
+    ],
+  );
+  const [traceId, spans] = [...h.spans.entries()][0];
+  const answer = summary.calls.find((call) => call.finishReasons?.includes('end_turn'))!;
+  const detail = genAiCallDetail(spans, answer.spanId)!;
+  assert.deepEqual(
+    detail.messages.map((message) => message.role),
+    ['system', 'user', 'assistant', 'tool', 'assistant'],
+  );
+  assert.equal(detail.toolRuns.toolu_01.tool, 'get_weather');
+  assert.equal(detail.position, 1, 'the second model call of its conversation');
+  assert.equal(traceId, TRACE);
+  assert.equal(h.store.size, 5, 'every span is a row');
+  assert.doesNotMatch(JSON.stringify(h.store.all()), /What should I pack/, 'prompts stay out of the rows');
 });
 
 test('refuses browser, rebinding, malformed, and unsupported requests', async (t) => {

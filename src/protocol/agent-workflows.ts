@@ -53,8 +53,9 @@ Rank what is failing by impact and explain each failure from its evidence.
 2. Call \`logline_analyze_logs\` with \`query: "level:error OR level:fatal"\`. Read the error groups (count, first and last seen, trend) and the top values of fields such as service and path.
 3. Take the three largest or newest groups. For each, search one example with \`logline_search_logs\` and call \`logline_inspect_event\` with \`context: 10\`. Read the exception, its causes, and the events just before it.
 4. If an example has a \`traceId\`, call \`logline_get_trace\` to see which service failed first; the earliest failing span is usually the cause and later ones are its consequences.
-5. Open the source at the top application frame of each exception before proposing a cause.
-6. Report a short list, most important first: what fails, how often and since when, the evidence, the likely cause, and the file and line to change. Say plainly when the evidence does not settle the cause.
+5. If the app calls an LLM or runs an agent, call \`logline_get_ai_calls\` with \`includeContent: true\` (and the \`traceId\` when there is one) to see failed model or tool calls, responses cut short by a token limit, and what the model was sent.
+6. Open the source at the top application frame of each exception before proposing a cause.
+7. Report a short list, most important first: what fails, how often and since when, the evidence, the likely cause, and the file and line to change. Say plainly when the evidence does not settle the cause.
 
 ${UNTRUSTED}`,
   },
@@ -72,7 +73,8 @@ Find where a slow request spends its time and which code is responsible.
 3. Find slow examples: \`logline_search_logs\` with \`query: "durationMs:>500 exists:traceId"\`, using the p95 instead of 500 when it is lower. Without trace ids, use \`durationMs:>500\` and read the events around one with \`logline_inspect_event\`.
 4. Call \`logline_get_trace\` for two or three of them. Read the critical path and the hotspots: an operation with high self time is slow in its own code; a span whose time is covered by children is waiting on them.
 5. Check whether the hotspot repeats: many short spans to the same dependency suggest an N+1 query or a missing batch.
-6. Report where the time goes, with span names, durations, and self times, the code to look at, and one change most likely to help.
+6. When the hotspots are model or tool calls, call \`logline_get_ai_calls\` with the \`traceId\`: compare input tokens and duration across the calls, and check for repeated tool calls or a growing prompt that cached tokens do not cover.
+7. Report where the time goes, with span names, durations, and self times, the code to look at, and one change most likely to help.
 
 ${UNTRUSTED}`,
   },

@@ -14,6 +14,7 @@ import {
   type ViewRequest,
 } from '../protocol/messages';
 import type { LogEvent } from '../core/types';
+import type { GenAiCallDetail, GenAiSummary } from '../core/gen-ai';
 import type { MetricSeriesView } from '../core/metrics';
 import type { TraceSummary, TraceView } from '../core/traces';
 import type { SavedSearches } from '../storage/saved-searches';
@@ -42,6 +43,9 @@ interface MessageServices {
   traceView(traceId: string): TraceView;
   traceList(): TraceSummary[];
   metricList(): MetricSeriesView[];
+  aiCallList(): GenAiSummary;
+  aiCallDetail(traceId: string, spanId: string): GenAiCallDetail | undefined;
+  copyAiCall(traceId: string, spanId: string): Promise<void>;
   toggleOtlp(enabled: boolean): Promise<void>;
   breakOnEvent(id: number): Promise<void>;
   breakOnQuery(query: string, levels: string[]): Promise<void>;
@@ -86,6 +90,20 @@ export async function handleMessage(
       return;
     case 'metrics':
       send({ type: 'metrics', metrics: services.metricList() });
+      return;
+    case 'aiCalls':
+      send({ type: 'aiCalls', aiCalls: services.aiCallList() });
+      return;
+    case 'aiCall':
+      send({
+        type: 'aiCall',
+        traceId: msg.traceId,
+        spanId: msg.spanId,
+        detail: services.aiCallDetail(msg.traceId, msg.spanId),
+      });
+      return;
+    case 'copyAiCall':
+      await services.copyAiCall(msg.traceId, msg.spanId);
       return;
     case 'toggleOtlp':
       await services.toggleOtlp(msg.enabled);

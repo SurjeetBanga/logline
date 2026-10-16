@@ -19,6 +19,7 @@ export function createTraceView(
     showContext(id: number): void;
     applyQuery(query: string): void;
     showList(): void;
+    openAiCall(traceId: string, spanId: string): void;
     /** Shows the waterfall in place of the table. */
     reveal(): void;
     visible(): boolean;
@@ -65,6 +66,11 @@ export function createTraceView(
     actions.applyQuery(`traceId:${current}`);
   });
   scope.listen(elements.traceRows, 'click', (event) => {
+    const chip = (event.target as HTMLElement).closest<HTMLElement>('.trace-genai');
+    if (chip?.dataset.spanId && current) {
+      actions.openAiCall(current, chip.dataset.spanId);
+      return;
+    }
     const button = (event.target as HTMLElement).closest<HTMLElement>('.trace-log-button');
     if (!button) return;
     actions.showContext(Number(button.dataset.id));
@@ -196,6 +202,25 @@ function spanRow(span: TraceRow, total: number): HTMLTableRowElement {
   label.style.paddingInlineStart = `${Math.min(span.depth, 24) * 14}px`;
   label.textContent = `${span.error ? '⚠ ' : ''}${span.name}`;
   name.append(label);
+  // A GenAI span shows its tokens, and the model or tool when its name leaves them out, and opens its conversation.
+  if (span.genAi) {
+    const content = document.createElement('div');
+    content.className = 'trace-name-content';
+    const chip = document.createElement('button');
+    chip.type = 'button';
+    chip.className = 'trace-genai';
+    chip.dataset.spanId = span.spanId;
+    const subject = span.genAi.label.replace(/^tool · /, '');
+    const usage =
+      span.genAi.inputTokens !== undefined || span.genAi.outputTokens !== undefined
+        ? `${compactTokens(span.genAi.inputTokens)} → ${compactTokens(span.genAi.outputTokens)} tok`
+        : '';
+    chip.textContent =
+      [span.name.includes(subject) ? '' : span.genAi.label, usage].filter(Boolean).join(' · ') || 'AI call';
+    chip.title = `${span.genAi.label}${usage ? `, ${usage}` : ''}. Open this call in AI calls.`;
+    content.append(label, chip);
+    name.replaceChildren(content);
+  }
   name.title = [
     `${span.name} (${span.kind})`,
     `Self time: ${formatDuration(span.selfMs)} of ${formatDuration(span.durationMs)}`,
@@ -218,6 +243,9 @@ function spanRow(span: TraceRow, total: number): HTMLTableRowElement {
   );
   return row;
 }
+
+const tokenFormat = new Intl.NumberFormat(undefined, { notation: 'compact', maximumFractionDigits: 1 });
+const compactTokens = (value: number | undefined) => (value === undefined ? '–' : tokenFormat.format(value));
 
 function logRow(log: TraceLog, total: number, depth: number): HTMLTableRowElement {
   const row = document.createElement('tr');

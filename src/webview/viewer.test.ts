@@ -2786,6 +2786,224 @@ test('snapshots apply editor requests once and reflect the OpenTelemetry receive
   assert.equal(get('otlpToggle').textContent, 'Start OpenTelemetry receiver');
 });
 
+test('the AI calls tab lists calls with totals and opens a conversation with its tool results', () => {
+  const { get, app, receive, messages } = viewer();
+  const snapshot = (extra: Record<string, unknown>) =>
+    receive({
+      type: 'snapshot',
+      generation: 1,
+      newest: 100,
+      status: 'Running',
+      command: '',
+      running: false,
+      total: 0,
+      retained: 0,
+      discarded: 0,
+      bytes: 0,
+      maxBytes: 1,
+      truncated: 0,
+      events: [],
+      columns: [],
+      page: 0,
+      pages: 1,
+      matched: 0,
+      ...extra,
+    });
+  snapshot({});
+  assert.equal(get('aiCalls').hidden, true, 'no tab before any GenAI span arrives');
+  snapshot({ aiCalls: { calls: 3, revision: 1 } });
+  assert.equal(get('aiCalls').hidden, false);
+  assert.equal(get('aiCallCount').textContent, '3');
+  get('aiCalls').listeners.get('click')!();
+  assert.equal(app.views.active(), 'aiCalls');
+  assert.deepEqual(JSON.parse(JSON.stringify(messages.at(-1))), { type: 'aiCalls' });
+  const call = (extra: Record<string, unknown>) => ({
+    traceId: 't1',
+    kind: 'model',
+    operation: 'chat',
+    name: 'chat gpt-4o',
+    service: 'agent',
+    startMs: 0,
+    durationMs: 1200,
+    error: false,
+    hasContent: true,
+    ...extra,
+  });
+  receive({
+    type: 'aiCalls',
+    aiCalls: {
+      calls: [
+        call({ spanId: 's3', model: 'gpt-4o', inputTokens: 40, outputTokens: 4096, finishReasons: ['length'] }),
+        call({ spanId: 's2', kind: 'tool', operation: 'execute_tool', tool: 'get_weather', durationMs: 180 }),
+        call({ spanId: 's1', model: 'gpt-4o', inputTokens: 1204, outputTokens: 86, error: true, errorMessage: '429' }),
+      ],
+      total: 3,
+      modelCalls: 2,
+      toolCalls: 1,
+      errors: 1,
+      inputTokens: 1244,
+      outputTokens: 4182,
+      cachedTokens: 622,
+      p50Ms: 1200,
+      p95Ms: 1200,
+      models: [
+        {
+          model: 'gpt-4o',
+          provider: 'openai',
+          calls: 2,
+          errors: 1,
+          inputTokens: 1244,
+          outputTokens: 4182,
+          cachedTokens: 622,
+          p50Ms: 1200,
+          p95Ms: 1200,
+        },
+      ],
+      tools: [{ tool: 'get_weather', calls: 1, errors: 0, p95Ms: 180 }],
+    },
+  });
+  assert.match(get('aiCallsStatus').textContent, /^3 AI calls · 1 failed/);
+  assert.deepEqual(
+    get('aiCallsTiles').children.map((tile) => tile.children.map((part) => part.textContent)),
+    [
+      ['Model calls', '2', '1 failed'],
+      ['Tokens', '1,244 → 4,182', '50% of input cached'],
+      ['Latency', 'p50 1.20 s', 'p95 1.20 s'],
+      ['Tool calls', '1'],
+    ],
+  );
+  const rows = () => get('aiCallRows').children;
+  assert.deepEqual(
+    rows().map((row) => row.children[1].textContent),
+    ['◆ chat gpt-4o', '⚙ tool get_weather', '◆ chat gpt-4o'],
+  );
+  assert.equal(rows()[0].children[3].textContent, '40 → 4,096');
+  assert.match(rows()[0].children[5].className, /ai-cut-short/, 'a response cut off by its limit stands out');
+  assert.match(rows()[2].className, /trace-error/);
+  get('aiCallsKind').value = 'tool';
+  get('aiCallsKind').listeners.get('change')!();
+  assert.equal(rows().length, 1);
+  get('aiCallsKind').value = '';
+  get('aiCallsErrorsOnly').checked = true;
+  get('aiCallsErrorsOnly').listeners.get('change')!();
+  assert.deepEqual(
+    rows().map((row) => row.dataset.spanId),
+    ['s1'],
+  );
+  get('aiCallsErrorsOnly').checked = false;
+  get('aiModelRows').listeners.get('click')!({ target: get('aiModelRows').children[0] });
+  assert.equal(get('aiCallsFilter').value, 'gpt-4o', 'a model narrows the list to its calls');
+
+  get('aiCallRows').listeners.get('click')!({ target: rows()[0] });
+  assert.equal(app.views.active(), 'aiCall');
+  assert.equal(get('aiCalls').attributes['aria-selected'], 'true', 'a call belongs to the AI calls tab');
+  assert.deepEqual(JSON.parse(JSON.stringify(messages.at(-1))), { type: 'aiCall', traceId: 't1', spanId: 's3' });
+  receive({ type: 'aiCall', traceId: 't1', spanId: 'other', detail: undefined });
+  assert.equal(get('aiCallStatus').textContent, 'Loading…', 'a reply for another call is ignored');
+  receive({
+    type: 'aiCall',
+    traceId: 't1',
+    spanId: 's3',
+    detail: {
+      call: call({ spanId: 's3', model: 'gpt-4o', provider: 'openai', inputTokens: 40, outputTokens: 4096 }),
+      messages: [
+        { role: 'system', parts: [{ kind: 'text', text: 'Be brief.\nUse tools.' }] },
+        { role: 'user', parts: [{ kind: 'text', text: 'Weather in Paris?' }] },
+        {
+          role: 'assistant',
+          output: true,
+          parts: [{ kind: 'tool_call', name: 'get_weather', id: 'c1', value: '{ "city": "Paris" }' }],
+        },
+      ],
+      toolRuns: { c1: { spanId: 's2', tool: 'get_weather', durationMs: 180, error: false, result: '{ "high": 14 }' } },
+      conversation: [
+        { traceId: 't1', spanId: 's1' },
+        { traceId: 't1', spanId: 's3' },
+      ],
+      position: 1,
+    },
+  });
+  assert.equal(get('aiCallTitle').textContent, '◆ chat gpt-4o');
+  assert.equal(get('aiCallStatus').textContent, 'openai · 1.20 s · 40 in → 4,096 out');
+  assert.equal(get('aiCallNavigation').hidden, false);
+  assert.equal(get('aiCallPosition').textContent, '2 of 2');
+  assert.equal(get('aiCallNext').disabled, true);
+  const [system, user, response] = get('aiCallTranscript').children;
+  assert.equal(system.children[0].children[0].textContent, 'System instructions (2 lines)');
+  assert.equal(system.children[0].open, false, 'instructions start collapsed');
+  assert.deepEqual(
+    user.children.map((part) => part.textContent),
+    ['User', 'Weather in Paris?'],
+  );
+  const tool = response.children[1];
+  assert.equal(response.children[0].textContent, 'Response');
+  assert.equal(tool.children[0].textContent, 'Tool call get_weather · ok · 180 ms');
+  assert.deepEqual(
+    tool.children.slice(1).map((part) => part.textContent),
+    ['{ "city": "Paris" }', 'Result', '{ "high": 14 }'],
+  );
+  get('aiCallCopy').listeners.get('click')!();
+  assert.deepEqual(JSON.parse(JSON.stringify(messages.at(-1))), { type: 'copyAiCall', traceId: 't1', spanId: 's3' });
+  get('aiCallPrevious').listeners.get('click')!();
+  assert.deepEqual(JSON.parse(JSON.stringify(messages.at(-1))), { type: 'aiCall', traceId: 't1', spanId: 's1' });
+  receive({
+    type: 'aiCall',
+    traceId: 't1',
+    spanId: 's1',
+    detail: {
+      call: call({ spanId: 's1', hasContent: false }),
+      messages: [],
+      toolRuns: {},
+      conversation: [{ traceId: 't1', spanId: 's1' }],
+      position: 0,
+    },
+  });
+  assert.match(get('aiCallTranscript').children[0].textContent, /no message content.*content capture/);
+  assert.equal(get('aiCallNavigation').hidden, true, 'a lone call has nothing to step through');
+  get('aiCallTrace').listeners.get('click')!();
+  assert.equal(app.views.active(), 'trace');
+  assert.deepEqual(JSON.parse(JSON.stringify(messages.at(-1))), { type: 'trace', traceId: 't1' });
+  // The waterfall's chip on a GenAI span opens that call.
+  receive({
+    type: 'trace',
+    trace: {
+      traceId: 't1',
+      durationMs: 1200,
+      services: ['agent'],
+      errors: 0,
+      omitted: 0,
+      hotspots: [],
+      logs: [],
+      spans: [
+        {
+          spanId: 's3',
+          name: 'chat gpt-4o',
+          service: 'agent',
+          kind: 'client',
+          offsetMs: 0,
+          durationMs: 1200,
+          selfMs: 1200,
+          depth: 0,
+          error: false,
+          critical: true,
+          attributes: {},
+          events: [],
+          genAi: { label: 'gpt-4o', inputTokens: 40, outputTokens: 4096 },
+        },
+      ],
+    },
+  });
+  const chip = get('traceRows').children[0].children[0].children[0].children[1];
+  assert.equal(chip.textContent, '40 → 4.1K tok', 'the model is already in the name');
+  get('traceRows').listeners.get('click')!({ target: chip });
+  assert.equal(app.views.active(), 'aiCall');
+  assert.deepEqual(JSON.parse(JSON.stringify(messages.at(-1))), { type: 'aiCall', traceId: 't1', spanId: 's3' });
+  get('aiCallBack').listeners.get('click')!();
+  assert.equal(app.views.active(), 'aiCalls');
+  snapshot({});
+  assert.equal(app.views.active(), 'logs', 'the tab leaves once its calls are gone');
+});
+
 test('the Metrics tab appears once metrics arrive and lists series with their latest values', () => {
   const { get, app, receive, messages, timers } = viewer();
   const snapshot = (extra: Record<string, unknown>) =>
