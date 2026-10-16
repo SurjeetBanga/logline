@@ -8,7 +8,9 @@ export type ViewName = 'logs' | 'analysis' | 'traces' | 'trace' | 'metrics' | 'a
 /** A view with its own tab, which is what the panel remembers between sessions. */
 export type TabName = Exclude<ViewName, 'trace' | 'aiCall'>;
 
-const TABS: readonly TabName[] = ['logs', 'analysis', 'traces', 'metrics', 'aiCalls', 'doctor'];
+// Log views, then request-level telemetry (traces and the AI calls inside them link to each other),
+// then aggregate metrics, then the health of the logging itself.
+const TABS: readonly TabName[] = ['logs', 'analysis', 'traces', 'aiCalls', 'metrics', 'doctor'];
 
 export function isTabName(value: unknown): value is TabName {
   return typeof value === 'string' && (TABS as readonly string[]).includes(value);
@@ -78,5 +80,5 @@ export function createViews(
     });
   }
 
-  return { show, ensureVisible, active: () => current };
+  return { show, ensureVisible, active: () => current, available: (tab: TabName) => !tabs[tab].hidden };
 }

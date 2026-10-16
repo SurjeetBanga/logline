@@ -4,8 +4,11 @@ import { OtlpReceiver } from '../capture/otlp-receiver';
 import {
   genAiCallDetail,
   genAiMarkdown,
-  summarizeGenAi,
+  readGenAiCalls,
+  summarizeGenAiCalls,
+  type GenAiCall,
   type GenAiCallDetail,
+  type GenAiContentOptions,
   type GenAiSummary,
 } from '../core/gen-ai';
 import { MetricStore, type MetricSeriesView } from '../core/metrics';
@@ -600,30 +603,34 @@ export class LogsController {
     return this.telemetryCache;
   }
   private telemetryCache?: { basis: string; findings: TelemetryFinding[]; version: number };
-  /** LLM calls, tool executions, and agent runs from received spans, recomputed only when spans change. */
+  /** LLM calls, tool executions, and agent runs from received spans, recomputed only when GenAI spans change. */
   aiCallList(): GenAiSummary {
-    if (this.aiCallCache?.revision !== this.spans.revision)
-      this.aiCallCache = { revision: this.spans.revision, summary: summarizeGenAi(this.spans.entries()) };
-    return this.aiCallCache.summary;
+    return this.aiCalls().summary;
   }
-  private aiCallCache?: { revision: number; summary: GenAiSummary };
+  private aiCalls(): { calls: GenAiCall[]; summary: GenAiSummary } {
+    if (this.aiCallCache?.revision !== this.spans.genAiRevision) {
+      const calls = readGenAiCalls(this.spans.entries());
+      this.aiCallCache = { revision: this.spans.genAiRevision, calls, summary: summarizeGenAiCalls(calls) };
+    }
+    return this.aiCallCache;
+  }
+  private aiCallCache?: { revision: number; calls: GenAiCall[]; summary: GenAiSummary };
   /** One call with its conversation, the tools it ran, and the rest of its conversation across traces. */
-  aiCallDetail(traceId: string, spanId: string): GenAiCallDetail | undefined {
-    const spans = this.spans;
-    return genAiCallDetail(spans.trace(traceId.toLowerCase()), spanId.toLowerCase(), {
-      *[Symbol.iterator]() {
-        for (const [, trace] of spans.entries()) yield* trace;
-      },
+  aiCallDetail(traceId: string, spanId: string, options: GenAiContentOptions = {}): GenAiCallDetail | undefined {
+    return genAiCallDetail(this.spans.trace(traceId.toLowerCase()), spanId.toLowerCase(), {
+      ...options,
+      conversationCalls: this.aiCalls().calls,
     });
   }
   /** Copy a call's conversation as Markdown, redacted like exports. */
   async copyAiCall(traceId: string, spanId: string): Promise<void> {
-    const detail = this.aiCallDetail(traceId, spanId);
+    const redactor = createRedactor(this.transfer.redactionOptions());
+    // Message text is redacted before it is cut to length; the rest of the call afterwards.
+    const detail = this.aiCallDetail(traceId, spanId, { text: redactor.text });
     if (!detail) {
       void vscode.window.showWarningMessage('That AI call is no longer retained.');
       return;
     }
-    const redactor = createRedactor(this.transfer.redactionOptions());
     await vscode.env.clipboard.writeText(genAiMarkdown(redactor.value(detail) as GenAiCallDetail));
     void vscode.window.showInformationMessage('Copied the AI call as Markdown.');
   }

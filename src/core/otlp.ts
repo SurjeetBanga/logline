@@ -73,6 +73,8 @@ const FLAT_CONTENT_KEY = /^gen_ai\.(?:prompt|completion)\.\d+\./;
 export function isGenAiContentKey(key: string): boolean {
   return key.startsWith('gen_ai.') && (GEN_AI_CONTENT_KEYS.has(key) || FLAT_CONTENT_KEY.test(key));
 }
+// Message events (`gen_ai.user.message`, `gen_ai.choice`) carry their content in plain keys.
+const isGenAiEventContentKey = (key: string) => key === 'content' || key === 'message' || isGenAiContentKey(key);
 export const SPAN_KINDS = ['unspecified', 'internal', 'server', 'client', 'producer', 'consumer'];
 const SEVERITY_LEVELS = ['trace', 'debug', 'info', 'warn', 'error', 'fatal'];
 
@@ -108,17 +110,22 @@ export function anyValue(value: unknown, depth = 0, limits: ValueLimits = VALUE_
 }
 
 /**
- * Decode OTLP key-value pairs. Top-level GenAI content attributes keep more
- * than others; nested values keep the limits of the attribute they belong to.
+ * Decode OTLP key-value pairs. Top-level keys that `content` accepts keep
+ * more than others; nested values keep the limits of the attribute they belong to.
  */
-export function attributes(values: unknown, depth = 0, limits?: ValueLimits): Attributes {
+export function attributes(
+  values: unknown,
+  depth = 0,
+  limits?: ValueLimits,
+  content?: (key: string) => boolean,
+): Attributes {
   const result: Attributes = Object.create(null);
   let count = 0;
   for (const entry of list(values)) {
     const kv = object(entry);
     const key = text(kv?.key, 256);
     if (!kv || !key || count >= MAX_ATTRIBUTES) continue;
-    result[key] = anyValue(kv.value, depth, limits ?? (isGenAiContentKey(key) ? CONTENT_LIMITS : VALUE_LIMITS));
+    result[key] = anyValue(kv.value, depth, limits ?? (content?.(key) ? CONTENT_LIMITS : VALUE_LIMITS));
     count++;
   }
   return result;
@@ -212,14 +219,23 @@ export function readSpans(request: unknown): Span[] {
           endMs,
           service,
           scope,
-          attributes: attributes(record.attributes),
+          // Only spans feed the AI calls view, so only they keep long GenAI content.
+          attributes: attributes(record.attributes, 0, undefined, isGenAiContentKey),
           events: list(record.events)
             .slice(0, MAX_EVENTS)
-            .map((event) => ({
-              timeMs: nanosToMs(object(event)?.timeUnixNano) ?? startMs,
-              name: text(object(event)?.name, 512) ?? '',
-              attributes: attributes(object(event)?.attributes),
-            })),
+            .map((event) => {
+              const name = text(object(event)?.name, 512) ?? '';
+              return {
+                timeMs: nanosToMs(object(event)?.timeUnixNano) ?? startMs,
+                name,
+                attributes: attributes(
+                  object(event)?.attributes,
+                  0,
+                  undefined,
+                  name.startsWith('gen_ai.') ? isGenAiEventContentKey : undefined,
+                ),
+              };
+            }),
           status: {
             code: Number(status?.code) === 2 ? 2 : Number(status?.code) === 1 ? 1 : 0,
             message: text(status?.message, 1024) || undefined,

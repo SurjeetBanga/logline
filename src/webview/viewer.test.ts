@@ -174,7 +174,14 @@ const bundle = buildSync({
   platform: 'browser',
   write: false,
 }).outputFiles[0].text;
-function viewer(saved: Record<string, unknown> = {}) {
+/**
+ * @param options.hidden Elements hidden before the viewer starts, as the page's markup hides them.
+ * @param options.snapshot Extra fields of the first snapshot.
+ */
+function viewer(
+  saved: Record<string, unknown> = {},
+  options: { hidden?: string[]; snapshot?: Record<string, unknown> } = {},
+) {
   const frames: (() => void)[] = [];
   const elements = new Map<string, Element>();
   const makeElement = () => {
@@ -236,6 +243,7 @@ function viewer(saved: Record<string, unknown> = {}) {
       timers.delete(id);
     },
   });
+  for (const id of options.hidden ?? []) get(id).hidden = true;
   runInContext(bundle, runtime);
   const exports = runtime.module.exports as {
     createViewer: typeof createViewer;
@@ -264,6 +272,7 @@ function viewer(saved: Record<string, unknown> = {}) {
     page: 0,
     pages: 2,
     matched: 100,
+    ...options.snapshot,
   });
   const flushFrames = () => {
     let count = 0;
@@ -2000,6 +2009,16 @@ test('views are tabs: one shows at a time, arrow keys move between visible tabs,
     'the list loads',
   );
   assert.equal(viewer({ view: 'trace' }).app.views.active(), 'logs', 'a single trace is not restored');
+  // A tab that appears only with data reopens once the first snapshot shows it.
+  const restored = viewer(
+    { view: 'aiCalls' },
+    { hidden: ['aiCalls'], snapshot: { aiCalls: { calls: 1, revision: 1 } } },
+  );
+  assert.equal(restored.app.views.active(), 'aiCalls');
+  assert.equal(restored.messages.at(-1)?.type, 'aiCalls', 'the list loads');
+  const empty = viewer({ view: 'aiCalls' }, { hidden: ['aiCalls'] });
+  assert.equal(empty.app.views.active(), 'logs', 'a tab without data falls back to Logs');
+  assert.notEqual(empty.savedStates.at(-1)?.view, 'logs', 'and the remembered tab is kept for next time');
 });
 
 test('rows show their code link and log doctor finding, with actions, and the Issues tab lists findings', () => {
@@ -2811,6 +2830,31 @@ test('the AI calls tab lists calls with totals and opens a conversation with its
     });
   snapshot({});
   assert.equal(get('aiCalls').hidden, true, 'no tab before any GenAI span arrives');
+  // While the receiver runs, the tab is there to be found, and says how to send calls.
+  snapshot({ otlp: { running: true, endpoint: 'http://127.0.0.1:4318' } });
+  assert.equal(get('aiCalls').hidden, false);
+  assert.equal(get('metrics').hidden, false, 'Metrics too');
+  get('aiCalls').listeners.get('click')!();
+  receive({
+    type: 'aiCalls',
+    aiCalls: {
+      calls: [],
+      total: 0,
+      modelCalls: 0,
+      toolCalls: 0,
+      errors: 0,
+      inputTokens: 0,
+      outputTokens: 0,
+      cachedTokens: 0,
+      models: [],
+      tools: [],
+    },
+  });
+  assert.match(get('aiCallsStatus').textContent, /^No AI calls yet\. .* to http:\/\/127\.0\.0\.1:4318\.$/);
+  assert.equal(get('aiCallsControls').hidden, true, 'filters wait for calls to filter');
+  assert.equal(get('aiCallsTable').hidden, true);
+  snapshot({});
+  assert.equal(app.views.active(), 'logs', 'stopping the receiver with no calls leaves the tab');
   snapshot({ aiCalls: { calls: 3, revision: 1 } });
   assert.equal(get('aiCalls').hidden, false);
   assert.equal(get('aiCallCount').textContent, '3');
@@ -2891,8 +2935,17 @@ test('the AI calls tab lists calls with totals and opens a conversation with its
     ['s1'],
   );
   get('aiCallsErrorsOnly').checked = false;
-  get('aiModelRows').listeners.get('click')!({ target: get('aiModelRows').children[0] });
-  assert.equal(get('aiCallsFilter').value, 'gpt-4o', 'a model narrows the list to its calls');
+  const chooseModel = () => get('aiModelRows').listeners.get('click')!({ target: get('aiModelRows').children[0] });
+  chooseModel();
+  assert.deepEqual(
+    rows().map((row) => row.dataset.spanId),
+    ['s3', 's1'],
+    'a model narrows the list to exactly its calls',
+  );
+  assert.equal(get('aiModelRows').children[0].attributes['aria-pressed'], 'true');
+  assert.match(get('aiCallsStatus').textContent, /gpt-4o only/);
+  chooseModel();
+  assert.equal(rows().length, 3, 'choosing the model again shows every call');
 
   get('aiCallRows').listeners.get('click')!({ target: rows()[0] });
   assert.equal(app.views.active(), 'aiCall');
@@ -2988,13 +3041,47 @@ test('the AI calls tab lists calls with totals and opens a conversation with its
           critical: true,
           attributes: {},
           events: [],
-          genAi: { label: 'gpt-4o', inputTokens: 40, outputTokens: 4096 },
+          genAi: { kind: 'model', label: 'gpt-4o', inputTokens: 40, outputTokens: 4096 },
+        },
+        {
+          spanId: 's2',
+          name: 'execute_tool get_weather',
+          service: 'agent',
+          kind: 'internal',
+          offsetMs: 0,
+          durationMs: 180,
+          selfMs: 180,
+          depth: 1,
+          error: false,
+          critical: false,
+          attributes: {},
+          events: [],
+          genAi: { kind: 'tool', label: 'tool · get_weather' },
+        },
+        {
+          spanId: 's0',
+          name: 'invoke_agent planner',
+          service: 'agent',
+          kind: 'internal',
+          offsetMs: 0,
+          durationMs: 3000,
+          selfMs: 10,
+          depth: 0,
+          error: false,
+          critical: false,
+          attributes: {},
+          events: [],
+          genAi: { kind: 'agent', label: 'planner', modelCalls: { calls: 2, inputTokens: 1240, outputTokens: 98 } },
         },
       ],
     },
   });
-  const chip = get('traceRows').children[0].children[0].children[0].children[1];
-  assert.equal(chip.textContent, '40 → 4.1K tok', 'the model is already in the name');
+  const chipOf = (index: number) => get('traceRows').children[index].children[0].children[0].children[1];
+  const chip = chipOf(0);
+  assert.equal(chip.children[1].textContent, '40 → 4.1K tok', 'the model is already in the name');
+  assert.match(chipOf(1).className, /icon-only/, 'a tool run adds nothing its name does not say');
+  assert.equal(chipOf(1).attributes['aria-label'], 'Open tool · get_weather in AI calls');
+  assert.equal(chipOf(2).children[1].textContent, '2 calls · 1.2K → 98 tok', 'an agent run totals its calls');
   get('traceRows').listeners.get('click')!({ target: chip });
   assert.equal(app.views.active(), 'aiCall');
   assert.deepEqual(JSON.parse(JSON.stringify(messages.at(-1))), { type: 'aiCall', traceId: 't1', spanId: 's3' });

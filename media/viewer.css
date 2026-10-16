@@ -678,12 +678,17 @@ header {
 .more-actions[aria-expanded='true'] {
   background: var(--vscode-toolbar-hoverBackground, rgba(90, 93, 94, 0.31));
 }
+/* A menu like VS Code's: plain rows, highlighted only under the pointer or focus. */
 .popover.actions-menu {
   width: max-content;
   min-width: 190px;
   max-width: calc(100vw - 16px);
   overflow-x: auto;
   padding: 4px;
+  border-color: var(--vscode-menu-border, var(--vscode-editorWidget-border, #454545));
+  border-radius: 6px;
+  background: var(--vscode-menu-background, var(--vscode-editorWidget-background, #252526));
+  box-shadow: 0 2px 8px var(--vscode-widget-shadow, rgba(0, 0, 0, 0.36));
 }
 .actions-menu button {
   display: flex;
@@ -691,13 +696,31 @@ header {
   width: max-content;
   min-width: 100%;
   max-width: none;
-  padding: 6px 10px;
+  height: 26px;
+  padding: 0 12px;
+  border-color: transparent;
+  border-radius: 4px;
+  background: transparent;
   text-align: left;
   white-space: nowrap;
   color: var(--vscode-menu-foreground, var(--vscode-foreground, #d4d4d4));
 }
 .actions-menu button:focus {
-  background: var(--vscode-list-hoverBackground, #2a2d2e);
+  outline: none;
+}
+/* One row is highlighted at a time: the one under the pointer, else the one keyboard focus is on. */
+.actions-menu button:hover,
+.actions-menu button:focus-visible,
+.actions-menu:not(:hover) button:focus {
+  outline: 1px solid var(--vscode-menu-selectionBorder, transparent);
+  outline-offset: -1px;
+  background: var(--vscode-menu-selectionBackground, var(--vscode-list-activeSelectionBackground, #04395e));
+  color: var(--vscode-menu-selectionForeground, var(--vscode-list-activeSelectionForeground, #ffffff));
+}
+.actions-menu:hover button:focus:not(:hover) {
+  outline: none;
+  background: transparent;
+  color: var(--vscode-menu-foreground, var(--vscode-foreground, #d4d4d4));
 }
 .menu-separator {
   margin: 4px 6px;
@@ -739,6 +762,10 @@ button {
   font: inherit;
   border: 1px solid var(--vscode-input-border, #555);
   border-radius: 3px;
+}
+/* Buttons are filled, like VS Code's own; a theme that outlines them sets button.border. */
+button {
+  border-color: var(--vscode-button-border, transparent);
 }
 input,
 select {
@@ -1024,7 +1051,13 @@ select {
 .level-actions button {
   flex: 1;
   padding: 2px 6px;
+  border-color: transparent;
+  background: transparent;
+  color: var(--vscode-textLink-foreground, #3794ff);
   font-size: 12px;
+}
+.level-actions button:hover {
+  background: var(--vscode-toolbar-hoverBackground, rgba(90, 93, 94, 0.31));
 }
 .level-menu label {
   display: flex;
@@ -1312,14 +1345,14 @@ select {
   grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
   gap: 8px;
 }
+/* A faint wash of the text color reads as a surface in every theme, without an outline. */
 .analysis-tile {
   display: flex;
   flex-direction: column;
   gap: 2px;
-  padding: 8px 10px;
-  border: 1px solid var(--vscode-panel-border, #444);
-  border-radius: 4px;
-  background: var(--vscode-editorWidget-background, rgba(255, 255, 255, 0.03));
+  padding: 8px 12px;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--vscode-foreground, #cccccc) 5%, transparent);
   min-width: 0;
 }
 .tile-label {
@@ -1981,8 +2014,8 @@ td[data-column]:focus-visible {
   overflow: auto;
 }
 .ai-tiles {
-  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
-  margin-bottom: 10px;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  margin-bottom: 12px;
 }
 .ai-models-table {
   margin-bottom: 12px;
@@ -2020,8 +2053,14 @@ td[data-column]:focus-visible {
 }
 .ai-call-row:hover,
 .ai-call-row:focus-visible,
-.ai-model-row:hover {
+.ai-model-row:hover,
+.ai-model-row:focus-visible {
   background: var(--vscode-list-hoverBackground, #2a2d2e);
+}
+/* The model the list is narrowed to. */
+.ai-model-row.selected {
+  background: var(--vscode-list-inactiveSelectionBackground, #37373d);
+  box-shadow: inset 2px 0 var(--vscode-focusBorder, #007fd4);
 }
 .ai-operation,
 .ai-agent {
@@ -2048,15 +2087,16 @@ td[data-column]:focus-visible {
 .ai-navigation {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: 2px;
+  margin-right: 4px;
 }
 #aiCallPosition {
+  padding: 0 4px;
   color: var(--vscode-descriptionForeground, #aaa);
   font-size: 12px;
   font-variant-numeric: tabular-nums;
 }
 .ai-transcript {
-  max-width: 980px;
   padding-bottom: 8px;
 }
 .ai-message {
@@ -2074,7 +2114,9 @@ td[data-column]:focus-visible {
 .ai-message.ai-output h4 {
   color: var(--vscode-textLink-foreground, #3794ff);
 }
+/* Prose keeps a readable line length; code and tool payloads use the full width. */
 .ai-text {
+  max-width: 100ch;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
@@ -2127,15 +2169,25 @@ td[data-column]:focus-visible {
 }
 /* In the trace waterfall, a GenAI span's model or tool and tokens, which open its conversation. */
 .trace-genai {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
   flex: none;
   margin-left: 8px;
-  padding: 0 7px;
+  padding: 0 7px 0 5px;
   border: 1px solid var(--vscode-panel-border, #444);
   border-radius: 10px;
   background: transparent;
   color: var(--vscode-descriptionForeground, #aaa);
   font-size: 11px;
   line-height: 16px;
+}
+.trace-genai svg {
+  width: 12px;
+  height: 12px;
+}
+.trace-genai.icon-only {
+  padding: 0 5px;
 }
 .trace-genai:hover,
 .trace-genai:focus-visible {
@@ -2279,6 +2331,18 @@ td[data-column]:focus-visible {
   font-size: 12px;
 }
 @media (max-width: 640px) {
+  /* Four tiles fold into two rows of two rather than three and one. */
+  .ai-tiles {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .view-header-actions {
+    margin-left: 0;
+  }
+  #aiCallsFilter {
+    flex: 1 1 auto;
+    width: auto;
+    min-width: 0;
+  }
   .traces-table th:nth-child(3),
   .traces-services,
   .traces-table th:nth-child(5),

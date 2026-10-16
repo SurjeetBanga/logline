@@ -41,7 +41,7 @@ export interface SnapshotSources {
     status(): { state: 'off' | 'waiting' | 'capturing' | 'attention'; detail: string; active: number; failed: number };
   };
   otlp?: { status(): ReceiverStatus };
-  spans?: { traceCount: number; genAiCount?: number; revision?: number };
+  spans?: { traceCount: number; genAiCount?: number; genAiRevision?: number };
   metrics?: { size: number; revision: number };
   /** What each row links to: its log statement and that statement's worst finding. */
   rowLinks?(event: LogEvent): Pick<RowEvent, 'site' | 'finding'>;
@@ -188,7 +188,7 @@ export function buildSnapshot(
     otlp: otlp?.status(),
     traceCount: spans?.traceCount ?? 0,
     ...(metrics?.size ? { metrics: { series: metrics.size, revision: metrics.revision } } : {}),
-    ...(spans?.genAiCount ? { aiCalls: { calls: spans.genAiCount, revision: spans.revision ?? 0 } } : {}),
+    ...(spans?.genAiCount ? { aiCalls: { calls: spans.genAiCount, revision: spans.genAiRevision ?? 0 } } : {}),
     ...(doctor ? { doctor } : {}),
     ...(agentClients?.length ? { agentClients } : {}),
     ...(changes ? { changes } : {}),

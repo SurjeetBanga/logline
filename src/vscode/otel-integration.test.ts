@@ -161,6 +161,7 @@ test('agents read AI calls only from shared services, redacted and within the re
   assert.equal(result.calls[0].model, 'gpt-4o');
   assert.match(result.calls[0].messages[0].parts[0].text, /^Call the API with key /);
   assert.doesNotMatch(JSON.stringify(result), new RegExp(apiKey));
+  assert.deepEqual([result.calls[0].inputTokens, result.inputTokens, result.models[0].inputTokens], [10, 10, 10]);
   assert.equal((access.aiCalls({ shareId: share.shareId! }) as any).calls[0].messages, undefined);
   assert.throws(() => access.aiCalls({ shareId: share.shareId!, limit: 0 }), /limit/);
   assert.throws(() => access.aiCalls({ shareId: share.shareId!, traceId: '../x' }), /traceId/);
@@ -174,6 +175,11 @@ test('agents read AI calls only from shared services, redacted and within the re
   assert.ok(big.coverage.contentCalls > 0 && big.coverage.contentCalls <= 20);
   assert.equal(big.calls[0].messages[0].parts[0].text.length, 2048);
   assert.equal(big.calls[0].messages[0].parts[0].truncated, true);
+  // A secret that crosses the cut is redacted, not shown in part.
+  chat('agent', '4444444444444444', 1000, 'w'.repeat(2030) + ' ' + apiKey);
+  const crossing = access.aiCalls({ shareId: share.shareId!, includeContent: true, limit: 1 }) as any;
+  assert.equal(crossing.calls[0].messages[0].parts[0].text, 'w'.repeat(2030) + ' ' + '[REDACTED]'.slice(0, 17));
+  assert.doesNotMatch(JSON.stringify(crossing), /sk_live_q/);
   access.revoke();
   assert.throws(() => access.aiCalls({ shareId: share.shareId! }), /No Logline logs are shared/);
 });

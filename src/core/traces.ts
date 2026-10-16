@@ -1,4 +1,4 @@
-import { genAiOperation, readGenAiCall } from './gen-ai';
+import { genAiOperation, readGenAiCall, type GenAiCall, type GenAiKind } from './gen-ai';
 import { isGenAiContentKey, spanDurationMs, SPAN_KINDS, type AttrValue, type Span } from './otlp';
 import { getField } from './query';
 import type { LogEvent } from './types';
@@ -21,6 +21,8 @@ export class SpanStore {
   private genAi = 0;
   /** Bumps whenever spans are added or removed, for change detection. */
   revision = 0;
+  /** Bumps only when GenAI spans are added or removed, so the AI calls view ignores other traffic. */
+  genAiRevision = 0;
 
   constructor(
     public maxSpans = 20000,
@@ -52,7 +54,10 @@ export class SpanStore {
     this.queue.push({ span, bytes, genAi });
     this.count++;
     this.bytes += bytes;
-    if (genAi) this.genAi++;
+    if (genAi) {
+      this.genAi++;
+      this.genAiRevision++;
+    }
     while (this.count > this.maxSpans || this.bytes > this.maxBytes) this.evict();
     this.revision++;
     return true;
@@ -79,6 +84,7 @@ export class SpanStore {
     this.bytes = 0;
     this.genAi = 0;
     this.revision++;
+    this.genAiRevision++;
   }
 
   private evict(): void {
@@ -92,7 +98,10 @@ export class SpanStore {
     const { span } = entry;
     this.count--;
     this.bytes -= entry.bytes;
-    if (entry.genAi) this.genAi--;
+    if (entry.genAi) {
+      this.genAi--;
+      this.genAiRevision++;
+    }
     const trace = this.traces.get(span.traceId);
     if (!trace) return;
     // Spans leave in arrival order, so the evicted span is normally first.
@@ -122,7 +131,14 @@ export interface TraceRow {
   attributes: Record<string, AttrValue>;
   events: { offsetMs: number; name: string }[];
   /** For a GenAI span, what to show beside its name: the model or tool, and its tokens. */
-  genAi?: { label: string; inputTokens?: number; outputTokens?: number };
+  genAi?: {
+    kind: GenAiKind;
+    label: string;
+    inputTokens?: number;
+    outputTokens?: number;
+    /** For an agent run, the model calls beneath it in the trace and their tokens. */
+    modelCalls?: { calls: number; inputTokens: number; outputTokens: number };
+  };
 }
 
 export interface TraceLogInput {
@@ -277,6 +293,11 @@ export function buildTrace(
       if (endMs === undefined || log.timeMs > endMs) endMs = log.timeMs;
     }
   const selfMs = new Map(spans.map((span) => [span.spanId, selfTimeMs(span, children.get(span.spanId) ?? [])]));
+  const calls = new Map<string, GenAiCall>();
+  for (const span of spans) {
+    const call = readGenAiCall(span);
+    if (call) calls.set(span.spanId, call);
+  }
   const rows: TraceRow[] = [];
   const visited = new Set<string>();
   // An explicit stack keeps malformed, deeply nested traces from overflowing the call stack.
@@ -311,7 +332,7 @@ export function buildTrace(
         events: span.events
           .slice(0, 16)
           .map((event) => ({ offsetMs: event.timeMs - (startMs ?? event.timeMs), name: event.name })),
-        ...genAiChip(span),
+        ...genAiChip(span, calls, children),
       });
     for (const child of (children.get(span.spanId) ?? []).slice().reverse())
       stack.push({ span: child, depth: depth + 1 });
@@ -332,18 +353,48 @@ export function buildTrace(
   };
 }
 
-function genAiChip(span: Span): Pick<TraceRow, 'genAi'> {
-  const call = readGenAiCall(span);
+function genAiChip(
+  span: Span,
+  calls: ReadonlyMap<string, GenAiCall>,
+  children: ReadonlyMap<string, Span[]>,
+): Pick<TraceRow, 'genAi'> {
+  const call = calls.get(span.spanId);
   if (!call) return {};
   const label =
     call.kind === 'tool' ? `tool · ${call.tool ?? call.name}` : (call.model ?? call.agent ?? call.operation);
   return {
     genAi: {
+      kind: call.kind,
       label,
       ...(call.inputTokens !== undefined ? { inputTokens: call.inputTokens } : {}),
       ...(call.outputTokens !== undefined ? { outputTokens: call.outputTokens } : {}),
+      ...(call.kind === 'agent' ? modelCallsBeneath(span, calls, children) : {}),
     },
   };
+}
+
+/** The model calls an agent run made, directly or through nested agents and tools. */
+function modelCallsBeneath(
+  span: Span,
+  calls: ReadonlyMap<string, GenAiCall>,
+  children: ReadonlyMap<string, Span[]>,
+): { modelCalls?: { calls: number; inputTokens: number; outputTokens: number } } {
+  const totals = { calls: 0, inputTokens: 0, outputTokens: 0 };
+  const seen = new Set([span.spanId]);
+  const stack = [...(children.get(span.spanId) ?? [])];
+  while (stack.length) {
+    const child = stack.pop()!;
+    if (seen.has(child.spanId)) continue;
+    seen.add(child.spanId);
+    const call = calls.get(child.spanId);
+    if (call?.kind === 'model') {
+      totals.calls++;
+      totals.inputTokens += call.inputTokens ?? 0;
+      totals.outputTokens += call.outputTokens ?? 0;
+    }
+    stack.push(...(children.get(child.spanId) ?? []));
+  }
+  return totals.calls ? { modelCalls: totals } : {};
 }
 
 /** Spans grouped by service and operation, covering every span, including those beyond the display limit. */

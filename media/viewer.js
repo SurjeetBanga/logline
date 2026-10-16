@@ -758,6 +758,8 @@
       aiCallsFilter: element("aiCallsFilter"),
       aiCallsTiles: element("aiCallsTiles"),
       aiModelsTable: element("aiModelsTable"),
+      aiCallsTable: element("aiCallsTable"),
+      aiCallsControls: element("aiCallsControls"),
       aiModelRows: element("aiModelRows"),
       aiCallRows: element("aiCallRows"),
       aiCallView: element("aiCallView"),
@@ -1091,6 +1093,11 @@
       ["path", { d: "M3 10.5v-7a1 1 0 0 1 1-1h6" }]
     ],
     agent: [["path", { d: "M8 2l1.4 4.6L14 8l-4.6 1.4L8 14l-1.4-4.6L2 8l4.6-1.4z" }]],
+    // The AI calls tab's icon.
+    aiCall: [
+      ["path", { d: "M2.5 3.5h11v7h-6l-3 2.5v-2.5h-2z" }],
+      ["path", { d: "M5.5 7h.01M8 7h.01M10.5 7h.01", "stroke-width": "1.8" }]
+    ],
     warning: [
       ["path", { d: "M8 2.5 14.5 13.5h-13zM8 6.5v3" }],
       ["circle", { cx: "8", cy: "11.6", r: ".4", fill: "currentColor" }]
@@ -1586,10 +1593,20 @@
       chip.type = "button";
       chip.className = "trace-genai";
       chip.dataset.spanId = span.spanId;
-      const subject = span.genAi.label.replace(/^tool · /, "");
-      const usage = span.genAi.inputTokens !== void 0 || span.genAi.outputTokens !== void 0 ? `${compactTokens(span.genAi.inputTokens)} \u2192 ${compactTokens(span.genAi.outputTokens)} tok` : "";
-      chip.textContent = [span.name.includes(subject) ? "" : span.genAi.label, usage].filter(Boolean).join(" \xB7 ") || "AI call";
-      chip.title = `${span.genAi.label}${usage ? `, ${usage}` : ""}. Open this call in AI calls.`;
+      const { label: subjectLabel, modelCalls } = span.genAi;
+      const subject = subjectLabel.replace(/^tool · /, "");
+      const details2 = [
+        modelCalls && `${modelCalls.calls} ${modelCalls.calls === 1 ? "call" : "calls"}`,
+        tokenUsage(modelCalls ?? span.genAi)
+      ].filter((fact) => !!fact);
+      const facts = [...span.name.includes(subject) ? [] : [subjectLabel], ...details2];
+      const text = document.createElement("span");
+      text.className = "trace-genai-text";
+      text.textContent = facts.join(" \xB7 ");
+      chip.append(icon("aiCall"), ...facts.length ? [text] : []);
+      if (!facts.length) chip.classList.add("icon-only");
+      chip.setAttribute("aria-label", `Open ${subjectLabel} in AI calls`);
+      chip.title = `${[subjectLabel, ...details2].join(", ")}. Open this call in AI calls.`;
       content.append(label, chip);
       name.replaceChildren(content);
     }
@@ -1615,6 +1632,13 @@
   }
   var tokenFormat = new Intl.NumberFormat(void 0, { notation: "compact", maximumFractionDigits: 1 });
   var compactTokens = (value) => value === void 0 ? "\u2013" : tokenFormat.format(value);
+  function tokenUsage({ inputTokens, outputTokens }) {
+    if (inputTokens !== void 0 && outputTokens !== void 0)
+      return `${compactTokens(inputTokens)} \u2192 ${compactTokens(outputTokens)} tok`;
+    if (inputTokens !== void 0) return `${compactTokens(inputTokens)} tok in`;
+    if (outputTokens !== void 0) return `${compactTokens(outputTokens)} tok out`;
+    return "";
+  }
   function logRow(log, total, depth) {
     const row = document.createElement("tr");
     row.className = "trace-log";
@@ -1854,10 +1878,11 @@ Trace ${trace.traceId}`;
       metrics = list;
       if (actions.visible()) render();
     }
-    function update(summary2) {
-      elements.metrics.hidden = !summary2;
+    function update(summary2, receiverRunning = false) {
+      elements.metrics.hidden = !summary2 && !receiverRunning;
+      elements.metricCount.hidden = !summary2;
       elements.metricCount.textContent = summary2 ? summary2.series.toLocaleString() : "";
-      elements.metrics.title = summary2 ? `${summary2.series.toLocaleString()} OpenTelemetry metric series. Show their latest values and trends.` : "";
+      elements.metrics.title = summary2 ? `${summary2.series.toLocaleString()} OpenTelemetry metric series. Show their latest values and trends.` : "Metrics from apps that send OpenTelemetry metrics to the receiver.";
       const changed = summary2?.revision !== revision;
       revision = summary2?.revision;
       if (changed && actions.visible()) refreshSoon();
@@ -1938,6 +1963,7 @@ Trace ${trace.traceId}`;
   var CUT_SHORT = /* @__PURE__ */ new Set(["length", "max_tokens", "content_filter", "max_output_tokens"]);
   var compact = new Intl.NumberFormat(void 0, { notation: "compact", maximumFractionDigits: 1 });
   var whole = new Intl.NumberFormat();
+  var UNKNOWN_MODEL = "unknown model";
   function tokens(value, short = false) {
     if (value === void 0) return "\u2013";
     return short && value >= 1e4 ? compact.format(value) : whole.format(value);
@@ -1955,6 +1981,7 @@ Trace ${trace.traceId}`;
     let refresh;
     let current;
     let detail;
+    let model;
     function load() {
       if (pending) return;
       pending = true;
@@ -2006,11 +2033,18 @@ Trace ${trace.traceId}`;
       event.preventDefault();
       openRow(event.target);
     });
-    scope.listen(elements.aiModelRows, "click", (event) => {
-      const row = event.target.closest("[data-model]");
-      if (!row?.dataset.model) return;
-      elements.aiCallsFilter.value = row.dataset.model;
+    function chooseModel(target) {
+      const row = target?.closest("[data-model]");
+      if (row?.dataset.model === void 0) return;
+      model = model === row.dataset.model ? void 0 : row.dataset.model;
       render();
+    }
+    scope.listen(elements.aiModelRows, "click", (event) => chooseModel(event.target));
+    scope.listen(elements.aiModelRows, "keydown", (event) => {
+      const key = event.key;
+      if (key !== "Enter" && key !== " ") return;
+      event.preventDefault();
+      chooseModel(event.target);
     });
     scope.listen(elements.aiCallsFilter, "input", render);
     scope.listen(elements.aiCallsKind, "change", render);
@@ -2028,10 +2062,11 @@ Trace ${trace.traceId}`;
     };
     scope.listen(elements.aiCallPrevious, "click", () => step(-1));
     scope.listen(elements.aiCallNext, "click", () => step(1));
-    function update(calls) {
-      elements.aiCalls.hidden = !calls;
+    function update(calls, receiverRunning = false) {
+      elements.aiCalls.hidden = !calls && !receiverRunning;
+      elements.aiCallCount.hidden = !calls;
       elements.aiCallCount.textContent = calls ? whole.format(calls.calls) : "";
-      elements.aiCalls.title = calls ? `${whole.format(calls.calls)} LLM calls, tool executions, and agent runs from OpenTelemetry. Show their models, tokens, and conversations.` : "";
+      elements.aiCalls.title = calls ? `${whole.format(calls.calls)} LLM calls, tool executions, and agent runs from OpenTelemetry. Show their models, tokens, and conversations.` : "LLM calls, tool executions, and agent runs from apps that send OpenTelemetry GenAI spans.";
       const changed = calls?.revision !== revision;
       revision = calls?.revision;
       if (changed && actions.listVisible()) refreshSoon();
@@ -2055,6 +2090,7 @@ Trace ${trace.traceId}`;
       const errorsOnly = elements.aiCallsErrorsOnly.checked;
       const terms = elements.aiCallsFilter.value.trim().toLowerCase().split(/\s+/).filter(Boolean);
       return calls.filter((call) => {
+        if (model !== void 0 && (call.kind !== "model" || (call.model ?? UNKNOWN_MODEL) !== model)) return false;
         if (kind && call.kind !== kind) return false;
         if (errorsOnly && !call.error) return false;
         if (!terms.length) return true;
@@ -2064,17 +2100,23 @@ Trace ${trace.traceId}`;
     }
     function render() {
       if (!summary2) return;
-      if (!summary2.total) {
-        elements.aiCallsStatus.textContent = "No AI calls yet. Apps instrumented with the OpenTelemetry GenAI conventions send their LLM calls, tool executions, and agent runs to the receiver.";
+      const empty = !summary2.total;
+      elements.aiCallsControls.hidden = empty;
+      elements.aiCallsTable.hidden = empty;
+      if (empty) {
+        const { running, endpoint } = actions.receiver();
+        elements.aiCallsStatus.textContent = "No AI calls yet. " + (running ? `Apps instrumented with the OpenTelemetry GenAI conventions, such as OpenLLMetry or the OpenAI and Anthropic instrumentations, send their LLM calls, tool executions, and agent runs to ${endpoint ?? "the receiver"}.` : "Start the OpenTelemetry receiver, then run an app instrumented with the GenAI conventions.");
         elements.aiCallsTiles.replaceChildren();
+        elements.aiModelsTable.hidden = true;
         elements.aiModelRows.replaceChildren();
         elements.aiCallRows.replaceChildren();
         return;
       }
+      if (model !== void 0 && !summary2.models.some((totals) => totals.model === model)) model = void 0;
       const rows = shown(summary2.calls);
-      elements.aiCallsStatus.textContent = `${whole.format(summary2.total)} AI ${summary2.total === 1 ? "call" : "calls"}` + (summary2.errors ? ` \xB7 ${whole.format(summary2.errors)} failed` : "") + (summary2.total > summary2.calls.length ? ` \xB7 newest ${whole.format(summary2.calls.length)} listed` : "") + (rows.length < summary2.calls.length ? ` \xB7 ${whole.format(rows.length)} match` : "") + " \xB7 Choose one to read its conversation";
+      elements.aiCallsStatus.textContent = `${whole.format(summary2.total)} AI ${summary2.total === 1 ? "call" : "calls"}` + (summary2.errors ? ` \xB7 ${whole.format(summary2.errors)} failed` : "") + (summary2.total > summary2.calls.length ? ` \xB7 newest ${whole.format(summary2.calls.length)} listed` : "") + (rows.length < summary2.calls.length ? ` \xB7 ${whole.format(rows.length)} match` : "") + (model !== void 0 ? ` \xB7 ${model} only` : "") + " \xB7 Choose one to read its conversation";
       elements.aiCallsTiles.replaceChildren(...tiles(summary2));
-      elements.aiModelRows.replaceChildren(...summary2.models.map(modelRow));
+      elements.aiModelRows.replaceChildren(...summary2.models.map((totals) => modelRow(totals, totals.model === model)));
       elements.aiModelsTable.hidden = !summary2.models.length;
       elements.aiCallRows.replaceChildren(...rows.map(callRow));
     }
@@ -2183,11 +2225,13 @@ Span ${call.spanId}`;
       tile("Tool calls", whole.format(summary2.toolCalls), toolErrors ? `${whole.format(toolErrors)} failed` : void 0)
     ];
   }
-  function modelRow(model) {
+  function modelRow(model, selected) {
     const row = document.createElement("tr");
-    row.className = "ai-model-row";
+    row.className = `ai-model-row${selected ? " selected" : ""}`;
     row.dataset.model = model.model;
-    row.title = `Show only ${model.model}`;
+    row.tabIndex = 0;
+    row.setAttribute("aria-pressed", String(selected));
+    row.title = selected ? "Show every call" : `Show only ${model.model} calls`;
     const name = cell(model.model, "trace-name");
     if (model.provider) {
       const provider = document.createElement("span");
@@ -3837,7 +3881,7 @@ Span ${call.spanId}`;
   }
 
   // src/webview/views.ts
-  var TABS = ["logs", "analysis", "traces", "metrics", "aiCalls", "doctor"];
+  var TABS = ["logs", "analysis", "traces", "aiCalls", "metrics", "doctor"];
   function isTabName(value) {
     return typeof value === "string" && TABS.includes(value);
   }
@@ -3874,7 +3918,7 @@ Span ${call.spanId}`;
         tabs[next].focus();
       });
     }
-    return { show, ensureVisible, active: () => current };
+    return { show, ensureVisible, active: () => current, available: (tab) => !tabs[tab].hidden };
   }
 
   // src/webview/viewer.ts
@@ -3889,6 +3933,7 @@ Span ${call.spanId}`;
     elements.search.value = saved.query ?? "";
     const { popovers, createPopover } = createPopovers(scope);
     createTooltips(scope);
+    let restoreTab;
     const views = createViews(
       {
         logs: elements.logsTab,
@@ -3972,7 +4017,8 @@ Span ${call.spanId}`;
       revealList: () => views.show("aiCalls"),
       revealCall: () => views.show("aiCall"),
       listVisible: () => views.active() === "aiCalls",
-      callVisible: () => views.active() === "aiCall"
+      callVisible: () => views.active() === "aiCall",
+      receiver: () => ({ running: otlpRunning, endpoint: otlpEndpoint })
     });
     const doctor = createDoctor(
       elements.doctor,
@@ -4138,8 +4184,13 @@ Span ${call.spanId}`;
       doctor.receive(data.doctor);
       changedFiles = data.changes?.files;
       updateChangesControl();
-      metricList.update(data.metrics);
-      aiCalls.update(data.aiCalls);
+      metricList.update(data.metrics, otlpRunning);
+      aiCalls.update(data.aiCalls, otlpRunning);
+      if (restoreTab) {
+        const tab = restoreTab;
+        restoreTab = void 0;
+        if (views.available(tab)) openView(tab);
+      }
       views.ensureVisible();
       elements.traceCount.hidden = !data.traceCount;
       elements.traceCount.textContent = data.traceCount ? numberFormat.format(data.traceCount) : "";
@@ -4647,6 +4698,7 @@ Span ${call.spanId}`;
       else views.show(tab);
     }
     function viewChanged(view, previous) {
+      restoreTab = void 0;
       if (previous === "trace") traceView.hide();
       if (previous === "metrics") metricList.hide();
       if (previous === "aiCalls") aiCalls.hide();
@@ -4742,7 +4794,10 @@ Span ${call.spanId}`;
     });
     const fallbackTimer = setInterval(() => request(), 5e3);
     views.show("logs");
-    if (state.view !== "logs" && isTabName(state.view)) openView(state.view);
+    if (state.view !== "logs" && isTabName(state.view)) {
+      if (views.available(state.view)) openView(state.view);
+      else restoreTab = state.view;
+    }
     request();
     return {
       state,

@@ -101,6 +101,8 @@ export function getElements() {
     aiCallsFilter: element<HTMLInputElement>('aiCallsFilter'),
     aiCallsTiles: element<HTMLElement>('aiCallsTiles'),
     aiModelsTable: element<HTMLTableElement>('aiModelsTable'),
+    aiCallsTable: element<HTMLTableElement>('aiCallsTable'),
+    aiCallsControls: element<HTMLElement>('aiCallsControls'),
     aiModelRows: element<HTMLTableSectionElement>('aiModelRows'),
     aiCallRows: element<HTMLTableSectionElement>('aiCallRows'),
     aiCallView: element<HTMLElement>('aiCallView'),

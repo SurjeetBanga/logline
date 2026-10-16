@@ -15,6 +15,8 @@ const KIND_GLYPHS: Record<GenAiCall['kind'], string> = { model: '◆', tool: '�
 const CUT_SHORT = new Set(['length', 'max_tokens', 'content_filter', 'max_output_tokens']);
 const compact = new Intl.NumberFormat(undefined, { notation: 'compact', maximumFractionDigits: 1 });
 const whole = new Intl.NumberFormat();
+// What the summary names model calls without a model; matches `summarizeGenAi`.
+const UNKNOWN_MODEL = 'unknown model';
 
 function tokens(value: number | undefined, short = false): string {
   if (value === undefined) return '–';
@@ -45,6 +47,7 @@ export function createAiCalls(
     revealCall(): void;
     listVisible(): boolean;
     callVisible(): boolean;
+    receiver(): { running: boolean; endpoint?: string };
   },
 ) {
   let summary: GenAiSummary | undefined;
@@ -54,6 +57,8 @@ export function createAiCalls(
   let refresh: ReturnType<typeof setTimeout> | undefined;
   let current: { traceId: string; spanId: string } | undefined;
   let detail: GenAiCallDetail | undefined;
+  /** The model whose row was chosen; the list shows only its calls. */
+  let model: string | undefined;
 
   function load() {
     if (pending) return;
@@ -115,12 +120,19 @@ export function createAiCalls(
     event.preventDefault();
     openRow(event.target);
   });
-  // A model's row narrows the list to its calls.
-  scope.listen(elements.aiModelRows, 'click', (event) => {
-    const row = (event.target as HTMLElement).closest<HTMLElement>('[data-model]');
-    if (!row?.dataset.model) return;
-    elements.aiCallsFilter.value = row.dataset.model;
+  // A model's row narrows the list to exactly its calls; choosing it again shows every call.
+  function chooseModel(target: EventTarget | null) {
+    const row = (target as HTMLElement | null)?.closest<HTMLElement>('[data-model]');
+    if (row?.dataset.model === undefined) return;
+    model = model === row.dataset.model ? undefined : row.dataset.model;
     render();
+  }
+  scope.listen(elements.aiModelRows, 'click', (event) => chooseModel(event.target));
+  scope.listen(elements.aiModelRows, 'keydown', (event) => {
+    const key = (event as KeyboardEvent).key;
+    if (key !== 'Enter' && key !== ' ') return;
+    event.preventDefault();
+    chooseModel(event.target);
   });
   scope.listen(elements.aiCallsFilter, 'input', render);
   scope.listen(elements.aiCallsKind, 'change', render);
@@ -139,13 +151,18 @@ export function createAiCalls(
   scope.listen(elements.aiCallPrevious, 'click', () => step(-1));
   scope.listen(elements.aiCallNext, 'click', () => step(1));
 
-  /** The snapshot's call count: shows the tab and keeps the shown list current. */
-  function update(calls: Snapshot['aiCalls']) {
-    elements.aiCalls.hidden = !calls;
+  /**
+   * The snapshot's call count: keeps the shown list current, and shows the
+   * tab once calls arrive or while the receiver runs, so the view can be
+   * found before an app sends any.
+   */
+  function update(calls: Snapshot['aiCalls'], receiverRunning = false) {
+    elements.aiCalls.hidden = !calls && !receiverRunning;
+    elements.aiCallCount.hidden = !calls;
     elements.aiCallCount.textContent = calls ? whole.format(calls.calls) : '';
     elements.aiCalls.title = calls
       ? `${whole.format(calls.calls)} LLM calls, tool executions, and agent runs from OpenTelemetry. Show their models, tokens, and conversations.`
-      : '';
+      : 'LLM calls, tool executions, and agent runs from apps that send OpenTelemetry GenAI spans.';
     const changed = calls?.revision !== revision;
     revision = calls?.revision;
     if (changed && actions.listVisible()) refreshSoon();
@@ -172,6 +189,7 @@ export function createAiCalls(
     const errorsOnly = elements.aiCallsErrorsOnly.checked;
     const terms = elements.aiCallsFilter.value.trim().toLowerCase().split(/\s+/).filter(Boolean);
     return calls.filter((call) => {
+      if (model !== undefined && (call.kind !== 'model' || (call.model ?? UNKNOWN_MODEL) !== model)) return false;
       if (kind && call.kind !== kind) return false;
       if (errorsOnly && !call.error) return false;
       if (!terms.length) return true;
@@ -185,23 +203,33 @@ export function createAiCalls(
 
   function render() {
     if (!summary) return;
-    if (!summary.total) {
+    const empty = !summary.total;
+    elements.aiCallsControls.hidden = empty;
+    elements.aiCallsTable.hidden = empty;
+    if (empty) {
+      const { running, endpoint } = actions.receiver();
       elements.aiCallsStatus.textContent =
-        'No AI calls yet. Apps instrumented with the OpenTelemetry GenAI conventions send their LLM calls, tool executions, and agent runs to the receiver.';
+        'No AI calls yet. ' +
+        (running
+          ? `Apps instrumented with the OpenTelemetry GenAI conventions, such as OpenLLMetry or the OpenAI and Anthropic instrumentations, send their LLM calls, tool executions, and agent runs to ${endpoint ?? 'the receiver'}.`
+          : 'Start the OpenTelemetry receiver, then run an app instrumented with the GenAI conventions.');
       elements.aiCallsTiles.replaceChildren();
+      elements.aiModelsTable.hidden = true;
       elements.aiModelRows.replaceChildren();
       elements.aiCallRows.replaceChildren();
       return;
     }
+    if (model !== undefined && !summary.models.some((totals) => totals.model === model)) model = undefined;
     const rows = shown(summary.calls);
     elements.aiCallsStatus.textContent =
       `${whole.format(summary.total)} AI ${summary.total === 1 ? 'call' : 'calls'}` +
       (summary.errors ? ` · ${whole.format(summary.errors)} failed` : '') +
       (summary.total > summary.calls.length ? ` · newest ${whole.format(summary.calls.length)} listed` : '') +
       (rows.length < summary.calls.length ? ` · ${whole.format(rows.length)} match` : '') +
+      (model !== undefined ? ` · ${model} only` : '') +
       ' · Choose one to read its conversation';
     elements.aiCallsTiles.replaceChildren(...tiles(summary));
-    elements.aiModelRows.replaceChildren(...summary.models.map(modelRow));
+    elements.aiModelRows.replaceChildren(...summary.models.map((totals) => modelRow(totals, totals.model === model)));
     elements.aiModelsTable.hidden = !summary.models.length;
     elements.aiCallRows.replaceChildren(...rows.map(callRow));
   }
@@ -325,11 +353,13 @@ function tiles(summary: GenAiSummary): HTMLElement[] {
   ];
 }
 
-function modelRow(model: GenAiSummary['models'][number]): HTMLTableRowElement {
+function modelRow(model: GenAiSummary['models'][number], selected: boolean): HTMLTableRowElement {
   const row = document.createElement('tr');
-  row.className = 'ai-model-row';
+  row.className = `ai-model-row${selected ? ' selected' : ''}`;
   row.dataset.model = model.model;
-  row.title = `Show only ${model.model}`;
+  row.tabIndex = 0;
+  row.setAttribute('aria-pressed', String(selected));
+  row.title = selected ? 'Show every call' : `Show only ${model.model} calls`;
   const name = cell(model.model, 'trace-name');
   if (model.provider) {
     const provider = document.createElement('span');
