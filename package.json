@@ -715,12 +715,12 @@
             "type": "string"
           },
           "default": [],
-          "description": "Additional case-insensitive field names to redact in exports, Copy results, and shared-agent results."
+          "description": "Additional case-insensitive field names to redact in exports, Copy filtered results, and shared-agent results."
         },
         "logline.redactionReplacement": {
           "type": "string",
           "default": "[REDACTED]",
-          "description": "Replacement text used for redacted values in exports, Copy results, and shared-agent results."
+          "description": "Replacement text used for redacted values in exports, Copy filtered results, and shared-agent results."
         },
         "logline.columns": {
           "type": "array",

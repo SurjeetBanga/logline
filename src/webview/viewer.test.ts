@@ -174,7 +174,7 @@ const bundle = buildSync({
   platform: 'browser',
   write: false,
 }).outputFiles[0].text;
-function viewer() {
+function viewer(saved: Record<string, unknown> = {}) {
   const frames: (() => void)[] = [];
   const elements = new Map<string, Element>();
   const makeElement = () => {
@@ -218,7 +218,7 @@ function viewer() {
     clearInterval() {},
     module: { exports: {} },
     acquireVsCodeApi: () => ({
-      getState: () => ({ query: 'timeout', levels: ['error'], server: 'api' }),
+      getState: () => ({ query: 'timeout', levels: ['error'], server: 'api', ...saved }),
       setState: (state: Record<string, any>) => savedStates.push(state),
       postMessage: (message: Record<string, any>) => messages.push(message),
     }),
@@ -592,7 +592,7 @@ test('analysis rows, values and bars narrow the search to their logs', () => {
   const { get, receive, app } = viewer();
   const from = Date.parse('2026-10-04T12:00:00Z');
   const analyze = () => {
-    get('analysisDialog').open = true;
+    get('analyze').listeners.get('click')!();
     receive({
       type: 'analysis',
       analysis: {
@@ -635,7 +635,8 @@ test('analysis rows, values and bars narrow the search to their logs', () => {
   );
   click(rows[1]);
   assert.equal(get('search').value, 'timeout status:500', 'added to the current search');
-  assert.equal(get('analysisDialog').open, false);
+  assert.equal(app.views.active(), 'logs', 'the filtered logs come into view');
+  assert.equal(get('analysisView').hidden, true);
   analyze();
   click(get('analysisContent').querySelectorAll('.volume-bar')[0]);
   assert.equal(
@@ -761,7 +762,7 @@ test('clicking a chip edits its value inline', () => {
   assert.equal(app.search.query(), 'service:web');
 });
 
-test('Copy results appears for an active filter and requests the filtered rows', () => {
+test('Copy filtered results is offered for an active filter and requests the filtered rows', () => {
   const { get, messages } = viewer();
   assert.equal(get('copyResults').hidden, false);
   get('copyResults').listeners.get('click')!();
@@ -771,7 +772,6 @@ test('Copy results appears for an active filter and requests the filtered rows',
     levels: ['error'],
     serverId: 'api',
   });
-  assert.equal(get('copyResults').textContent, 'Copied');
 });
 
 test('right-clicking a table value offers an additional field-value filter', () => {
@@ -1680,20 +1680,20 @@ test('the terminal capture toggle exposes explicit state labels', () => {
       captureTerminals,
       captureStatus,
     });
-  assert.equal(get('captureToggle').textContent, 'Terminal capture: Off');
+  assert.equal(get('captureToggle').textContent, 'Capture off');
 
   snapshot(false, { state: 'off', detail: 'Terminal capture is off', active: 0, failed: 0 });
   assert.equal(get('captureToggle').attributes['aria-pressed'], 'false');
 
   snapshot(true, { state: 'waiting', detail: 'Ready for the next supported terminal command', active: 0, failed: 0 });
-  assert.equal(get('captureToggle').textContent, 'Terminal capture: On');
+  assert.equal(get('captureToggle').textContent, 'Capture on');
   assert.equal(get('captureToggle').attributes['aria-pressed'], 'true');
 
   snapshot(true, { state: 'capturing', detail: 'Capturing terminal command', active: 1, failed: 0 });
-  assert.equal(get('captureToggle').textContent, 'Terminal capture: Capturing…');
+  assert.equal(get('captureToggle').textContent, 'Capturing…');
 
   snapshot(true, { state: 'attention', detail: '1 terminal capture failed', active: 0, failed: 1 });
-  assert.equal(get('captureToggle').textContent, 'Terminal capture: Needs attention');
+  assert.equal(get('captureToggle').textContent, 'Capture needs attention');
 });
 
 test('automatic columns settle after the first useful schema while later fields remain opt-in', () => {
@@ -1936,7 +1936,73 @@ test('specific run sharing remains available through More actions', () => {
   assert.equal(get('actionsMenu').hidden, true);
 });
 
-test('rows show their code link and log doctor finding, with actions, and the toolbar lists findings', () => {
+test('More actions holds the data actions, and its keys skip Copy filtered results without a filter', () => {
+  const { get, messages, app } = viewer({
+    query: '',
+    server: '',
+    levels: ['trace', 'debug', 'info', 'warn', 'error', 'fatal', 'unclassified'],
+  });
+  get('clear').listeners.get('click')!();
+  assert.equal(messages.at(-2)?.type, 'clear', 'Clear logs is a menu item');
+  assert.equal(get('copyResults').hidden, true, 'nothing to copy beyond the export without a filter');
+  get('actionsMenu').hidden = true;
+  get('moreActions').listeners.get('keydown')!({ key: 'ArrowDown', preventDefault() {} });
+  get('actionsMenu').listeners.get('keydown')!({ key: 'ArrowDown', preventDefault() {} });
+  get('actionsMenu').listeners.get('keydown')!({ key: 'ArrowDown', preventDefault() {} });
+  assert.equal(app.search.query(), '');
+  assert.notEqual(get('copyResults').focusCalls.length, 1, 'the hidden item is never focused');
+  assert.equal(get('export').focusCalls.length, 1, 'the third shown item follows Connect');
+});
+
+test('views are tabs: one shows at a time, arrow keys move between visible tabs, and the panel remembers its tab', () => {
+  const { get, app, messages, savedStates } = viewer();
+  assert.equal(app.views.active(), 'logs');
+  assert.equal(get('logsTab').attributes['aria-selected'], 'true');
+  assert.equal(get('logsTab').tabIndex, 0);
+  assert.equal(get('analyze').tabIndex, -1, 'only the selected tab is in the tab order');
+  get('analyze').listeners.get('click')!();
+  assert.equal(app.views.active(), 'analysis');
+  assert.equal(get('analysisView').hidden, false);
+  assert.equal(get('logsView').hidden, true);
+  assert.equal(messages.at(-1)?.type, 'analysis');
+  assert.equal(savedStates.at(-1)?.view, 'analysis');
+  // Analyze follows the filter while it is shown.
+  app.search.setQuery('status:500', true);
+  assert.deepEqual(
+    messages.slice(-2).map((message) => [message.type, message.query]),
+    [
+      ['snapshot', 'status:500'],
+      ['analysis', 'status:500'],
+    ],
+  );
+  // Metrics has no data, so its tab is hidden and the arrow keys pass over it.
+  get('metrics').hidden = true;
+  get('doctor').hidden = false;
+  const key = (tab: string, name: string) => get(tab).listeners.get('keydown')!({ key: name, preventDefault() {} });
+  key('analyze', 'ArrowRight');
+  assert.equal(app.views.active(), 'traces');
+  assert.equal(get('traces').focusCalls.length, 1);
+  key('traces', 'ArrowRight');
+  assert.equal(app.views.active(), 'doctor', 'Metrics is skipped');
+  key('doctor', 'ArrowRight');
+  assert.equal(app.views.active(), 'logs', 'the last tab wraps to the first');
+  key('logsTab', 'End');
+  assert.equal(app.views.active(), 'doctor');
+  key('doctor', 'Home');
+  assert.equal(app.views.active(), 'logs');
+  assert.equal(savedStates.at(-1)?.view, undefined, 'the default tab is not stored');
+
+  const reopened = viewer({ view: 'traces' });
+  assert.equal(reopened.app.views.active(), 'traces');
+  assert.equal(
+    reopened.messages.some((message) => message.type === 'traces'),
+    true,
+    'the list loads',
+  );
+  assert.equal(viewer({ view: 'trace' }).app.views.active(), 'logs', 'a single trace is not restored');
+});
+
+test('rows show their code link and log doctor finding, with actions, and the Issues tab lists findings', () => {
   const { get, receive, messages, app } = viewer();
   const finding = {
     siteId: 'src/pay.ts\u00004',
@@ -1946,7 +2012,7 @@ test('rows show their code link and log doctor finding, with actions, and the to
     file: 'src/pay.ts',
     line: 4,
   };
-  assert.equal(get('doctor').hidden, true, 'no chip while log doctor is off');
+  assert.equal(get('doctor').hidden, true, 'no Issues tab while log doctor is off');
   assert.equal(get('rowHint').hidden, false, 'first-run tip explains opening events');
   receive({
     type: 'snapshot',
@@ -2045,6 +2111,21 @@ test('rows show their code link and log doctor finding, with actions, and the to
   const item = get('doctorList').querySelectorAll('.doctor-item')[0];
   assert.equal(item.querySelector('.doctor-location')!.textContent, 'pay.ts:4');
   const fix = item.querySelectorAll('.doctor-action').find((button) => button.textContent === 'Fix…')!;
+  // As in the page, the list sits inside the Issues view.
+  get('doctorView').append(get('doctorList'));
+  get('doctor').listeners.get('click')!();
+  assert.equal(app.views.active(), 'doctor');
+  assert.equal(get('doctorView').hidden, false);
+  get('doctorView').listeners.get('click')!({
+    target: { closest: (wanted: string) => (wanted === '[data-doctor-action]' ? fix : undefined) },
+  });
+  assert.equal(app.views.active(), 'doctor', 'a fix opens the editor and leaves the tab in place');
+  const showEvents = item.querySelectorAll('.doctor-action').find((button) => button.textContent === 'Show events')!;
+  get('doctorView').listeners.get('click')!({
+    target: { closest: (wanted: string) => (wanted === '[data-doctor-action]' ? showEvents : undefined) },
+  });
+  assert.equal(messages.at(-1)!.action, 'showEvents');
+  assert.equal(app.views.active(), 'logs', 'the events it filters to come into view');
   app.bridge.pending = false;
   app.bridge.request(true);
   assert.equal(messages.at(-1)!.doctorRevision, 3, 'the host can skip a list the view already has');
@@ -2093,11 +2174,11 @@ test('rows show their code link and log doctor finding, with actions, and the to
     matched: 0,
     doctor: { revision: 4, total: 0, findings: [] },
   });
-  assert.equal(get('doctor').hidden, false, 'with nothing found the chip stays visible');
+  assert.equal(get('doctor').hidden, false, 'with nothing found the tab stays visible');
   assert.match(get('doctor').className, /is-clear/);
   assert.equal(get('doctorCount').hidden, true);
   assert.match(get('doctorList').querySelector('.popover-empty')!.textContent, /No problems found so far/);
-  get('doctorPanel').listeners.get('click')!({
+  get('doctorView').listeners.get('click')!({
     target: { closest: (wanted: string) => (wanted === '[data-doctor-action]' ? fix : undefined) },
   });
   assert.deepEqual(JSON.parse(JSON.stringify(messages.at(-1))), {
@@ -2142,7 +2223,7 @@ test('a leak in output no statement accounts for names its source and opens an e
   const example = item.querySelector('.doctor-action')!;
   assert.equal(example.dataset.doctorAction, 'example');
   const sent = messages.length;
-  get('doctorPanel').listeners.get('click')!({
+  get('doctorView').listeners.get('click')!({
     target: { closest: (wanted: string) => (wanted === '[data-doctor-action]' ? example : undefined) },
   });
   assert.equal(get('contextDialog').open, true);
@@ -2189,10 +2270,10 @@ test('an OpenTelemetry convention finding names its service and opens a trace th
   assert.equal(item.querySelector('.doctor-source')!.textContent, 'api');
   const trace = item.querySelector('.doctor-action')!;
   assert.equal(trace.textContent, 'Show trace');
-  get('doctorPanel').listeners.get('click')!({
+  get('doctorView').listeners.get('click')!({
     target: { closest: (wanted: string) => (wanted === '[data-doctor-action]' ? trace : undefined) },
   });
-  assert.equal(get('traceDialog').open, true);
+  assert.equal(get('traceView').hidden, false, 'the trace opens in the Traces tab');
   assert.deepEqual(JSON.parse(JSON.stringify(messages.at(-1))), { type: 'trace', traceId: 'abc123' });
 });
 
@@ -2358,7 +2439,7 @@ test('event details link to the log statement and the trace', () => {
   click(site, '.log-site-button');
   assert.deepEqual(JSON.parse(JSON.stringify(messages.at(-1))), { type: 'openLogSite', id: 42 });
   click(trace, '.trace-button');
-  assert.equal(get('traceDialog').open, true);
+  assert.equal(get('traceView').hidden, false, 'the trace opens in the Traces tab');
   assert.deepEqual(JSON.parse(JSON.stringify(messages.at(-1))), { type: 'trace', traceId: 'abc123' });
   // Actions that do not apply stay visible, explain why, and do nothing when clicked.
   const plain = renderDetails(43, 'raw', []);
@@ -2373,7 +2454,7 @@ test('event details link to the log statement and the trace', () => {
     },
   });
   assert.equal(messages.length, sent);
-  assert.equal(get('traceDialog').open, true, 'unchanged');
+  assert.equal(get('traceView').hidden, false, 'unchanged');
   assert.match(
     String(renderDetails(44, undefined, []).querySelector('.trace-button')!.dataset.unavailable),
     /Checking/,
@@ -2564,7 +2645,9 @@ test('a trace without spans explains how to collect them, and Filter logs by tra
 test('the Traces list shows recent requests and opens a waterfall that can return to the list', () => {
   const { get, app, receive, messages } = viewer();
   get('traces').listeners.get('click')!();
-  assert.equal(get('tracesDialog').open, true);
+  assert.equal(app.views.active(), 'traces');
+  assert.equal(get('tracesView').hidden, false);
+  assert.equal(get('logsView').hidden, true, 'the list replaces the table');
   assert.deepEqual(JSON.parse(JSON.stringify(messages.at(-1))), { type: 'traces' });
   receive({
     type: 'traces',
@@ -2619,14 +2702,16 @@ test('the Traces list shows recent requests and opens a waterfall that can retur
   );
   const row = get('tracesRows').children[0];
   get('tracesRows').listeners.get('click')!({ target: { closest: () => row } });
-  assert.equal(get('tracesDialog').open, false);
-  assert.equal(get('traceDialog').open, true);
-  assert.equal(get('traceBack').hidden, false);
+  assert.equal(get('tracesView').hidden, true);
+  assert.equal(get('traceView').hidden, false);
+  assert.equal(get('traces').attributes['aria-selected'], 'true', 'a trace belongs to the Traces tab');
   assert.deepEqual(JSON.parse(JSON.stringify(messages.at(-1))), { type: 'trace', traceId: 'f1' });
   get('traceBack').listeners.get('click')!();
-  assert.equal(get('tracesDialog').open, true);
+  assert.equal(get('tracesView').hidden, false);
+  assert.equal(get('traceView').hidden, true);
   app.traceView.show('abc');
-  assert.equal(get('traceBack').hidden, true, 'a trace opened from a row has no list to return to');
+  assert.equal(get('traceView').hidden, false, 'a trace opened from a row also opens in the Traces tab');
+  get('traceBack').listeners.get('click')!();
   receive({ type: 'traces', traces: [] });
   assert.match(get('tracesStatus').textContent, /No traces yet. Start the OpenTelemetry receiver/);
   assert.equal(get('tracesStartReceiver').hidden, false);
@@ -2689,20 +2774,20 @@ test('snapshots apply editor requests once and reflect the OpenTelemetry receive
   assert.equal(get('status').textContent, 'Ready', 'the chip replaces the receiver status text');
   assert.equal(get('traceCount').textContent, '12');
   get('otlpStatus').listeners.get('click')!();
-  assert.equal(get('tracesDialog').open, true);
+  assert.equal(get('tracesView').hidden, false);
   assert.deepEqual(JSON.parse(JSON.stringify(messages.at(-1))), { type: 'traces' });
   assert.equal(get('otlpToggle').textContent, 'Stop OpenTelemetry receiver');
   get('otlpToggle').listeners.get('click')!();
   assert.deepEqual(JSON.parse(JSON.stringify(messages.at(-1))), { type: 'toggleOtlp', enabled: false });
   snapshot({ openTrace: 'abc123', otlp: { running: false } });
-  assert.equal(get('traceDialog').open, true);
+  assert.equal(get('traceView').hidden, false);
   assert.equal(get('otlpStatus').hidden, true);
   assert.equal(get('traceCount').hidden, true);
   assert.equal(get('otlpToggle').textContent, 'Start OpenTelemetry receiver');
 });
 
-test('the Metrics button appears once metrics arrive and lists series with their latest values', () => {
-  const { get, receive, messages, timers } = viewer();
+test('the Metrics tab appears once metrics arrive and lists series with their latest values', () => {
+  const { get, app, receive, messages, timers } = viewer();
   const snapshot = (extra: Record<string, unknown>) =>
     receive({
       type: 'snapshot',
@@ -2725,12 +2810,12 @@ test('the Metrics button appears once metrics arrive and lists series with their
       ...extra,
     });
   snapshot({});
-  assert.equal(get('metrics').hidden, true, 'no button before any metric arrives');
+  assert.equal(get('metrics').hidden, true, 'no tab before any metric arrives');
   snapshot({ metrics: { series: 2, revision: 5 } });
   assert.equal(get('metrics').hidden, false);
   assert.equal(get('metricCount').textContent, '2');
   get('metrics').listeners.get('click')!();
-  assert.equal(get('metricsDialog').open, true);
+  assert.equal(get('metricsView').hidden, false);
   assert.deepEqual(JSON.parse(JSON.stringify(messages.at(-1))), { type: 'metrics' });
   const series = (extra: Record<string, unknown>) => ({
     key: String(extra.name),
@@ -2820,6 +2905,9 @@ test('the Metrics button appears once metrics arrive and lists series with their
     callback();
   }
   assert.equal(refreshes(), 1, 'an open list refreshes once per export interval, however many points arrived');
+  snapshot({});
+  assert.equal(get('metrics').hidden, true);
+  assert.equal(app.views.active(), 'logs', 'a view whose tab went away returns to the logs');
 });
 
 test('My changes appears in a git repository and adds or removes changed:true', () => {

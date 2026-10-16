@@ -101,11 +101,20 @@ function details(series: MetricSeriesView): string {
 }
 
 /**
- * The Metrics dialog: OpenTelemetry metric series received by Logline's
+ * The Metrics tab: OpenTelemetry metric series received by Logline's
  * receiver, with their latest value and a trend of recent points. Counters
  * show a rate, histograms their p95, and gauges their value.
  */
-export function createMetricList(elements: Elements, api: WebviewApi, scope: EventScope) {
+export function createMetricList(
+  elements: Elements,
+  api: WebviewApi,
+  scope: EventScope,
+  actions: {
+    /** Shows the list in place of the table. */
+    reveal(): void;
+    visible(): boolean;
+  },
+) {
   let metrics: MetricSeriesView[] = [];
   let revision: number | undefined;
   let pending = false;
@@ -126,7 +135,7 @@ export function createMetricList(elements: Elements, api: WebviewApi, scope: Eve
     refresh = setTimeout(
       () => {
         refresh = undefined;
-        if (elements.metricsDialog.open) load();
+        if (actions.visible()) load();
       },
       Math.max(0, loadedAt + REFRESH_MS - Date.now()),
     );
@@ -135,25 +144,25 @@ export function createMetricList(elements: Elements, api: WebviewApi, scope: Eve
   function show() {
     elements.metricsStatus.textContent = 'Loading…';
     elements.metricsRows.replaceChildren();
-    if (!elements.metricsDialog.open) elements.metricsDialog.showModal();
+    actions.reveal();
     load();
   }
 
-  scope.listen(elements.metrics, 'click', show);
-  scope.listen(elements.metricsClose, 'click', () => elements.metricsDialog.close());
-  scope.listen(elements.metricsDialog, 'close', () => {
+  /** Stops refreshing once another view is shown. */
+  function hide() {
     clearTimeout(refresh);
     refresh = undefined;
-  });
+  }
+
   scope.listen(elements.metricsFilter, 'input', render);
 
   function receive(list: MetricSeriesView[]) {
     pending = false;
     metrics = list;
-    if (elements.metricsDialog.open) render();
+    if (actions.visible()) render();
   }
 
-  /** The snapshot's metric counts: shows the toolbar button and keeps an open list current. */
+  /** The snapshot's metric counts: shows the tab and keeps the shown list current. */
   function update(summary: { series: number; revision: number } | undefined) {
     elements.metrics.hidden = !summary;
     elements.metricCount.textContent = summary ? summary.series.toLocaleString() : '';
@@ -162,7 +171,7 @@ export function createMetricList(elements: Elements, api: WebviewApi, scope: Eve
       : '';
     const changed = summary?.revision !== revision;
     revision = summary?.revision;
-    if (changed && elements.metricsDialog.open) refreshSoon();
+    if (changed && actions.visible()) refreshSoon();
   }
 
   function render() {
@@ -214,5 +223,5 @@ export function createMetricList(elements: Elements, api: WebviewApi, scope: Eve
     );
   }
 
-  return { show, receive, update };
+  return { show, hide, receive, update };
 }

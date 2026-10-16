@@ -19,6 +19,7 @@ import { createTable } from './table/controller';
 import { createCellActions } from './table/cell-actions';
 import { createTimestampFormatter } from './time';
 import type { WebviewApi } from './types';
+import { createViews, isTabName, tabOf, type TabName, type ViewName } from './views';
 
 const HOLD_AFTER_MOVE_MS = 2000;
 
@@ -33,6 +34,26 @@ export function createViewer(api: WebviewApi) {
   elements.search.value = saved.query ?? '';
   const { popovers, createPopover } = createPopovers(scope);
   createTooltips(scope);
+  const views = createViews(
+    {
+      logs: elements.logsTab,
+      analysis: elements.analyze,
+      traces: elements.traces,
+      metrics: elements.metrics,
+      doctor: elements.doctor,
+    },
+    {
+      logs: elements.logsView,
+      analysis: elements.analysisView,
+      traces: elements.tracesView,
+      trace: elements.traceView,
+      metrics: elements.metricsView,
+      doctor: elements.doctorView,
+    },
+    scope,
+    openView,
+    viewChanged,
+  );
   const formatTimestamp = createTimestampFormatter(state);
   const analysis = createAnalysis(
     elements,
@@ -44,11 +65,11 @@ export function createViewer(api: WebviewApi) {
           elements.analysisStatus.textContent = choice.reason;
           return;
         }
-        elements.analysisDialog.close();
+        views.show('logs');
         search.setQuery(choice.query, true);
       },
       selectSource: (id) => {
-        elements.analysisDialog.close();
+        views.show('logs');
         selectSource(id);
       },
     },
@@ -61,24 +82,37 @@ export function createViewer(api: WebviewApi) {
   const request = (force = false) => bridge.request(force);
   const traceView = createTraceView(elements, api, scope, {
     showContext: (id) => inspection.showContext(id),
-    applyQuery: (query) => search.setQuery(query, true),
+    applyQuery: (query) => {
+      views.show('logs');
+      search.setQuery(query, true);
+    },
     showList: () => traceList.show(),
+    reveal: () => views.show('trace'),
+    visible: () => views.active() === 'trace',
   });
   const traceList = createTraceList(elements, api, scope, {
-    showTrace: (traceId) => traceView.show(traceId, true),
+    showTrace: (traceId) => traceView.show(traceId),
     formatTime: (ms) => formatTimestamp({ id: 0, level: '', timestampMs: ms }) ?? '',
     startReceiver: () => api.postMessage({ type: 'toggleOtlp', enabled: true }),
     receiver: () => ({ running: otlpRunning, endpoint: otlpEndpoint }),
+    reveal: () => views.show('traces'),
+    visible: () => views.active() === 'traces',
   });
-  const metricList = createMetricList(elements, api, scope);
+  const metricList = createMetricList(elements, api, scope, {
+    reveal: () => views.show('metrics'),
+    visible: () => views.active() === 'metrics',
+  });
   const doctor = createDoctor(
     elements.doctor,
     elements.doctorCount,
-    elements.doctorPanel,
+    elements.doctorView,
     elements.doctorList,
     api,
     scope,
-    () => doctorPopover.close(),
+    // Show events filters the table, so the table comes back into view.
+    (action) => {
+      if (action === 'showEvents') views.show('logs');
+    },
     (id) => inspection.showContext(id),
     (traceId) => traceView.show(traceId),
   );
@@ -118,7 +152,6 @@ export function createViewer(api: WebviewApi) {
   elements.helpBadge.hidden = !guideUnread;
   let searchDebounce: ReturnType<typeof setTimeout> | undefined;
   let autocompleteDebounce: ReturnType<typeof setTimeout> | undefined;
-  let copyFeedbackTimer: ReturnType<typeof setTimeout> | undefined;
   cellActions = createCellActions(
     elements,
     () => table.events,
@@ -220,7 +253,10 @@ export function createViewer(api: WebviewApi) {
     bridge.received(data.requestId);
     const rows = bridge.rows(data);
     // A filter requested from the editor (a log statement's CodeLens).
-    if (data.applyQuery !== undefined && data.applyQuery !== search.query()) search.setQuery(data.applyQuery, true);
+    if (data.applyQuery !== undefined && data.applyQuery !== search.query()) {
+      views.show('logs');
+      search.setQuery(data.applyQuery, true);
+    }
     if (data.openTrace) traceView.show(data.openTrace);
     const receiverWasRunning = otlpRunning;
     otlpRunning = data.otlp?.running === true;
@@ -237,6 +273,7 @@ export function createViewer(api: WebviewApi) {
     changedFiles = data.changes?.files;
     updateChangesControl();
     metricList.update(data.metrics);
+    views.ensureVisible();
     elements.traceCount.hidden = !data.traceCount;
     elements.traceCount.textContent = data.traceCount ? numberFormat.format(data.traceCount) : '';
     elements.traces.title = data.traceCount
@@ -289,12 +326,12 @@ export function createViewer(api: WebviewApi) {
     setLabel(
       elements.captureToggle,
       data.captureStatus?.state === 'capturing'
-        ? 'Terminal capture: Capturing…'
+        ? 'Capturing…'
         : data.captureStatus?.state === 'attention'
-          ? 'Terminal capture: Needs attention'
+          ? 'Capture needs attention'
           : data.captureTerminals
-            ? 'Terminal capture: On'
-            : 'Terminal capture: Off',
+            ? 'Capture on'
+            : 'Capture off',
     );
     elements.captureToggle.setAttribute('aria-pressed', String(data.captureTerminals));
     elements.captureToggle.title =
@@ -326,7 +363,11 @@ export function createViewer(api: WebviewApi) {
       : sharing
         ? `Agents can read ${sharedRuns} selected run${sharedRuns === 1 ? '' : 's'} in this window, redacted, until you stop sharing. Later commands are not included.`
         : '';
-    setLabel(elements.stop, state.selectedServer ? 'Stop server' : 'Stop all');
+    // An icon button: its name and tooltip say what it stops.
+    elements.stop.setAttribute('aria-label', state.selectedServer ? 'Stop server' : 'Stop all');
+    elements.stop.title = state.selectedServer
+      ? 'Stop the running commands of the selected source'
+      : 'Stop running commands that Logline started';
     const activeSessions = Array.isArray(data.sessions)
       ? data.sessions.filter((session) => ['running', 'stopping'].includes(session.status))
       : [];
@@ -413,9 +454,16 @@ export function createViewer(api: WebviewApi) {
     }
     const number = (value: number) => numberFormat.format(value);
     const budget = Number.isFinite(data.maxBytes) ? (data.maxBytes / 1048576).toFixed(0) : '?';
+    const memory = `${(data.bytes / 1048576).toFixed(1)} / ${budget} MiB`;
+    const skipped = data.persistDropped ? ` · ${number(data.persistDropped)} disk writes skipped` : '';
+    // The status bar keeps what needs attention; the tooltip has every count.
     elements.counts.textContent =
-      `${number(data.total)} received · ${number(data.retained)} retained · ${number(data.discarded)} discarded · ${(data.bytes / 1048576).toFixed(1)} / ${budget} MiB · ${data.truncated} truncated` +
-      (data.persistDropped ? ` · ${number(data.persistDropped)} disk writes skipped` : '');
+      `${number(data.retained)} retained · ${memory}` +
+      (data.discarded ? ` · ${number(data.discarded)} discarded` : '') +
+      skipped;
+    elements.counts.title =
+      `${number(data.total)} received · ${number(data.retained)} retained · ${number(data.discarded)} discarded · ${memory} · ${data.truncated} truncated` +
+      skipped;
     updateModeLabel();
     if (Array.isArray(data.columnFields)) state.columnFields = data.columnFields;
     table.updateColumns(data.columns ?? []);
@@ -547,8 +595,6 @@ export function createViewer(api: WebviewApi) {
   }
   function updateCopyResultsControl() {
     elements.copyResults.hidden = !hasActiveFilter();
-    setLabel(elements.copyResults, 'Copy results');
-    delete elements.copyResults.dataset.copied;
   }
   // Shown in a git repository, and whenever the filter already uses it so it can be turned off.
   function updateChangesControl() {
@@ -584,6 +630,8 @@ export function createViewer(api: WebviewApi) {
     updateFollowControl();
     updateModeLabel();
     request(true);
+    // Analyze always shows the current filter, source, and run.
+    if (views.active() === 'analysis') requestAnalysis();
   }
   function filterChanged() {
     state.filterChanged();
@@ -720,11 +768,6 @@ export function createViewer(api: WebviewApi) {
   });
 
   const actionsContainer = elements.moreActions.closest<HTMLElement>('.popover-container')!;
-  const doctorPopover = createPopover(
-    elements.doctor.closest<HTMLElement>('.popover-container')!,
-    elements.doctor,
-    elements.doctorPanel,
-  );
   // Findings shown in an expanded event inside Surrounding logs act the same way.
   scope.listen(elements.contextDetails, 'click', (event) => {
     doctor.handleAction(event);
@@ -744,8 +787,10 @@ export function createViewer(api: WebviewApi) {
   const actionItems = [
     elements.shareSpecificRuns,
     elements.connectAgent,
+    elements.copyResults,
     elements.export,
     elements.import,
+    elements.clear,
     elements.breakOnLogs,
     elements.otlpToggle,
     elements.manage,
@@ -753,34 +798,38 @@ export function createViewer(api: WebviewApi) {
     elements.config,
     elements.help,
   ];
+  // Copy filtered results is hidden without a filter; keyboard navigation skips it.
+  const shownActions = () => actionItems.filter((item) => !item.hidden);
   scope.listen(elements.moreActions, 'click', () => {
-    if (actionsMenu.isOpen()) actionItems[0].focus();
+    if (actionsMenu.isOpen()) shownActions()[0].focus();
   });
   scope.listen(elements.moreActions, 'keydown', (event) => {
     if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return;
     event.preventDefault();
     actionsMenu.open();
-    actionItems[event.key === 'ArrowUp' ? actionItems.length - 1 : 0].focus();
+    const items = shownActions();
+    items[event.key === 'ArrowUp' ? items.length - 1 : 0].focus();
   });
   scope.listen(elements.actionsMenu, 'keydown', (event) => {
     if (event.key === 'Tab') {
       actionsMenu.close(true);
       return;
     }
-    const index = actionItems.indexOf(document.activeElement as HTMLButtonElement);
+    const items = shownActions();
+    const index = items.indexOf(document.activeElement as HTMLButtonElement);
     const next =
       event.key === 'Home'
         ? 0
         : event.key === 'End'
-          ? actionItems.length - 1
+          ? items.length - 1
           : event.key === 'ArrowDown'
-            ? (index + 1) % actionItems.length
+            ? (index + 1) % items.length
             : event.key === 'ArrowUp'
-              ? (index - 1 + actionItems.length) % actionItems.length
+              ? (index - 1 + items.length) % items.length
               : undefined;
     if (next === undefined) return;
     event.preventDefault();
-    actionItems[next].focus();
+    items[next].focus();
   });
   scope.listen(actionsContainer, 'focusout', (event) => {
     if (!actionsContainer.contains(event.relatedTarget as Node | null)) actionsMenu.close();
@@ -796,11 +845,6 @@ export function createViewer(api: WebviewApi) {
       serverId: state.selectedServer || undefined,
       sessionId: state.selectedSession || undefined,
     });
-    setLabel(elements.copyResults, 'Copied');
-    // The label is hidden on narrow panels, so the icon confirms the copy too.
-    elements.copyResults.dataset.copied = 'true';
-    clearTimeout(copyFeedbackTimer);
-    copyFeedbackTimer = setTimeout(updateCopyResultsControl, 1200);
   });
 
   scope.listen(elements.captureToggle, 'click', () => {
@@ -842,8 +886,7 @@ export function createViewer(api: WebviewApi) {
   scope.listen(elements.changedOnly, 'click', () => {
     search.setQuery(withChangedScope(search.query(), !hasChangedScope(search.query())), true);
   });
-  scope.listen(elements.analyze, 'click', () => {
-    elements.analysisDialog.showModal();
+  function requestAnalysis() {
     elements.analysisStatus.textContent = 'Loading analysis…';
     api.postMessage({
       type: 'analysis',
@@ -852,9 +895,24 @@ export function createViewer(api: WebviewApi) {
       serverId: state.selectedServer || undefined,
       sessionId: state.selectedSession || undefined,
     });
-  });
+  }
 
-  scope.listen(elements.analysisClose, 'click', () => elements.analysisDialog.close());
+  /** Opens a view from its tab, loading what it shows. */
+  function openView(tab: TabName) {
+    if (tab === 'analysis') {
+      views.show('analysis');
+      requestAnalysis();
+    } else if (tab === 'traces') traceList.show();
+    else if (tab === 'metrics') metricList.show();
+    else views.show(tab);
+  }
+
+  function viewChanged(view: ViewName, previous: ViewName) {
+    if (previous === 'trace') traceView.hide();
+    if (previous === 'metrics') metricList.hide();
+    state.view = tabOf(view);
+    saveState();
+  }
 
   function resumeLive() {
     state.resume();
@@ -956,9 +1014,14 @@ export function createViewer(api: WebviewApi) {
   // safety net in case one is ever missed.
   const fallbackTimer = setInterval(() => request(), 5000);
 
+  // The panel reopens on the tab it was left on.
+  views.show('logs');
+  if (state.view !== 'logs' && isTabName(state.view)) openView(state.view);
+
   request();
   return {
     state,
+    views,
     bridge,
     table,
     search,
@@ -972,7 +1035,6 @@ export function createViewer(api: WebviewApi) {
       clearTimeout(holdTimer);
       clearTimeout(searchDebounce);
       clearTimeout(autocompleteDebounce);
-      clearTimeout(copyFeedbackTimer);
       window.removeEventListener('message', onMessage);
     },
   };

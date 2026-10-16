@@ -10,39 +10,42 @@ export function formatDuration(ms: number): string {
   return `${(ms / 1000).toFixed(2)} s`;
 }
 
-/** The trace waterfall dialog: spans across services with their logs interleaved. */
+/** The trace waterfall in the Traces tab: spans across services with their logs interleaved. */
 export function createTraceView(
   elements: Elements,
   api: WebviewApi,
   scope: EventScope,
-  actions: { showContext(id: number): void; applyQuery(query: string): void; showList(): void },
+  actions: {
+    showContext(id: number): void;
+    applyQuery(query: string): void;
+    showList(): void;
+    /** Shows the waterfall in place of the table. */
+    reveal(): void;
+    visible(): boolean;
+  },
 ) {
   let current: string | undefined;
 
-  /** @param fromList Opened from the Traces list, which the dialog offers to return to. */
-  function show(traceId: string, fromList = false) {
+  function show(traceId: string) {
     current = traceId.toLowerCase();
-    elements.traceBack.hidden = !fromList;
     elements.traceTitle.textContent = `Trace ${current.length > 12 ? `${current.slice(0, 8)}…${current.slice(-4)}` : current}`;
     elements.traceTitle.title = current;
     elements.traceStatus.textContent = 'Loading…';
     elements.traceRows.replaceChildren();
     elements.traceHotspots.hidden = true;
-    if (!elements.traceDialog.open) elements.traceDialog.showModal();
+    actions.reveal();
     api.postMessage({ type: 'trace', traceId: current });
   }
 
-  scope.listen(elements.traceClose, 'click', () => elements.traceDialog.close());
-  scope.listen(elements.traceBack, 'click', () => {
-    elements.traceDialog.close();
-    actions.showList();
-  });
-  scope.listen(elements.traceDialog, 'close', () => {
+  /** Forgets the trace when another view is shown, so a late reply for it is ignored. */
+  function hide() {
     current = undefined;
     elements.traceRows.replaceChildren();
     elements.traceHotspotList.replaceChildren();
     elements.traceHotspots.hidden = true;
-  });
+  }
+
+  scope.listen(elements.traceBack, 'click', () => actions.showList());
   // A hotspot leads to the first span of its operation in the waterfall.
   scope.listen(elements.traceHotspotList, 'click', (event) => {
     const button = (event.target as HTMLElement).closest<HTMLElement>('.trace-hotspot');
@@ -59,19 +62,16 @@ export function createTraceView(
   });
   scope.listen(elements.traceFilter, 'click', () => {
     if (!current) return;
-    const query = `traceId:${current}`;
-    elements.traceDialog.close();
-    actions.applyQuery(query);
+    actions.applyQuery(`traceId:${current}`);
   });
   scope.listen(elements.traceRows, 'click', (event) => {
     const button = (event.target as HTMLElement).closest<HTMLElement>('.trace-log-button');
     if (!button) return;
-    elements.traceDialog.close();
     actions.showContext(Number(button.dataset.id));
   });
 
   function receive(trace: TraceView) {
-    if (!elements.traceDialog.open || trace.traceId !== current) return;
+    if (!actions.visible() || trace.traceId !== current) return;
     elements.traceStatus.textContent = summary(trace);
     // With one span, self time says nothing the waterfall does not.
     const shownHotspots = trace.spans.length + trace.omitted > 1 ? trace.hotspots : [];
@@ -108,9 +108,10 @@ export function createTraceView(
 
   return {
     show,
+    hide,
     receive,
     get open() {
-      return elements.traceDialog.open;
+      return actions.visible();
     },
   };
 }
