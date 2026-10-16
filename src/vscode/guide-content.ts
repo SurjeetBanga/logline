@@ -17,6 +17,27 @@ export interface GuideRelease {
 
 export const GUIDE_RELEASES: GuideRelease[] = [
   {
+    version: '1.15.0',
+    date: '2026-10-16',
+    highlights: [
+      {
+        title: 'See what your app asks the model',
+        text: 'The AI calls tab lists LLM calls, tool executions, and agent runs from OpenTelemetry GenAI spans, with tokens, cache share, p95 latency, and each call’s conversation and tool results.',
+        section: 'inspect',
+      },
+      {
+        title: 'AI calls in traces and for agents',
+        text: 'GenAI spans in the trace waterfall carry a token chip that opens the call, and agents read the same calls with logline_get_ai_calls, redacted.',
+        section: 'share',
+      },
+      {
+        title: 'Every view is a tab',
+        text: 'Analyze, Traces, AI calls, Metrics, and Issues are tabs next to Logs, the toolbar is two rows, and terminal capture moved to the status bar at the bottom of the panel.',
+        section: 'capture',
+      },
+    ],
+  },
+  {
     version: '1.14.0',
     date: '2026-10-10',
     highlights: [

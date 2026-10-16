@@ -9,16 +9,24 @@ const pending = [];
 
 function nanos(ms) { return String(BigInt(Math.round(ms * 1000)) * 1000n); }
 
-async function span(service, name, fn, kind = 1) {
+function value(v) {
+  if (Array.isArray(v)) return { arrayValue: { values: v.map(value) } };
+  if (Number.isInteger(v)) return { intValue: String(v) };
+  return { stringValue: typeof v === 'string' ? v : JSON.stringify(v) };
+}
+
+// fn receives the span's attributes, so it can add ones it learns while running.
+async function span(service, name, fn, kind = 1, attributes = {}) {
   const parent = storage.getStore();
   const current = { traceId: parent?.traceId ?? randomBytes(16).toString('hex'), spanId: randomBytes(8).toString('hex'), parentSpanId: parent?.spanId };
   const start = performance.timeOrigin + performance.now();
   let status = { code: 1 };
-  try { return await storage.run(current, fn); }
+  try { return await storage.run(current, () => fn(attributes)); }
   catch (error) { status = { code: 2, message: error.message }; throw error; }
   finally {
     const end = performance.timeOrigin + performance.now();
-    pending.push({ service, span: { ...current, name, kind, startTimeUnixNano: nanos(start), endTimeUnixNano: nanos(end), status } });
+    pending.push({ service, span: { ...current, name, kind, startTimeUnixNano: nanos(start), endTimeUnixNano: nanos(end), status,
+      attributes: Object.entries(attributes).map(([key, v]) => ({ key, value: value(v) })) } });
   }
 }
 

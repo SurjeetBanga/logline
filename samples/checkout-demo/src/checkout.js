@@ -1,6 +1,7 @@
 const logger = require('./logger');
 const { span } = require('./tracing');
 const metrics = require('./metrics');
+const { draftDeclineReply } = require('./assistant');
 
 const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
 
@@ -26,6 +27,7 @@ async function checkout(req) {
     } catch (err) {
       logger.error('payment failed for order', { orderId: req.order.id });
       metrics.countOrder('declined');
+      draftDeclineReply(req.order).catch(() => undefined);
     } finally {
       metrics.recordDuration(performance.now() - started);
     }

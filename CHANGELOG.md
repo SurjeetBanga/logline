@@ -2,7 +2,7 @@
 
 All notable changes to Logline are documented in this file.
 
-## Unreleased
+## 1.15.0 — 2026-10-16
 
 ### Changes
 
@@ -10,6 +10,9 @@ All notable changes to Logline are documented in this file.
 - In the trace waterfall, GenAI spans carry a chip, marked with the AI calls icon, that opens the call in **AI calls**: a model call's chip shows its tokens, and an agent run's the model calls beneath it and their tokens.
 - Agents get `logline_get_ai_calls`: totals per model and tool, the newest calls, and with `includeContent` the start of each call's messages and tool results, redacted. The `logline-triage` and `logline-slow-request` skills use it when an app calls an LLM.
 - Prompts, responses, and tool payloads on spans and their GenAI message events keep up to 64 KiB per attribute when received, instead of being cut at 4 KiB, and stay out of span rows in the table and waterfall tooltips. Log records keep the usual 4 KiB.
+- The toolbar is two rows instead of four, so a docked panel shows more logs. On narrow panels, tabs and filters show their icons and counts, and rows wrap instead of hiding controls off the edge.
+- **More actions** reads like a VS Code menu: plain rows, with the one under the pointer or keyboard focus highlighted. Buttons are filled without an outline unless the color theme gives buttons a border, and summary tiles no longer have outlines.
+- The [checkout sample](samples/checkout-demo) has a support assistant that drafts a reply to each declined order, so its agent runs, model calls, and tool call show in **AI calls** and in the trace of the failed checkout. It simulates the model and needs no API key.
 
 ### Behavior changes
 
@@ -20,11 +23,6 @@ The Logs panel is reorganized around tabs, so every view gets more room and new 
 - **Clear logs** and **Copy filtered results** (formerly **Copy results**) are under **More actions**, with Export, Import, and the other occasional actions.
 - **Saved searches** is an icon inside the search box, **Columns** an icon at the end of the filter row, and Run and Stop are icons beside the source picker.
 - Paging, the mode, and the retention counts share one status bar line; hover the counts for every figure.
-
-### Changes
-
-- The toolbar is two rows instead of four, so a docked panel shows more logs. On narrow panels, tabs and filters show their icons and counts, and rows wrap instead of hiding controls off the edge.
-- **More actions** reads like a VS Code menu: plain rows, with the one under the pointer or keyboard focus highlighted. Buttons are filled without an outline unless the color theme gives buttons a border, and summary tiles no longer have outlines.
 
 ### Fixes
 
