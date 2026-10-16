@@ -22,7 +22,7 @@
 
 **Debugging with F5?** Whatever the Debug Console shows appears in Logs automatically, for every debugger. For launch configurations that print to the integrated terminal (the Python and Java default), turn on terminal capture.
 
-**Using OpenTelemetry?** Choose **More actions → Start OpenTelemetry receiver**. Instrumented apps you start from Logline, a debug session, or a new terminal send their logs, traces, and metrics to Logline with no collector and no code changes. Choose **Traces** to see recent requests, or the trace button on any row to see that request across services. **Metrics** shows each series' latest value and trend.
+**Using OpenTelemetry?** Choose **More actions → Start OpenTelemetry receiver**. Instrumented apps you start from Logline, a debug session, or a new terminal send their logs, traces, and metrics to Logline with no collector and no code changes. The **Traces** tab shows recent requests, and the trace button on any row shows that request across services. The **Metrics** tab shows each series' latest value and trend.
 
 **Running Docker Compose?** Run **Logline: Follow Docker Compose Project**, or run `docker compose up` with **Run Command** or in a captured terminal. Each service becomes its own source, and its JSON or logfmt lines keep their level and fields.
 
@@ -30,13 +30,13 @@
 
 **Try it with a file:** run **Logline: Import Logs** and select [samples/demo-logs.jsonl](samples/demo-logs.jsonl) from this repository. You can also import JSON, JSONL/NDJSON, CSV, and plain-text logs.
 
-Open **Help** in the toolbar for the offline visual guide, or run **Logline: What’s New** for release highlights. If something isn't working, run **Logline: Show Status** to see the receiver, agent connections, sharing, and capture, with a fix for anything off. See [Development](#development) to build and install from source.
+Open **More actions → Help** for the offline visual guide, or run **Logline: What’s New** for release highlights. If something isn't working, run **Logline: Show Status** to see the receiver, agent connections, sharing, and capture, with a fix for anything off. See [Development](#development) to build and install from source.
 
 ## Terminal capture and agent sharing
 
 Logline turns structured logs into a searchable table in the bottom **Logs** panel and keeps plain-text output alongside them.
 
-Logline can also capture commands you run in supported VS Code terminals. Turn **Terminal capture: Off** to **Terminal capture: On** in the Logs panel, run the next command normally, and its output becomes searchable without wrapping the command. Commands already in progress cannot be backfilled. Completed terminal runs remain available while their logs are retained; empty stale terminal metadata is removed automatically. Use the combined source/run dropdown’s **Runs** tab to stop an individual Logline-owned process or task with its inline **Stop** action; externally captured terminal commands remain observe-only. Its **Sources** tab filters by server, task, terminal, or imported source. Choose **Share with agent** to make retained Logline sources and new runs in this VS Code window available to Copilot and any agent you connected. The first use asks for confirmation and explains that redaction may not remove every sensitive value; later uses enable sharing immediately. The toolbar shows **Sharing · Stop**, with the sharing scope and the agents that read the logs below it. Continue in your existing agent chat and ask it to check the logs. Use **More actions → Choose specific runs to share…** to limit access, or click **Stop** on the sharing button to revoke it. Sharing is held in memory and ends when logs are cleared or the window or workspace changes.
+Logline can also capture commands you run in supported VS Code terminals. Click **Capture off** in the Logs panel's status bar so it reads **Capture on**, run the next command normally, and its output becomes searchable without wrapping the command. Commands already in progress cannot be backfilled. Completed terminal runs remain available while their logs are retained; empty stale terminal metadata is removed automatically. Use the combined source/run dropdown’s **Runs** tab to stop an individual Logline-owned process or task with its inline **Stop** action; externally captured terminal commands remain observe-only. Its **Sources** tab filters by server, task, terminal, or imported source. Choose **Share with agent** to make retained Logline sources and new runs in this VS Code window available to Copilot and any agent you connected. The first use asks for confirmation and explains that redaction may not remove every sensitive value; later uses enable sharing immediately. The button shows **Sharing · Stop**, and the status bar shows the sharing scope and the agents that read the logs. Continue in your existing agent chat and ask it to check the logs. Use **More actions → Choose specific runs to share…** to limit access, or click **Stop** on the sharing button to revoke it. Sharing is held in memory and ends when logs are cleared or the window or workspace changes.
 
 ## What you can do
 
@@ -50,7 +50,7 @@ Logline can also capture commands you run in supported VS Code terminals. Turn *
 | **Fix** | **Log doctor** shows statements that logged secrets or personal data, failures logged at info, errors without their exception or request id, and noisy or oversized statements in the Problems panel, with masked evidence and quick fixes. It also finds secrets and personal data in output from libraries, imports, and terminals, and checks OpenTelemetry spans and metrics for unnamed services, ids in span names, unmarked 5xx errors, missing routes, and outdated attribute names. |
 | **Arrange** | Auto-detected fields, custom and nested columns, sorting, drag-to-reorder, and resizable column widths. |
 | **Analyze** | Error rate and p95 latency at a glance, volume and latency over time, status codes, top values of fields like service and path, error groups, and log patterns for the current filter. Click any bar, value, pattern, or group to filter to its logs. |
-| **Share** | Export filtered JSONL, JSON, CSV, or Markdown context for AI tools, or share retained sources (including new runs) or specific command runs with Copilot, Claude Code, Codex, or another MCP client for read-only live investigation. Exports and **Copy results** redact common credentials by default; agent tools always redact them. |
+| **Share** | Export filtered JSONL, JSON, CSV, or Markdown context for AI tools, or share retained sources (including new runs) or specific command runs with Copilot, Claude Code, Codex, or another MCP client for read-only live investigation. Exports and **Copy filtered results** redact common credentials by default; agent tools always redact them. |
 
 **Live** follows the newest events, which appear at the top. Scroll down to read and Live pauses so rows stay put; scroll back to the top to resume. Turn it off to browse retained history in pages of up to 1,000 rows. Expanding an event holds your place while collection continues; changing filters, sorting, paging, or columns returns inspection to **Browse**. Choose **Live** or **Resume** to return to the newest rows.
 
@@ -104,7 +104,7 @@ Set `autoStart` to `true` to start when Logline activates. Set `jsonOnly` to `tr
 
 ## Settings and retention
 
-Open **Settings** in the toolbar for all options. A few useful defaults:
+Open **More actions → Settings** for all options. A few useful defaults:
 
 | Setting | Default | Purpose |
 | --- | --- | --- |
@@ -120,12 +120,12 @@ Open **Settings** in the toolbar for all options. A few useful defaults:
 | `logline.maxEvents` | `50000` | Maximum retained events. |
 | `logline.maxMemoryMb` | `100` | Estimated event-storage budget in MiB. |
 | `logline.persistLogs` | `false` | Write original logs to `.logline/latest.log`. |
-| `logline.redactExports` | `true` | Redact exports and **Copy results**. Agent sharing is always redacted. |
+| `logline.redactExports` | `true` | Redact exports and **Copy filtered results**. Agent sharing is always redacted. |
 | `logline.externalAgents` | `true` | Let Claude Code, Codex, and other MCP clients reach this window. They still read only what you share. |
 
 Older events are discarded when either retention limit is reached. Search, context, and analysis cover retained events only; the memory budget estimates event storage, not total VS Code memory. With persistence on, Logline adds a `.gitignore` to `.logline/` and makes `latest.log` readable only by you, since it is not redacted.
 
-**Copy** on an expanded event and disk persistence keep original content. **Copy results** and AI Markdown exports include the latest 1,000 matching events; full JSON/JSONL/CSV exports cover all matches in the retained snapshot. Use CSV when you want to export and re-import the original raw records—JSON/JSONL exports contain Logline event envelopes.
+**Copy** on an expanded event and disk persistence keep original content. **Copy filtered results** and AI Markdown exports include the latest 1,000 matching events; full JSON/JSONL/CSV exports cover all matches in the retained snapshot. Use CSV when you want to export and re-import the original raw records—JSON/JSONL exports contain Logline event envelopes.
 
 See the [usage reference](docs/usage.md) for all settings, query details, import/export behavior, task examples, and retention limits.
 

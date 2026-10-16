@@ -14,6 +14,8 @@ export interface PersistedState {
   hiddenColumns?: string[];
   cellHintDismissed?: boolean;
   rowHintDismissed?: boolean;
+  /** The tab the panel was left on. */
+  view?: string;
 }
 /** Persistent preferences and interaction state, independent of DOM rendering. */
 export class ViewerState {
@@ -45,7 +47,10 @@ export class ViewerState {
   newestFirst = true;
   cellHintDismissed: boolean;
   rowHintDismissed: boolean;
+  /** The selected tab, kept so the panel reopens on it. */
+  view: string;
   constructor(saved: PersistedState = {}) {
+    this.view = typeof saved.view === 'string' ? saved.view : 'logs';
     this.following = !saved.sort;
     this.cellHintDismissed = saved.cellHintDismissed === true;
     this.rowHintDismissed = saved.rowHintDismissed === true;
@@ -129,6 +134,7 @@ export class ViewerState {
       extraColumns: this.extraColumns,
       ...(this.cellHintDismissed ? { cellHintDismissed: true } : {}),
       ...(this.rowHintDismissed ? { rowHintDismissed: true } : {}),
+      ...(this.view !== 'logs' ? { view: this.view } : {}),
     };
   }
 }

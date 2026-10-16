@@ -29,11 +29,10 @@ export function createPopovers(scope: EventScope) {
         panel.style.bottom = '';
         panel.style.maxHeight = '';
         panel.style.position = '';
-        // The search toolbar is horizontally scrollable so its controls stay
-        // on one row. Any absolutely positioned menu inside that scroller is
-        // clipped to the toolbar's height, which makes All levels and Saved
-        // searches appear not to open. Anchor every toolbar menu to the
-        // viewport so it can escape that clipping layer.
+        // A menu inside the toolbar rows, or over the table's scroll area,
+        // would be clipped by them, which makes All levels and Saved searches
+        // appear not to open. Anchor every toolbar menu to the viewport so it
+        // can escape that clipping layer.
         if (
           panel.classList.contains('fields-panel') ||
           panel.classList.contains('cheat-sheet') ||
@@ -41,8 +40,7 @@ export function createPopovers(scope: EventScope) {
           panel.classList.contains('saved-searches') ||
           panel.classList.contains('actions-menu') ||
           panel.classList.contains('session-menu') ||
-          panel.classList.contains('scope-menu') ||
-          panel.classList.contains('doctor-panel')
+          panel.classList.contains('scope-menu')
         ) {
           const trigger = button.getBoundingClientRect();
           const margin = 8;

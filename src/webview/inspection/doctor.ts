@@ -44,8 +44,10 @@ export const DOCTOR_ACTION_TITLES = {
 };
 
 /**
- * The log doctor chip in the Logs toolbar and its list of findings, so what
- * log doctor reports in the Problems panel is also visible next to the logs.
+ * The Issues tab and its list of findings, so what log doctor reports in the
+ * Problems panel is also visible next to the logs.
+ *
+ * @param hostActionTaken Runs after a finding in the tab asks the host to act, such as showing its events.
  */
 export function createDoctor(
   button: HTMLButtonElement,
@@ -54,7 +56,7 @@ export function createDoctor(
   list: HTMLElement,
   api: WebviewApi,
   scope: EventScope,
-  closePanel: () => void,
+  hostActionTaken: (action: DoctorAction) => void,
   showExample: (id: number) => void = () => undefined,
   showTrace: (traceId: string) => void = () => undefined,
 ) {
@@ -78,7 +80,11 @@ export function createDoctor(
     count.hidden = !total;
     count.textContent = total.toLocaleString();
     const warnings = findings.filter((finding) => finding.severity === 'warning').length;
-    button.className = !total ? 'doctor-chip is-clear' : warnings ? 'doctor-chip has-warnings' : 'doctor-chip';
+    // Classes, not className: the tab keeps its own classes.
+    if (total) button.classList.remove('is-clear');
+    else button.classList.add('is-clear');
+    if (warnings) button.classList.add('has-warnings');
+    else button.classList.remove('has-warnings');
     button.title = total
       ? `Log doctor found ${total.toLocaleString()} problem${total === 1 ? '' : 's'} with log statements${warnings ? `, ${warnings.toLocaleString()} of them warnings` : ''}. Click to review.`
       : 'Log doctor checks what your logs actually contain: secrets and personal data in any source; on matched log statements, failures logged below warning, errors without the exception or a request id, and noisy or oversized statements; and OpenTelemetry spans and metrics against the semantic conventions. Nothing found so far.';
@@ -174,12 +180,10 @@ export function createDoctor(
     const action = target?.dataset.doctorAction as PanelAction | undefined;
     if (!target || !action) return false;
     if (action === 'example') {
-      if (panel.contains(target)) closePanel();
       showExample(Number(target.dataset.eventId));
       return true;
     }
     if (action === 'trace') {
-      if (panel.contains(target)) closePanel();
       showTrace(target.dataset.traceId!);
       return true;
     }
@@ -188,7 +192,7 @@ export function createDoctor(
       action,
       ...(target.dataset.siteId ? { siteId: target.dataset.siteId } : {}),
     });
-    if (panel.contains(target)) closePanel();
+    if (panel.contains(target)) hostActionTaken(action);
     return true;
   }
   scope.listen(panel, 'click', handleAction);

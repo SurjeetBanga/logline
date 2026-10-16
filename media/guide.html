@@ -68,9 +68,9 @@
                 ><span class="visual-command">npm test</span><span class="visual-cursor"></span>
               </div>
               <h3>Capture your terminal</h3>
-              <p class="where">Logs toolbar → <strong>Terminal capture: On</strong></p>
+              <p class="where">Logs status bar → <strong>Capture off</strong></p>
               <p>Run commands normally in a supported VS Code terminal, then search the new output in Logs.</p>
-              <code>Terminal capture: On</code>
+              <code>Capture on</code>
             </article>
             <article class="card">
               <div class="card-visual visual-terminal" aria-hidden="true">
@@ -88,7 +88,7 @@
                 ><span class="visual-row"><b>worker</b><em>saved</em></span>
               </div>
               <h3>Manage saved servers</h3>
-              <p class="where">Logs toolbar → <strong>Manage servers</strong></p>
+              <p class="where">Logs → More actions → <strong>Manage servers…</strong></p>
               <p>Save a label, command, working directory, environment, and optional auto-start or JSON-only mode.</p>
               <code>jsonOnly: true</code>
             </article>
@@ -148,11 +148,11 @@
                 ><span class="visual-token">Logs</span>
               </div>
               <h3>Receive OpenTelemetry</h3>
-              <p class="where">Logs toolbar → More actions → <strong>Start OpenTelemetry receiver</strong></p>
+              <p class="where">Logs → More actions → <strong>Start OpenTelemetry receiver</strong></p>
               <p>
                 Instrumented apps send logs, traces, and metrics to a receiver on this machine. Servers, tasks, debug
-                sessions, and new terminals are pointed at it automatically. <strong>Metrics</strong> in the toolbar
-                shows each series' latest value and trend.
+                sessions, and new terminals are pointed at it automatically. The <strong>Metrics</strong> tab shows each
+                series' latest value and trend.
               </p>
               <code>http://127.0.0.1:4318</code>
             </article>
@@ -172,7 +172,7 @@
                 ><span class="visual-chip">last:15m</span>
               </div>
               <h3>Build a query</h3>
-              <p class="where">Logs toolbar → <strong>Search</strong> → press Enter</p>
+              <p class="where">Logs → <strong>Add a filter</strong> → press Enter</p>
               <p>
                 Combine free text, phrases, negation, OR, aliases, wildcards, numeric ranges, regex, and time windows.
                 Applied terms become removable chips you can edit inline.
@@ -185,7 +185,7 @@
                 ><span class="visual-level muted">+ 5</span>
               </div>
               <h3>Filter by level</h3>
-              <p class="where">Logs toolbar → <strong>All levels</strong></p>
+              <p class="where">Logs filter row → <strong>All levels</strong></p>
               <p>
                 Choose any combination of Trace, Debug, Info, Warn, Error, Fatal, and Unclassified. The filter works
                 alongside the query.
@@ -210,7 +210,7 @@
                 ><span class="visual-delete">×</span>
               </div>
               <h3>Reuse a search</h3>
-              <p class="where">Logs toolbar → <strong>Saved searches</strong></p>
+              <p class="where">Search box → <strong>Saved searches</strong> icon</p>
               <p>
                 Save the current query, server, and level selection. Reopen it from the saved-search list or delete it
                 when it is no longer needed.
@@ -223,7 +223,7 @@
                 ><span class="visual-chip">changed:true</span>
               </div>
               <h3>Focus on your changes</h3>
-              <p class="where">Logs toolbar → <strong>My changes</strong></p>
+              <p class="where">Logs filter row → <strong>My changes</strong></p>
               <p>
                 In a git repository, show only logs from code you changed since the last commit: the statement that
                 logged them, the location they report, or a frame in their stack trace. Combine it with any search.
@@ -246,7 +246,7 @@
                 ><span class="visual-live-dot"></span>
               </div>
               <h3>Live and Browse</h3>
-              <p class="where">Logs footer → <strong>Live</strong> / <strong>Browse</strong></p>
+              <p class="where">Logs filter row → <strong>Live</strong> / <strong>Browse</strong></p>
               <p>
                 Live keeps the newest rows on top. Scroll down to read and it switches to Browse so rows hold still;
                 scroll back to the top to resume. Browse also pages through retained history and sorts it.
@@ -287,7 +287,7 @@
               </div>
               <h3>Follow a trace</h3>
               <p class="where">
-                Logs toolbar → <strong>Traces</strong> · Row → trace button · Expanded event → <strong>Trace</strong>
+                <strong>Traces</strong> tab · Row → trace button · Expanded event → <strong>Trace</strong>
               </p>
               <p>
                 Browse recent requests, then see every span across services as a waterfall, with errors, the critical
@@ -328,7 +328,10 @@
                 <span class="visual-shield">!</span><span class="visual-redacted">eyJh…[jwt]</span>
               </div>
               <h3>Fix risky log statements</h3>
-              <p class="where">Problems panel · Command Palette → <strong>Logline: Show Log Health</strong></p>
+              <p class="where">
+                <strong>Issues</strong> tab · Problems panel · Command Palette →
+                <strong>Logline: Show Log Health</strong>
+              </p>
               <p>
                 Log doctor flags statements that logged secrets or personal data, dropped a caught exception, or flood
                 the logs, with masked evidence and quick fixes. It also checks OpenTelemetry spans and metrics against
@@ -351,7 +354,7 @@
                 <span>method</span><span>path</span><span>status</span><b>GET</b><b>/api</b><b>200</b>
               </div>
               <h3>Choose columns</h3>
-              <p class="where">Logs toolbar → <strong>Columns</strong></p>
+              <p class="where">Logs filter row → <strong>Columns</strong> icon</p>
               <p>Show detected or custom payload fields. Drag headers to reorder and drag dividers to resize.</p>
               <code>method · path · status</code>
             </article>
@@ -370,7 +373,7 @@
                 <i></i><i></i><i></i><i></i><span class="visual-trend">trend</span>
               </div>
               <h3>Analyze the filter</h3>
-              <p class="where">Logs toolbar → <strong>Analyze</strong></p>
+              <p class="where"><strong>Analyze</strong> tab</p>
               <p>
                 See error rate and p95 latency at a glance, volume over time, status codes, top values, patterns, and
                 error groups. Click any of them to filter the logs to it.
@@ -393,7 +396,9 @@
                 ><span class="visual-file">AI</span>
               </div>
               <h3>Export or copy</h3>
-              <p class="where">Logs toolbar → <strong>Export</strong> or <strong>Copy results</strong></p>
+              <p class="where">
+                Logs → More actions → <strong>Export logs…</strong> or <strong>Copy filtered results</strong>
+              </p>
               <p>Save JSON Lines, JSON, CSV, or AI context Markdown using the current source, run, and filters.</p>
               <code>AI context (Markdown)</code>
             </article>
@@ -403,7 +408,7 @@
               </div>
               <h3>Share with agent</h3>
               <p class="where">
-                Logs toolbar → <strong>Share with agent</strong> · More actions →
+                Logs → <strong>Share with agent</strong> · More actions →
                 <strong>Connect Claude Code or Codex…</strong>
               </p>
               <p>
@@ -427,7 +432,7 @@
                 ><span class="visual-token">Imported</span>
               </div>
               <h3>Import offline logs</h3>
-              <p class="where">Logs toolbar → <strong>Import</strong></p>
+              <p class="where">Logs → More actions → <strong>Import logs…</strong></p>
               <p>Load JSON, JSONL, CSV, or plain text into a separate Imported source for searching and analysis.</p>
               <code>Imported</code>
             </article>

@@ -6,7 +6,7 @@ import type { WebviewApi } from '../types';
 import { formatDuration } from './trace';
 
 /**
- * The Traces dialog: recent requests across services, from OpenTelemetry
+ * The Traces tab: recent requests across services, from OpenTelemetry
  * spans and from logs that carry a trace id. Choosing one opens its waterfall.
  */
 export function createTraceList(
@@ -18,6 +18,9 @@ export function createTraceList(
     formatTime(ms: number): string;
     startReceiver(): void;
     receiver(): { running: boolean; endpoint?: string };
+    /** Shows the list in place of the table. */
+    reveal(): void;
+    visible(): boolean;
   },
 ) {
   let traces: TraceSummary[] = [];
@@ -25,21 +28,15 @@ export function createTraceList(
   function show() {
     elements.tracesStatus.textContent = 'Loading…';
     elements.tracesRows.replaceChildren();
-    if (!elements.tracesDialog.open) elements.tracesDialog.showModal();
+    actions.reveal();
     api.postMessage({ type: 'traces' });
   }
 
-  scope.listen(elements.traces, 'click', show);
-  scope.listen(elements.tracesClose, 'click', () => elements.tracesDialog.close());
   scope.listen(elements.tracesErrorsOnly, 'change', render);
-  scope.listen(elements.tracesStartReceiver, 'click', () => {
-    actions.startReceiver();
-    elements.tracesDialog.close();
-  });
+  scope.listen(elements.tracesStartReceiver, 'click', () => actions.startReceiver());
   scope.listen(elements.tracesRows, 'click', (event) => {
     const row = (event.target as HTMLElement).closest<HTMLElement>('[data-trace-id]');
     if (!row?.dataset.traceId) return;
-    elements.tracesDialog.close();
     actions.showTrace(row.dataset.traceId);
   });
   scope.listen(elements.tracesRows, 'keydown', (event) => {
@@ -48,18 +45,17 @@ export function createTraceList(
     const row = (event.target as HTMLElement).closest<HTMLElement>('[data-trace-id]');
     if (!row?.dataset.traceId) return;
     event.preventDefault();
-    elements.tracesDialog.close();
     actions.showTrace(row.dataset.traceId);
   });
 
-  // The receiver can start or stop while the list is open.
+  // The receiver can start or stop while the list is shown.
   function receiverChanged() {
-    if (elements.tracesDialog.open) render();
+    if (actions.visible()) render();
   }
 
   function receive(list: TraceSummary[]) {
     traces = list;
-    if (elements.tracesDialog.open) render();
+    if (actions.visible()) render();
   }
 
   function render() {

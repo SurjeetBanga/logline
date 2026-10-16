@@ -2,6 +2,22 @@
 
 All notable changes to Logline are documented in this file.
 
+## Unreleased
+
+### Behavior changes
+
+The Logs panel is reorganized around tabs, so every view gets more room and new views no longer add toolbar buttons. Nothing was removed; some controls moved:
+
+- **Analyze**, **Traces**, **Metrics**, and **Issues** (formerly **Log issues**) are tabs next to **Logs** instead of toolbar buttons and dialogs. Each view shows in place of the table, with its count on the tab, and the panel reopens on the tab it was left on. Choosing a bar in Analyze, **Filter logs by trace**, or **Show events** on an issue returns to **Logs** with the filter applied. Arrow keys move between tabs.
+- **Terminal capture** is in the status bar at the bottom of the panel, as **Capture off** or **Capture on**, next to the OpenTelemetry receiver, sharing, the running command, and retention.
+- **Clear logs** and **Copy filtered results** (formerly **Copy results**) are under **More actions**, with Export, Import, and the other occasional actions.
+- **Saved searches** is an icon inside the search box, **Columns** an icon at the end of the filter row, and Run and Stop are icons beside the source picker.
+- Paging, the mode, and the retention counts share one status bar line; hover the counts for every figure.
+
+### Changes
+
+- The toolbar is two rows instead of four, so a docked panel shows more logs. On narrow panels, tabs and filters show their icons and counts, and rows wrap instead of hiding controls off the edge.
+
 ## 1.14.1 — 2026-10-10
 
 ### Performance
