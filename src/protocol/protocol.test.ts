@@ -12,9 +12,18 @@ test('message boundary rejects invalid actions and source coordinates', () => {
     { type: 'context', id: '1' },
     { type: 'copy', id: NaN },
     { type: 'exportContext', ids: '1,2' },
+    { type: 'aiCall', traceId: 'abc' },
+    { type: 'aiCall', traceId: 'abc', spanId: '../x' },
+    { type: 'copyAiCall', traceId: 1, spanId: 'b' },
   ]) {
     assert.equal(parseViewRequest(value), undefined);
   }
+  assert.deepEqual(parseViewRequest({ type: 'aiCall', traceId: 'abc', spanId: 'def', extra: 1 }), {
+    type: 'aiCall',
+    traceId: 'abc',
+    spanId: 'def',
+  });
+  assert.deepEqual(parseViewRequest({ type: 'aiCalls', limit: 5 }), { type: 'aiCalls' });
   assert.deepEqual(parseViewRequest({ type: 'doctorAction', action: 'fix', siteId: 'a.ts\u00001', extra: 1 }), {
     type: 'doctorAction',
     action: 'fix',

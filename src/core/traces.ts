@@ -1,4 +1,5 @@
-import { spanDurationMs, SPAN_KINDS, type AttrValue, type Span } from './otlp';
+import { genAiOperation, readGenAiCall } from './gen-ai';
+import { isGenAiContentKey, spanDurationMs, SPAN_KINDS, type AttrValue, type Span } from './otlp';
 import { getField } from './query';
 import type { LogEvent } from './types';
 
@@ -13,10 +14,11 @@ function spanBytes(span: Span): number {
 export class SpanStore {
   // Span ids per trace make duplicate checks constant time in traces with many spans.
   private readonly traces = new Map<string, { spans: Span[]; ids: Set<string> }>();
-  private queue: ({ span: Span; bytes: number } | undefined)[] = [];
+  private queue: ({ span: Span; bytes: number; genAi: boolean } | undefined)[] = [];
   private head = 0;
   private count = 0;
   private bytes = 0;
+  private genAi = 0;
   /** Bumps whenever spans are added or removed, for change detection. */
   revision = 0;
 
@@ -27,6 +29,11 @@ export class SpanStore {
 
   get size(): number {
     return this.count;
+  }
+
+  /** Retained GenAI spans: model calls, tool executions, and agent runs. */
+  get genAiCount(): number {
+    return this.genAi;
   }
 
   add(span: Span): boolean {
@@ -41,9 +48,11 @@ export class SpanStore {
     }
     trace.spans.push(span);
     trace.ids.add(span.spanId);
-    this.queue.push({ span, bytes });
+    const genAi = genAiOperation(span) !== undefined;
+    this.queue.push({ span, bytes, genAi });
     this.count++;
     this.bytes += bytes;
+    if (genAi) this.genAi++;
     while (this.count > this.maxSpans || this.bytes > this.maxBytes) this.evict();
     this.revision++;
     return true;
@@ -68,6 +77,7 @@ export class SpanStore {
     this.head = 0;
     this.count = 0;
     this.bytes = 0;
+    this.genAi = 0;
     this.revision++;
   }
 
@@ -82,6 +92,7 @@ export class SpanStore {
     const { span } = entry;
     this.count--;
     this.bytes -= entry.bytes;
+    if (entry.genAi) this.genAi--;
     const trace = this.traces.get(span.traceId);
     if (!trace) return;
     // Spans leave in arrival order, so the evicted span is normally first.
@@ -110,6 +121,8 @@ export interface TraceRow {
   critical: boolean;
   attributes: Record<string, AttrValue>;
   events: { offsetMs: number; name: string }[];
+  /** For a GenAI span, what to show beside its name: the model or tool, and its tokens. */
+  genAi?: { label: string; inputTokens?: number; outputTokens?: number };
 }
 
 export interface TraceLogInput {
@@ -289,10 +302,16 @@ export function buildTrace(
         error: span.status.code === 2,
         statusMessage: span.status.message,
         critical: critical.has(span.spanId),
-        attributes: Object.fromEntries(Object.entries(span.attributes).slice(0, MAX_ROW_ATTRIBUTES)),
+        // Prompts and responses are read in the AI calls view, not in a span's tooltip.
+        attributes: Object.fromEntries(
+          Object.entries(span.attributes)
+            .filter(([key]) => !isGenAiContentKey(key))
+            .slice(0, MAX_ROW_ATTRIBUTES),
+        ),
         events: span.events
           .slice(0, 16)
           .map((event) => ({ offsetMs: event.timeMs - (startMs ?? event.timeMs), name: event.name })),
+        ...genAiChip(span),
       });
     for (const child of (children.get(span.spanId) ?? []).slice().reverse())
       stack.push({ span: child, depth: depth + 1 });
@@ -310,6 +329,20 @@ export function buildTrace(
       ...log,
       offsetMs: timeMs === undefined || startMs === undefined ? undefined : timeMs - startMs,
     })),
+  };
+}
+
+function genAiChip(span: Span): Pick<TraceRow, 'genAi'> {
+  const call = readGenAiCall(span);
+  if (!call) return {};
+  const label =
+    call.kind === 'tool' ? `tool · ${call.tool ?? call.name}` : (call.model ?? call.agent ?? call.operation);
+  return {
+    genAi: {
+      label,
+      ...(call.inputTokens !== undefined ? { inputTokens: call.inputTokens } : {}),
+      ...(call.outputTokens !== undefined ? { outputTokens: call.outputTokens } : {}),
+    },
   };
 }
 

@@ -1,5 +1,6 @@
 import type { ServerSummary, SessionRegistry } from '../capture/session-registry';
 import type { ExceptionBlock } from '../core/exceptions';
+import type { GenAiCallDetail, GenAiSummary } from '../core/gen-ai';
 import type { AnalysisResult } from '../core/log-analysis';
 import type { PageOptions, Stats, SuggestedValue } from '../core/log-store';
 import type { LogEvent } from '../core/types';
@@ -50,6 +51,8 @@ export type ViewRequest =
   | { type: 'trace'; traceId: string }
   | { type: 'traces' }
   | { type: 'metrics' }
+  | { type: 'aiCalls' }
+  | { type: 'aiCall' | 'copyAiCall'; traceId: string; spanId: string }
   | { type: 'toggleOtlp'; enabled: boolean }
   | { type: 'exportContext'; ids: number[] }
   | { type: 'shareWithAgent'; sourceIds?: string[]; sessionIds?: string[]; anchor?: number; chooseRuns?: boolean }
@@ -110,6 +113,8 @@ export interface Snapshot extends Stats {
   traceCount?: number;
   /** OpenTelemetry metric series retained, and a revision that changes with every new data point. */
   metrics?: { series: number; revision: number };
+  /** Retained GenAI spans (model calls, tool executions, agent runs), and a revision that changes with spans. */
+  aiCalls?: { calls: number; revision: number };
   /**
    * Log doctor findings, worst first, while log doctor is on. `findings` is
    * left out when the view already has this revision.
@@ -185,6 +190,8 @@ export type HostMessage =
   | { type: 'analysis'; analysis: AnalysisResult }
   | { type: 'trace'; trace: TraceView }
   | { type: 'traces'; traces: TraceSummary[] }
+  | { type: 'aiCalls'; aiCalls: GenAiSummary }
+  | { type: 'aiCall'; traceId: string; spanId: string; detail?: GenAiCallDetail }
   | { type: 'metrics'; metrics: MetricSeriesView[] };
 // Sharing status is also included in snapshots so the webview can render a
 // durable indicator after a notification-driven refresh.
@@ -284,6 +291,15 @@ export function parseViewRequest(value: unknown): ViewRequest | undefined {
     case 'trace': {
       const traceId = string('traceId');
       return traceId && /^[A-Za-z0-9_-]{1,128}$/.test(traceId) ? { type: msg.type, traceId } : undefined;
+    }
+    case 'aiCalls':
+      return { type: msg.type };
+    case 'aiCall':
+    case 'copyAiCall': {
+      const traceId = string('traceId'),
+        spanId = string('spanId');
+      const id = /^[A-Za-z0-9_-]{1,128}$/;
+      return traceId && spanId && id.test(traceId) && id.test(spanId) ? { type: msg.type, traceId, spanId } : undefined;
     }
     case 'toggleOtlp':
       return { type: msg.type, enabled: msg.enabled === true };

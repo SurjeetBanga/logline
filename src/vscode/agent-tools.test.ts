@@ -38,10 +38,11 @@ test('agent tools register all actions, format bounded results, and translate va
     analyze: () => ({ coverage: { matched: 1 } }),
     wait: async () => ({ events: [], matched: 0, newest: 1, partial: false, hasMore: false }),
     trace: (shareId: string, traceId: string) => ({ traceId, shareId, spans: [] }),
+    aiCalls: (input: { shareId: string }) => ({ shareId: input.shareId, calls: [] }),
   } as any;
   const disposables = registerAgentTools({} as any, access);
-  assert.equal(registrations.size, 6);
-  assert.equal(disposables.length, 6);
+  assert.equal(registrations.size, 7);
+  assert.equal(disposables.length, 7);
   const prepared = await registrations.get('logline_search_logs').prepareInvocation({ input: {} });
   assert.match(prepared.invocationMessage, /Reading shared/);
   const result = await registrations.get('logline_search_logs').invoke({ input: { shareId: 'share' } });
@@ -58,6 +59,8 @@ test('agent tools register all actions, format bounded results, and translate va
   assert.match(trace.content[0].value, /"traceId":"abc"/);
   const missing = await registrations.get('logline_get_trace').invoke({ input: { shareId: 'share' } });
   assert.match(missing.content[0].value, /INVALID_INPUT/);
+  const calls = await registrations.get('logline_get_ai_calls').invoke({ input: { shareId: 'share' } });
+  assert.match(calls.content[0].value, /"calls":\[\]/);
   for (const disposable of disposables) disposable.dispose();
   assert.equal(registrations.size, 0);
 });

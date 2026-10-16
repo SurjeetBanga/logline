@@ -127,6 +127,57 @@ test('agent traces include only spans and logs from shared sources, redacted', a
   assert.throws(() => access.trace(share.shareId!, TRACE), /No Logline logs are shared/);
 });
 
+test('agents read AI calls only from shared services, redacted and within the result budget', () => {
+  const { AgentLogAccess } = withVscode({}, () => require('./agent-access') as typeof import('./agent-access'));
+  const spans = new SpanStore();
+  // Secret-shaped values are built here so the repository holds no literal secret.
+  const apiKey = ['sk', 'live', 'q'.repeat(24)].join('_');
+  const chat = (service: string, spanId: string, startMs: number, prompt: string) =>
+    spans.add({
+      traceId: TRACE,
+      spanId,
+      name: 'chat gpt-4o',
+      kind: 3,
+      startMs,
+      endMs: startMs + 100,
+      service,
+      events: [],
+      status: { code: 0 },
+      attributes: {
+        'gen_ai.operation.name': 'chat',
+        'gen_ai.request.model': 'gpt-4o',
+        'gen_ai.usage.input_tokens': 10,
+        'gen_ai.input.messages': [{ role: 'user', parts: [{ type: 'text', content: prompt }] }],
+      },
+    });
+  chat('agent', '1111111111111111', 0, `Call the API with key ${apiKey}`);
+  chat('private', '2222222222222222', 1, 'not shared');
+  const store = new LogStore();
+  store.add({ ...parseLogLine('{"msg":"agent started"}', 'otlp', 1, new Date()), serverId: 'otel:agent' });
+  const access = new AgentLogAccess(store, new SessionRegistry(), () => 2, {}, spans);
+  const share = access.share(['otel:agent']);
+  const result = access.aiCalls({ shareId: share.shareId!, includeContent: true }) as any;
+  assert.equal(result.total, 1, 'the unshared service is left out');
+  assert.equal(result.calls[0].model, 'gpt-4o');
+  assert.match(result.calls[0].messages[0].parts[0].text, /^Call the API with key /);
+  assert.doesNotMatch(JSON.stringify(result), new RegExp(apiKey));
+  assert.equal((access.aiCalls({ shareId: share.shareId! }) as any).calls[0].messages, undefined);
+  assert.throws(() => access.aiCalls({ shareId: share.shareId!, limit: 0 }), /limit/);
+  assert.throws(() => access.aiCalls({ shareId: share.shareId!, traceId: '../x' }), /traceId/);
+  assert.equal((access.aiCalls({ shareId: share.shareId!, model: 'other' }) as any).calls.length, 0);
+
+  // Long conversations: parts are cut, and the oldest calls lose their content before the result outgrows the budget.
+  for (let i = 0; i < 40; i++) chat('agent', `3${String(i).padStart(15, '0')}`, 100 + i, 'w'.repeat(9000));
+  const big = access.aiCalls({ shareId: share.shareId!, includeContent: true, limit: 200 }) as any;
+  assert.ok(Buffer.byteLength(JSON.stringify(big), 'utf8') <= 56 * 1024);
+  assert.equal(big.calls.length, 41, 'every call is still listed');
+  assert.ok(big.coverage.contentCalls > 0 && big.coverage.contentCalls <= 20);
+  assert.equal(big.calls[0].messages[0].parts[0].text.length, 2048);
+  assert.equal(big.calls[0].messages[0].parts[0].truncated, true);
+  access.revoke();
+  assert.throws(() => access.aiCalls({ shareId: share.shareId! }), /No Logline logs are shared/);
+});
+
 test('the controller runs the receiver from settings and points new processes at it', async (t) => {
   const settings: Record<string, unknown> = { 'otlp.enabled': true, 'otlp.port': 0 };
   let changeListener: ((event: { affectsConfiguration(name: string): boolean }) => void) | undefined;

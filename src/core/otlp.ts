@@ -42,6 +42,37 @@ const MAX_STRING = 4096;
 const MAX_ARRAY = 64;
 const MAX_DEPTH = 6;
 const MAX_EVENTS = 128;
+
+/** How much of one attribute value is kept: string length, array items, and nesting depth. */
+interface ValueLimits {
+  string: number;
+  array: number;
+  depth: number;
+}
+const VALUE_LIMITS: ValueLimits = { string: MAX_STRING, array: MAX_ARRAY, depth: MAX_DEPTH };
+// Prompts, responses, and tool payloads are what the AI calls view shows, so
+// they keep far more than other attributes. The span store's byte budget
+// still bounds what is retained in total.
+const CONTENT_LIMITS: ValueLimits = { string: 64 * 1024, array: 256, depth: 12 };
+const GEN_AI_CONTENT_KEYS = new Set([
+  'gen_ai.system_instructions',
+  'gen_ai.input.messages',
+  'gen_ai.output.messages',
+  'gen_ai.tool.definitions',
+  'gen_ai.tool.call.arguments',
+  'gen_ai.tool.call.result',
+  // Older conventions and instrumentations.
+  'gen_ai.prompt',
+  'gen_ai.completion',
+  'gen_ai.event.content',
+]);
+// OpenLLMetry flattens messages into `gen_ai.prompt.0.content`, `gen_ai.completion.1.tool_calls.0.arguments`, ….
+const FLAT_CONTENT_KEY = /^gen_ai\.(?:prompt|completion)\.\d+\./;
+
+/** An attribute that carries GenAI message or tool content rather than metadata. */
+export function isGenAiContentKey(key: string): boolean {
+  return key.startsWith('gen_ai.') && (GEN_AI_CONTENT_KEYS.has(key) || FLAT_CONTENT_KEY.test(key));
+}
 export const SPAN_KINDS = ['unspecified', 'internal', 'server', 'client', 'producer', 'consumer'];
 const SEVERITY_LEVELS = ['trace', 'debug', 'info', 'warn', 'error', 'fatal'];
 
@@ -53,10 +84,10 @@ const text = (value: unknown, max = MAX_STRING): string | undefined =>
   typeof value === 'string' ? value.slice(0, max) : undefined;
 
 /** Decode one OTLP AnyValue into plain JSON, bounded in size and depth. */
-export function anyValue(value: unknown, depth = 0): AttrValue {
+export function anyValue(value: unknown, depth = 0, limits: ValueLimits = VALUE_LIMITS): AttrValue {
   const v = object(value);
   if (!v) return null;
-  if (typeof v.stringValue === 'string') return v.stringValue.slice(0, MAX_STRING);
+  if (typeof v.stringValue === 'string') return v.stringValue.slice(0, limits.string);
   if (typeof v.boolValue === 'boolean') return v.boolValue;
   if (v.intValue !== undefined) {
     const number = Number(v.intValue);
@@ -65,25 +96,29 @@ export function anyValue(value: unknown, depth = 0): AttrValue {
   if (typeof v.doubleValue === 'number') return v.doubleValue;
   if (typeof v.doubleValue === 'string' && Number.isFinite(Number(v.doubleValue))) return Number(v.doubleValue);
   if (typeof v.bytesValue === 'string') return v.bytesValue.slice(0, MAX_STRING);
-  if (depth >= MAX_DEPTH) return '[nested value]';
+  if (depth >= limits.depth) return '[nested value]';
   const array = object(v.arrayValue);
   if (array)
     return list(array.values)
-      .slice(0, MAX_ARRAY)
-      .map((item) => anyValue(item, depth + 1));
+      .slice(0, limits.array)
+      .map((item) => anyValue(item, depth + 1, limits));
   const kvlist = object(v.kvlistValue);
-  if (kvlist) return attributes(kvlist.values, depth + 1);
+  if (kvlist) return attributes(kvlist.values, depth + 1, limits);
   return null;
 }
 
-export function attributes(values: unknown, depth = 0): Attributes {
+/**
+ * Decode OTLP key-value pairs. Top-level GenAI content attributes keep more
+ * than others; nested values keep the limits of the attribute they belong to.
+ */
+export function attributes(values: unknown, depth = 0, limits?: ValueLimits): Attributes {
   const result: Attributes = Object.create(null);
   let count = 0;
   for (const entry of list(values)) {
     const kv = object(entry);
     const key = text(kv?.key, 256);
     if (!kv || !key || count >= MAX_ATTRIBUTES) continue;
-    result[key] = anyValue(kv.value, depth);
+    result[key] = anyValue(kv.value, depth, limits ?? (isGenAiContentKey(key) ? CONTENT_LIMITS : VALUE_LIMITS));
     count++;
   }
   return result;
@@ -267,7 +302,13 @@ export function spanLine(span: Span): string {
   };
   if (span.parentSpanId) line.parentSpanId = span.parentSpanId;
   if (span.status.message) line.statusMessage = span.status.message;
-  assign(line, span.attributes);
+  // Prompts and responses stay in the AI calls view rather than in table rows.
+  assign(
+    line,
+    Object.keys(span.attributes).some(isGenAiContentKey)
+      ? (Object.fromEntries(Object.entries(span.attributes).filter(([key]) => !isGenAiContentKey(key))) as Attributes)
+      : span.attributes,
+  );
   // Instrumentation records exceptions as span events; their stack traces
   // feed Logline's exception view and error grouping.
   const exception = span.events.find((event) => event.name === 'exception');
