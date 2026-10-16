@@ -83,27 +83,6 @@
             ><span class="button-label">Traces</span><span id="traceCount" class="count-badge" hidden></span>
           </button>
           <button
-            id="metrics"
-            class="view-tab"
-            type="button"
-            role="tab"
-            aria-selected="false"
-            aria-controls="metricsView"
-            tabindex="-1"
-            hidden
-          >
-            <svg class="tb-icon" aria-hidden="true" viewBox="0 0 16 16" width="14" height="14">
-              <path
-                d="M1.5 11.5 5 7l3 3 5.5-6.5"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="1.6"
-                stroke-linecap="round"
-                stroke-linejoin="round"
-              /></svg
-            ><span class="button-label">Metrics</span><span id="metricCount" class="count-badge"></span>
-          </button>
-          <button
             id="aiCalls"
             class="view-tab"
             type="button"
@@ -128,6 +107,27 @@
               <path d="M2.5 3.5h11v7h-6l-3 2.5v-2.5h-2z" />
               <path d="M5.5 7h.01M8 7h.01M10.5 7h.01" stroke-width="1.8" /></svg
             ><span class="button-label">AI calls</span><span id="aiCallCount" class="count-badge"></span>
+          </button>
+          <button
+            id="metrics"
+            class="view-tab"
+            type="button"
+            role="tab"
+            aria-selected="false"
+            aria-controls="metricsView"
+            tabindex="-1"
+            hidden
+          >
+            <svg class="tb-icon" aria-hidden="true" viewBox="0 0 16 16" width="14" height="14">
+              <path
+                d="M1.5 11.5 5 7l3 3 5.5-6.5"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.6"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              /></svg
+            ><span class="button-label">Metrics</span><span id="metricCount" class="count-badge"></span>
           </button>
           <button
             id="doctor"
@@ -177,11 +177,19 @@
                 hidden
               >
                 <div class="scope-tabs" role="tablist" aria-label="Filter by">
-                  <button id="sourcesTab" type="button" role="tab" aria-selected="true" aria-controls="sourceMenu">
+                  <button
+                    id="sourcesTab"
+                    class="scope-tab"
+                    type="button"
+                    role="tab"
+                    aria-selected="true"
+                    aria-controls="sourceMenu"
+                  >
                     Sources
                   </button>
                   <button
                     id="runsTab"
+                    class="scope-tab"
                     type="button"
                     role="tab"
                     aria-selected="false"
@@ -725,7 +733,7 @@
       <section id="aiCallsView" class="view-panel" role="tabpanel" aria-labelledby="aiCalls" hidden>
         <div class="view-header">
           <p id="aiCallsStatus" class="view-status" role="status">Loading…</p>
-          <span class="view-header-actions"
+          <span id="aiCallsControls" class="view-header-actions"
             ><select id="aiCallsKind" aria-label="Show">
               <option value="">All calls</option>
               <option value="model">Model calls</option>
@@ -735,7 +743,7 @@
             ><input
               id="aiCallsFilter"
               type="search"
-              placeholder="Filter by model, tool, agent, or service"
+              placeholder="Filter by model, tool, or agent"
               aria-label="Filter AI calls"
           /></span>
         </div>
@@ -754,7 +762,7 @@
             </thead>
             <tbody id="aiModelRows"></tbody>
           </table>
-          <table class="trace-table ai-calls-table" aria-label="AI calls">
+          <table id="aiCallsTable" class="trace-table ai-calls-table" aria-label="AI calls">
             <thead>
               <tr>
                 <th>Started</th>
@@ -778,10 +786,47 @@
           >
           <span class="view-header-actions"
             ><span id="aiCallNavigation" class="ai-navigation" hidden
-              ><button id="aiCallPrevious" type="button" title="The previous call in this conversation">
-                ◀ Previous</button
+              ><button
+                id="aiCallPrevious"
+                class="icon-button"
+                type="button"
+                title="The previous call in this conversation"
+                aria-label="Previous call"
+              >
+                <svg
+                  aria-hidden="true"
+                  viewBox="0 0 16 16"
+                  width="14"
+                  height="14"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.4"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                >
+                  <path d="M10 3.5L5.5 8l4.5 4.5" />
+                </svg></button
               ><span id="aiCallPosition"></span
-              ><button id="aiCallNext" type="button" title="The next call in this conversation">Next ▶</button></span
+              ><button
+                id="aiCallNext"
+                class="icon-button"
+                type="button"
+                title="The next call in this conversation"
+                aria-label="Next call"
+              >
+                <svg
+                  aria-hidden="true"
+                  viewBox="0 0 16 16"
+                  width="14"
+                  height="14"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.4"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                >
+                  <path d="M6 3.5l4.5 4.5L6 12.5" />
+                </svg></button></span
             ><button id="aiCallTrace" type="button" title="Open the trace this call belongs to">Trace</button
             ><button
               id="aiCallCopy"

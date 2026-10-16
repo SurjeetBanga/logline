@@ -9,7 +9,7 @@ import {
   summarizeGenAi,
   PART_LIMIT,
 } from './gen-ai';
-import { readSpans, spanLine, type Attributes, type Span } from './otlp';
+import { readLogs, readSpans, spanLine, type Attributes, type Span } from './otlp';
 import { buildTrace, SpanStore } from './traces';
 
 const TRACE = 'a'.repeat(32);
@@ -142,9 +142,56 @@ test('long prompts survive ingest while other attributes are still cut, and stay
   const shown = genAiMessages(chat)[0].parts[0];
   assert.equal(shown.text!.length, PART_LIMIT, 'display cuts a part');
   assert.equal(shown.truncated, true);
+  // Text is prepared before it is cut, so a secret across the cut is still recognized.
+  const secret = 'ghp_' + 'a'.repeat(36);
+  const crossing = otlp({
+    'gen_ai.operation.name': 'chat',
+    'gen_ai.input.messages': [{ role: 'user', parts: [{ type: 'text', content: 'x'.repeat(90) + secret }] }],
+  });
+  const redacted = genAiMessages(crossing, { text: (text) => text.replaceAll(secret, '[REDACTED]'), limit: 100 });
+  assert.equal(redacted[0].parts[0].text, 'x'.repeat(90) + '[REDACTED]');
   const line = JSON.parse(spanLine(chat));
   assert.equal(line['gen_ai.input.messages'], undefined, 'the table row leaves prompts to the AI calls view');
   assert.equal(line['gen_ai.operation.name'], 'chat');
+});
+
+test('message events keep long content, and log records keep the usual limit', () => {
+  const prompt = 'x'.repeat(20_000);
+  const [evented] = readSpans({
+    resourceSpans: [
+      {
+        scopeSpans: [
+          {
+            spans: [
+              {
+                traceId: TRACE,
+                spanId: '1'.repeat(16),
+                name: 'chat gpt-4o',
+                startTimeUnixNano: '1000000000',
+                attributes: [{ key: 'gen_ai.request.model', value: { stringValue: 'gpt-4o' } }],
+                events: [
+                  { name: 'gen_ai.user.message', attributes: [{ key: 'content', value: { stringValue: prompt } }] },
+                  { name: 'retry', attributes: [{ key: 'content', value: { stringValue: prompt } }] },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+    ],
+  });
+  assert.equal((evented.events[0].attributes.content as string).length, 20_000);
+  assert.equal((evented.events[1].attributes.content as string).length, 4096, 'other events keep the usual limit');
+  const [log] = readLogs({
+    resourceLogs: [
+      {
+        scopeLogs: [
+          { logRecords: [{ attributes: [{ key: 'gen_ai.input.messages', value: { stringValue: prompt } }] }] },
+        ],
+      },
+    ],
+  });
+  assert.equal((log.attributes['gen_ai.input.messages'] as string).length, 4096);
 });
 
 test('older conventions and flattened messages still read as calls and conversations', () => {
@@ -208,12 +255,13 @@ test('older conventions and flattened messages still read as calls and conversat
     'gen_ai.operation.name': 'chat',
     'gen_ai.input.messages': JSON.stringify([
       { role: 'user', content: 'List files' },
+      { role: 'user', content: [{ type: 'text', text: 'in src' }] },
       { role: 'tool', tool_call_id: 't1', content: '["a.ts"]' },
     ]),
   });
   assert.deepEqual(
     genAiMessages(chatShape).map((message) => message.parts.map((part) => [part.kind, part.id ?? part.text])),
-    [[['text', 'List files']], [['tool_result', 't1']]],
+    [[['text', 'List files']], [['text', 'in src']], [['tool_result', 't1']]],
   );
   assert.equal(readGenAiCall(span('5'.repeat(16), 'GET /health', { 'http.route': '/health' })), undefined);
 });
@@ -338,7 +386,9 @@ test('a call shows the result of the tools it asked for and where it sits in its
     { 'gen_ai.operation.name': 'chat', 'gen_ai.conversation.id': 'c' },
     { traceId: 'c'.repeat(32), startMs: 9000 },
   );
-  const joined = genAiCallDetail([later], later.spanId, [other, later])!;
+  const joined = genAiCallDetail([later], later.spanId, {
+    conversationCalls: [other, later].map((item) => readGenAiCall(item)!),
+  })!;
   assert.deepEqual([joined.conversation.length, joined.position], [2, 1]);
 
   const markdown = genAiMarkdown(detail);
@@ -359,19 +409,28 @@ test('the span store counts GenAI spans as they arrive and leave, and the waterf
   const spans = agentRun();
   for (const item of spans.slice(0, 3)) store.add(item);
   assert.equal(store.genAiCount, 3);
-  store.add(span('ff'.padEnd(16, '0'), 'GET /', { 'http.route': '/' }));
+  const revision = store.genAiRevision;
+  store.add(span('fe'.padEnd(16, '0'), 'GET /', { 'http.route': '/' }));
   assert.equal(store.genAiCount, 2, 'an evicted GenAI span is no longer counted');
+  assert.equal(store.genAiRevision, revision + 1, 'evicting a GenAI span changes the GenAI revision');
+  store.add(span('ff'.padEnd(16, '0'), 'GET /', { 'http.route': '/' }));
+  store.add(span('fd'.padEnd(16, '0'), 'GET /', { 'http.route': '/' }));
+  store.add(span('fc'.padEnd(16, '0'), 'GET /', { 'http.route': '/' }));
+  const settled = store.genAiRevision;
+  store.add(span('fb'.padEnd(16, '0'), 'GET /', { 'http.route': '/' }));
+  assert.equal(store.genAiRevision, settled, 'other spans leave it alone');
   store.clear();
   assert.equal(store.genAiCount, 0);
   const rows = buildTrace(TRACE, spans).spans;
   assert.deepEqual(
     rows.map((row) => row.genAi),
     [
-      { label: 'planner' },
-      { label: 'claude-sonnet-5-5', inputTokens: 1000, outputTokens: 100 },
-      { label: 'tool · get_weather' },
-      { label: 'claude-sonnet-5-5', inputTokens: 1600, outputTokens: 200 },
-      { label: 'gpt-4o-mini' },
+      // An agent run totals the model calls beneath it.
+      { kind: 'agent', label: 'planner', modelCalls: { calls: 2, inputTokens: 2600, outputTokens: 300 } },
+      { kind: 'model', label: 'claude-sonnet-5-5', inputTokens: 1000, outputTokens: 100 },
+      { kind: 'tool', label: 'tool · get_weather' },
+      { kind: 'model', label: 'claude-sonnet-5-5', inputTokens: 1600, outputTokens: 200 },
+      { kind: 'model', label: 'gpt-4o-mini' },
     ],
   );
 });

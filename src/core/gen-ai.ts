@@ -240,10 +240,6 @@ function structured(value: AttrValue | undefined): unknown {
   return value;
 }
 
-function clip(text: string): { text: string; truncated?: boolean } {
-  return text.length > PART_LIMIT ? { text: text.slice(0, PART_LIMIT), truncated: true } : { text };
-}
-
 function asText(value: unknown): string {
   if (typeof value === 'string') return value;
   if (value === undefined || value === null) return '';
@@ -251,15 +247,38 @@ function asText(value: unknown): string {
 }
 
 function textPart(kind: GenAiPartKind, value: unknown): GenAiPart {
-  const { text, truncated } = clip(asText(value));
-  return { kind, text, ...(truncated ? { truncated } : {}) };
+  return { kind, text: asText(value) };
 }
 
 function valuePart(part: Omit<GenAiPart, 'value'>, value: unknown): GenAiPart {
   // Arguments often arrive as JSON text; show them pretty-printed like structured ones.
   const shown = typeof value === 'string' ? (parseJson(value, (parsed) => parsed) ?? value) : value;
-  const { text, truncated } = clip(asText(shown));
-  return { ...part, value: text, ...(truncated ? { truncated } : {}) };
+  return { ...part, value: asText(shown) };
+}
+
+/** How message text is prepared for display or sharing. */
+export interface GenAiContentOptions {
+  /** Runs on each text or value before it is cut, such as redaction: a cut secret no longer matches its pattern. */
+  text?: (text: string) => string;
+  /** Characters of one part kept; `PART_LIMIT` by default. */
+  limit?: number;
+}
+
+function prepare(text: string, options: GenAiContentOptions): { text: string; truncated?: boolean } {
+  const shown = options.text ? options.text(text) : text;
+  const limit = options.limit ?? PART_LIMIT;
+  return shown.length > limit ? { text: shown.slice(0, limit), truncated: true } : { text: shown };
+}
+
+function preparePart(part: GenAiPart, options: GenAiContentOptions): GenAiPart {
+  const result: GenAiPart = { ...part };
+  for (const key of ['text', 'value'] as const) {
+    if (part[key] === undefined) continue;
+    const { text, truncated } = prepare(part[key], options);
+    result[key] = text;
+    if (truncated) result.truncated = true;
+  }
+  return result;
 }
 
 type Json = Record<string, unknown>;
@@ -271,7 +290,9 @@ function readPart(value: unknown): GenAiPart | undefined {
   const part = record(value);
   if (!part) return undefined;
   const type = typeof part.type === 'string' ? part.type : undefined;
-  if (type === 'text' || (!type && part.content !== undefined)) return textPart('text', part.content);
+  // Older chat shapes put a text part's text in `text` rather than `content`.
+  if (type === 'text' || (!type && (part.content !== undefined || part.text !== undefined)))
+    return textPart('text', part.content ?? part.text);
   if (type === 'reasoning' || type === 'thinking') return textPart('reasoning', part.content ?? part.text);
   if (type === 'tool_call' || type === 'function_call')
     return valuePart(
@@ -417,7 +438,14 @@ function toolDefinitions(value: AttrValue | undefined): GenAiMessage | undefined
 }
 
 /** The conversation one span recorded: system instructions, input, output, and the tools offered. */
-export function genAiMessages(span: Span): GenAiMessage[] {
+export function genAiMessages(span: Span, options: GenAiContentOptions = {}): GenAiMessage[] {
+  return recordedMessages(span).map((message) => ({
+    ...message,
+    parts: message.parts.map((part) => preparePart(part, options)),
+  }));
+}
+
+function recordedMessages(span: Span): GenAiMessage[] {
   const a = span.attributes;
   const messages: GenAiMessage[] = [];
   const system = systemMessage(a['gen_ai.system_instructions']);
@@ -454,18 +482,27 @@ function percentile(sorted: number[], share: number): number {
   return sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * share))];
 }
 
-/**
- * GenAI calls across retained traces: the newest calls, totals per model and
- * per tool, and token counts.
- */
-export function summarizeGenAi(traces: Iterable<[string, readonly Span[]]>, limit = 500): GenAiSummary {
+/** Every GenAI call across retained traces, newest first. */
+export function readGenAiCalls(traces: Iterable<[string, readonly Span[]]>): GenAiCall[] {
   const calls: GenAiCall[] = [];
   for (const [, spans] of traces)
     for (const span of spans) {
       const call = readGenAiCall(span);
       if (call) calls.push(call);
     }
-  calls.sort((a, b) => b.startMs - a.startMs);
+  return calls.sort((a, b) => b.startMs - a.startMs);
+}
+
+/**
+ * GenAI calls across retained traces: the newest calls, totals per model and
+ * per tool, and token counts.
+ */
+export function summarizeGenAi(traces: Iterable<[string, readonly Span[]]>, limit = 500): GenAiSummary {
+  return summarizeGenAiCalls(readGenAiCalls(traces), limit);
+}
+
+/** Totals for calls already read, newest first, as `readGenAiCalls` returns them. */
+export function summarizeGenAiCalls(calls: readonly GenAiCall[], limit = 500): GenAiSummary {
   const models = new Map<string, GenAiModelTotals & { durations: number[] }>();
   const tools = new Map<string, GenAiToolTotals & { durations: number[] }>();
   const modelDurations: number[] = [];
@@ -545,12 +582,13 @@ export function summarizeGenAi(traces: Iterable<[string, readonly Span[]]>, limi
  * One call with its conversation, the outcome of the tools it asked for, and
  * where it sits among the model calls of the same conversation.
  *
- * @param conversationSpans Spans to look in for the rest of the conversation: its trace, or every retained span.
+ * @param options.conversationCalls Calls to look in for the rest of a conversation that has an id, such as every
+ * retained call; without them only the call's trace is searched.
  */
 export function genAiCallDetail(
   trace: readonly Span[],
   spanId: string,
-  conversationSpans: Iterable<Span> = trace,
+  options: GenAiContentOptions & { conversationCalls?: Iterable<GenAiCall> } = {},
 ): GenAiCallDetail | undefined {
   const span = trace.find((item) => item.spanId === spanId);
   const call = span && readGenAiCall(span);
@@ -560,7 +598,7 @@ export function genAiCallDetail(
     const id = str(item.attributes['gen_ai.tool.call.id']);
     if (!id || genAiOperation(item) !== 'execute_tool') continue;
     const result = item.attributes['gen_ai.tool.call.result'];
-    const shown = result === undefined ? undefined : clip(asText(structured(result)));
+    const shown = result === undefined ? undefined : prepare(asText(structured(result)), options);
     toolRuns[id] = {
       spanId: item.spanId,
       tool: str(item.attributes['gen_ai.tool.name']),
@@ -573,14 +611,15 @@ export function genAiCallDetail(
   const sameConversation = (other: GenAiCall) =>
     call.conversationId ? other.conversationId === call.conversationId : other.traceId === call.traceId;
   const conversation: GenAiCall[] = [];
-  for (const item of call.conversationId ? conversationSpans : trace) {
-    const other = readGenAiCall(item);
-    if (other && other.kind === call.kind && sameConversation(other)) conversation.push(other);
-  }
+  const candidates =
+    call.conversationId && options.conversationCalls
+      ? options.conversationCalls
+      : trace.map((item) => readGenAiCall(item)).filter((item): item is GenAiCall => !!item);
+  for (const other of candidates) if (other.kind === call.kind && sameConversation(other)) conversation.push(other);
   conversation.sort((a, b) => a.startMs - b.startMs || a.spanId.localeCompare(b.spanId));
   return {
     call,
-    messages: genAiMessages(span),
+    messages: genAiMessages(span, options),
     toolRuns,
     conversation: conversation.map((item) => ({ traceId: item.traceId, spanId: item.spanId })),
     position: conversation.findIndex((item) => item.spanId === call.spanId && item.traceId === call.traceId),

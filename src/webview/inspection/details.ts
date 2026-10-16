@@ -14,6 +14,11 @@ const ICONS: Record<string, IconPart[]> = {
     ['path', { d: 'M3 10.5v-7a1 1 0 0 1 1-1h6' }],
   ],
   agent: [['path', { d: 'M8 2l1.4 4.6L14 8l-4.6 1.4L8 14l-1.4-4.6L2 8l4.6-1.4z' }]],
+  // The AI calls tab's icon.
+  aiCall: [
+    ['path', { d: 'M2.5 3.5h11v7h-6l-3 2.5v-2.5h-2z' }],
+    ['path', { d: 'M5.5 7h.01M8 7h.01M10.5 7h.01', 'stroke-width': '1.8' }],
+  ],
   warning: [
     ['path', { d: 'M8 2.5 14.5 13.5h-13zM8 6.5v3' }],
     ['circle', { cx: '8', cy: '11.6', r: '.4', fill: 'currentColor' }],

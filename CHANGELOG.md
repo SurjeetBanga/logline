@@ -7,15 +7,15 @@ All notable changes to Logline are documented in this file.
 ### Changes
 
 - **AI calls**: a tab that lists LLM calls, tool executions, and agent runs from OpenTelemetry spans that follow the GenAI semantic conventions. Totals show model calls, input and output tokens with the cached share, p50 and p95 latency, and tool calls, then each model's calls, tokens, p95, and errors. Choosing a call shows its conversation: system instructions, messages, the response, reasoning, and each tool call with the result of its `execute_tool` span, with **Previous** and **Next** through the rest of the conversation, **Trace**, and **Copy** as redacted Markdown. Responses cut short by a token limit stand out, and calls without recorded content still show their model, tokens, and timing. Older forms such as `gen_ai.system`, `gen_ai.usage.prompt_tokens`, OpenLLMetry's `gen_ai.prompt.<n>.*` attributes, and message span events are read too. Try it with [samples/genai-trace.json](samples/genai-trace.json).
-- In the trace waterfall, LLM call and tool spans carry a chip with their tokens that opens the call in **AI calls**.
+- In the trace waterfall, GenAI spans carry a chip, marked with the AI calls icon, that opens the call in **AI calls**: a model call's chip shows its tokens, and an agent run's the model calls beneath it and their tokens.
 - Agents get `logline_get_ai_calls`: totals per model and tool, the newest calls, and with `includeContent` the start of each call's messages and tool results, redacted. The `logline-triage` and `logline-slow-request` skills use it when an app calls an LLM.
-- Prompts, responses, and tool payloads keep up to 64 KiB per attribute when received, instead of being cut at 4 KiB, and stay out of span rows in the table and waterfall tooltips.
+- Prompts, responses, and tool payloads on spans and their GenAI message events keep up to 64 KiB per attribute when received, instead of being cut at 4 KiB, and stay out of span rows in the table and waterfall tooltips. Log records keep the usual 4 KiB.
 
 ### Behavior changes
 
 The Logs panel is reorganized around tabs, so every view gets more room and new views no longer add toolbar buttons. Nothing was removed; some controls moved:
 
-- **Analyze**, **Traces**, **Metrics**, and **Issues** (formerly **Log issues**) are tabs next to **Logs** instead of toolbar buttons and dialogs. Each view shows in place of the table, with its count on the tab, and the panel reopens on the tab it was left on. Choosing a bar in Analyze, **Filter logs by trace**, or **Show events** on an issue returns to **Logs** with the filter applied. Arrow keys move between tabs.
+- **Analyze**, **Traces**, **Metrics**, and **Issues** (formerly **Log issues**) are tabs next to **Logs** instead of toolbar buttons and dialogs. **AI calls** and **Metrics** show while the OpenTelemetry receiver runs, so they can be found before data arrives, and once a service has sent data. Each view shows in place of the table, with its count on the tab, and the panel reopens on the tab it was left on. Choosing a bar in Analyze, **Filter logs by trace**, or **Show events** on an issue returns to **Logs** with the filter applied. Arrow keys move between tabs.
 - **Terminal capture** is in the status bar at the bottom of the panel, as **Capture off** or **Capture on**, next to the OpenTelemetry receiver, sharing, the running command, and retention.
 - **Clear logs** and **Copy filtered results** (formerly **Copy results**) are under **More actions**, with Export, Import, and the other occasional actions.
 - **Saved searches** is an icon inside the search box, **Columns** an icon at the end of the filter row, and Run and Stop are icons beside the source picker.
@@ -24,6 +24,12 @@ The Logs panel is reorganized around tabs, so every view gets more room and new 
 ### Changes
 
 - The toolbar is two rows instead of four, so a docked panel shows more logs. On narrow panels, tabs and filters show their icons and counts, and rows wrap instead of hiding controls off the edge.
+- **More actions** reads like a VS Code menu: plain rows, with the one under the pointer or keyboard focus highlighted. Buttons are filled without an outline unless the color theme gives buttons a border, and summary tiles no longer have outlines.
+
+### Fixes
+
+- Redaction no longer hides token counts such as `max_tokens`, `prompt_tokens`, and `gen_ai.usage.input_tokens` in logs, span attributes, agent results, and exports, and no longer turns a missing sensitive field into `[REDACTED]`.
+- The **Sources** and **Runs** switcher in the source picker shows as tabs again, and the Left and Right arrow keys switch between them.
 
 ## 1.14.1 — 2026-10-10
 

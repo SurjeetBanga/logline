@@ -1,6 +1,7 @@
 import type { TraceHotspot, TraceLog, TraceRow, TraceView } from '../../core/traces';
 import type { Elements } from '../dom';
 import { cell } from '../dom';
+import { icon } from './details';
 import type { EventScope } from '../event-scope';
 import type { WebviewApi } from '../types';
 
@@ -202,7 +203,9 @@ function spanRow(span: TraceRow, total: number): HTMLTableRowElement {
   label.style.paddingInlineStart = `${Math.min(span.depth, 24) * 14}px`;
   label.textContent = `${span.error ? '⚠ ' : ''}${span.name}`;
   name.append(label);
-  // A GenAI span shows its tokens, and the model or tool when its name leaves them out, and opens its conversation.
+  // A GenAI span opens its conversation from a chip marked with the AI calls icon. The chip adds what the
+  // row leaves out: the model or tool when the name does not say it, a call's tokens, and an agent run's
+  // model calls; a tool run's chip is the icon alone.
   if (span.genAi) {
     const content = document.createElement('div');
     content.className = 'trace-name-content';
@@ -210,14 +213,20 @@ function spanRow(span: TraceRow, total: number): HTMLTableRowElement {
     chip.type = 'button';
     chip.className = 'trace-genai';
     chip.dataset.spanId = span.spanId;
-    const subject = span.genAi.label.replace(/^tool · /, '');
-    const usage =
-      span.genAi.inputTokens !== undefined || span.genAi.outputTokens !== undefined
-        ? `${compactTokens(span.genAi.inputTokens)} → ${compactTokens(span.genAi.outputTokens)} tok`
-        : '';
-    chip.textContent =
-      [span.name.includes(subject) ? '' : span.genAi.label, usage].filter(Boolean).join(' · ') || 'AI call';
-    chip.title = `${span.genAi.label}${usage ? `, ${usage}` : ''}. Open this call in AI calls.`;
+    const { label: subjectLabel, modelCalls } = span.genAi;
+    const subject = subjectLabel.replace(/^tool · /, '');
+    const details = [
+      modelCalls && `${modelCalls.calls} ${modelCalls.calls === 1 ? 'call' : 'calls'}`,
+      tokenUsage(modelCalls ?? span.genAi),
+    ].filter((fact): fact is string => !!fact);
+    const facts = [...(span.name.includes(subject) ? [] : [subjectLabel]), ...details];
+    const text = document.createElement('span');
+    text.className = 'trace-genai-text';
+    text.textContent = facts.join(' · ');
+    chip.append(icon('aiCall'), ...(facts.length ? [text] : []));
+    if (!facts.length) chip.classList.add('icon-only');
+    chip.setAttribute('aria-label', `Open ${subjectLabel} in AI calls`);
+    chip.title = `${[subjectLabel, ...details].join(', ')}. Open this call in AI calls.`;
     content.append(label, chip);
     name.replaceChildren(content);
   }
@@ -246,6 +255,15 @@ function spanRow(span: TraceRow, total: number): HTMLTableRowElement {
 
 const tokenFormat = new Intl.NumberFormat(undefined, { notation: 'compact', maximumFractionDigits: 1 });
 const compactTokens = (value: number | undefined) => (value === undefined ? '–' : tokenFormat.format(value));
+
+/** `1.2K → 86 tok`; a call that failed before answering has input tokens only. */
+function tokenUsage({ inputTokens, outputTokens }: { inputTokens?: number; outputTokens?: number }): string {
+  if (inputTokens !== undefined && outputTokens !== undefined)
+    return `${compactTokens(inputTokens)} → ${compactTokens(outputTokens)} tok`;
+  if (inputTokens !== undefined) return `${compactTokens(inputTokens)} tok in`;
+  if (outputTokens !== undefined) return `${compactTokens(outputTokens)} tok out`;
+  return '';
+}
 
 function logRow(log: TraceLog, total: number, depth: number): HTMLTableRowElement {
   const row = document.createElement('tr');

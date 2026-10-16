@@ -568,20 +568,14 @@ export class AgentLogAccess {
       for (const call of calls) {
         if (withContent >= AI_CONTENT_CALLS) break;
         if (!call.hasContent) continue;
-        const detail = genAiCallDetail(traces.get(call.traceId) ?? [], call.spanId);
+        // Redacted before it is cut, so a secret across the cut still matches its pattern.
+        const detail = genAiCallDetail(traces.get(call.traceId) ?? [], call.spanId, {
+          text: this.redactor.text,
+          limit: AI_PART_CHARACTERS,
+        });
         if (!detail) continue;
-        call.messages = detail.messages.map((message) => ({
-          ...message,
-          parts: message.parts.map((part) => shortenPart(part)),
-        }));
-        call.toolRuns = Object.fromEntries(
-          Object.entries(detail.toolRuns).map(([id, run]) => [
-            id,
-            run.result === undefined || run.result.length <= AI_PART_CHARACTERS
-              ? run
-              : { ...run, result: run.result.slice(0, AI_PART_CHARACTERS), truncated: true },
-          ]),
-        );
+        call.messages = detail.messages;
+        call.toolRuns = detail.toolRuns;
         withContent++;
       }
     const result = (shown: typeof calls) =>
@@ -852,14 +846,4 @@ export class AgentLogAccess {
       throw new AgentAccessError('SHARE_CHANGED', 'The search cursor is no longer valid.');
     }
   }
-}
-
-function shortenPart<T extends { text?: string; value?: string; truncated?: boolean }>(part: T): T {
-  const cut = (text: string | undefined) =>
-    text !== undefined && text.length > AI_PART_CHARACTERS ? text.slice(0, AI_PART_CHARACTERS) : text;
-  const text = cut(part.text),
-    value = cut(part.value);
-  return text === part.text && value === part.value
-    ? part
-    : { ...part, ...(text !== undefined ? { text } : {}), ...(value !== undefined ? { value } : {}), truncated: true };
 }

@@ -35,6 +35,8 @@ export function createViewer(api: WebviewApi) {
   elements.search.value = saved.query ?? '';
   const { popovers, createPopover } = createPopovers(scope);
   createTooltips(scope);
+  // The remembered tab, until the first snapshot says whether it has data.
+  let restoreTab: TabName | undefined;
   const views = createViews(
     {
       logs: elements.logsTab,
@@ -114,6 +116,7 @@ export function createViewer(api: WebviewApi) {
     revealCall: () => views.show('aiCall'),
     listVisible: () => views.active() === 'aiCalls',
     callVisible: () => views.active() === 'aiCall',
+    receiver: () => ({ running: otlpRunning, endpoint: otlpEndpoint }),
   });
   const doctor = createDoctor(
     elements.doctor,
@@ -293,8 +296,14 @@ export function createViewer(api: WebviewApi) {
     doctor.receive(data.doctor);
     changedFiles = data.changes?.files;
     updateChangesControl();
-    metricList.update(data.metrics);
-    aiCalls.update(data.aiCalls);
+    metricList.update(data.metrics, otlpRunning);
+    aiCalls.update(data.aiCalls, otlpRunning);
+    // Tabs such as Metrics appear only once the snapshot says they have data.
+    if (restoreTab) {
+      const tab = restoreTab;
+      restoreTab = undefined;
+      if (views.available(tab)) openView(tab);
+    }
     views.ensureVisible();
     elements.traceCount.hidden = !data.traceCount;
     elements.traceCount.textContent = data.traceCount ? numberFormat.format(data.traceCount) : '';
@@ -931,6 +940,7 @@ export function createViewer(api: WebviewApi) {
   }
 
   function viewChanged(view: ViewName, previous: ViewName) {
+    restoreTab = undefined;
     if (previous === 'trace') traceView.hide();
     if (previous === 'metrics') metricList.hide();
     if (previous === 'aiCalls') aiCalls.hide();
@@ -1039,9 +1049,13 @@ export function createViewer(api: WebviewApi) {
   // safety net in case one is ever missed.
   const fallbackTimer = setInterval(() => request(), 5000);
 
-  // The panel reopens on the tab it was left on.
+  // The panel reopens on the tab it was left on: now when its tab is shown,
+  // else once the first snapshot says whether it has data.
   views.show('logs');
-  if (state.view !== 'logs' && isTabName(state.view)) openView(state.view);
+  if (state.view !== 'logs' && isTabName(state.view)) {
+    if (views.available(state.view)) openView(state.view);
+    else restoreTab = state.view;
+  }
 
   request();
   return {

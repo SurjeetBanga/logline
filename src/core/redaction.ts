@@ -9,6 +9,10 @@ export interface RedactionOptions {
 const DEFAULT_REPLACEMENT = '[REDACTED]';
 const SENSITIVE_KEY =
   /(?:password|passphrase|secret|token|api[-_ ]?key|authorization|cookie|private[-_ ]?key|access[-_ ]?key|credential)/i;
+// Counts that only share a word with a sensitive key, such as `max_tokens`
+// or `gen_ai.usage.input_tokens`.
+const NOT_SENSITIVE_KEY =
+  /(?:count|limit|ttl|expires?|duration|(?:input|output|prompt|completion|cached|reasoning|total|max)[-_.]?tokens)$/i;
 
 // Credentials recognizable by their value alone, wherever they appear. Each
 // pattern starts on a fixed prefix and repeats only over characters it
@@ -51,7 +55,7 @@ function normalizedKey(key: string): string {
 export function isSensitiveKey(key: string, fields: string[] = []): boolean {
   const normalized = normalizedKey(key);
   if (fields.some((field) => normalizedKey(field) === normalized)) return true;
-  return SENSITIVE_KEY.test(key) && !/(count|limit|ttl|expires?|duration)$/i.test(key);
+  return SENSITIVE_KEY.test(key) && !NOT_SENSITIVE_KEY.test(key);
 }
 
 function isKeyCharacter(value: string | undefined): boolean {
@@ -252,7 +256,9 @@ export function createRedactor(options: RedactionOptions = {}): Redactor {
 
   const redactValueInternal = (value: unknown, key?: string): unknown => {
     if (!enabled) return value;
-    if (key !== undefined && isSensitiveKey(key, configuredFields)) return replacement;
+    // An absent value has nothing to hide, and replacing it would invent one.
+    if (key !== undefined && isSensitiveKey(key, configuredFields))
+      return value === undefined || value === null ? value : replacement;
     if (typeof value === 'string') return redactTextInternal(value);
     if (Array.isArray(value)) return value.map((item) => redactValueInternal(item));
     if (!value || typeof value !== 'object') return value;

@@ -10,6 +10,32 @@ test('redacts sensitive object keys while retaining safe values', () => {
   });
 });
 
+test('keeps model token counts and absent sensitive values', () => {
+  assert.deepEqual(
+    redactValue({
+      inputTokens: 10,
+      outputTokens: 2,
+      cachedTokens: 4,
+      'gen_ai.usage.input_tokens': 10,
+      'gen_ai.usage.cache_read.input_tokens': 4,
+      max_tokens: 1024,
+      tokens: 'test-value',
+      accessToken: undefined,
+    }),
+    {
+      inputTokens: 10,
+      outputTokens: 2,
+      cachedTokens: 4,
+      'gen_ai.usage.input_tokens': 10,
+      'gen_ai.usage.cache_read.input_tokens': 4,
+      max_tokens: 1024,
+      tokens: '[REDACTED]',
+      accessToken: undefined,
+    },
+  );
+  assert.equal(redactText('prompt_tokens=12 completion_tokens=3'), 'prompt_tokens=12 completion_tokens=3');
+});
+
 test('redacts secrets in plain text assignments', () => {
   assert.equal(
     redactText('authorization: Bearer test-token token="test-value"'),
