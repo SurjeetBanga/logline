@@ -866,7 +866,7 @@
     "@vscode/vsce": "^4.0.0",
     "esbuild": "^0.28.2",
     "ovsx": "^1.2.0",
-    "oxlint": "^1.85.0",
+    "oxlint": "^1.88.0",
     "oxlint-tsgolint": "^7.0.2002",
     "prettier": "^3.9.10",
     "typescript": "^7.0.2"
