@@ -306,6 +306,15 @@
               </button>
               <button id="import" type="button" role="menuitem" tabindex="-1">Import logs…</button>
               <button
+                id="addConnection"
+                type="button"
+                role="menuitem"
+                tabindex="-1"
+                title="Search and tail the log table of a SQLite or Postgres database"
+              >
+                Add connection…
+              </button>
+              <button
                 id="clear"
                 type="button"
                 role="menuitem"
@@ -615,6 +624,25 @@
             <div id="fieldList"></div>
           </div>
         </div>
+      </div>
+      <div id="connectionBar" class="connection-bar" role="group" aria-label="Search connection" hidden>
+        <div class="connection-controls">
+          <label class="connection-range"
+            >Range
+            <select id="connectionRange">
+              <option value="15m">Last 15 minutes</option>
+              <option value="1h">Last hour</option>
+              <option value="4h">Last 4 hours</option>
+              <option value="24h">Last 24 hours</option>
+              <option value="7d">Last 7 days</option>
+            </select></label
+          >
+          <button id="connectionRun" type="button">Run</button>
+          <button id="connectionTail" type="button" aria-pressed="false">Tail</button>
+          <button id="connectionSql" type="button" title="Run a read-only SELECT you type">Run SQL…</button>
+          <span id="connectionResult" class="connection-note" aria-live="polite"></span>
+        </div>
+        <code id="connectionPreview" class="connection-note connection-preview"></code>
       </div>
       <p id="rowHint" class="detail-hint table-hint" hidden>
         Click an event to see its details and actions. Hover a row for quick actions, and hover any icon to see what it

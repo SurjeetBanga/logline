@@ -189,6 +189,52 @@ timed('otlp', 'Read an OTLP/JSON request of 2,000 log records', async () => {
   };
   return () => readLogs(request, 0);
 });
+// Connections: what a fetch from a log table costs once its rows arrive.
+const tableRows = (count) =>
+  Array.from({ length: count }, (_, i) => ({
+    id: i,
+    created_at: new Date(receivedAt.getTime() + i * 1000).toISOString().replace('T', ' ').slice(0, 19),
+    severity: i % 10 ? 'INFO' : 'ERROR',
+    msg: `request ${i} took ${i % 900} ms`,
+    user_id: i % 97,
+    route: '/orders/:id',
+  }));
+const logTable = { table: 'app_logs', timestamp: 'created_at', level: 'severity', message: 'msg' };
+timed('remote-rows', 'Turn 5,000 fetched table rows into events, filtered by the search', async () => {
+  const { LogStore } = await load('core/log-store.js');
+  const { Ingestion } = await load('capture/ingestion.js');
+  const { matchesQuery } = await load('core/query.js');
+  const { rowFilter, rowRoles, rowToLine } = await load('core/remote-query.js');
+  const rows = tableRows(5000);
+  const roles = rowRoles(Object.keys(rows[0]), logTable);
+  const filter = rowFilter('level:error /took \\d+ ms/');
+  const accept = (event) => matchesQuery(event, filter, receivedAt.getTime());
+  return () => {
+    const ingestion = new Ingestion(new LogStore(10000, 100 * 1024 * 1024), () => {});
+    for (const row of rows)
+      ingestion.accept(rowToLine(row, roles, 'iso').line, 'remote', {
+        serverId: 'conn:app',
+        server: 'SQLite · app',
+        sessionId: 'run',
+        accept,
+      });
+  };
+});
+timed('remote-sql', 'Turn 1,000 searches into SQL for a log table', async () => {
+  const { buildSqlLogQuery } = await load('core/remote-query.js');
+  const table = {
+    time: 'iso',
+    columns: Object.keys(tableRows(1)[0]).map((name) => ({ name, type: name.endsWith('id') ? 'INTEGER' : 'TEXT' })),
+  };
+  const searches = Array.from(
+    { length: 1000 },
+    (_, i) => `level:error user_id:>${i % 97} -route:/health "took ${i} ms" OR msg:timeout /retry/`,
+  );
+  return () => {
+    for (const query of searches)
+      buildSqlLogQuery({ dialect: 'sqlite', mapping: logTable, table, query, limit: 5000, order: 'desc' });
+  };
+});
 /** An OTLP/JSON trace request of `count` spans, each with `attributes(i)` as its attributes. */
 function spanRequest(count, attributes) {
   const value = (item) => (typeof item === 'number' ? { intValue: String(item) } : { stringValue: String(item) });

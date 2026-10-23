@@ -2,6 +2,12 @@
 
 All notable changes to Logline are documented in this file.
 
+## Unreleased
+
+### Changes
+
+- **Connections**: search and tail the log table of a SQLite file or a Postgres server from the Logs panel. **Add Connection** connects, lists the tables, and suggests which columns hold the time, level, message, service, and trace id. Choosing the connection as the source shows a time range, **Run**, **Tail**, and **Run SQL…**; nothing is fetched until you press Run. The search box's filters become parameterized SQL, a line shows the SQL they run as and which terms Logline applies itself, such as regular expressions, and the result line says how many rows came back and how many matched. Each search is a run of its own, which the panel switches to, so search, Analyze, traces, export, and sharing with agents work on fetched rows and earlier results stay to compare. Queries are read-only and stopped after `logline.connectionTimeoutSeconds`, and passwords are kept in VS Code secret storage. See [Connections](docs/usage.md#connections-log-tables-in-sqlite-and-postgres).
+
 ## 1.15.0 — 2026-10-16
 
 ### Changes

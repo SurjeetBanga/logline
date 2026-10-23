@@ -14,6 +14,7 @@ import { createAiCalls } from './inspection/ai-calls';
 import { createDoctor } from './inspection/doctor';
 import { createPopovers } from './popovers';
 import { createSearch } from './search/controls';
+import { createConnectionBar } from './search/connection-bar';
 import { ViewerState } from './state';
 import { LEVELS } from './state';
 import { createTable } from './table/controller';
@@ -85,6 +86,7 @@ export function createViewer(api: WebviewApi) {
     traceView.show(traceId),
   );
   const search = createSearch(elements, state, api, popovers, { filterChanged, updateScopeSelection }, scope);
+  const connectionBar = createConnectionBar(elements, state, api, scope, () => search.query(), saveState);
   const request = (force = false) => bridge.request(force);
   const traceView = createTraceView(elements, api, scope, {
     showContext: (id) => inspection.showContext(id),
@@ -231,6 +233,10 @@ export function createViewer(api: WebviewApi) {
       metricList.receive(data.metrics);
       return;
     }
+    if (data.type === 'connectionPreview') {
+      connectionBar.receivePreview(data);
+      return;
+    }
     if (data.type === 'aiCalls') {
       aiCalls.receive(data.aiCalls);
       return;
@@ -282,6 +288,18 @@ export function createViewer(api: WebviewApi) {
       search.setQuery(data.applyQuery, true);
     }
     if (data.openTrace) traceView.show(data.openTrace);
+    // A source and run chosen from the editor, such as a connection just added or a search just run. This
+    // snapshot's rows and columns belong to the previous selection, so the next one is rendered instead.
+    if (
+      data.applySource &&
+      data.servers?.some((server) => server.id === data.applySource) &&
+      (data.applySource !== state.selectedServer || (data.applyRun ?? '') !== state.selectedSession)
+    ) {
+      views.show('logs');
+      selectSource(data.applySource, data.applyRun);
+      bridge.flush();
+      return;
+    }
     const receiverWasRunning = otlpRunning;
     otlpRunning = data.otlp?.running === true;
     otlpEndpoint = data.otlp?.endpoint;
@@ -439,6 +457,7 @@ export function createViewer(api: WebviewApi) {
         updateSourceSelection();
       }
     }
+    connectionBar.update(data.connections);
     if (data.sessions) {
       // A container source (`<source>::<service>`) shares the runs of the source that printed it.
       const sessions = data.sessions.filter(
@@ -523,9 +542,9 @@ export function createViewer(api: WebviewApi) {
       }
       elements.empty.hidden = rows.length > 0;
       elements.rowHint.hidden = state.rowHintDismissed || !rows.length;
-      elements.empty.textContent = data.total
-        ? 'No matching events in retained history.'
-        : 'Run a server command to see its logs here.';
+      elements.empty.textContent =
+        connectionBar.emptyText() ??
+        (data.total ? 'No matching events in retained history.' : 'Run a server command to see its logs here.');
       if (state.following && !state.paused && !state.selectedSort) table.scheduleRenderWindow(true);
     }
     bridge.flush();
@@ -668,6 +687,7 @@ export function createViewer(api: WebviewApi) {
     state.filterChanged();
     updateCopyResultsControl();
     updateChangesControl();
+    connectionBar.queryChanged();
     saveState();
     requestInteraction();
   }
@@ -1037,9 +1057,11 @@ export function createViewer(api: WebviewApi) {
     api.postMessage({ type: 'breakOnQuery', query: search.query(), levels: state.currentLevels() }),
   );
 
-  scope.listen(elements.run, 'click', () =>
-    api.postMessage({ type: 'run', serverId: state.selectedServer || undefined }),
-  );
+  scope.listen(elements.run, 'click', () => {
+    // A selected connection runs its search; other sources start their command.
+    if (!connectionBar.run()) api.postMessage({ type: 'run', serverId: state.selectedServer || undefined });
+  });
+  scope.listen(elements.addConnection, 'click', () => api.postMessage({ type: 'addConnection' }));
 
   scope.listen(document, 'visibilitychange', () => {
     if (!document.hidden) request();
@@ -1115,6 +1137,15 @@ export function createViewer(api: WebviewApi) {
     all.textContent = activeCount ? `All sources · ${activeCount} active` : 'All sources';
     all.title = 'Show logs from every source';
     scope.listen(all, 'click', () => selectSource(''));
+    const add = document.createElement('button');
+    add.type = 'button';
+    add.className = 'source-select source-action';
+    add.textContent = 'Add connection…';
+    add.title = 'Search and tail the log table of a SQLite or Postgres database';
+    scope.listen(add, 'click', () => {
+      scopePopover.close(true);
+      api.postMessage({ type: 'addConnection' });
+    });
     const options = [
       all,
       ...servers.map((server) => {
@@ -1128,6 +1159,7 @@ export function createViewer(api: WebviewApi) {
         scope.listen(option, 'click', () => selectSource(server.id));
         return option;
       }),
+      add,
     ];
     elements.sourceMenu.replaceChildren(...options);
     updateSourceSelection();
@@ -1141,7 +1173,8 @@ export function createViewer(api: WebviewApi) {
 
   function updateSourceSelection(): void {
     for (const choice of elements.sourceMenu.querySelectorAll<HTMLButtonElement>('.source-select'))
-      choice.setAttribute('aria-selected', String(choice.dataset.sourceId === state.selectedServer));
+      if (choice.dataset.sourceId !== undefined)
+        choice.setAttribute('aria-selected', String(choice.dataset.sourceId === state.selectedServer));
     updateScopeSelection();
   }
 
@@ -1176,10 +1209,10 @@ export function createViewer(api: WebviewApi) {
     if (focus) (tab === 'sources' ? elements.sourcesTab : elements.runsTab).focus();
   }
 
-  function selectSource(id: string): void {
+  function selectSource(id: string, run = ''): void {
     search.clearAutocomplete();
     state.selectedServer = id;
-    state.selectedSession = '';
+    state.selectedSession = run;
     sessionSignature = '';
     visibleSessions = [];
     elements.server.value = id;
@@ -1191,6 +1224,7 @@ export function createViewer(api: WebviewApi) {
     setScopeTab('sources');
     saveState();
     scopePopover.close(true);
+    connectionBar.render();
     requestInteraction();
   }
 

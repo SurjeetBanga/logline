@@ -14,6 +14,8 @@ export interface CaptureMetadata {
   location?: LogEvent['location'];
   /** Set when the line carried a container prefix; the container becomes its own source. */
   container?: ContainerTag;
+  /** Drop events this rejects, such as fetched rows that the full search does not match. */
+  accept?: (event: LogEvent) => boolean;
 }
 
 /** The source id and label for one container of a capture source. */
@@ -44,6 +46,7 @@ export class Ingestion {
     // A timestamp printed by Docker stands in for the arrival time; one inside the payload still wins.
     const event = this.create(raw, stream, tag?.time !== undefined ? new Date(tag.time) : undefined);
     if (metadata.jsonOnly && !event.isJson) return undefined;
+    if (metadata.accept && !metadata.accept(event)) return undefined;
     const source = tag ? containerSource(metadata.serverId, tag) : metadata;
     event.serverId = source.serverId;
     event.server = source.server;
@@ -56,8 +59,8 @@ export class Ingestion {
     event.truncated = metadata.truncated;
     if (event.truncated) event.isJson = false;
     if (metadata.location) event.location = metadata.location;
-    // Imported lines arrive all at once, so arrival time says nothing about them.
-    if (stream !== 'import') this.crashes.observe(event, Date.now());
+    // Imported and fetched lines arrive all at once, so arrival time says nothing about them.
+    if (stream !== 'import' && stream !== 'remote') this.crashes.observe(event, Date.now());
     // Disk capture retains the physical line, including ANSI and surrounding whitespace.
     if (metadata.persist) this.persist(tag ? `${tag.container} | ${raw}` : raw);
     this.commit(event);

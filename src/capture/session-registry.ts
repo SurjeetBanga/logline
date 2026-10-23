@@ -111,7 +111,10 @@ export class SessionRegistry {
     }));
   }
 
-  serverSummaries(configured: ServerConfig[], store: Pick<LogStore, 'serverIds' | 'serverLabel'>): ServerSummary[] {
+  serverSummaries(
+    configured: Pick<ServerConfig, 'id' | 'label'>[],
+    store: Pick<LogStore, 'serverIds' | 'serverLabel'>,
+  ): ServerSummary[] {
     const byId = new Map<string, SessionSummary[]>();
     for (const record of this.records.values()) {
       const records = byId.get(record.serverId) ?? [];

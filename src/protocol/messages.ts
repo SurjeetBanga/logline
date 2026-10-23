@@ -9,6 +9,8 @@ import type { AgentShareStatus } from '../core/agent-types';
 import type { MetricSeriesView } from '../core/metrics';
 import type { TraceSummary, TraceView } from '../core/traces';
 import type { ReceiverStatus } from '../capture/otlp-receiver';
+import type { RemoteRunInfo } from '../capture/remote-source';
+import { RANGE_CHOICES, type ConnectionType } from '../core/connections';
 
 export interface Filter {
   query?: string;
@@ -63,7 +65,24 @@ export type ViewRequest =
   | { type: 'showGuide'; section?: 'guide' | 'whatsNew' }
   | { type: 'run'; serverId?: string }
   | { type: 'stop'; serverId?: string; sessionId?: string }
-  | { type: 'import' | 'clear' | 'config' | 'manageServers' };
+  | { type: 'connectionFetch' | 'connectionPreview'; connectionId: string; query: string; range: string }
+  | { type: 'connectionTail'; connectionId: string; query: string; enabled: boolean }
+  | { type: 'connectionSql'; connectionId: string }
+  | { type: 'import' | 'clear' | 'config' | 'manageServers' | 'addConnection' };
+
+/** A saved connection as the Logs panel lists it. */
+export interface ConnectionView {
+  id: string;
+  /** The source its runs are captured under. */
+  sourceId: string;
+  label: string;
+  type: ConnectionType;
+  /** Whether a log table is mapped, so searches can run; without one only typed SQL can. */
+  mapped: boolean;
+  tailing: boolean;
+  /** The latest fetch or tail. */
+  last?: RemoteRunInfo;
+}
 
 export interface Snapshot extends Stats {
   type: 'snapshot';
@@ -108,6 +127,12 @@ export interface Snapshot extends Stats {
   applyQuery?: string;
   /** A trace requested from the editor, opened once. */
   openTrace?: string;
+  /** A source to select, such as a connection just added, applied once. */
+  applySource?: string;
+  /** With applySource, a run of that source to select, such as a search just run. */
+  applyRun?: string;
+  /** Saved connections to log stores outside the editor. */
+  connections?: ConnectionView[];
   otlp?: ReceiverStatus;
   /** Traces with spans currently retained. */
   traceCount?: number;
@@ -192,7 +217,17 @@ export type HostMessage =
   | { type: 'traces'; traces: TraceSummary[] }
   | { type: 'aiCalls'; aiCalls: GenAiSummary }
   | { type: 'aiCall'; traceId: string; spanId: string; detail?: GenAiCallDetail }
-  | { type: 'metrics'; metrics: MetricSeriesView[] };
+  | { type: 'metrics'; metrics: MetricSeriesView[] }
+  | {
+      type: 'connectionPreview';
+      connectionId: string;
+      query: string;
+      range: string;
+      /** The SQL the search would run, and the terms Logline would apply to the fetched rows. */
+      statement?: string;
+      local: string[];
+      error?: string;
+    };
 // Sharing status is also included in snapshots so the webview can render a
 // durable indicator after a notification-driven refresh.
 
@@ -333,10 +368,23 @@ export function parseViewRequest(value: unknown): ViewRequest | undefined {
       return { type: msg.type, serverId: filter.serverId };
     case 'stop':
       return { type: msg.type, serverId: filter.serverId, sessionId: filter.sessionId };
+    case 'connectionFetch':
+    case 'connectionPreview':
+    case 'connectionTail':
+    case 'connectionSql': {
+      const connectionId = string('connectionId')?.slice(0, 128);
+      if (!connectionId) return;
+      if (msg.type === 'connectionSql') return { type: msg.type, connectionId };
+      const query = (string('query') ?? '').slice(0, 1024);
+      if (msg.type === 'connectionTail') return { type: msg.type, connectionId, query, enabled: msg.enabled === true };
+      const range = string('range');
+      return { type: msg.type, connectionId, query, range: range && RANGE_CHOICES.includes(range) ? range : '1h' };
+    }
     case 'import':
     case 'clear':
     case 'config':
     case 'manageServers':
+    case 'addConnection':
       return { type: msg.type };
   }
 }

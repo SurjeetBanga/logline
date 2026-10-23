@@ -109,3 +109,38 @@ test('message boundary preserves an empty level selection and normalizes paginat
     ids: [1, 5],
   });
 });
+
+test('connection requests need a connection id, and bound their query and range', () => {
+  for (const value of [
+    { type: 'connectionFetch', query: 'level:error', range: '1h' },
+    { type: 'connectionPreview', connectionId: '', query: '' },
+    { type: 'connectionTail', connectionId: 7 },
+    { type: 'connectionSql' },
+  ])
+    assert.equal(parseViewRequest(value), undefined, JSON.stringify(value));
+  assert.deepEqual(
+    parseViewRequest({ type: 'connectionFetch', connectionId: 'app', query: 'level:error', range: '24h' }),
+    {
+      type: 'connectionFetch',
+      connectionId: 'app',
+      query: 'level:error',
+      range: '24h',
+    },
+  );
+  // An unknown range falls back to the last hour; a long query is cut to the search limit.
+  assert.deepEqual(
+    parseViewRequest({ type: 'connectionPreview', connectionId: 'app', query: 'x'.repeat(2000), range: 'constructor' }),
+    { type: 'connectionPreview', connectionId: 'app', query: 'x'.repeat(1024), range: '1h' },
+  );
+  assert.deepEqual(parseViewRequest({ type: 'connectionTail', connectionId: 'app', enabled: 'yes' }), {
+    type: 'connectionTail',
+    connectionId: 'app',
+    query: '',
+    enabled: false,
+  });
+  assert.deepEqual(parseViewRequest({ type: 'connectionSql', connectionId: 'app', query: 'ignored' }), {
+    type: 'connectionSql',
+    connectionId: 'app',
+  });
+  assert.deepEqual(parseViewRequest({ type: 'addConnection', extra: true }), { type: 'addConnection' });
+});

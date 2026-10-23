@@ -91,6 +91,22 @@ export function registerCommands(
       );
       await vscode.commands.executeCommand('logline.logs.focus');
     }),
+    vscode.commands.registerCommand('logline.addConnection', () => controller.connections.add()),
+    vscode.commands.registerCommand('logline.searchConnection', (id?: unknown) =>
+      controller.connections.query(typeof id === 'string' ? id : undefined),
+    ),
+    vscode.commands.registerCommand('logline.runConnectionSql', (id?: unknown) =>
+      controller.connections.runSql(typeof id === 'string' ? id : undefined),
+    ),
+    vscode.commands.registerCommand('logline.tailConnection', (id?: unknown) =>
+      controller.connections.tail(typeof id === 'string' ? id : undefined, ''),
+    ),
+    vscode.commands.registerCommand('logline.testConnection', (id?: unknown) =>
+      controller.connections.test(typeof id === 'string' ? id : undefined),
+    ),
+    vscode.commands.registerCommand('logline.removeConnection', (id?: unknown) =>
+      controller.connections.remove(typeof id === 'string' ? id : undefined),
+    ),
     vscode.commands.registerCommand('logline.stopCommand', () => controller.stop()),
     vscode.commands.registerCommand('logline.export', () => controller.transfer.exportLogs()),
     vscode.commands.registerCommand('logline.import', () => controller.transfer.importLogs()),

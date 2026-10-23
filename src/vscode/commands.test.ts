@@ -70,6 +70,12 @@ test('commands register the complete action surface and honor trust/focus/config
       return true;
     },
     terminalCapture: { availableTerminals: () => [], toggleSource: () => undefined },
+    connections: Object.fromEntries(
+      ['add', 'query', 'runSql', 'tail', 'test', 'remove'].map((name) => [
+        name,
+        async (...args: unknown[]) => calls.push({ name: `connections.${name}`, value: args }),
+      ]),
+    ),
     files: {
       follow: async (file: string) => {
         calls.push({ name: 'follow', value: file });
@@ -79,7 +85,7 @@ test('commands register the complete action surface and honor trust/focus/config
   } as any;
   const guideCalls: string[] = [];
   const registrations = registerCommands(controller, (section) => guideCalls.push(section));
-  assert.equal(handlers.size, 24);
+  assert.equal(handlers.size, 30);
   await handlers.get('logline.runCommand')!();
   for (const name of [
     'logline.stopCommand',
@@ -122,6 +128,24 @@ test('commands register the complete action surface and honor trust/focus/config
     '200',
   ]);
   assert.deepEqual(guideCalls, ['guide', 'whatsNew']);
+  // Connection commands pass a connection id from a command link through, and ignore anything else.
+  await handlers.get('logline.addConnection')!();
+  await handlers.get('logline.searchConnection')!('prod');
+  await handlers.get('logline.runConnectionSql')!({ not: 'an id' });
+  await handlers.get('logline.tailConnection')!('prod');
+  await handlers.get('logline.testConnection')!();
+  await handlers.get('logline.removeConnection')!('prod');
+  assert.deepEqual(
+    calls.filter((call) => String(call.name).startsWith('connections.')),
+    [
+      { name: 'connections.add', value: [] },
+      { name: 'connections.query', value: ['prod'] },
+      { name: 'connections.runSql', value: [undefined] },
+      { name: 'connections.tail', value: ['prod', ''] },
+      { name: 'connections.test', value: [undefined] },
+      { name: 'connections.remove', value: ['prod'] },
+    ],
+  );
   assert.ok(calls.some((call) => call.name === 'command' && call.value === 'logline.logs.focus'));
   assert.ok(calls.some((call) => call.name === 'config:captureTerminals' && call.value === true));
   assert.ok(calls.some((call) => call.name === 'config:captureTerminals' && call.value === false));

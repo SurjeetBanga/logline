@@ -918,6 +918,64 @@ select {
   border-radius: 3px;
   font-size: 11px;
 }
+/* An action at the end of the source list, not a source. */
+.source-select.source-action {
+  margin-top: 4px;
+  border-top: 1px solid var(--vscode-menu-separatorBackground, #454545);
+  color: var(--vscode-textLink-foreground, #3794ff);
+}
+/* Shown while a connection is the selected source: nothing is fetched until Run or Tail. */
+.connection-bar {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 6px;
+  min-width: 0;
+}
+.connection-bar[hidden] {
+  display: none;
+}
+.connection-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.connection-range {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--vscode-descriptionForeground, #aaa);
+}
+.connection-range select {
+  height: 26px;
+  padding: 2px 6px;
+}
+#connectionRun:not(:disabled) {
+  color: var(--vscode-button-foreground, #fff);
+  background: var(--vscode-button-background, #0e639c);
+}
+#connectionRun:not(:disabled):hover {
+  background: var(--vscode-button-hoverBackground, #1177bb);
+}
+.connection-note {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--vscode-descriptionForeground, #aaa);
+  font-size: 11px;
+}
+.connection-preview {
+  font-family: var(--vscode-editor-font-family, monospace);
+}
+.connection-preview:empty {
+  display: none;
+}
+.connection-note.connection-error {
+  color: var(--vscode-errorForeground, #f48771);
+}
 /* Chromium adds a datalist disclosure chevron to inputs with `list`. The
    suggestions remain available while typing, but the disclosure is redundant
    beside the editor's own controls. */

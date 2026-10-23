@@ -22,6 +22,7 @@ import type { LogTransfer } from './log-transfer';
 import { manageServers } from './servers';
 import { openSource } from './source-navigation';
 import type { AgentLogAccess } from './agent-access';
+import type { ConnectionManager } from './connections';
 
 interface MessageServices {
   store: LogStore;
@@ -52,6 +53,7 @@ interface MessageServices {
   doctorAction(action: DoctorAction, siteId?: string): Promise<void>;
   connectAgent(): Promise<void>;
   showStatus(): Promise<void>;
+  connections?: Pick<ConnectionManager, 'fetch' | 'tail' | 'runSql' | 'preview' | 'add'>;
 }
 export async function handleMessage(
   services: MessageServices,
@@ -210,6 +212,29 @@ export async function handleMessage(
     case 'manageServers':
       await manageServers();
       return;
+    case 'addConnection':
+      await services.connections?.add();
+      return;
+    case 'connectionFetch':
+      await services.connections?.fetch(msg.connectionId, msg.query, msg.range);
+      return;
+    case 'connectionTail':
+      await services.connections?.tail(msg.connectionId, msg.query, msg.enabled);
+      return;
+    case 'connectionSql':
+      await services.connections?.runSql(msg.connectionId);
+      return;
+    case 'connectionPreview': {
+      const preview = (await services.connections?.preview(msg.connectionId, msg.query, msg.range)) ?? { local: [] };
+      send({
+        type: 'connectionPreview',
+        connectionId: msg.connectionId,
+        query: msg.query,
+        range: msg.range,
+        ...preview,
+      });
+      return;
+    }
     case 'run': {
       if (!vscode.workspace.isTrusted) {
         void vscode.window.showWarningMessage('Trust this workspace before running a server command.');

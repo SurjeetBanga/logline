@@ -1615,7 +1615,7 @@ test('the run picker selects a run and supports keyboard navigation', () => {
 });
 
 test('the combined scope picker switches between source and run tabs', () => {
-  const { get, receive, app } = viewer();
+  const { get, receive, app, messages } = viewer();
   app.state.selectedServer = '';
   get('scopeMenu').hidden = true;
   receive({
@@ -1654,7 +1654,12 @@ test('the combined scope picker switches between source and run tabs', () => {
   get('server').listeners.get('click')!({ stopPropagation() {} });
   assert.equal(get('scopeMenu').hidden, false);
   assert.equal(get('sourcesTab').attributes['aria-selected'], 'true');
-  assert.equal(get('sourceMenu').children.length, 3);
+  assert.equal(get('sourceMenu').children.length, 4);
+  const add = get('sourceMenu').children[3];
+  assert.equal(add.textContent, 'Add connection…');
+  add.listeners.get('click')!();
+  assert.deepEqual(JSON.parse(JSON.stringify(messages.at(-1))), { type: 'addConnection' });
+  get('server').listeners.get('click')!({ stopPropagation() {} });
 
   get('runsTab').listeners.get('click')!();
   assert.equal(get('sourcesTab').attributes['aria-selected'], 'false');
@@ -3263,4 +3268,173 @@ test('My changes appears in a git repository and adds or removes changed:true', 
   snapshot({});
   assert.equal(get('changedOnly').hidden, false);
   assert.equal(get('changedOnly').attributes['aria-pressed'], 'true');
+});
+
+test('a saved range the panel does not offer falls back to the last hour', () => {
+  assert.equal(viewer({ range: '2h' }).app.state.connectionRange, '1h');
+  assert.equal(viewer({ range: '7d' }).app.state.connectionRange, '7d');
+});
+
+test('a selected connection shows its range, Run, Tail and Run SQL, with the SQL a filter becomes', () => {
+  const { get, app, receive, messages, timers, savedStates } = viewer({ server: '' });
+  const plain = (value: unknown) => JSON.parse(JSON.stringify(value));
+  const connection = {
+    id: 'app',
+    sourceId: 'conn:app',
+    label: 'SQLite · app',
+    type: 'sqlite',
+    mapped: true,
+    tailing: false,
+  };
+  const snapshot = (extra: Record<string, unknown>) =>
+    receive({
+      type: 'snapshot',
+      generation: 1,
+      newest: 100,
+      status: 'Ready',
+      command: '',
+      running: false,
+      total: 0,
+      retained: 0,
+      discarded: 0,
+      bytes: 0,
+      maxBytes: 1,
+      truncated: 0,
+      events: [],
+      columns: [],
+      page: 0,
+      pages: 1,
+      matched: 0,
+      servers: [
+        { id: 'api', label: 'API', status: 'idle', activeSessions: 0 },
+        { id: 'conn:app', label: 'SQLite · app', status: 'idle', activeSessions: 0 },
+      ],
+      sessions: [],
+      connections: [connection],
+      ...extra,
+    });
+  snapshot({});
+  assert.equal(get('connectionBar').hidden, true, 'hidden until a connection is the source');
+  // A connection just added is selected from the editor. The snapshot that asks for it was built for the previous
+  // source, so it is not rendered: the next one, for the connection, is.
+  const before = messages.length;
+  snapshot({ applySource: 'conn:app', events: [{ id: 7, level: 'info', message: 'from the previous source' }] });
+  assert.equal(app.state.selectedServer, 'conn:app');
+  assert.notEqual(app.table.events[0]?.message, 'from the previous source');
+  assert.equal(plain(messages.slice(before).find((message) => message.type === 'snapshot'))?.serverId, 'conn:app');
+  snapshot({});
+  assert.equal(get('connectionBar').hidden, false);
+  assert.equal(get('empty').textContent, 'Choose a range and press Run to fetch rows from SQLite · app.');
+  assert.equal(get('connectionResult').textContent, 'Choose a range and press Run. Nothing is fetched until you do.');
+  assert.equal(
+    messages.some((message) => message.type === 'connectionFetch'),
+    false,
+    'nothing runs on its own',
+  );
+  // The preview of the SQL the filter becomes is asked for after a pause.
+  [...timers.values()].at(-1)!();
+  assert.deepEqual(plain(messages.at(-1)), {
+    type: 'connectionPreview',
+    connectionId: 'app',
+    query: 'timeout',
+    range: '1h',
+  });
+  receive({
+    type: 'connectionPreview',
+    connectionId: 'app',
+    query: 'timeout',
+    range: '1h',
+    statement: 'SELECT * FROM "app_logs" WHERE …',
+    local: ['/time.?out/'],
+  });
+  assert.equal(
+    get('connectionPreview').textContent,
+    'Runs as: SELECT * FROM "app_logs" WHERE … · Filtered locally: /time.?out/',
+  );
+  // A preview for an older filter is ignored.
+  receive({ type: 'connectionPreview', connectionId: 'app', query: 'old', range: '1h', statement: 'stale', local: [] });
+  assert.match(get('connectionPreview').textContent, /^Runs as: SELECT/);
+  get('connectionRange').value = '24h';
+  get('connectionRange').listeners.get('change')!();
+  assert.equal(app.state.connectionRange, '24h');
+  assert.equal(savedStates.at(-1)?.range, '24h');
+  get('connectionRun').listeners.get('click')!();
+  assert.deepEqual(plain(messages.at(-1)), {
+    type: 'connectionFetch',
+    connectionId: 'app',
+    query: 'timeout',
+    range: '24h',
+  });
+  // The toolbar's run button runs the search too.
+  get('run').listeners.get('click')!();
+  assert.deepEqual(plain(messages.at(-1)).type, 'connectionFetch');
+  get('connectionTail').listeners.get('click')!();
+  assert.deepEqual(plain(messages.at(-1)), {
+    type: 'connectionTail',
+    connectionId: 'app',
+    query: 'timeout',
+    enabled: true,
+  });
+  get('connectionSql').listeners.get('click')!();
+  assert.deepEqual(plain(messages.at(-1)), { type: 'connectionSql', connectionId: 'app' });
+  const last = {
+    sessionId: 's',
+    kind: 'fetch',
+    running: false,
+    fetched: 500,
+    kept: 12,
+    total: 4800,
+    elapsedMs: 38,
+    local: [],
+    at: 0,
+  };
+  snapshot({ connections: [{ ...connection, last }] });
+  assert.equal(
+    get('connectionResult').textContent,
+    'Fetched 500 of 4,800 rows · 12 match the filter · 38 ms · read-only',
+  );
+  snapshot({ connections: [{ ...connection, last: { ...last, running: true } }] });
+  assert.equal(get('connectionResult').textContent, 'Fetching…');
+  assert.equal(get('connectionRun').disabled, true);
+  snapshot({ connections: [{ ...connection, last: { ...last, error: 'no such table: app_logs' } }] });
+  assert.equal(get('connectionResult').textContent, 'Failed: no such table: app_logs');
+  assert.equal(get('connectionResult').classList.contains('connection-error'), true);
+  snapshot({
+    connections: [{ ...connection, tailing: true, last: { ...last, kind: 'tail', running: true, kept: 3 } }],
+  });
+  assert.equal(get('connectionTail').textContent, 'Stop tail');
+  assert.equal(get('connectionTail').attributes['aria-pressed'], 'true');
+  assert.equal(get('connectionResult').textContent, 'Tailing · 3 rows');
+  assert.equal(get('connectionRun').disabled, false, 'a tail does not block a search');
+  snapshot({ connections: [{ ...connection, last: { ...last, kind: 'tail', running: false, kept: 3 } }] });
+  assert.equal(get('connectionResult').textContent, 'Tail stopped · 3 rows');
+  assert.equal(get('empty').textContent, 'No matching rows. Change the filter or the range and press Run.');
+  // A search just run is selected with its source, so earlier runs' rows do not mix in.
+  const run = {
+    id: 'run-2',
+    serverId: 'conn:app',
+    server: 'SQLite · app',
+    command: 'level:error · last 1h',
+    status: 'exited',
+    startedAt: 1,
+  };
+  snapshot({ applySource: 'conn:app', applyRun: 'run-2', sessions: [run] });
+  assert.equal(app.state.selectedSession, 'run-2');
+  snapshot({ sessions: [run] });
+  assert.equal(app.state.selectedSession, 'run-2');
+  assert.match(get('server').textContent, /level:error · last 1h/);
+  // Without a mapped table, Run asks for SQL.
+  snapshot({ connections: [{ ...connection, mapped: false }] });
+  assert.equal(get('connectionResult').textContent, 'No log table is mapped. Use Run SQL to query it.');
+  assert.equal(get('connectionPreview').textContent, '');
+  get('run').listeners.get('click')!();
+  assert.deepEqual(plain(messages.at(-1)), { type: 'connectionSql', connectionId: 'app' });
+  // Any other source hides the bar again.
+  get('sourceMenu').children[1].listeners.get('click')!();
+  assert.equal(app.state.selectedServer, 'api');
+  assert.equal(get('connectionBar').hidden, true);
+  get('run').listeners.get('click')!();
+  assert.deepEqual(plain(messages.at(-1)), { type: 'run', serverId: 'api' });
+  get('addConnection').listeners.get('click')!();
+  assert.deepEqual(plain(messages.at(-1)), { type: 'addConnection' });
 });

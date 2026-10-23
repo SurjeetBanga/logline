@@ -676,6 +676,14 @@
       searchChips: element("searchChips"),
       searchClear: element("searchClear"),
       searchError: element("searchError"),
+      connectionBar: element("connectionBar"),
+      addConnection: element("addConnection"),
+      connectionRange: element("connectionRange"),
+      connectionRun: element("connectionRun"),
+      connectionTail: element("connectionTail"),
+      connectionSql: element("connectionSql"),
+      connectionPreview: element("connectionPreview"),
+      connectionResult: element("connectionResult"),
       copyResults: element("copyResults"),
       fieldSuggestions: element("fieldSuggestions"),
       searchHelp: element("searchHelp"),
@@ -2459,6 +2467,10 @@ Span ${call.spanId}`;
     return void 0;
   }
 
+  // src/core/connections.ts
+  var RANGES = { "15m": 15, "1h": 60, "4h": 240, "24h": 1440, "7d": 10080 };
+  var RANGE_CHOICES = Object.keys(RANGES);
+
   // src/webview/state.ts
   var LEVELS = ["trace", "debug", "info", "warn", "error", "fatal", "unclassified"];
   var ViewerState = class {
@@ -2492,8 +2504,11 @@ Span ${call.spanId}`;
     rowHintDismissed;
     /** The selected tab, kept so the panel reopens on it. */
     view;
+    /** The time range a connection search covers, such as `1h`. */
+    connectionRange;
     constructor(saved = {}) {
       this.view = typeof saved.view === "string" ? saved.view : "logs";
+      this.connectionRange = typeof saved.range === "string" && RANGE_CHOICES.includes(saved.range) ? saved.range : "1h";
       this.following = !saved.sort;
       this.cellHintDismissed = saved.cellHintDismissed === true;
       this.rowHintDismissed = saved.rowHintDismissed === true;
@@ -2573,7 +2588,8 @@ Span ${call.spanId}`;
         extraColumns: this.extraColumns,
         ...this.cellHintDismissed ? { cellHintDismissed: true } : {},
         ...this.rowHintDismissed ? { rowHintDismissed: true } : {},
-        ...this.view !== "logs" ? { view: this.view } : {}
+        ...this.view !== "logs" ? { view: this.view } : {},
+        ...this.connectionRange !== "1h" ? { range: this.connectionRange } : {}
       };
     }
   };
@@ -2931,6 +2947,138 @@ Span ${call.spanId}`;
       setQuery,
       appendQuery: (value) => setQuery(`${appliedQuery} ${value}`, true),
       clear
+    };
+  }
+
+  // src/webview/search/connection-bar.ts
+  var PREVIEW_DELAY_MS = 250;
+  function createConnectionBar(elements, state, api, scope, query, saveState) {
+    let connections = [];
+    let previewKey = "";
+    let previewTimer;
+    const numbers = new Intl.NumberFormat();
+    const selected = () => connections.find((connection) => connection.sourceId === state.selectedServer);
+    function resultText(connection) {
+      const last = connection.last;
+      if (!last)
+        return connection.mapped ? "Choose a range and press Run. Nothing is fetched until you do." : "No log table is mapped. Use Run SQL to query it.";
+      const rows = `${numbers.format(last.kept)} row${last.kept === 1 ? "" : "s"}`;
+      if (last.kind === "tail")
+        return !last.running ? `Tail stopped \xB7 ${rows}` : last.error ? `Tail interrupted: ${last.error}` : `Tailing \xB7 ${rows}`;
+      if (last.running) return "Fetching\u2026";
+      if (last.error) return `Failed: ${last.error}`;
+      const of = last.total !== void 0 && last.total > last.fetched ? ` of ${numbers.format(last.total)}` : "";
+      const kept = last.kept < last.fetched ? ` \xB7 ${numbers.format(last.kept)} match the filter` : "";
+      const time = last.elapsedMs !== void 0 ? ` \xB7 ${numbers.format(last.elapsedMs)} ms` : "";
+      return `Fetched ${numbers.format(last.fetched)}${of} row${last.fetched === 1 ? "" : "s"}${kept}${time} \xB7 read-only`;
+    }
+    function render() {
+      const connection = selected();
+      elements.connectionBar.hidden = !connection;
+      if (!connection) {
+        clearTimeout(previewTimer);
+        previewKey = "";
+        return;
+      }
+      const busy = connection.last?.running === true && connection.last.kind !== "tail";
+      elements.connectionRange.value = state.connectionRange;
+      elements.connectionRange.disabled = !connection.mapped;
+      elements.connectionRun.disabled = !connection.mapped || busy;
+      elements.connectionRun.title = connection.mapped ? `Fetch the newest rows from ${connection.label} in this range that match the filter` : "Map a log table to search it; Run SQL works without one";
+      elements.connectionTail.disabled = !connection.mapped;
+      elements.connectionTail.setAttribute("aria-pressed", String(connection.tailing));
+      elements.connectionTail.textContent = connection.tailing ? "Stop tail" : "Tail";
+      elements.connectionTail.title = connection.tailing ? "Stop reading new rows" : "Show the newest matching rows, then keep reading rows as they are added";
+      elements.connectionResult.textContent = resultText(connection);
+      elements.connectionResult.title = connection.last?.statement ?? "";
+      elements.connectionResult.classList[connection.last?.error ? "add" : "remove"]("connection-error");
+      if (!connection.mapped) elements.connectionPreview.textContent = "";
+      else requestPreview(connection);
+    }
+    function requestPreview(connection = selected()) {
+      if (!connection?.mapped) return;
+      const message = {
+        type: "connectionPreview",
+        connectionId: connection.id,
+        query: query(),
+        range: state.connectionRange
+      };
+      const key = JSON.stringify(message);
+      if (key === previewKey) return;
+      previewKey = key;
+      clearTimeout(previewTimer);
+      previewTimer = setTimeout(() => api.postMessage(message), PREVIEW_DELAY_MS);
+    }
+    function receivePreview(preview) {
+      const connection = selected();
+      const { type, connectionId, query: query2, range } = preview;
+      if (!connection || JSON.stringify({ type, connectionId, query: query2, range }) !== previewKey) return;
+      const note = elements.connectionPreview;
+      note.classList[preview.error ? "add" : "remove"]("connection-error");
+      if (preview.error) {
+        note.textContent = preview.error;
+        note.title = "";
+        return;
+      }
+      const local = preview.local.length ? ` \xB7 Filtered locally: ${preview.local.join(" ")}` : "";
+      note.textContent = preview.statement ? `Runs as: ${preview.statement}${local}` : "";
+      note.title = preview.statement ? `${preview.statement}${preview.local.length ? `
+
+Terms SQL cannot express are applied to the fetched rows: ${preview.local.join(" ")}` : ""}` : "";
+    }
+    function run() {
+      const connection = selected();
+      if (!connection) return false;
+      if (connection.mapped)
+        api.postMessage({
+          type: "connectionFetch",
+          connectionId: connection.id,
+          query: query(),
+          range: state.connectionRange
+        });
+      else api.postMessage({ type: "connectionSql", connectionId: connection.id });
+      return true;
+    }
+    scope.listen(elements.connectionRange, "change", () => {
+      state.connectionRange = elements.connectionRange.value;
+      saveState();
+      requestPreview();
+    });
+    scope.listen(elements.connectionRun, "click", () => run());
+    scope.listen(elements.connectionTail, "click", () => {
+      const connection = selected();
+      if (connection)
+        api.postMessage({
+          type: "connectionTail",
+          connectionId: connection.id,
+          query: query(),
+          enabled: !connection.tailing
+        });
+    });
+    scope.listen(elements.connectionSql, "click", () => {
+      const connection = selected();
+      if (connection) api.postMessage({ type: "connectionSql", connectionId: connection.id });
+    });
+    scope.track(() => clearTimeout(previewTimer));
+    return {
+      update(list) {
+        connections = list ?? [];
+        render();
+      },
+      render,
+      receivePreview,
+      /** The filter changed: refresh the preview of the SQL it becomes. */
+      queryChanged: () => requestPreview(),
+      /** Fetch from the selected connection; false when no connection is selected. */
+      run,
+      connections: () => connections,
+      /** What the empty table says while a connection is selected, or undefined for other sources. */
+      emptyText() {
+        const connection = selected();
+        if (!connection) return void 0;
+        if (connection.last) return "No matching rows. Change the filter or the range and press Run.";
+        return connection.mapped ? `Choose a range and press Run to fetch rows from ${connection.label}.` : `Use Run SQL to query ${connection.label}.`;
+      }
     };
   }
 
@@ -3987,6 +4135,7 @@ Span ${call.spanId}`;
       (traceId) => traceView.show(traceId)
     );
     const search = createSearch(elements, state, api, popovers, { filterChanged, updateScopeSelection }, scope);
+    const connectionBar = createConnectionBar(elements, state, api, scope, () => search.query(), saveState);
     const request = (force = false) => bridge.request(force);
     const traceView = createTraceView(elements, api, scope, {
       showContext: (id) => inspection.showContext(id),
@@ -4126,6 +4275,10 @@ Span ${call.spanId}`;
         metricList.receive(data.metrics);
         return;
       }
+      if (data.type === "connectionPreview") {
+        connectionBar.receivePreview(data);
+        return;
+      }
       if (data.type === "aiCalls") {
         aiCalls.receive(data.aiCalls);
         return;
@@ -4172,6 +4325,12 @@ Span ${call.spanId}`;
         search.setQuery(data.applyQuery, true);
       }
       if (data.openTrace) traceView.show(data.openTrace);
+      if (data.applySource && data.servers?.some((server) => server.id === data.applySource) && (data.applySource !== state.selectedServer || (data.applyRun ?? "") !== state.selectedSession)) {
+        views.show("logs");
+        selectSource(data.applySource, data.applyRun);
+        bridge.flush();
+        return;
+      }
       const receiverWasRunning = otlpRunning;
       otlpRunning = data.otlp?.running === true;
       otlpEndpoint = data.otlp?.endpoint;
@@ -4286,6 +4445,7 @@ Span ${call.spanId}`;
           updateSourceSelection();
         }
       }
+      connectionBar.update(data.connections);
       if (data.sessions) {
         const sessions = data.sessions.filter(
           (session) => !state.selectedServer || session.serverId === state.selectedServer || state.selectedServer.startsWith(`${session.serverId}::`)
@@ -4356,7 +4516,7 @@ Span ${call.spanId}`;
         }
         elements.empty.hidden = rows.length > 0;
         elements.rowHint.hidden = state.rowHintDismissed || !rows.length;
-        elements.empty.textContent = data.total ? "No matching events in retained history." : "Run a server command to see its logs here.";
+        elements.empty.textContent = connectionBar.emptyText() ?? (data.total ? "No matching events in retained history." : "Run a server command to see its logs here.");
         if (state.following && !state.paused && !state.selectedSort) table.scheduleRenderWindow(true);
       }
       bridge.flush();
@@ -4463,6 +4623,7 @@ Span ${call.spanId}`;
       state.filterChanged();
       updateCopyResultsControl();
       updateChangesControl();
+      connectionBar.queryChanged();
       saveState();
       requestInteraction();
     }
@@ -4784,11 +4945,10 @@ Span ${call.spanId}`;
       "click",
       () => api.postMessage({ type: "breakOnQuery", query: search.query(), levels: state.currentLevels() })
     );
-    scope.listen(
-      elements.run,
-      "click",
-      () => api.postMessage({ type: "run", serverId: state.selectedServer || void 0 })
-    );
+    scope.listen(elements.run, "click", () => {
+      if (!connectionBar.run()) api.postMessage({ type: "run", serverId: state.selectedServer || void 0 });
+    });
+    scope.listen(elements.addConnection, "click", () => api.postMessage({ type: "addConnection" }));
     scope.listen(document, "visibilitychange", () => {
       if (!document.hidden) request();
     });
@@ -4845,6 +5005,15 @@ Span ${call.spanId}`;
       all.textContent = activeCount ? `All sources \xB7 ${activeCount} active` : "All sources";
       all.title = "Show logs from every source";
       scope.listen(all, "click", () => selectSource(""));
+      const add = document.createElement("button");
+      add.type = "button";
+      add.className = "source-select source-action";
+      add.textContent = "Add connection\u2026";
+      add.title = "Search and tail the log table of a SQLite or Postgres database";
+      scope.listen(add, "click", () => {
+        scopePopover.close(true);
+        api.postMessage({ type: "addConnection" });
+      });
       const options = [
         all,
         ...servers.map((server) => {
@@ -4857,7 +5026,8 @@ Span ${call.spanId}`;
           option.title = formatted.title;
           scope.listen(option, "click", () => selectSource(server.id));
           return option;
-        })
+        }),
+        add
       ];
       elements.sourceMenu.replaceChildren(...options);
       updateSourceSelection();
@@ -4870,7 +5040,8 @@ Span ${call.spanId}`;
     }
     function updateSourceSelection() {
       for (const choice of elements.sourceMenu.querySelectorAll(".source-select"))
-        choice.setAttribute("aria-selected", String(choice.dataset.sourceId === state.selectedServer));
+        if (choice.dataset.sourceId !== void 0)
+          choice.setAttribute("aria-selected", String(choice.dataset.sourceId === state.selectedServer));
       updateScopeSelection();
     }
     function updateScopeSelection() {
@@ -4896,10 +5067,10 @@ Span ${call.spanId}`;
       elements.sessionMenu.hidden = tab !== "runs";
       if (focus) (tab === "sources" ? elements.sourcesTab : elements.runsTab).focus();
     }
-    function selectSource(id) {
+    function selectSource(id, run = "") {
       search.clearAutocomplete();
       state.selectedServer = id;
-      state.selectedSession = "";
+      state.selectedSession = run;
       sessionSignature = "";
       visibleSessions = [];
       elements.server.value = id;
@@ -4911,6 +5082,7 @@ Span ${call.spanId}`;
       setScopeTab("sources");
       saveState();
       scopePopover.close(true);
+      connectionBar.render();
       requestInteraction();
     }
     function runName(session) {

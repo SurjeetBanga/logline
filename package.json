@@ -113,6 +113,36 @@
         "category": "Logline"
       },
       {
+        "command": "logline.addConnection",
+        "title": "Add Connection…",
+        "category": "Logline"
+      },
+      {
+        "command": "logline.searchConnection",
+        "title": "Search Connection…",
+        "category": "Logline"
+      },
+      {
+        "command": "logline.runConnectionSql",
+        "title": "Run SQL on Connection…",
+        "category": "Logline"
+      },
+      {
+        "command": "logline.tailConnection",
+        "title": "Start or Stop Tailing Connection",
+        "category": "Logline"
+      },
+      {
+        "command": "logline.testConnection",
+        "title": "Test Connection",
+        "category": "Logline"
+      },
+      {
+        "command": "logline.removeConnection",
+        "title": "Remove Connection…",
+        "category": "Logline"
+      },
+      {
         "command": "logline.breakOnMatchingLogs",
         "title": "Break on Matching Logs",
         "category": "Logline"
@@ -839,6 +869,126 @@
               "command"
             ]
           }
+        },
+        "logline.connections": {
+          "type": "array",
+          "default": [],
+          "markdownDescription": "Databases whose log tables Logline can search and tail. Add one with **Logline: Add Connection**. Passwords are kept in VS Code secret storage, never here.",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "description": "Stable connection identifier."
+              },
+              "label": {
+                "type": "string",
+                "description": "Name shown in the Logs panel."
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "sqlite",
+                  "postgres"
+                ]
+              },
+              "path": {
+                "type": "string",
+                "description": "SQLite: the database file, absolute or relative to the first workspace folder."
+              },
+              "host": {
+                "type": "string",
+                "description": "Postgres: host name.",
+                "default": "localhost"
+              },
+              "port": {
+                "type": "integer",
+                "description": "Postgres: port.",
+                "default": 5432
+              },
+              "database": {
+                "type": "string",
+                "description": "Postgres: database name."
+              },
+              "user": {
+                "type": "string",
+                "description": "Postgres: user name."
+              },
+              "ssl": {
+                "type": "boolean",
+                "description": "Postgres: require TLS and verify the server certificate.",
+                "default": false
+              },
+              "logs": {
+                "type": "object",
+                "description": "The table that holds one row per log event, and which of its columns hold the time, level, message, service, and trace id. Other columns become fields.",
+                "properties": {
+                  "table": {
+                    "type": "string",
+                    "description": "Table name, or schema.table."
+                  },
+                  "timestamp": {
+                    "type": "string",
+                    "description": "Column with the event time: a date/time type, ISO 8601 text, or seconds or milliseconds since 1970."
+                  },
+                  "level": {
+                    "type": "string",
+                    "description": "Column with the level or severity."
+                  },
+                  "message": {
+                    "type": "string",
+                    "description": "Column with the message."
+                  },
+                  "service": {
+                    "type": "string",
+                    "description": "Column with the service or application name."
+                  },
+                  "traceId": {
+                    "type": "string",
+                    "description": "Column with the trace or request id."
+                  },
+                  "timestampFormat": {
+                    "type": "string",
+                    "enum": [
+                      "iso",
+                      "epoch_s",
+                      "epoch_ms"
+                    ],
+                    "description": "How the time column stores time. Detected when left out."
+                  }
+                },
+                "required": [
+                  "table",
+                  "timestamp"
+                ]
+              }
+            },
+            "required": [
+              "id",
+              "type"
+            ]
+          }
+        },
+        "logline.connectionMaxRows": {
+          "type": "integer",
+          "default": 5000,
+          "minimum": 100,
+          "maximum": 50000,
+          "description": "Most rows one search or SQL query fetches from a connection. The newest matching rows are kept."
+        },
+        "logline.connectionPollSeconds": {
+          "type": "integer",
+          "default": 2,
+          "minimum": 1,
+          "maximum": 300,
+          "description": "How often a tailed connection is read for new rows."
+        },
+        "logline.connectionTimeoutSeconds": {
+          "type": "integer",
+          "default": 10,
+          "minimum": 1,
+          "maximum": 300,
+          "description": "Longest a query on a connection may run before it is stopped."
         }
       }
     }
@@ -868,6 +1018,7 @@
     "ovsx": "^1.2.0",
     "oxlint": "^1.88.0",
     "oxlint-tsgolint": "^7.0.2002",
+    "pg": "8.23.1",
     "prettier": "^3.9.10",
     "typescript": "^7.0.2"
   },

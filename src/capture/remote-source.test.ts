@@ -1,0 +1,269 @@
+import assert from 'node:assert/strict';
+import { afterEach, mock, test } from 'node:test';
+import { LogStore } from '../core/log-store';
+import type { FetchRequest, FetchResult, RemoteConnector, RemoteRecord } from './connectors/types';
+import { Ingestion } from './ingestion';
+import { RemoteSource, type RemoteTarget } from './remote-source';
+import { RuntimeState } from './runtime-state';
+import { SessionRegistry } from './session-registry';
+
+const BASE = Date.parse('2026-10-23T09:00:00Z');
+const row = (minute: number, level: string, message: string): RemoteRecord => ({
+  line: JSON.stringify({ timestamp: new Date(BASE + minute * 60000).toISOString(), level, message }),
+  timeMs: BASE + minute * 60000,
+});
+const result = (records: RemoteRecord[], extra: Partial<FetchResult> = {}): FetchResult => ({
+  records,
+  pushed: [],
+  local: [],
+  statement: 'SELECT …',
+  elapsedMs: 12,
+  ...extra,
+});
+
+function setup(settings: Record<string, unknown> = {}) {
+  const store = new LogStore(1000);
+  const registry = new SessionRegistry();
+  const ingestion = new Ingestion(store, () => {
+    throw new Error('fetched rows are never written to disk');
+  });
+  const state = new RuntimeState(() => undefined);
+  const config = {
+    get: <T>(key: string, fallback: T): T => (Object.hasOwn(settings, key) ? (settings[key] as T) : fallback),
+  };
+  const remote = new RemoteSource(config, registry, ingestion, state);
+  const target = (connector: RemoteConnector): RemoteTarget => ({
+    id: 'app',
+    sourceId: 'conn:app',
+    label: 'SQLite · app',
+    connector,
+  });
+  const messages = () => store.all().map((event) => event.message);
+  return { store, registry, state, remote, target, messages };
+}
+
+afterEach(() => mock.timers.reset());
+
+test('a fetch keeps the rows that match the whole search, oldest first, in a run of its own', async () => {
+  const { remote, target, registry, state, store, messages } = setup({ connectionMaxRows: 300 });
+  const requests: FetchRequest[] = [];
+  const connector: RemoteConnector = {
+    async fetchLogs(request) {
+      requests.push(request);
+      // Newest first, as a search returns them; the database could not apply the regex.
+      return result([row(3, 'error', 'timeout'), row(2, 'info', 'ok'), row(1, 'error', 'time out')], {
+        total: 10,
+        pushed: ['level:error'],
+        local: ['/time.?out/'],
+      });
+    },
+  };
+  const started: string[] = [];
+  const info = await remote.fetch(target(connector), {
+    query: 'level:error /time.?out/',
+    fromMs: BASE,
+    toMs: BASE + 3600000,
+    title: 'level:error /time.?out/ · last 1h',
+    started: (sessionId) => {
+      // Called before the query runs, so the panel can show the run as its rows arrive.
+      assert.equal(requests.length, 0);
+      started.push(sessionId);
+    },
+  });
+  assert.deepEqual(started, [info.sessionId]);
+  assert.deepEqual(requests, [
+    {
+      query: 'level:error /time.?out/',
+      fromMs: BASE,
+      toMs: BASE + 3600000,
+      limit: 300,
+      order: 'desc',
+      countTotal: true,
+    },
+  ]);
+  assert.deepEqual(messages(), ['time out', 'timeout']);
+  assert.deepEqual(
+    store.all().map((event) => [event.serverId, event.server, event.stream, event.timestampMs]),
+    [
+      ['conn:app', 'SQLite · app', 'remote', BASE + 60000],
+      ['conn:app', 'SQLite · app', 'remote', BASE + 180000],
+    ],
+  );
+  assert.equal(info.running, false);
+  assert.equal(info.fetched, 3);
+  assert.equal(info.kept, 2);
+  assert.equal(info.total, 10);
+  assert.deepEqual(info.local, ['/time.?out/']);
+  assert.equal(remote.last('app'), info);
+  const record = registry.records.get(info.sessionId)!;
+  assert.equal(record.sourceKind, 'remote');
+  assert.equal(record.status, 'exited');
+  assert.equal(record.exitReason, '2 rows');
+  assert.equal(record.events, 2);
+  assert.equal(record.command, 'level:error /time.?out/ · last 1h');
+  assert.equal(state.status, 'Fetched 2 rows from SQLite · app');
+  assert.equal(remote.active, 0);
+});
+
+test('typed SQL keeps its own row order and filter; a store without SQL says so', async () => {
+  const { remote, target, messages } = setup();
+  const rows = [row(5, 'info', 'b'), row(1, 'info', 'a')];
+  const info = await remote.fetch(
+    target({
+      fetchLogs: async () => assert.fail('a typed query does not search'),
+      runSql: async (sql, limit) => {
+        assert.equal(sql, 'SELECT * FROM logs ORDER BY id DESC');
+        assert.equal(limit, 5000);
+        return result(rows);
+      },
+    }),
+    { query: 'ignored', sql: 'SELECT * FROM logs ORDER BY id DESC', title: 'SQL' },
+  );
+  assert.equal(info.kind, 'sql');
+  assert.deepEqual(messages(), ['b', 'a']);
+  const failed = await remote.fetch(target({ fetchLogs: async () => result([]) }), {
+    query: '',
+    sql: 'SELECT 1',
+    title: 'SQL',
+  });
+  assert.equal(failed.error, 'SQLite · app does not run SQL.');
+});
+
+test('a failed fetch is a failed run that says why', async () => {
+  const { remote, target, registry, state } = setup();
+  const info = await remote.fetch(
+    target({
+      fetchLogs: async () => {
+        throw new Error('no such table: app_logs');
+      },
+    }),
+    { query: '', title: 'All rows · last 1h' },
+  );
+  assert.equal(info.error, 'no such table: app_logs');
+  const record = registry.records.get(info.sessionId)!;
+  assert.equal(record.status, 'failed');
+  assert.equal(record.captureReason, 'no such table: app_logs');
+  assert.equal(state.status, 'SQLite · app: no such table: app_logs');
+});
+
+test('stopping a fetch cancels the query and keeps none of its rows', async () => {
+  const { remote, target, registry, messages } = setup();
+  let release!: (value: FetchResult) => void;
+  let signal: AbortSignal | undefined;
+  const pending = remote.fetch(
+    target({
+      fetchLogs: (_request, abort) => {
+        signal = abort;
+        return new Promise((resolve) => (release = resolve));
+      },
+    }),
+    { query: '', title: 'All rows' },
+  );
+  const [sessionId] = [...registry.records.keys()];
+  assert.equal(remote.active, 1);
+  remote.stopSessionById(sessionId);
+  assert.equal(signal?.aborted, true);
+  release(result([row(1, 'info', 'late')]));
+  const info = await pending;
+  assert.deepEqual(messages(), []);
+  assert.equal(info.running, false);
+  assert.equal(registry.records.get(sessionId)!.exitReason, 'stopped');
+});
+
+test('a tail shows the newest rows, then only rows it has not shown, and survives a failed read', async () => {
+  mock.timers.enable({ apis: ['setInterval'] });
+  const { remote, target, registry, messages } = setup({ connectionPollSeconds: 1 });
+  const requests: FetchRequest[] = [];
+  const reads: (() => FetchResult)[] = [
+    // The newest rows, newest first.
+    () => result([row(2, 'info', 'two'), row(1, 'info', 'one')]),
+    // Forward from the last time seen: that row again, a new row at the same time, and a later one.
+    () => result([row(2, 'info', 'two'), row(2, 'info', 'two again'), row(3, 'error', 'three')]),
+    () => {
+      throw new Error('database is locked');
+    },
+    () => result([row(3, 'error', 'three'), row(4, 'error', 'four')]),
+  ];
+  const connector: RemoteConnector = {
+    async fetchLogs(request) {
+      requests.push(request);
+      return reads.shift()!();
+    },
+  };
+  const settle = async () => {
+    for (let turn = 0; turn < 20; turn++) await new Promise((resolve) => setImmediate(resolve));
+  };
+  const sessionId = remote.tail(target(connector), 'level:error OR level:info', 'Tail: all rows');
+  await settle();
+  assert.equal(remote.tailing('app'), true);
+  assert.deepEqual(messages(), ['one', 'two']);
+  mock.timers.tick(1000);
+  await settle();
+  assert.deepEqual(messages(), ['one', 'two', 'two again', 'three']);
+  mock.timers.tick(1000);
+  await settle();
+  const record = registry.records.get(sessionId)!;
+  assert.equal(record.captureStatus, 'interrupted');
+  assert.equal(record.captureReason, 'database is locked');
+  assert.equal(remote.last('app')?.error, 'database is locked');
+  mock.timers.tick(1000);
+  await settle();
+  assert.deepEqual(messages(), ['one', 'two', 'two again', 'three', 'four']);
+  assert.equal(record.captureStatus, 'streaming');
+  assert.equal(remote.last('app')?.error, undefined);
+  assert.deepEqual(
+    requests.map((request) => [request.fromMs, request.order, request.limit]),
+    [
+      [undefined, 'desc', 200],
+      [BASE + 120000, 'asc', 5000],
+      [BASE + 180000, 'asc', 5000],
+      [BASE + 180000, 'asc', 5000],
+    ],
+  );
+  remote.stopTails('app');
+  assert.equal(remote.tailing('app'), false);
+  assert.equal(record.status, 'exited');
+  assert.equal(record.exitReason, 'stopped tailing');
+  mock.timers.tick(5000);
+  await settle();
+  assert.equal(requests.length, 4, 'a stopped tail reads no more');
+});
+
+test('a tail of an empty table starts now, and removing a connection stops its runs', async () => {
+  mock.timers.enable({ apis: ['setInterval'] });
+  const { remote, target, registry } = setup();
+  const requests: FetchRequest[] = [];
+  const connector: RemoteConnector = {
+    async fetchLogs(request) {
+      requests.push(request);
+      return result([]);
+    },
+  };
+  const before = Date.now();
+  const sessionId = remote.tail(target(connector), '', 'Tail');
+  for (let turn = 0; turn < 10; turn++) await new Promise((resolve) => setImmediate(resolve));
+  mock.timers.tick(2000);
+  for (let turn = 0; turn < 10; turn++) await new Promise((resolve) => setImmediate(resolve));
+  assert.ok((requests[1].fromMs ?? 0) >= before);
+  remote.stopConnection('app');
+  assert.equal(registry.records.get(sessionId)!.status, 'exited');
+  assert.equal(remote.last('app'), undefined);
+  remote.tail(target(connector), '', 'Tail');
+  await remote.dispose();
+  assert.equal(remote.active, 0);
+});
+
+test('clearing logs forgets finished results but not a running tail', async () => {
+  mock.timers.enable({ apis: ['setInterval'] });
+  const { remote, target } = setup();
+  await remote.fetch(target({ fetchLogs: async () => result([row(1, 'info', 'a')]) }), {
+    query: '',
+    title: 'All rows',
+  });
+  remote.clearResults();
+  assert.equal(remote.last('app'), undefined);
+  remote.tail(target({ fetchLogs: async () => result([]) }), '', 'Tail');
+  remote.clearResults();
+  assert.equal(remote.last('app')?.kind, 'tail');
+  await remote.dispose();
+});
