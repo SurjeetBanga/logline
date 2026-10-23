@@ -13,6 +13,7 @@ type Elements = Pick<
   | 'connectionSql'
   | 'connectionPreview'
   | 'connectionResult'
+  | 'connectionCompare'
 >;
 type Preview = Extract<HostMessage, { type: 'connectionPreview' }>;
 
@@ -31,6 +32,8 @@ export function createConnectionBar(
   scope: EventScope,
   query: () => string,
   saveState: () => void,
+  /** Compare a run of the connection with local runs. */
+  compare: (baselineServerId: string, baselineSessionId: string) => void,
 ) {
   let connections: ConnectionView[] = [];
   let previewKey = '';
@@ -81,6 +84,8 @@ export function createConnectionBar(
       ? 'Stop reading new rows'
       : 'Show the newest matching rows, then keep reading rows as they are added';
     elements.connectionResult.textContent = resultText(connection);
+    // The run to compare: the one selected in the run picker, else the latest.
+    elements.connectionCompare.hidden = !connection.last || connection.last.kind === 'tail';
     elements.connectionResult.title = connection.last?.statement ?? '';
     elements.connectionResult.classList[connection.last?.error ? 'add' : 'remove']('connection-error');
     if (!connection.mapped) elements.connectionPreview.textContent = '';
@@ -149,6 +154,11 @@ export function createConnectionBar(
         query: query(),
         enabled: !connection.tailing,
       });
+  });
+  scope.listen(elements.connectionCompare, 'click', () => {
+    const connection = selected();
+    const run = state.selectedSession || connection?.last?.sessionId;
+    if (connection && run) compare(connection.sourceId, run);
   });
   scope.listen(elements.connectionSql, 'click', () => {
     const connection = selected();

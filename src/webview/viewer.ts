@@ -15,6 +15,7 @@ import { createDoctor } from './inspection/doctor';
 import { createPopovers } from './popovers';
 import { createSearch } from './search/controls';
 import { createConnectionBar } from './search/connection-bar';
+import { createCompare } from './inspection/compare';
 import { ViewerState } from './state';
 import { LEVELS } from './state';
 import { createTable } from './table/controller';
@@ -42,6 +43,7 @@ export function createViewer(api: WebviewApi) {
     {
       logs: elements.logsTab,
       analysis: elements.analyze,
+      compare: elements.compare,
       traces: elements.traces,
       metrics: elements.metrics,
       aiCalls: elements.aiCalls,
@@ -50,6 +52,7 @@ export function createViewer(api: WebviewApi) {
     {
       logs: elements.logsView,
       analysis: elements.analysisView,
+      compare: elements.compareView,
       traces: elements.tracesView,
       trace: elements.traceView,
       metrics: elements.metricsView,
@@ -86,7 +89,15 @@ export function createViewer(api: WebviewApi) {
     traceView.show(traceId),
   );
   const search = createSearch(elements, state, api, popovers, { filterChanged, updateScopeSelection }, scope);
-  const connectionBar = createConnectionBar(elements, state, api, scope, () => search.query(), saveState);
+  const connectionBar = createConnectionBar(
+    elements,
+    state,
+    api,
+    scope,
+    () => search.query(),
+    saveState,
+    (baselineServerId, baselineSessionId) => compareView.open({ baselineServerId, baselineSessionId }),
+  );
   const request = (force = false) => bridge.request(force);
   const traceView = createTraceView(elements, api, scope, {
     showContext: (id) => inspection.showContext(id),
@@ -106,6 +117,12 @@ export function createViewer(api: WebviewApi) {
     receiver: () => ({ running: otlpRunning, endpoint: otlpEndpoint }),
     reveal: () => views.show('traces'),
     visible: () => views.active() === 'traces',
+  });
+  const compareView = createCompare(elements, api, scope, {
+    reveal: () => views.show('compare'),
+    visible: () => views.active() === 'compare',
+    formatTime: (ms) => formatTimestamp({ id: 0, level: '', timestampMs: ms }) ?? '',
+    showContext: (id) => inspection.showContext(id),
   });
   const metricList = createMetricList(elements, api, scope, {
     reveal: () => views.show('metrics'),
@@ -231,6 +248,10 @@ export function createViewer(api: WebviewApi) {
     }
     if (data.type === 'metrics') {
       metricList.receive(data.metrics);
+      return;
+    }
+    if (data.type === 'compare') {
+      compareView.receive(data);
       return;
     }
     if (data.type === 'connectionPreview') {
@@ -458,6 +479,8 @@ export function createViewer(api: WebviewApi) {
       }
     }
     connectionBar.update(data.connections);
+    compareView.update(data.sessions, data.servers, data.newest);
+    if (data.openCompare) compareView.open(data.openCompare);
     if (data.sessions) {
       // A container source (`<source>::<service>`) shares the runs of the source that printed it.
       const sessions = data.sessions.filter(
@@ -955,6 +978,7 @@ export function createViewer(api: WebviewApi) {
       requestAnalysis();
     } else if (tab === 'traces') traceList.show();
     else if (tab === 'metrics') metricList.show();
+    else if (tab === 'compare') compareView.show();
     else if (tab === 'aiCalls') aiCalls.show();
     else views.show(tab);
   }
@@ -963,6 +987,7 @@ export function createViewer(api: WebviewApi) {
     restoreTab = undefined;
     if (previous === 'trace') traceView.hide();
     if (previous === 'metrics') metricList.hide();
+    if (previous === 'compare') compareView.hide();
     if (previous === 'aiCalls') aiCalls.hide();
     if (previous === 'aiCall') aiCalls.close();
     state.view = tabOf(view);

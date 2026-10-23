@@ -19,6 +19,7 @@ import { OtelIntegration } from './otel-integration';
 import { FileFollower } from '../capture/file-follower';
 import { RemoteSource } from '../capture/remote-source';
 import { ConnectionManager } from './connections';
+import { ProductionCompare } from './production-compare';
 import { Ingestion } from '../capture/ingestion';
 import { ProcessRunner } from '../capture/process-runner';
 import { RuntimeState } from '../capture/runtime-state';
@@ -41,7 +42,7 @@ import { eventLocation, LogSiteIndex, LogSiteTracker } from '../core/log-sites';
 import { getField } from '../core/query';
 import { extractExceptions } from '../core/exceptions';
 import type { LogEvent } from '../core/types';
-import type { DetailLinks, DoctorAction, RowEvent } from '../protocol/messages';
+import type { CompareRequest, CompareView, DetailLinks, DoctorAction, RowEvent } from '../protocol/messages';
 import type { LogBreakpoints } from './log-breakpoints';
 import { doctorMode, type LogDoctor } from './log-doctor';
 import { SensitiveScanner, type SourceSensitive } from '../core/log-findings';
@@ -83,6 +84,9 @@ export class LogsController {
   /** Runs fetched from saved connections, and tails that keep reading them. */
   readonly remote = new RemoteSource(this.config, this.registry, this.ingestion, this.state);
   readonly connections: ConnectionManager;
+  /** Production errors compared with local runs, for the Compare tab. */
+  readonly compare: ProductionCompare;
+  private pendingCompare?: CompareRequest;
   readonly debug = new DebugCapture(
     this.config,
     this.registry,
@@ -150,6 +154,7 @@ export class LogsController {
     this.connections = new ConnectionManager(this.config, this.remote, context.secrets, (sourceId, runId) =>
       this.showSource(sourceId, runId),
     );
+    this.compare = new ProductionCompare(this.store, this.registry, (view) => void this.comparisonFinished(view));
     this.store.changeScope = new ChangeScope(this.changedLines, this.logSites);
     this.agentAccess.changes = () => this.gitChanges?.status();
     this.otel = new OtelIntegration(
@@ -219,14 +224,17 @@ export class LogsController {
     this.terminalCapture.pruneStale();
     // A connection's run stays even when it matched nothing: that is its result.
     this.registry.pruneEmptyCompleted(['debug', 'otel'], (serverId, id) => this.store.sessionEventCount(serverId, id));
+    this.compare.check();
     const {
       pendingQuery: applyQuery,
       pendingTrace: openTrace,
       pendingSource: applySource,
       pendingRun: applyRun,
+      pendingCompare: openCompare,
     } = this;
-    this.pendingQuery = this.pendingTrace = this.pendingSource = this.pendingRun = undefined;
+    this.pendingQuery = this.pendingTrace = this.pendingSource = this.pendingRun = this.pendingCompare = undefined;
     return {
+      ...(openCompare ? { openCompare } : {}),
       ...this.buildSnapshot(request),
       ...(applyQuery !== undefined ? { applyQuery } : {}),
       ...(openTrace ? { openTrace } : {}),
@@ -311,6 +319,7 @@ export class LogsController {
           await vscode.commands.executeCommand('logline.showStatus');
         },
         connections: this.connections,
+        compare: (request) => this.compare.build(request),
       },
       send,
       message,
@@ -319,6 +328,21 @@ export class LogsController {
   /** Filter the Logs panel from the editor. The next snapshot carries the query, so a panel that is still loading applies it too. */
   async showQuery(query: string): Promise<void> {
     this.pendingQuery = query;
+    await vscode.commands.executeCommand('logline.logs.focus');
+    this.notifications.send({ type: 'update' });
+  }
+  /** A local run of the compared source finished: say what it means for the production errors. */
+  private async comparisonFinished(view: CompareView): Promise<void> {
+    const choice = await vscode.window.showInformationMessage(
+      `${view.local.label} finished: ${view.summary}`,
+      'Show Comparison',
+    );
+    if (choice !== 'Show Comparison') return;
+    this.pendingCompare = {
+      baselineServerId: view.baseline.serverId,
+      ...(view.baseline.sessionId ? { baselineSessionId: view.baseline.sessionId } : {}),
+      localServerId: view.local.serverId,
+    };
     await vscode.commands.executeCommand('logline.logs.focus');
     this.notifications.send({ type: 'update' });
   }
@@ -474,6 +498,7 @@ export class LogsController {
     this.spans.clear();
     this.metrics.clear();
     this.remote.clearResults();
+    this.compare.unpin();
     this.registry.clearCompleted();
     // A clear must also remove a completed import's status. Active capture is
     // intentionally retained, so keep its truthful running state instead.

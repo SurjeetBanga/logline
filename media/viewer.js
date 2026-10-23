@@ -677,6 +677,15 @@
       searchClear: element("searchClear"),
       searchError: element("searchError"),
       connectionBar: element("connectionBar"),
+      connectionCompare: element("connectionCompare"),
+      compare: element("compare"),
+      compareView: element("compareView"),
+      compareBaseline: element("compareBaseline"),
+      compareLocal: element("compareLocal"),
+      compareStatus: element("compareStatus"),
+      compareHead: element("compareHead"),
+      compareRows: element("compareRows"),
+      compareDetail: element("compareDetail"),
       addConnection: element("addConnection"),
       connectionRange: element("connectionRange"),
       connectionRun: element("connectionRun"),
@@ -2952,7 +2961,7 @@ Span ${call.spanId}`;
 
   // src/webview/search/connection-bar.ts
   var PREVIEW_DELAY_MS = 250;
-  function createConnectionBar(elements, state, api, scope, query, saveState) {
+  function createConnectionBar(elements, state, api, scope, query, saveState, compare) {
     let connections = [];
     let previewKey = "";
     let previewTimer;
@@ -2990,6 +2999,7 @@ Span ${call.spanId}`;
       elements.connectionTail.textContent = connection.tailing ? "Stop tail" : "Tail";
       elements.connectionTail.title = connection.tailing ? "Stop reading new rows" : "Show the newest matching rows, then keep reading rows as they are added";
       elements.connectionResult.textContent = resultText(connection);
+      elements.connectionCompare.hidden = !connection.last || connection.last.kind === "tail";
       elements.connectionResult.title = connection.last?.statement ?? "";
       elements.connectionResult.classList[connection.last?.error ? "add" : "remove"]("connection-error");
       if (!connection.mapped) elements.connectionPreview.textContent = "";
@@ -3055,6 +3065,11 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
           enabled: !connection.tailing
         });
     });
+    scope.listen(elements.connectionCompare, "click", () => {
+      const connection = selected();
+      const run2 = state.selectedSession || connection?.last?.sessionId;
+      if (connection && run2) compare(connection.sourceId, run2);
+    });
     scope.listen(elements.connectionSql, "click", () => {
       const connection = selected();
       if (connection) api.postMessage({ type: "connectionSql", connectionId: connection.id });
@@ -3079,6 +3094,233 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
         if (connection.last) return "No matching rows. Change the filter or the range and press Run.";
         return connection.mapped ? `Choose a range and press Run to fetch rows from ${connection.label}.` : `Use Run SQL to query ${connection.label}.`;
       }
+    };
+  }
+
+  // src/webview/inspection/compare.ts
+  var STATUS = {
+    reproduced: {
+      label: "Reproduced",
+      className: "compare-reproduced",
+      title: "In production and in the newest local run"
+    },
+    fixed: {
+      label: "Fixed locally",
+      className: "compare-fixed",
+      title: "In production and an earlier local run, but not the newest"
+    },
+    notSeen: { label: "Not seen locally", className: "compare-muted", title: "In production only" },
+    new: { label: "New", className: "compare-new", title: "Only in the newest local run" },
+    localOnly: { label: "Local only", className: "compare-new", title: "In local runs, not in production" }
+  };
+  var REFRESH_MS3 = 2e3;
+  function createCompare(elements, api, scope, actions) {
+    let baselines = [];
+    let locals = [];
+    let signature = "";
+    let view;
+    let selected;
+    let newest = 0;
+    let refresh;
+    const baselineValue = (serverId, sessionId) => JSON.stringify([serverId, sessionId ?? ""]);
+    function request() {
+      const baseline = elements.compareBaseline.value;
+      const localServerId = elements.compareLocal.value;
+      if (!baseline || !localServerId) return void 0;
+      const [baselineServerId, baselineSessionId] = JSON.parse(baseline);
+      return { baselineServerId, ...baselineSessionId ? { baselineSessionId } : {}, localServerId };
+    }
+    function load() {
+      clearTimeout(refresh);
+      refresh = void 0;
+      const message = request();
+      if (!message) {
+        elements.compareStatus.textContent = !baselines.length ? "Fetch a run from a connection, or import a production log, to compare with." : "Run your app or tests locally, then choose them as Local to compare.";
+        elements.compareHead.replaceChildren();
+        elements.compareRows.replaceChildren();
+        elements.compareDetail.hidden = true;
+        return;
+      }
+      elements.compareStatus.textContent = "Comparing\u2026";
+      api.postMessage({ type: "compare", ...message });
+    }
+    function fillSelect(select, options, keep) {
+      select.replaceChildren(
+        ...options.map(({ value, label }) => {
+          const option = document.createElement("option");
+          option.value = value;
+          option.textContent = label;
+          return option;
+        })
+      );
+      select.value = options.some((option) => option.value === keep) ? keep : options[0]?.value ?? "";
+    }
+    function update(sessions = [], sources = [], latest = 0) {
+      const runs = sessions.filter((session) => session.sourceKind === "remote" || session.sourceKind === "import").sort((a, b) => b.startedAt - a.startedAt);
+      baselines = runs.map((session) => ({
+        value: baselineValue(session.serverId, session.id),
+        label: `${session.server} \xB7 ${session.command || session.id}`
+      }));
+      const local = new Set(
+        sessions.filter((session) => session.sourceKind !== "remote" && session.sourceKind !== "import").map((session) => session.serverId)
+      );
+      const lastStart = (id) => Math.max(0, ...sessions.filter((session) => session.serverId === id).map((session) => session.startedAt));
+      locals = sources.filter((source) => local.has(source.id)).sort((a, b) => lastStart(b.id) - lastStart(a.id)).map((source) => ({ id: source.id, label: source.label }));
+      elements.compare.hidden = !baselines.length;
+      const next = JSON.stringify([baselines, locals]);
+      if (next !== signature) {
+        signature = next;
+        fillSelect(elements.compareBaseline, baselines, elements.compareBaseline.value);
+        fillSelect(
+          elements.compareLocal,
+          locals.map((source) => ({ value: source.id, label: source.label })),
+          elements.compareLocal.value
+        );
+      }
+      if (latest !== newest) {
+        newest = latest;
+        if (actions.visible() && view && !refresh) refresh = setTimeout(load, REFRESH_MS3);
+      }
+    }
+    function open(target = {}) {
+      if (target.baselineServerId)
+        elements.compareBaseline.value = baselineValue(target.baselineServerId, target.baselineSessionId);
+      if (target.localServerId) elements.compareLocal.value = target.localServerId;
+      selected = void 0;
+      actions.reveal();
+      load();
+    }
+    function hide() {
+      clearTimeout(refresh);
+      refresh = void 0;
+    }
+    function receive(message) {
+      if (message.error) elements.compareStatus.textContent = `Could not compare: ${message.error}`;
+      else if (message.view) render(message.view);
+    }
+    function statusCell(row) {
+      const status = STATUS[row.status];
+      const element2 = cell(status.label, `compare-status ${status.className}`);
+      element2.title = status.title;
+      if (row.changed) {
+        const changed = document.createElement("span");
+        changed.className = "compare-changed";
+        changed.textContent = ` \xB7 changed${row.location ? `: ${row.location}` : ""}`;
+        changed.title = "Thrown from code changed since the last commit, so most likely from your change";
+        element2.append(changed);
+      }
+      return element2;
+    }
+    function render(next) {
+      view = next;
+      const header = (text, title = "") => {
+        const element2 = document.createElement("th");
+        element2.textContent = text;
+        element2.title = title;
+        return element2;
+      };
+      elements.compareHead.replaceChildren(
+        header("Error"),
+        header("Production", next.baseline.label),
+        ...next.runs.map(
+          (run, index) => header(
+            index === next.runs.length - 1 ? "Latest run" : run.startedAt ? actions.formatTime(run.startedAt) : "Run",
+            `${run.label}${run.startedAt ? ` \xB7 ${actions.formatTime(run.startedAt)}` : ""}`
+          )
+        ),
+        header("Status")
+      );
+      const errors = next.rows.length;
+      elements.compareStatus.textContent = !errors ? `No errors in ${next.baseline.label} or the newest runs of ${next.local.label}.` : next.runs.length ? `${next.summary} \xB7 ${next.baseline.label} vs ${next.local.label}` : `${errors} production error${errors === 1 ? "" : "s"}. ${next.local.label} has no runs yet: run it to compare.`;
+      elements.compareRows.replaceChildren(
+        ...next.rows.map((row2) => {
+          const element2 = document.createElement("tr");
+          element2.className = `compare-row${row2.signature === selected ? " selected" : ""}`;
+          element2.tabIndex = 0;
+          element2.dataset.signature = row2.signature;
+          const message = cell(row2.pattern, "compare-message");
+          message.title = row2.message;
+          element2.append(
+            message,
+            cell(row2.baseline || "\u2013", "compare-count"),
+            ...row2.runs.map((count) => cell(count || "\u2013", "compare-count")),
+            statusCell(row2)
+          );
+          const choose = () => {
+            selected = selected === row2.signature ? void 0 : row2.signature;
+            render(next);
+          };
+          scope.listen(element2, "click", choose);
+          scope.listen(element2, "keydown", (event) => {
+            if (event.key === "Enter" || event.key === " ") {
+              event.preventDefault();
+              choose();
+            }
+          });
+          return element2;
+        })
+      );
+      const row = next.rows.find((candidate) => candidate.signature === selected);
+      elements.compareDetail.hidden = !row;
+      elements.compareDetail.replaceChildren(...row ? [detail(row, next)] : []);
+    }
+    function side(title, sample) {
+      const column = document.createElement("section");
+      column.className = "compare-side";
+      const heading = document.createElement("h3");
+      heading.textContent = title;
+      column.append(heading);
+      if (!sample) {
+        const none = document.createElement("p");
+        none.className = "compare-none";
+        none.textContent = "Not seen here.";
+        column.append(none);
+        return column;
+      }
+      const list = document.createElement("dl");
+      const add = (name, value, differs = false) => {
+        const term = document.createElement("dt");
+        term.textContent = name;
+        const description = document.createElement("dd");
+        description.textContent = String(value ?? "");
+        if (differs) {
+          term.className = description.className = "compare-diff";
+          description.title = "Differs from the other side";
+        }
+        list.append(term, description);
+      };
+      add("time", sample.timestamp);
+      add("level", sample.level);
+      add("message", sample.message);
+      for (const [name, value] of Object.entries(sample.fields)) add(name, value, sample.differs.includes(name));
+      const open2 = document.createElement("button");
+      open2.type = "button";
+      open2.textContent = "Surrounding logs";
+      open2.title = "Show the logs around this event";
+      scope.listen(open2, "click", () => actions.showContext(sample.id));
+      column.append(list, open2);
+      return column;
+    }
+    function detail(row, next) {
+      const container = document.createElement("div");
+      container.className = "compare-sides";
+      container.append(
+        side(`Production \xB7 ${next.baseline.label}`, row.samples.baseline),
+        side(`Local \xB7 ${next.local.label}`, row.samples.local)
+      );
+      return container;
+    }
+    scope.listen(elements.compareBaseline, "change", () => open());
+    scope.listen(elements.compareLocal, "change", () => open());
+    scope.track(() => clearTimeout(refresh));
+    return {
+      update,
+      open,
+      show: () => open(),
+      hide,
+      receive,
+      /** Whether there is a production run to compare against. */
+      available: () => baselines.length > 0
     };
   }
 
@@ -4029,7 +4271,7 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
   }
 
   // src/webview/views.ts
-  var TABS = ["logs", "analysis", "traces", "aiCalls", "metrics", "doctor"];
+  var TABS = ["logs", "analysis", "compare", "traces", "aiCalls", "metrics", "doctor"];
   function isTabName(value) {
     return typeof value === "string" && TABS.includes(value);
   }
@@ -4086,6 +4328,7 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
       {
         logs: elements.logsTab,
         analysis: elements.analyze,
+        compare: elements.compare,
         traces: elements.traces,
         metrics: elements.metrics,
         aiCalls: elements.aiCalls,
@@ -4094,6 +4337,7 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
       {
         logs: elements.logsView,
         analysis: elements.analysisView,
+        compare: elements.compareView,
         traces: elements.tracesView,
         trace: elements.traceView,
         metrics: elements.metricsView,
@@ -4135,7 +4379,15 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
       (traceId) => traceView.show(traceId)
     );
     const search = createSearch(elements, state, api, popovers, { filterChanged, updateScopeSelection }, scope);
-    const connectionBar = createConnectionBar(elements, state, api, scope, () => search.query(), saveState);
+    const connectionBar = createConnectionBar(
+      elements,
+      state,
+      api,
+      scope,
+      () => search.query(),
+      saveState,
+      (baselineServerId, baselineSessionId) => compareView.open({ baselineServerId, baselineSessionId })
+    );
     const request = (force = false) => bridge.request(force);
     const traceView = createTraceView(elements, api, scope, {
       showContext: (id) => inspection.showContext(id),
@@ -4155,6 +4407,12 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
       receiver: () => ({ running: otlpRunning, endpoint: otlpEndpoint }),
       reveal: () => views.show("traces"),
       visible: () => views.active() === "traces"
+    });
+    const compareView = createCompare(elements, api, scope, {
+      reveal: () => views.show("compare"),
+      visible: () => views.active() === "compare",
+      formatTime: (ms) => formatTimestamp({ id: 0, level: "", timestampMs: ms }) ?? "",
+      showContext: (id) => inspection.showContext(id)
     });
     const metricList = createMetricList(elements, api, scope, {
       reveal: () => views.show("metrics"),
@@ -4273,6 +4531,10 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
       }
       if (data.type === "metrics") {
         metricList.receive(data.metrics);
+        return;
+      }
+      if (data.type === "compare") {
+        compareView.receive(data);
         return;
       }
       if (data.type === "connectionPreview") {
@@ -4446,6 +4708,8 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
         }
       }
       connectionBar.update(data.connections);
+      compareView.update(data.sessions, data.servers, data.newest);
+      if (data.openCompare) compareView.open(data.openCompare);
       if (data.sessions) {
         const sessions = data.sessions.filter(
           (session) => !state.selectedServer || session.serverId === state.selectedServer || state.selectedServer.startsWith(`${session.serverId}::`)
@@ -4855,6 +5119,7 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
         requestAnalysis();
       } else if (tab === "traces") traceList.show();
       else if (tab === "metrics") metricList.show();
+      else if (tab === "compare") compareView.show();
       else if (tab === "aiCalls") aiCalls.show();
       else views.show(tab);
     }
@@ -4862,6 +5127,7 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
       restoreTab = void 0;
       if (previous === "trace") traceView.hide();
       if (previous === "metrics") metricList.hide();
+      if (previous === "compare") compareView.hide();
       if (previous === "aiCalls") aiCalls.hide();
       if (previous === "aiCall") aiCalls.close();
       state.view = tabOf(view);

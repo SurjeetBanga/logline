@@ -3438,3 +3438,170 @@ test('a selected connection shows its range, Run, Tail and Run SQL, with the SQL
   get('addConnection').listeners.get('click')!();
   assert.deepEqual(plain(messages.at(-1)), { type: 'addConnection' });
 });
+
+test('the Compare tab lines up production errors with local runs and shows both sides of one', () => {
+  const { get, app, receive, messages } = viewer({ server: '' });
+  const plain = (value: unknown) => JSON.parse(JSON.stringify(value));
+  const snapshot = (extra: Record<string, unknown>) =>
+    receive({
+      type: 'snapshot',
+      generation: 1,
+      newest: 100,
+      status: 'Ready',
+      command: '',
+      running: false,
+      total: 0,
+      retained: 0,
+      discarded: 0,
+      bytes: 0,
+      maxBytes: 1,
+      truncated: 0,
+      events: [],
+      columns: [],
+      page: 0,
+      pages: 1,
+      matched: 0,
+      servers: [
+        { id: 'npm-test', label: 'npm test', status: 'exited', activeSessions: 0 },
+        { id: 'conn:prod', label: 'SQLite · prod', status: 'exited', activeSessions: 0 },
+      ],
+      ...extra,
+    });
+  const local = {
+    id: 'r1',
+    serverId: 'npm-test',
+    server: 'npm test',
+    command: 'npm test',
+    status: 'exited',
+    startedAt: 5,
+    sourceKind: 'process',
+  };
+  snapshot({ sessions: [local] });
+  assert.equal(get('compare').hidden, true, 'nothing to compare against yet');
+  const prod = {
+    id: 'p1',
+    serverId: 'conn:prod',
+    server: 'SQLite · prod',
+    command: 'level:error · last 1h',
+    status: 'exited',
+    startedAt: 9,
+    sourceKind: 'remote',
+  };
+  snapshot({ sessions: [local, prod] });
+  assert.equal(get('compare').hidden, false);
+  get('compare').listeners.get('click')!();
+  assert.equal(app.views.active(), 'compare');
+  assert.deepEqual(plain(messages.at(-1)), {
+    type: 'compare',
+    baselineServerId: 'conn:prod',
+    baselineSessionId: 'p1',
+    localServerId: 'npm-test',
+  });
+  assert.equal(get('compareStatus').textContent, 'Comparing…');
+  const sample = (id: number, region: string) => ({
+    id,
+    level: 'error',
+    message: 'timed out',
+    fields: { region },
+    differs: ['region'],
+  });
+  receive({
+    type: 'compare',
+    view: {
+      baseline: { serverId: 'conn:prod', sessionId: 'p1', label: 'SQLite · prod · level:error · last 1h', events: 40 },
+      local: { serverId: 'npm-test', label: 'npm test' },
+      runs: [
+        { id: 'r0', label: 'npm test', startedAt: 1 },
+        { id: 'r1', label: 'npm test', startedAt: 5 },
+      ],
+      rows: [
+        {
+          signature: 'timed out after <n> ms',
+          message: 'timed out after 5000 ms',
+          pattern: 'timed out after * ms',
+          baseline: 312,
+          runs: [4, 0],
+          status: 'fixed',
+          samples: { baseline: sample(7, 'eu'), local: sample(9, 'local') },
+        },
+        {
+          signature: 'negative quantity <n>',
+          message: 'negative quantity 2',
+          pattern: 'negative quantity *',
+          location: 'cart.ts:42',
+          baseline: 0,
+          runs: [0, 2],
+          status: 'new',
+          changed: true,
+          samples: { local: sample(11, 'local') },
+        },
+      ],
+      summary: '1 production error fixed locally · 1 new local error from your changes',
+    },
+  });
+  assert.equal(
+    get('compareStatus').textContent,
+    '1 production error fixed locally · 1 new local error from your changes · SQLite · prod · level:error · last 1h vs npm test',
+  );
+  assert.deepEqual(
+    get('compareHead')
+      .children.map((th) => th.textContent)
+      .slice(-2),
+    ['Latest run', 'Status'],
+  );
+  const rows = get('compareRows').children;
+  assert.deepEqual(
+    rows[0].children.map((td) => td.textContent),
+    ['timed out after * ms', '312', '4', '–', 'Fixed locally'],
+  );
+  assert.equal(rows[1].children.at(-1)!.textContent, 'New');
+  assert.equal(rows[1].children.at(-1)!.children[0].textContent, ' · changed: cart.ts:42');
+  // Choosing a row shows an event from each side, with the differing field marked.
+  rows[0].listeners.get('click')!();
+  assert.equal(get('compareDetail').hidden, false);
+  const sides = get('compareDetail').children[0].children;
+  assert.equal(sides.length, 2);
+  const list = sides[0].children[1];
+  const region = list.children.findIndex((child) => child.textContent === 'region');
+  assert.equal(list.children[region].className, 'compare-diff');
+  sides[0].children[2].listeners.get('click')!();
+  assert.deepEqual(plain(messages.at(-1)), { type: 'context', id: 7 });
+  receive({ type: 'compare', error: 'boom' });
+  assert.equal(get('compareStatus').textContent, 'Could not compare: boom');
+  // A connection's run opens the comparison from the connection bar.
+  snapshot({
+    sessions: [local, prod],
+    connections: [
+      {
+        id: 'prod',
+        sourceId: 'conn:prod',
+        label: 'SQLite · prod',
+        type: 'sqlite',
+        mapped: true,
+        tailing: false,
+        last: { sessionId: 'p1', kind: 'fetch', running: false, fetched: 1, kept: 1, local: [], at: 0 },
+      },
+    ],
+    applySource: 'conn:prod',
+  });
+  snapshot({ sessions: [local, prod], connections: [] });
+  app.views.show('logs');
+  snapshot({
+    sessions: [local, prod],
+    connections: [
+      {
+        id: 'prod',
+        sourceId: 'conn:prod',
+        label: 'SQLite · prod',
+        type: 'sqlite',
+        mapped: true,
+        tailing: false,
+        last: { sessionId: 'p1', kind: 'fetch', running: false, fetched: 1, kept: 1, local: [], at: 0 },
+      },
+    ],
+  });
+  assert.equal(get('connectionCompare').hidden, false);
+  get('connectionCompare').listeners.get('click')!();
+  assert.equal(app.views.active(), 'compare');
+  assert.equal(plain(messages.at(-1)).baselineSessionId, 'p1');
+});

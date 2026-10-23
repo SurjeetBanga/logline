@@ -144,3 +144,26 @@ test('connection requests need a connection id, and bound their query and range'
   });
   assert.deepEqual(parseViewRequest({ type: 'addConnection', extra: true }), { type: 'addConnection' });
 });
+
+test('compare requests name a production source and a local source', () => {
+  assert.equal(parseViewRequest({ type: 'compare', baselineServerId: 'conn:prod' }), undefined);
+  assert.equal(parseViewRequest({ type: 'compare', localServerId: 'npm' }), undefined);
+  assert.deepEqual(
+    parseViewRequest({
+      type: 'compare',
+      baselineServerId: 'conn:prod',
+      baselineSessionId: 'p1',
+      localServerId: 'npm',
+      x: 1,
+    }),
+    { type: 'compare', baselineServerId: 'conn:prod', localServerId: 'npm', baselineSessionId: 'p1' },
+  );
+  assert.deepEqual(
+    parseViewRequest({ type: 'compare', baselineServerId: 'prod.log', localServerId: 'npm', baselineSessionId: 5 }),
+    {
+      type: 'compare',
+      baselineServerId: 'prod.log',
+      localServerId: 'npm',
+    },
+  );
+});

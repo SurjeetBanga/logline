@@ -11,6 +11,7 @@ import type { TraceSummary, TraceView } from '../core/traces';
 import type { ReceiverStatus } from '../capture/otlp-receiver';
 import type { RemoteRunInfo } from '../capture/remote-source';
 import { RANGE_CHOICES, type ConnectionType } from '../core/connections';
+import type { SignatureRow } from '../core/signature-compare';
 
 export interface Filter {
   query?: string;
@@ -68,7 +69,32 @@ export type ViewRequest =
   | { type: 'connectionFetch' | 'connectionPreview'; connectionId: string; query: string; range: string }
   | { type: 'connectionTail'; connectionId: string; query: string; enabled: boolean }
   | { type: 'connectionSql'; connectionId: string }
+  | ({ type: 'compare' } & CompareRequest)
   | { type: 'import' | 'clear' | 'config' | 'manageServers' | 'addConnection' };
+
+/** Production (a run fetched from a connection, or an imported file) against a local source's newest runs. */
+export interface CompareRequest {
+  baselineServerId: string;
+  baselineSessionId?: string;
+  localServerId: string;
+}
+/** An event shown beside its counterpart, with the fields whose values differ. */
+export interface CompareSample {
+  id: number;
+  timestamp?: string;
+  level: string;
+  message?: string;
+  fields: Record<string, string | number | boolean>;
+  differs: string[];
+}
+export interface CompareView {
+  baseline: { serverId: string; sessionId?: string; label: string; events: number };
+  local: { serverId: string; label: string };
+  /** The local source's newest runs, oldest first; each row has a count per run. */
+  runs: { id: string; label: string; startedAt: number }[];
+  rows: (SignatureRow & { samples: { baseline?: CompareSample; local?: CompareSample } })[];
+  summary: string;
+}
 
 /** A saved connection as the Logs panel lists it. */
 export interface ConnectionView {
@@ -133,6 +159,8 @@ export interface Snapshot extends Stats {
   applyRun?: string;
   /** Saved connections to log stores outside the editor. */
   connections?: ConnectionView[];
+  /** A comparison to open, such as after a local run finished, applied once. */
+  openCompare?: CompareRequest;
   otlp?: ReceiverStatus;
   /** Traces with spans currently retained. */
   traceCount?: number;
@@ -218,6 +246,7 @@ export type HostMessage =
   | { type: 'aiCalls'; aiCalls: GenAiSummary }
   | { type: 'aiCall'; traceId: string; spanId: string; detail?: GenAiCallDetail }
   | { type: 'metrics'; metrics: MetricSeriesView[] }
+  | { type: 'compare'; view?: CompareView; error?: string }
   | {
       type: 'connectionPreview';
       connectionId: string;
@@ -379,6 +408,18 @@ export function parseViewRequest(value: unknown): ViewRequest | undefined {
       if (msg.type === 'connectionTail') return { type: msg.type, connectionId, query, enabled: msg.enabled === true };
       const range = string('range');
       return { type: msg.type, connectionId, query, range: range && RANGE_CHOICES.includes(range) ? range : '1h' };
+    }
+    case 'compare': {
+      const baselineServerId = string('baselineServerId')?.slice(0, 4096);
+      const localServerId = string('localServerId')?.slice(0, 4096);
+      const baselineSessionId = string('baselineSessionId')?.slice(0, 128);
+      if (!baselineServerId || !localServerId) return;
+      return {
+        type: msg.type,
+        baselineServerId,
+        localServerId,
+        ...(baselineSessionId ? { baselineSessionId } : {}),
+      };
     }
     case 'import':
     case 'clear':

@@ -23,6 +23,7 @@ import { manageServers } from './servers';
 import { openSource } from './source-navigation';
 import type { AgentLogAccess } from './agent-access';
 import type { ConnectionManager } from './connections';
+import type { CompareRequest, CompareView } from '../protocol/messages';
 
 interface MessageServices {
   store: LogStore;
@@ -54,6 +55,7 @@ interface MessageServices {
   connectAgent(): Promise<void>;
   showStatus(): Promise<void>;
   connections?: Pick<ConnectionManager, 'fetch' | 'tail' | 'runSql' | 'preview' | 'add'>;
+  compare?(request: CompareRequest): CompareView;
 }
 export async function handleMessage(
   services: MessageServices,
@@ -214,6 +216,13 @@ export async function handleMessage(
       return;
     case 'addConnection':
       await services.connections?.add();
+      return;
+    case 'compare':
+      try {
+        if (services.compare) send({ type: 'compare', view: services.compare(msg) });
+      } catch (error) {
+        send({ type: 'compare', error: error instanceof Error ? error.message : String(error) });
+      }
       return;
     case 'connectionFetch':
       await services.connections?.fetch(msg.connectionId, msg.query, msg.range);
