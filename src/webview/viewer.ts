@@ -16,6 +16,7 @@ import { createPopovers } from './popovers';
 import { createSearch } from './search/controls';
 import { createConnectionBar } from './search/connection-bar';
 import { createCompare } from './inspection/compare';
+import { createMetricQuery } from './inspection/metric-query';
 import { ViewerState } from './state';
 import { LEVELS } from './state';
 import { createTable } from './table/controller';
@@ -123,6 +124,23 @@ export function createViewer(api: WebviewApi) {
     visible: () => views.active() === 'compare',
     formatTime: (ms) => formatTimestamp({ id: 0, level: '', timestampMs: ms }) ?? '',
     showContext: (id) => inspection.showContext(id),
+  });
+  const metricQuery = createMetricQuery(elements, api, scope, {
+    formatTime: (ms) => formatTimestamp({ id: 0, level: '', timestampMs: ms }) ?? '',
+    showLogs: (connectionId, fromMs, toMs) =>
+      api.postMessage({
+        type: 'connectionFetch',
+        connectionId,
+        query: search.query(),
+        range: state.connectionRange,
+        fromMs,
+        toMs,
+      }),
+    showLocal: (fromMs, toMs) => {
+      views.show('logs');
+      selectSource('');
+      search.setQuery(`timestamp:[${new Date(fromMs).toISOString()} to ${new Date(toMs).toISOString()}]`, true);
+    },
   });
   const metricList = createMetricList(elements, api, scope, {
     reveal: () => views.show('metrics'),
@@ -250,6 +268,14 @@ export function createViewer(api: WebviewApi) {
       metricList.receive(data.metrics);
       return;
     }
+    if (data.type === 'metricQuery') {
+      metricQuery.receive(data);
+      return;
+    }
+    if (data.type === 'metricNames') {
+      metricQuery.receiveNames(data);
+      return;
+    }
     if (data.type === 'compare') {
       compareView.receive(data);
       return;
@@ -335,7 +361,9 @@ export function createViewer(api: WebviewApi) {
     doctor.receive(data.doctor);
     changedFiles = data.changes?.files;
     updateChangesControl();
-    metricList.update(data.metrics, otlpRunning);
+    // A connection can be queried for metrics, so the tab shows with one too.
+    metricList.update(data.metrics, otlpRunning || !!data.connections?.length);
+    metricQuery.update(data.connections);
     aiCalls.update(data.aiCalls, otlpRunning);
     // Tabs such as Metrics appear only once the snapshot says they have data.
     if (restoreTab) {

@@ -172,6 +172,12 @@ A Datadog connection has the same **Run** and **Tail** as a database, without **
 
 **Open link…** (or **Logline: Open Datadog Link or Trace ID…**) takes a Log Explorer link and fetches its search over its time range as a run; when the link points at a log with a trace id, a second run fetches every log of that trace from half an hour around it, and the panel switches to it. Paste a trace id instead to fetch that trace from the last day.
 
+### Metrics from connections
+
+While a connection is saved, the **Metrics** tab has a **Metric query** bar above its list. Choose the connection, type a query, choose a range, and press **Run** or Enter. For Datadog, the query is a metric query such as `avg:trace.http.request.duration{service:checkout} by {env}`, and metric names that reported in the last day are suggested as you type the first word; it needs the `timeseries_query` and `metrics_read` permissions. For a database, it is a `SELECT` that returns a time column, a value column (named `value`, else the first numeric one), and optionally text columns that name the series, such as `SELECT minute AS time, avg(duration_ms) AS value, service FROM requests GROUP BY 1, 3`; it runs read-only, and rows outside the range are left out.
+
+The chart shows up to 20 series of up to 300 points each, with the value axis in the metric's unit and a legend with each series' latest value. Hover to see every series' value at that time. Drag across a spike to select that window: **Show logs from <connection>** fetches the connection's logs from exactly that window, with the Logs tab's filter, as a new run, and **Local logs** filters your local runs to the same window. **Watch** keeps reading the query every 15 seconds into the Metrics list below, as series of the connection's service, so it trends next to OpenTelemetry metrics; press **Stop watching** to end it.
+
 ### Compare production with local runs
 
 The **Compare** tab answers two questions while you debug a production failure: does my local run reproduce it, and does my fix make it go away? It appears once there is a production run to compare against: a run fetched from a connection, or an imported log file. Choose **Compare with local** under a connection's controls (it compares the selected run, or the latest), or open the tab and choose **Production** and **Local**: the source you run locally, such as your app or your tests. The newest local source is chosen by default.

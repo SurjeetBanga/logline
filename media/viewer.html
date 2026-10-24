@@ -797,6 +797,43 @@
         </div>
       </section>
       <section id="metricsView" class="view-panel" role="tabpanel" aria-labelledby="metrics" hidden>
+        <div id="metricQuery" class="metric-query" role="group" aria-label="Metric query" hidden>
+          <div class="metric-query-controls">
+            <select id="metricConnection" aria-label="Connection to query"></select>
+            <input
+              id="metricInput"
+              type="text"
+              list="metricSuggestions"
+              autocomplete="off"
+              maxlength="2048"
+              aria-label="Metric query"
+            />
+            <datalist id="metricSuggestions"></datalist>
+            <select id="metricRange" aria-label="Time range">
+              <option value="15m">Last 15 minutes</option>
+              <option value="1h">Last hour</option>
+              <option value="4h">Last 4 hours</option>
+              <option value="24h">Last 24 hours</option>
+              <option value="7d">Last 7 days</option>
+            </select>
+            <button id="metricRun" type="button">Run</button>
+            <button
+              id="metricWatch"
+              type="button"
+              aria-pressed="false"
+              title="Keep reading this query into the Metrics list below, every 15 seconds"
+            >
+              Watch
+            </button>
+          </div>
+          <p id="metricQueryStatus" class="view-status" role="status"></p>
+          <div id="metricChart" class="metric-chart" hidden></div>
+          <div id="metricSelection" class="metric-selection" role="group" aria-label="Selected time" hidden>
+            <span id="metricSelectionText"></span>
+            <button id="metricShowLogs" type="button">Show logs</button>
+            <button id="metricShowLocal" type="button" title="Show your local logs from this window">Local logs</button>
+          </div>
+        </div>
         <div class="view-header">
           <p id="metricsStatus" class="view-status" role="status">Loading…</p>
           <span class="view-header-actions"

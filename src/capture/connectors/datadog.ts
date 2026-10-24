@@ -1,6 +1,15 @@
 import { datadogApiBase, type DatadogConnection } from '../../core/connections';
 import { datadogQuery } from '../../core/datadog-query';
-import { errorText, timedOut, type Connector, type FetchRequest, type FetchResult, type RemoteRecord } from './types';
+import { boundSeries, datadogSeries } from '../../core/metric-query';
+import {
+  errorText,
+  timedOut,
+  type Connector,
+  type FetchRequest,
+  type FetchResult,
+  type MetricResult,
+  type RemoteRecord,
+} from './types';
 
 /** API and application keys, or an access token, kept in secret storage. */
 export interface DatadogKeys {
@@ -48,7 +57,7 @@ function problem(status: number, headers: Headers, body: Json | undefined, text:
   const errors = Array.isArray(body?.errors) ? body.errors.map(String).join('; ') : text.slice(0, 300);
   if (status === 401 || status === 403)
     return new Error(
-      `Datadog refused the ${token ? 'access token' : 'API or application key'} (${status}${errors ? `: ${errors}` : ''}). It needs the logs_read_data permission.`,
+      `Datadog refused the ${token ? 'access token' : 'API or application key'} (${status}${errors ? `: ${errors}` : ''}). Logs need the logs_read_data permission; metrics need timeseries_query and metrics_read.`,
     );
   if (status === 429) {
     const reset = Number(headers.get('x-ratelimit-reset'));
@@ -184,6 +193,29 @@ export class DatadogConnector implements Connector {
       statement: translated.query,
       elapsedMs: Date.now() - started,
     };
+  }
+
+  /** A metric query in Datadog syntax, such as `avg:trace.http.request.duration{service:checkout} by {env}`. */
+  async queryMetrics(query: string, fromMs: number, toMs: number, signal?: AbortSignal): Promise<MetricResult> {
+    const started = Date.now();
+    const params = new URLSearchParams({
+      from: String(Math.floor(fromMs / 1000)),
+      to: String(Math.ceil(toMs / 1000)),
+      query,
+    });
+    const response = await this.request('GET', `/api/v1/query?${params}`, undefined, signal);
+    if (response.status === 'error')
+      throw new Error(`Datadog could not run the query: ${String(response.error ?? 'error')}`);
+    return { series: boundSeries(datadogSeries(response)), statement: query, elapsedMs: Date.now() - started };
+  }
+
+  /** Metrics that reported in the last day, filtered by name. */
+  async listMetrics(search: string, signal?: AbortSignal): Promise<string[]> {
+    const from = Math.floor(Date.now() / 1000) - 86400;
+    const response = await this.request('GET', `/api/v1/metrics?from=${from}`, undefined, signal);
+    const names = Array.isArray(response.metrics) ? response.metrics.map(String) : [];
+    const term = search.toLowerCase();
+    return names.filter((name) => name.toLowerCase().includes(term)).slice(0, 200);
   }
 
   dispose(): Promise<void> {

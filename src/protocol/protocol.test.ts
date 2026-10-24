@@ -175,3 +175,34 @@ test('a Datadog link request names its connection', () => {
   });
   assert.equal(parseViewRequest({ type: 'connectionLink' }), undefined);
 });
+
+test('metric requests need a connection and a query; a fetch can name an exact window', () => {
+  assert.deepEqual(parseViewRequest({ type: 'metricQuery', connectionId: 'prod', query: 'avg:x{*}', range: '4h' }), {
+    type: 'metricQuery',
+    connectionId: 'prod',
+    query: 'avg:x{*}',
+    range: '4h',
+  });
+  assert.equal(parseViewRequest({ type: 'metricQuery', connectionId: 'prod', query: '  ' }), undefined);
+  assert.equal(parseViewRequest({ type: 'metricWatch', query: 'x' }), undefined);
+  assert.deepEqual(parseViewRequest({ type: 'metricWatch', connectionId: 'prod', query: 'x', enabled: true }), {
+    type: 'metricWatch',
+    connectionId: 'prod',
+    query: 'x',
+    enabled: true,
+  });
+  assert.deepEqual(parseViewRequest({ type: 'metricNames', connectionId: 'prod', search: 'trace' }), {
+    type: 'metricNames',
+    connectionId: 'prod',
+    search: 'trace',
+  });
+  assert.deepEqual(
+    parseViewRequest({ type: 'connectionFetch', connectionId: 'prod', query: '', range: '1h', fromMs: 10, toMs: 20 }),
+    { type: 'connectionFetch', connectionId: 'prod', query: '', range: '1h', fromMs: 10, toMs: 20 },
+  );
+  // A window that ends before it starts is ignored.
+  assert.deepEqual(
+    parseViewRequest({ type: 'connectionFetch', connectionId: 'prod', query: '', range: '1h', fromMs: 20, toMs: 10 }),
+    { type: 'connectionFetch', connectionId: 'prod', query: '', range: '1h' },
+  );
+});

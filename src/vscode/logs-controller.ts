@@ -18,6 +18,7 @@ import { buildTrace, SpanStore, summarizeTraces, traceLogs, type TraceSummary, t
 import { OtelIntegration } from './otel-integration';
 import { FileFollower } from '../capture/file-follower';
 import { RemoteSource } from '../capture/remote-source';
+import { RemoteMetrics } from '../capture/remote-metrics';
 import { ConnectionManager } from './connections';
 import { ProductionCompare } from './production-compare';
 import { Ingestion } from '../capture/ingestion';
@@ -84,6 +85,8 @@ export class LogsController {
   /** Runs fetched from saved connections, and tails that keep reading them. */
   readonly remote = new RemoteSource(this.config, this.registry, this.ingestion, this.state);
   readonly connections: ConnectionManager;
+  /** Metric queries watched on connections, polled into `metrics`. */
+  readonly remoteMetrics: RemoteMetrics;
   /** Production errors compared with local runs, for the Compare tab. */
   readonly compare: ProductionCompare;
   private pendingCompare?: CompareRequest;
@@ -151,8 +154,13 @@ export class LogsController {
       Partial<Pick<vscode.ExtensionContext, 'environmentVariableCollection' | 'secrets'>>,
   ) {
     this.globalState = context.globalState;
-    this.connections = new ConnectionManager(this.config, this.remote, context.secrets, (sourceId, runId) =>
-      this.showSource(sourceId, runId),
+    this.remoteMetrics = new RemoteMetrics(this.metrics, this.state);
+    this.connections = new ConnectionManager(
+      this.config,
+      this.remote,
+      context.secrets,
+      (sourceId, runId) => this.showSource(sourceId, runId),
+      this.remoteMetrics,
     );
     this.compare = new ProductionCompare(this.store, this.registry, (view) => void this.comparisonFinished(view));
     this.store.changeScope = new ChangeScope(this.changedLines, this.logSites);
@@ -783,6 +791,7 @@ export class LogsController {
     await this.otel.dispose();
     await this.files.dispose();
     await this.remote.dispose();
+    await this.remoteMetrics.dispose();
     this.connections.dispose();
     // Closing streams may emit a final partial line; flush persistence afterwards.
     await this.runner.dispose();

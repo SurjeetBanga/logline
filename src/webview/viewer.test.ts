@@ -3665,3 +3665,154 @@ test('a Datadog connection offers Open link instead of Run SQL, and speaks of lo
   snapshot({ connections: [{ ...connection, last }] });
   assert.equal(get('connectionResult').textContent, 'Fetched 1 log · 80 ms · read-only');
 });
+
+test('a metric query is charted, and a window dragged across it shows the logs from then', () => {
+  const { get, app, receive, messages, timers } = viewer({ server: '' });
+  const plain = (value: unknown) => JSON.parse(JSON.stringify(value));
+  const connection = {
+    id: 'prod',
+    sourceId: 'conn:prod',
+    label: 'Datadog · prod',
+    type: 'datadog',
+    mapped: true,
+    sql: false,
+    watching: [],
+    tailing: false,
+  };
+  const snapshot = (extra: Record<string, unknown>) =>
+    receive({
+      type: 'snapshot',
+      generation: 1,
+      newest: 100,
+      status: 'Ready',
+      command: '',
+      running: false,
+      total: 0,
+      retained: 0,
+      discarded: 0,
+      bytes: 0,
+      maxBytes: 1,
+      truncated: 0,
+      events: [],
+      columns: [],
+      page: 0,
+      pages: 1,
+      matched: 0,
+      servers: [{ id: 'conn:prod', label: 'Datadog · prod', status: 'idle', activeSessions: 0 }],
+      sessions: [],
+      ...extra,
+    });
+  snapshot({});
+  assert.equal(get('metricQuery').hidden, true);
+  assert.equal(get('metrics').hidden, true, 'no Metrics tab without metrics or a connection');
+  snapshot({ connections: [connection] });
+  assert.equal(get('metrics').hidden, false, 'a connection can be queried for metrics');
+  assert.equal(get('metricQuery').hidden, false);
+  assert.equal(get('metricConnection').value, 'prod');
+  assert.match((get('metricInput') as unknown as { placeholder: string }).placeholder, /^avg:/);
+  // Metric names are suggested while the first word is typed.
+  get('metricInput').value = 'trace';
+  get('metricInput').listeners.get('input')!();
+  [...timers.values()].at(-1)!();
+  assert.deepEqual(plain(messages.at(-1)), { type: 'metricNames', connectionId: 'prod', search: 'trace' });
+  receive({ type: 'metricNames', connectionId: 'prod', search: 'trace', names: ['trace.http.request.duration'] });
+  assert.equal(get('metricSuggestions').children[0].value, 'trace.http.request.duration');
+  get('metricInput').value = 'avg:trace.http.request.duration{*} by {env}';
+  get('metricInput').listeners.get('input')!();
+  get('metricRun').listeners.get('click')!();
+  assert.deepEqual(plain(messages.at(-1)), {
+    type: 'metricQuery',
+    connectionId: 'prod',
+    query: 'avg:trace.http.request.duration{*} by {env}',
+    range: '1h',
+  });
+  assert.equal(get('metricQueryStatus').textContent, 'Querying…');
+  const fromMs = Date.parse('2026-10-23T09:00:00Z');
+  const toMs = fromMs + 3600000;
+  receive({
+    type: 'metricQuery',
+    connectionId: 'prod',
+    query: 'avg:trace.http.request.duration{*} by {env}',
+    range: '1h',
+    result: {
+      series: [
+        {
+          name: 'trace.http.request.duration',
+          scope: 'env:prod',
+          unit: 'ms',
+          points: [
+            [fromMs, 100],
+            [fromMs + 720000, 880],
+            [toMs, 120],
+          ],
+        },
+        {
+          name: 'trace.http.request.duration',
+          scope: 'env:staging',
+          unit: 'ms',
+          points: [
+            [fromMs, 90],
+            [toMs, 95],
+          ],
+        },
+      ],
+      statement: 'avg:trace.http.request.duration{*} by {env}',
+      elapsedMs: 29,
+      fromMs,
+      toMs,
+    },
+  });
+  assert.match(get('metricQueryStatus').textContent, /^2 series · 5 points · 29 ms\./);
+  const chart = get('metricChart');
+  assert.equal(chart.hidden, false);
+  const [svg, tooltip, legend] = chart.children;
+  assert.equal(svg.children.filter((child) => (child.attributes.class ?? '').startsWith('metric-line')).length, 2);
+  assert.deepEqual(
+    legend.children.map((item) => item.children[1].textContent),
+    ['env:prod · 120 ms', 'env:staging · 95 ms'],
+  );
+  // Hovering shows each series' value at that time.
+  svg.listeners.get('pointermove')!({ clientX: 70 });
+  assert.equal(tooltip.hidden, false);
+  assert.match(tooltip.textContent, /env:prod: /);
+  // Dragging selects a window.
+  svg.listeners.get('pointerdown')!({ clientX: 20 });
+  svg.listeners.get('pointermove')!({ clientX: 60 });
+  svg.listeners.get('pointerup')!({ clientX: 60 });
+  assert.equal(get('metricSelection').hidden, false);
+  assert.equal(get('metricShowLogs').textContent, 'Show logs from Datadog · prod');
+  get('metricShowLogs').listeners.get('click')!();
+  const fetch = plain(messages.at(-1));
+  assert.equal(fetch.type, 'connectionFetch');
+  assert.equal(fetch.connectionId, 'prod');
+  assert.ok(fetch.fromMs >= fromMs && fetch.toMs <= toMs && fetch.fromMs < fetch.toMs);
+  get('metricShowLocal').listeners.get('click')!();
+  assert.equal(app.views.active(), 'logs');
+  assert.match(
+    app.search.query(),
+    /^timestamp:\[2026-10-23T09:\d\d:\d\d\.\d{3}Z to 2026-10-23T\d\d:\d\d:\d\d\.\d{3}Z\]$/,
+  );
+  // A click without a drag clears the selection.
+  svg.listeners.get('pointerdown')!({ clientX: 30 });
+  svg.listeners.get('pointerup')!({ clientX: 30 });
+  assert.equal(get('metricSelection').hidden, true);
+  // Watch keeps reading the query into the Metrics list.
+  get('metricWatch').listeners.get('click')!();
+  assert.deepEqual(plain(messages.at(-1)), {
+    type: 'metricWatch',
+    connectionId: 'prod',
+    query: 'avg:trace.http.request.duration{*} by {env}',
+    enabled: true,
+  });
+  snapshot({ connections: [{ ...connection, watching: ['avg:trace.http.request.duration{*} by {env}'] }] });
+  assert.equal(get('metricWatch').textContent, 'Stop watching');
+  receive({
+    type: 'metricQuery',
+    connectionId: 'prod',
+    query: 'avg:trace.http.request.duration{*} by {env}',
+    range: '1h',
+    error: 'boom',
+  });
+  assert.equal(get('metricQueryStatus').textContent, 'Could not query: boom');
+  assert.equal(chart.hidden, true);
+});

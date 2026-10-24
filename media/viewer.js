@@ -75,14 +75,14 @@
       section2.append(empty2);
       return section2;
     }
-    function xAxisTicks(svg, bucketCount, range, xFor, height) {
+    function xAxisTicks(svg2, bucketCount, range, xFor, height) {
       const tickEvery = Math.max(1, Math.round(bucketCount / 6));
       for (let index = 0; index < bucketCount; index += tickEvery) {
         const time = bucketTime(range, bucketCount, index);
         if (time === void 0) continue;
         const label = svgEl("text", { x: xFor(index), y: height - 4, class: "chart-axis-label" });
         label.textContent = formatClock(time, range);
-        svg.append(label);
+        svg2.append(label);
       }
     }
     function volumeChart(rate, errors, range) {
@@ -98,7 +98,7 @@
       const max = Math.max(1, ...rate.map((item) => item.count));
       const barGap = 2;
       const barWidth = Math.max(1, width / bucketCount - barGap);
-      const svg = svgEl("svg", {
+      const svg2 = svgEl("svg", {
         viewBox: `0 0 ${width} ${height}`,
         class: "volume-chart",
         role: "img",
@@ -106,7 +106,7 @@
       });
       const maxLabel = svgEl("text", { x: 2, y: padTop, class: "chart-axis-label" });
       maxLabel.textContent = String(max);
-      svg.append(maxLabel);
+      svg2.append(maxLabel);
       rate.forEach((item, index) => {
         const errorCount = Math.min(item.count, errors[index]?.count ?? 0);
         const okCount = item.count - errorCount;
@@ -155,11 +155,11 @@
           dot.append(dotTitle);
           group.append(dot);
         }
-        svg.append(group);
+        svg2.append(group);
       });
-      xAxisTicks(svg, bucketCount, range, (index) => index * (barWidth + barGap) + barWidth / 2, height);
+      xAxisTicks(svg2, bucketCount, range, (index) => index * (barWidth + barGap) + barWidth / 2, height);
       section2.append(
-        svg,
+        svg2,
         chartLegend([
           { className: "swatch-ok", label: "events" },
           { className: "swatch-error", label: "errors" }
@@ -179,7 +179,7 @@
       const plotHeight = height - padTop - padBottom;
       const max = Math.max(1, ...latency.map((item) => Math.max(item.average, item.p95)));
       const step = bucketCount > 1 ? width / (bucketCount - 1) : 0;
-      const svg = svgEl("svg", {
+      const svg2 = svgEl("svg", {
         viewBox: `0 0 ${width} ${height}`,
         class: "latency-chart",
         role: "img",
@@ -187,7 +187,7 @@
       });
       const maxLabel = svgEl("text", { x: 2, y: padTop, class: "chart-axis-label" });
       maxLabel.textContent = `${Math.round(max)}ms`;
-      svg.append(maxLabel);
+      svg2.append(maxLabel);
       const pathFor = (key) => {
         let d = "";
         let drawing = false;
@@ -203,8 +203,8 @@
         });
         return d.trim();
       };
-      svg.append(svgEl("path", { d: pathFor("p95"), class: "latency-line latency-p95" }));
-      svg.append(svgEl("path", { d: pathFor("average"), class: "latency-line latency-average" }));
+      svg2.append(svgEl("path", { d: pathFor("p95"), class: "latency-line latency-p95" }));
+      svg2.append(svgEl("path", { d: pathFor("average"), class: "latency-line latency-average" }));
       latency.forEach((item, index) => {
         if (item.count === 0) return;
         const x = index * step;
@@ -219,11 +219,11 @@
         const title = svgEl("title");
         title.textContent = `${time !== void 0 ? formatClock(time, range) + "\n" : ""}average ${Math.round(item.average)}ms, p95 ${Math.round(item.p95)}ms`;
         dot.append(title);
-        svg.append(dot);
+        svg2.append(dot);
       });
-      xAxisTicks(svg, bucketCount, range, (index) => index * step, height);
+      xAxisTicks(svg2, bucketCount, range, (index) => index * step, height);
       section2.append(
-        svg,
+        svg2,
         chartLegend([
           { className: "swatch-average", label: "average" },
           { className: "swatch-p95", label: "p95" }
@@ -677,6 +677,19 @@
       searchClear: element("searchClear"),
       searchError: element("searchError"),
       connectionBar: element("connectionBar"),
+      metricQuery: element("metricQuery"),
+      metricConnection: element("metricConnection"),
+      metricInput: element("metricInput"),
+      metricSuggestions: element("metricSuggestions"),
+      metricRange: element("metricRange"),
+      metricRun: element("metricRun"),
+      metricWatch: element("metricWatch"),
+      metricQueryStatus: element("metricQueryStatus"),
+      metricChart: element("metricChart"),
+      metricSelection: element("metricSelection"),
+      metricSelectionText: element("metricSelectionText"),
+      metricShowLogs: element("metricShowLogs"),
+      metricShowLocal: element("metricShowLocal"),
       connectionCompare: element("connectionCompare"),
       connectionLink: element("connectionLink"),
       compare: element("compare"),
@@ -1143,7 +1156,7 @@
   }
   function buildIcon(name) {
     const namespace = "http://www.w3.org/2000/svg";
-    const svg = document.createElementNS(namespace, "svg");
+    const svg2 = document.createElementNS(namespace, "svg");
     for (const [key, value] of Object.entries({
       viewBox: "0 0 16 16",
       width: "14",
@@ -1155,13 +1168,13 @@
       "stroke-linecap": "round",
       "stroke-linejoin": "round"
     }))
-      svg.setAttribute(key, value);
+      svg2.setAttribute(key, value);
     for (const [tag, attributes] of ICONS[name]) {
       const part = document.createElementNS(namespace, tag);
       for (const [key, value] of Object.entries(attributes)) part.setAttribute(key, value);
-      svg.append(part);
+      svg2.append(part);
     }
-    return svg;
+    return svg2;
   }
   function eventAction(className, iconName, label, title, unavailable) {
     const button = document.createElement("button");
@@ -1820,12 +1833,12 @@ Trace ${trace.traceId}`;
   }
   function sparkline(points) {
     const namespace = "http://www.w3.org/2000/svg";
-    const svg = document.createElementNS(namespace, "svg");
-    svg.setAttribute("class", "metric-spark");
-    svg.setAttribute("viewBox", "0 0 100 24");
-    svg.setAttribute("preserveAspectRatio", "none");
-    svg.setAttribute("aria-hidden", "true");
-    if (points.length < 2) return svg;
+    const svg2 = document.createElementNS(namespace, "svg");
+    svg2.setAttribute("class", "metric-spark");
+    svg2.setAttribute("viewBox", "0 0 100 24");
+    svg2.setAttribute("preserveAspectRatio", "none");
+    svg2.setAttribute("aria-hidden", "true");
+    if (points.length < 2) return svg2;
     const values = points.map((point) => point.value);
     const low = Math.min(...values), high = Math.max(...values);
     const first = points[0].timeMs, span = Math.max(1, points[points.length - 1].timeMs - first);
@@ -1839,8 +1852,8 @@ Trace ${trace.traceId}`;
       }).join(" ")
     );
     line.setAttribute("vector-effect", "non-scaling-stroke");
-    svg.append(line);
-    return svg;
+    svg2.append(line);
+    return svg2;
   }
   function details(series) {
     const rate = series.measure === "rate";
@@ -3333,6 +3346,284 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
     };
   }
 
+  // src/webview/inspection/metric-query.ts
+  var SVG = "http://www.w3.org/2000/svg";
+  var HEIGHT = 220;
+  var MARGIN = { left: 64, right: 12, top: 10, bottom: 22 };
+  var COLORS = 6;
+  var SUGGEST_DELAY_MS = 250;
+  function svg(name, attributes) {
+    const element2 = document.createElementNS(SVG, name);
+    for (const [key, value] of Object.entries(attributes)) element2.setAttribute(key, String(value));
+    return element2;
+  }
+  function ticks(low, high, count) {
+    const span = high - low || Math.abs(high) || 1;
+    const raw = span / count;
+    const power = 10 ** Math.floor(Math.log10(raw));
+    const step = [1, 2, 5, 10].map((factor) => factor * power).find((candidate) => candidate >= raw);
+    const values = [];
+    for (let value = Math.ceil(low / step) * step; value <= high + step / 1e6; value += step) values.push(value);
+    return values;
+  }
+  function createMetricQuery(elements, api, scope, actions) {
+    let connections = [];
+    let signature = "";
+    let result;
+    let selection;
+    let suggestTimer;
+    const selected = () => connections.find((connection) => connection.id === elements.metricConnection.value);
+    elements.metricRange.value = "1h";
+    function placeholder() {
+      const connection = selected();
+      elements.metricInput.placeholder = connection?.type === "datadog" ? "avg:trace.http.request.duration{service:checkout} by {env}" : "SELECT minute AS time, avg(duration_ms) AS value, service FROM requests GROUP BY 1, 3";
+      elements.metricInput.title = connection?.type === "datadog" ? "A Datadog metric query" : "A SELECT that returns a time, a value, and optionally columns that name series";
+    }
+    function updateWatch() {
+      const query = elements.metricInput.value.trim();
+      const watched = !!query && !!selected()?.watching?.includes(query);
+      elements.metricWatch.setAttribute("aria-pressed", String(watched));
+      elements.metricWatch.textContent = watched ? "Stop watching" : "Watch";
+      elements.metricWatch.disabled = !query;
+    }
+    function update(list) {
+      connections = list ?? [];
+      elements.metricQuery.hidden = !connections.length;
+      const next = JSON.stringify(connections.map((connection) => [connection.id, connection.label]));
+      if (next !== signature) {
+        signature = next;
+        const keep = elements.metricConnection.value;
+        elements.metricConnection.replaceChildren(
+          ...connections.map((connection) => {
+            const option = document.createElement("option");
+            option.value = connection.id;
+            option.textContent = connection.label;
+            return option;
+          })
+        );
+        elements.metricConnection.value = connections.some((connection) => connection.id === keep) ? keep : (connections.find((connection) => connection.type === "datadog") ?? connections[0])?.id ?? "";
+        placeholder();
+      }
+      updateWatch();
+    }
+    function run() {
+      const connection = selected();
+      const query = elements.metricInput.value.trim();
+      if (!connection || !query) return;
+      selection = void 0;
+      elements.metricSelection.hidden = true;
+      elements.metricQueryStatus.textContent = "Querying\u2026";
+      api.postMessage({ type: "metricQuery", connectionId: connection.id, query, range: elements.metricRange.value });
+    }
+    function receive(message) {
+      if (message.connectionId !== elements.metricConnection.value || message.query !== elements.metricInput.value.trim())
+        return;
+      if (message.error || !message.result) {
+        result = void 0;
+        elements.metricQueryStatus.textContent = `Could not query: ${message.error ?? "no result"}`;
+        elements.metricChart.hidden = true;
+        return;
+      }
+      result = message.result;
+      const points = result.series.reduce((sum, series) => sum + series.points.length, 0);
+      elements.metricQueryStatus.textContent = result.series.length ? `${result.series.length} series \xB7 ${points.toLocaleString()} points \xB7 ${result.elapsedMs.toLocaleString()} ms. Drag across the chart to show the logs from that time.` : "No data for this query in the range.";
+      draw();
+    }
+    function receiveNames(message) {
+      if (message.connectionId !== elements.metricConnection.value) return;
+      elements.metricSuggestions.replaceChildren(
+        ...message.names.map((name) => {
+          const option = document.createElement("option");
+          option.value = name;
+          return option;
+        })
+      );
+    }
+    function draw() {
+      const chart = elements.metricChart;
+      const data = result;
+      chart.hidden = !data?.series.length;
+      if (!data?.series.length) return chart.replaceChildren();
+      const width = Math.max(320, chart.clientWidth || 800);
+      const unit = data.series.find((series) => series.unit)?.unit;
+      const values = data.series.flatMap((series) => series.points.map(([, value]) => value));
+      const low = Math.min(0, ...values);
+      const high = Math.max(...values, low + 1);
+      const yTicks = ticks(low, high * 1.05, 4);
+      const top = yTicks.at(-1);
+      const bottom = Math.min(low, yTicks[0]);
+      const x = (time2) => MARGIN.left + (time2 - data.fromMs) / Math.max(1, data.toMs - data.fromMs) * (width - MARGIN.left - MARGIN.right);
+      const y = (value) => MARGIN.top + (1 - (value - bottom) / Math.max(1e-9, top - bottom)) * (HEIGHT - MARGIN.top - MARGIN.bottom);
+      const time = (px) => data.fromMs + (px - MARGIN.left) / Math.max(1, width - MARGIN.left - MARGIN.right) * (data.toMs - data.fromMs);
+      const root = svg("svg", {
+        class: "metric-chart-svg",
+        viewBox: `0 0 ${width} ${HEIGHT}`,
+        width,
+        height: HEIGHT,
+        role: "img"
+      });
+      root.setAttribute(
+        "aria-label",
+        `${data.series.length} series from ${actions.formatTime(data.fromMs)} to ${actions.formatTime(data.toMs)}`
+      );
+      for (const value of yTicks) {
+        root.append(
+          svg("line", { class: "metric-grid", x1: MARGIN.left, x2: width - MARGIN.right, y1: y(value), y2: y(value) })
+        );
+        const label = svg("text", { class: "metric-axis", x: MARGIN.left - 6, y: y(value) + 4, "text-anchor": "end" });
+        label.textContent = formatMetric(value, unit);
+        root.append(label);
+      }
+      for (let index = 0; index <= 4; index++) {
+        const at2 = data.fromMs + (data.toMs - data.fromMs) * index / 4;
+        const label = svg("text", {
+          class: "metric-axis",
+          x: x(at2),
+          y: HEIGHT - 6,
+          "text-anchor": index === 0 ? "start" : index === 4 ? "end" : "middle"
+        });
+        label.textContent = actions.formatTime(at2);
+        root.append(label);
+      }
+      data.series.forEach((series, index) => {
+        root.append(
+          svg("polyline", {
+            class: `metric-line metric-color-${index % COLORS}`,
+            points: series.points.map(([at2, value]) => `${x(at2).toFixed(1)},${y(value).toFixed(1)}`).join(" ")
+          })
+        );
+      });
+      const brush = svg("rect", {
+        class: "metric-brush",
+        x: 0,
+        y: MARGIN.top,
+        width: 0,
+        height: HEIGHT - MARGIN.top - MARGIN.bottom
+      });
+      brush.setAttribute("visibility", "hidden");
+      const cursor = svg("line", { class: "metric-cursor", x1: 0, x2: 0, y1: MARGIN.top, y2: HEIGHT - MARGIN.bottom });
+      cursor.setAttribute("visibility", "hidden");
+      root.append(brush, cursor);
+      const tooltip = document.createElement("div");
+      tooltip.className = "metric-tooltip";
+      tooltip.hidden = true;
+      const legend = document.createElement("ul");
+      legend.className = "metric-legend";
+      legend.append(
+        ...data.series.map((series, index) => {
+          const item = document.createElement("li");
+          const swatch = document.createElement("span");
+          swatch.className = `metric-swatch metric-color-${index % COLORS}`;
+          const latest = series.points.at(-1);
+          const text = document.createElement("span");
+          text.textContent = `${seriesName(series)}${latest ? ` \xB7 ${formatMetric(latest[1], series.unit)}` : ""}`;
+          item.append(swatch, text);
+          return item;
+        })
+      );
+      const at = (event) => {
+        const box = root.getBoundingClientRect();
+        const px = (event.clientX - box.left) / Math.max(1, box.width) * width;
+        return Math.min(width - MARGIN.right, Math.max(MARGIN.left, px));
+      };
+      let start;
+      scope.listen(root, "pointerdown", (event) => {
+        start = at(event);
+        brush.setAttribute("visibility", "visible");
+        brush.setAttribute("x", String(start));
+        brush.setAttribute("width", "0");
+      });
+      scope.listen(root, "pointermove", (event) => {
+        const px = at(event);
+        if (start !== void 0) {
+          brush.setAttribute("x", String(Math.min(start, px)));
+          brush.setAttribute("width", String(Math.abs(px - start)));
+        }
+        const moment = time(px);
+        cursor.setAttribute("x1", String(px));
+        cursor.setAttribute("x2", String(px));
+        cursor.setAttribute("visibility", "visible");
+        tooltip.hidden = false;
+        tooltip.textContent = [
+          actions.formatTime(moment),
+          ...data.series.map((series) => {
+            const nearest = series.points.reduce(
+              (best, point) => Math.abs(point[0] - moment) < Math.abs(best[0] - moment) ? point : best,
+              series.points[0]
+            );
+            return `${seriesName(series)}: ${nearest ? formatMetric(nearest[1], series.unit) : "\u2013"}`;
+          })
+        ].join("\n");
+      });
+      scope.listen(root, "pointerleave", () => {
+        cursor.setAttribute("visibility", "hidden");
+        tooltip.hidden = true;
+      });
+      scope.listen(root, "pointerup", (event) => {
+        if (start === void 0) return;
+        const end = at(event);
+        const [from, to] = [Math.min(start, end), Math.max(start, end)];
+        start = void 0;
+        if (to - from < 4) {
+          brush.setAttribute("visibility", "hidden");
+          select(void 0);
+          return;
+        }
+        select([Math.floor(time(from)), Math.ceil(time(to))]);
+      });
+      chart.replaceChildren(root, tooltip, legend);
+    }
+    function seriesName(series) {
+      return series.scope && series.scope !== "*" ? series.scope : series.name;
+    }
+    function select(window2) {
+      selection = window2;
+      elements.metricSelection.hidden = !window2;
+      if (!window2) return;
+      elements.metricSelectionText.textContent = `${actions.formatTime(window2[0])} \u2013 ${actions.formatTime(window2[1])} selected`;
+      elements.metricShowLogs.textContent = `Show logs from ${selected()?.label ?? "the connection"}`;
+    }
+    scope.listen(elements.metricRun, "click", run);
+    scope.listen(elements.metricInput, "keydown", (event) => {
+      if (event.key === "Enter") run();
+    });
+    scope.listen(elements.metricInput, "input", () => {
+      updateWatch();
+      clearTimeout(suggestTimer);
+      const connection = selected();
+      const search = elements.metricInput.value.trim();
+      if (!connection || connection.type !== "datadog" || !search || /[\s{(]/.test(search)) return;
+      suggestTimer = setTimeout(
+        () => api.postMessage({ type: "metricNames", connectionId: connection.id, search: search.replace(/^[a-z]+:/, "") }),
+        SUGGEST_DELAY_MS
+      );
+    });
+    scope.listen(elements.metricConnection, "change", () => {
+      placeholder();
+      updateWatch();
+    });
+    scope.listen(elements.metricWatch, "click", () => {
+      const connection = selected();
+      const query = elements.metricInput.value.trim();
+      if (!connection || !query) return;
+      api.postMessage({
+        type: "metricWatch",
+        connectionId: connection.id,
+        query,
+        enabled: !connection.watching?.includes(query)
+      });
+    });
+    scope.listen(elements.metricShowLogs, "click", () => {
+      const connection = selected();
+      if (connection && selection) actions.showLogs(connection.id, selection[0], selection[1]);
+    });
+    scope.listen(elements.metricShowLocal, "click", () => {
+      if (selection) actions.showLocal(selection[0], selection[1]);
+    });
+    scope.track(() => clearTimeout(suggestTimer));
+    return { update, receive, receiveNames, run, redraw: draw };
+  }
+
   // src/webview/table/layout.ts
   function layoutColumnWidths(displayedColumns, columnElements, columnWidths, available, table) {
     if (!columnElements.size) return;
@@ -4423,6 +4714,22 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
       formatTime: (ms) => formatTimestamp({ id: 0, level: "", timestampMs: ms }) ?? "",
       showContext: (id) => inspection.showContext(id)
     });
+    const metricQuery = createMetricQuery(elements, api, scope, {
+      formatTime: (ms) => formatTimestamp({ id: 0, level: "", timestampMs: ms }) ?? "",
+      showLogs: (connectionId, fromMs, toMs) => api.postMessage({
+        type: "connectionFetch",
+        connectionId,
+        query: search.query(),
+        range: state.connectionRange,
+        fromMs,
+        toMs
+      }),
+      showLocal: (fromMs, toMs) => {
+        views.show("logs");
+        selectSource("");
+        search.setQuery(`timestamp:[${new Date(fromMs).toISOString()} to ${new Date(toMs).toISOString()}]`, true);
+      }
+    });
     const metricList = createMetricList(elements, api, scope, {
       reveal: () => views.show("metrics"),
       visible: () => views.active() === "metrics"
@@ -4542,6 +4849,14 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
         metricList.receive(data.metrics);
         return;
       }
+      if (data.type === "metricQuery") {
+        metricQuery.receive(data);
+        return;
+      }
+      if (data.type === "metricNames") {
+        metricQuery.receiveNames(data);
+        return;
+      }
       if (data.type === "compare") {
         compareView.receive(data);
         return;
@@ -4614,7 +4929,8 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
       doctor.receive(data.doctor);
       changedFiles = data.changes?.files;
       updateChangesControl();
-      metricList.update(data.metrics, otlpRunning);
+      metricList.update(data.metrics, otlpRunning || !!data.connections?.length);
+      metricQuery.update(data.connections);
       aiCalls.update(data.aiCalls, otlpRunning);
       if (restoreTab) {
         const tab = restoreTab;

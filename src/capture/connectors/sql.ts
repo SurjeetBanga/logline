@@ -1,4 +1,5 @@
 import type { ColumnInfo, ConnectionConfig, LogTableMapping, TimeEncoding } from '../../core/connections';
+import { boundSeries, rowsToSeries } from '../../core/metric-query';
 import {
   buildSqlLogQuery,
   checkReadOnlySql,
@@ -8,7 +9,7 @@ import {
   type RowRoles,
   type TableInfo,
 } from '../../core/remote-query';
-import type { Connector, FetchRequest, FetchResult, Row, SqlDriver } from './types';
+import type { Connector, FetchRequest, FetchResult, MetricResult, Row, SqlDriver } from './types';
 
 const NUMERIC_TYPE = /int|real|double|float|numeric|decimal|serial|number/i;
 
@@ -178,6 +179,28 @@ export class SqlConnector implements Connector {
       statement: checked.sql,
       elapsedMs: Date.now() - started,
     };
+  }
+
+  /**
+   * A typed SELECT that returns a time, a value, and optionally columns that
+   * name series, such as `SELECT minute AS time, avg(duration_ms) AS value FROM requests GROUP BY 1`.
+   * Rows outside the range are left out.
+   */
+  async queryMetrics(sql: string, fromMs: number, toMs: number, signal?: AbortSignal): Promise<MetricResult> {
+    const started = Date.now();
+    const checked = checkReadOnlySql(sql);
+    if ('error' in checked) throw new Error(checked.error);
+    const statement = limitedSql(checked.sql, this.driver.dialect, 50000);
+    const rows = await this.query(statement.sql, statement.params, signal);
+    const series = rowsToSeries(rows, 'value')
+      .map((one) => ({ ...one, points: one.points.filter(([time]) => time >= fromMs && time <= toMs) }))
+      .filter((one) => one.points.length);
+    return { series: boundSeries(series), statement: checked.sql, elapsedMs: Date.now() - started };
+  }
+
+  /** A database has no catalog of metrics; queries are typed. */
+  listMetrics(): Promise<string[]> {
+    return Promise.resolve([]);
   }
 
   dispose(): Promise<void> {

@@ -328,3 +328,32 @@ test('Postgres errors: timeouts are explained, and a broken connection is replac
   assert.equal(refused.clients(), 2, 'a failed connect is retried on the next query');
   await assert.rejects(driver.query('SELECT 1', [], { timeoutMs: 1000, signal: AbortSignal.abort() }), /cancelled/);
 });
+
+test('a typed SELECT becomes metric series within the range', { skip: !hasSqlite }, async () => {
+  const file = logDatabase();
+  const connector = new SqlConnector(connection(file), new SqliteProcessDriver(file), () => 5000);
+  try {
+    const result = await connector.queryMetrics(
+      'SELECT created_at AS time, COUNT(*) AS value, severity FROM app_logs GROUP BY created_at, severity',
+      BASE + 60000,
+      BASE + 3 * 60000,
+    );
+    assert.deepEqual(
+      result.series.map((series) => [series.scope, series.points]),
+      [
+        [
+          'severity:ERROR',
+          [
+            [BASE + 60000, 1],
+            [BASE + 3 * 60000, 1],
+          ],
+        ],
+        ['severity:INFO', [[BASE + 2 * 60000, 1]]],
+      ],
+    );
+    assert.deepEqual(await connector.listMetrics(), []);
+    await assert.rejects(connector.queryMetrics('DELETE FROM app_logs', 0, 1), /Only SELECT/);
+  } finally {
+    await connector.dispose();
+  }
+});

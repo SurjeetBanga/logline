@@ -236,6 +236,7 @@ test(
         type: 'sqlite',
         mapped: true,
         sql: true,
+        watching: [],
         tailing: false,
       },
     ]);
@@ -444,6 +445,7 @@ test('a Datadog connection is added with its keys, searched, and opened from a l
       type: 'datadog',
       mapped: true,
       sql: false,
+      watching: [],
       tailing: false,
     });
     assert.deepEqual(await manager.preview('prod', 'level:error /x/', '1h'), {
@@ -499,4 +501,40 @@ test('a Datadog site that cannot be reached is reported and not saved', async ()
   await manager.add();
   assert.equal(updates.length, 0);
   assert.match(ui.messages.at(-1)!, /^error: Could not connect: Could not reach Datadog/);
+});
+
+test('metric queries, name suggestions, watches, and windowed fetches go through the connection', async () => {
+  reset();
+  const now = Date.now();
+  const fake = await startFakeDatadog({
+    token: 'tok-metrics',
+    series: [{ metric: 'latency', scope: 'env:prod', points: [[now - 60000, 120]] }],
+    logs: [{ id: 'l1', timestamp: new Date(now - 90000).toISOString(), status: 'error', message: 'slow' }],
+  });
+  try {
+    raw.workspace = [{ id: 'prod', label: 'prod', type: 'datadog', site: fake.url }];
+    const { manager, secrets, registry, store } = setup();
+    secrets.set(`logline.connection.datadog:${fake.url}`, JSON.stringify({ token: 'tok-metrics' }));
+    const answer = await manager.metricQuery('prod', 'avg:latency{*} by {env}', '1h');
+    assert.deepEqual(answer.result?.series, [{ name: 'latency', scope: 'env:prod', points: [[now - 60000, 120]] }]);
+    assert.ok(answer.result!.toMs - answer.result!.fromMs === 3600000);
+    assert.deepEqual(await manager.metricNames('prod', 'lat'), ['latency']);
+    assert.deepEqual(await manager.metricQuery('missing', 'x', '1h'), {
+      error: 'That connection is no longer in logline.connections.',
+    });
+    // A window selected on the chart fetches the logs from exactly that time.
+    await manager.fetch('prod', '', '1h', { fromMs: now - 120000, toMs: now - 60000 });
+    const run = [...registry.records.values()].at(-1)!;
+    assert.match(run.command ?? '', /^All rows · \d\d:\d\d:\d\d–\d\d:\d\d:\d\d UTC$/);
+    assert.deepEqual(
+      store.all().map((event) => event.message),
+      ['slow'],
+    );
+    // Without a place to put watched metrics, Watch does nothing.
+    await manager.watchMetric('prod', 'avg:latency{*}', true);
+    assert.deepEqual(manager.views()[0].watching, []);
+    manager.dispose();
+  } finally {
+    await fake.close();
+  }
 });

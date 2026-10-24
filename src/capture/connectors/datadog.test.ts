@@ -124,7 +124,7 @@ test('refused keys, rate limits, timeouts, and unreachable APIs are explained', 
     const wrong = new DatadogConnector(connection(fake.url), { token: 'wrong' }, () => 5000);
     await assert.rejects(
       wrong.fetchLogs(request),
-      /Datadog refused the access token \(403: Forbidden\)\. It needs the logs_read_data permission\./,
+      /Datadog refused the access token \(403: Forbidden\)\. Logs need the logs_read_data permission; metrics need timeseries_query and metrics_read\./,
     );
     const right = new DatadogConnector(connection(fake.url), { token: 'right-token' }, () => 5000);
     assert.equal((await right.fetchLogs(request)).records.length, 5);
@@ -186,4 +186,53 @@ test('a typed Datadog query is sent as it is, and the default range is the last 
   assert.ok(Number(filter.to) - Number(filter.from) === 900000 && Number(filter.to) >= before);
   assert.equal(seen[0].sort, 'timestamp');
   assert.equal(connector.tailLagMs, 60000);
+});
+
+test('a metric query reads Datadog timeseries over the range, and metric names are suggested', async () => {
+  const now = Date.now();
+  const fake = await startFakeDatadog({
+    token: 'metrics-token',
+    series: [
+      {
+        metric: 'trace.http.request.duration',
+        scope: 'env:prod',
+        unit: 's',
+        points: [
+          [now - 120000, 0.2],
+          [now - 60000, 0.9],
+          [now - 7200000, 5],
+        ],
+      },
+      { metric: 'system.cpu.user', scope: 'host:web-1', points: [[now - 60000, 30]] },
+    ],
+  });
+  try {
+    const connector = new DatadogConnector(connection(fake.url), { token: 'metrics-token' }, () => 5000);
+    const result = await connector.queryMetrics('avg:trace.http.request.duration{*} by {env}', now - 3600000, now);
+    assert.equal(result.statement, 'avg:trace.http.request.duration{*} by {env}');
+    assert.deepEqual(result.series, [
+      {
+        name: 'trace.http.request.duration',
+        scope: 'env:prod',
+        unit: 's',
+        points: [
+          [now - 120000, 0.2],
+          [now - 60000, 0.9],
+        ],
+      },
+    ]);
+    const request = fake.state.requests.at(-1)!;
+    assert.equal(request.path, '/api/v1/query');
+    assert.deepEqual(await connector.listMetrics('HTTP'), ['trace.http.request.duration']);
+    assert.deepEqual(await connector.listMetrics(''), ['trace.http.request.duration', 'system.cpu.user']);
+  } finally {
+    await fake.close();
+  }
+  const failing = new DatadogConnector(
+    connection('datadoghq.com'),
+    {},
+    () => 2000,
+    async () => new Response(JSON.stringify({ status: 'error', error: 'Rule parsing error' })),
+  );
+  await assert.rejects(failing.queryMetrics('avg:x{', 0, 1), /could not run the query: Rule parsing error/);
 });

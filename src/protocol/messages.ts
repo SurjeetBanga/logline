@@ -12,6 +12,7 @@ import type { ReceiverStatus } from '../capture/otlp-receiver';
 import type { RemoteRunInfo } from '../capture/remote-source';
 import { RANGE_CHOICES, type ConnectionType } from '../core/connections';
 import type { SignatureRow } from '../core/signature-compare';
+import type { MetricSeriesData } from '../core/metric-query';
 
 export interface Filter {
   query?: string;
@@ -66,7 +67,19 @@ export type ViewRequest =
   | { type: 'showGuide'; section?: 'guide' | 'whatsNew' }
   | { type: 'run'; serverId?: string }
   | { type: 'stop'; serverId?: string; sessionId?: string }
-  | { type: 'connectionFetch' | 'connectionPreview'; connectionId: string; query: string; range: string }
+  | { type: 'connectionPreview'; connectionId: string; query: string; range: string }
+  | {
+      type: 'connectionFetch';
+      connectionId: string;
+      query: string;
+      range: string;
+      /** An exact window, such as one selected on a metric chart, instead of the range. */
+      fromMs?: number;
+      toMs?: number;
+    }
+  | { type: 'metricQuery'; connectionId: string; query: string; range: string }
+  | { type: 'metricNames'; connectionId: string; search: string }
+  | { type: 'metricWatch'; connectionId: string; query: string; enabled: boolean }
   | { type: 'connectionTail'; connectionId: string; query: string; enabled: boolean }
   | { type: 'connectionSql' | 'connectionLink'; connectionId: string }
   | ({ type: 'compare' } & CompareRequest)
@@ -107,6 +120,8 @@ export interface ConnectionView {
   mapped: boolean;
   /** Whether it runs SQL typed by a person (databases do, Datadog does not). */
   sql: boolean;
+  /** Metric queries watched into the Metrics list. */
+  watching: string[];
   tailing: boolean;
   /** The latest fetch or tail. */
   last?: RemoteRunInfo;
@@ -249,6 +264,15 @@ export type HostMessage =
   | { type: 'aiCall'; traceId: string; spanId: string; detail?: GenAiCallDetail }
   | { type: 'metrics'; metrics: MetricSeriesView[] }
   | { type: 'compare'; view?: CompareView; error?: string }
+  | {
+      type: 'metricQuery';
+      connectionId: string;
+      query: string;
+      range: string;
+      result?: { series: MetricSeriesData[]; statement: string; elapsedMs: number; fromMs: number; toMs: number };
+      error?: string;
+    }
+  | { type: 'metricNames'; connectionId: string; search: string; names: string[] }
   | {
       type: 'connectionPreview';
       connectionId: string;
@@ -399,6 +423,18 @@ export function parseViewRequest(value: unknown): ViewRequest | undefined {
       return { type: msg.type, serverId: filter.serverId };
     case 'stop':
       return { type: msg.type, serverId: filter.serverId, sessionId: filter.sessionId };
+    case 'metricQuery':
+    case 'metricNames':
+    case 'metricWatch': {
+      const connectionId = string('connectionId')?.slice(0, 128);
+      const query = (string(msg.type === 'metricNames' ? 'search' : 'query') ?? '').slice(0, 2048);
+      if (!connectionId) return;
+      if (msg.type === 'metricNames') return { type: msg.type, connectionId, search: query.slice(0, 256) };
+      if (!query.trim()) return;
+      if (msg.type === 'metricWatch') return { type: msg.type, connectionId, query, enabled: msg.enabled === true };
+      const range = string('range');
+      return { type: msg.type, connectionId, query, range: range && RANGE_CHOICES.includes(range) ? range : '1h' };
+    }
     case 'connectionFetch':
     case 'connectionPreview':
     case 'connectionTail':
@@ -410,7 +446,12 @@ export function parseViewRequest(value: unknown): ViewRequest | undefined {
       const query = (string('query') ?? '').slice(0, 1024);
       if (msg.type === 'connectionTail') return { type: msg.type, connectionId, query, enabled: msg.enabled === true };
       const range = string('range');
-      return { type: msg.type, connectionId, query, range: range && RANGE_CHOICES.includes(range) ? range : '1h' };
+      const valid = range && RANGE_CHOICES.includes(range) ? range : '1h';
+      const fromMs = number('fromMs');
+      const toMs = number('toMs');
+      if (msg.type === 'connectionFetch' && fromMs !== undefined && toMs !== undefined && fromMs < toMs)
+        return { type: msg.type, connectionId, query, range: valid, fromMs, toMs };
+      return { type: msg.type, connectionId, query, range: valid };
     }
     case 'compare': {
       const baselineServerId = string('baselineServerId')?.slice(0, 4096);

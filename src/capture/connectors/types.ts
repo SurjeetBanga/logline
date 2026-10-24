@@ -1,3 +1,4 @@
+import type { MetricSeriesData } from '../../core/metric-query';
 import type { SqlDialect, SqlValue } from '../../core/remote-query';
 
 export type Row = Record<string, unknown>;
@@ -57,8 +58,22 @@ export interface RemoteConnector {
   readonly tailLagMs?: number;
 }
 
+export interface MetricResult {
+  series: MetricSeriesData[];
+  /** The query that ran, for display. */
+  statement: string;
+  elapsedMs: number;
+}
+
+/** A store of metric time series. */
+export interface MetricConnector {
+  queryMetrics(query: string, fromMs: number, toMs: number, signal?: AbortSignal): Promise<MetricResult>;
+  /** Metric names that contain `search`, for suggestions. */
+  listMetrics(search: string, signal?: AbortSignal): Promise<string[]>;
+}
+
 /** A connection's store, as the editor uses it. */
-export interface Connector extends RemoteConnector {
+export interface Connector extends RemoteConnector, Partial<MetricConnector> {
   /** A short description of what was reached, to confirm the connection works. */
   test(): Promise<string>;
   /** What a search would send, and which terms Logline would apply itself, without running it. */

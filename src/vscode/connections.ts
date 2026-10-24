@@ -5,7 +5,9 @@ import { PostgresDriver } from '../capture/connectors/postgres-driver';
 import { SqlConnector } from '../capture/connectors/sql';
 import { openSqlite } from '../capture/connectors/sqlite-driver';
 import { errorText, type Connector, type RemoteRecord, type SqlDriver } from '../capture/connectors/types';
+import type { RemoteMetrics } from '../capture/remote-metrics';
 import type { RemoteSource, RemoteTarget } from '../capture/remote-source';
+import type { MetricSeriesData } from '../core/metric-query';
 import {
   connectionLabel,
   connectionSourceId,
@@ -62,6 +64,8 @@ export class ConnectionManager implements vscode.Disposable {
     private readonly secrets: Secrets | undefined,
     /** Select a source, and one of its runs, in the Logs panel. */
     private readonly showSource: (sourceId: string, runId?: string) => Promise<void>,
+    /** Watched metric queries, polled into the Metrics list. */
+    private readonly watched?: RemoteMetrics,
   ) {}
 
   list(): ConnectionConfig[] {
@@ -82,6 +86,7 @@ export class ConnectionManager implements vscode.Disposable {
         type: connection.type,
         mapped: searchable(connection),
         sql: sqlCapable(connection),
+        watching: this.watched?.watching(connection.id) ?? [],
         tailing: this.remote.tailing(connection.id),
         ...(last ? { last } : {}),
       };
@@ -95,7 +100,10 @@ export class ConnectionManager implements vscode.Disposable {
       if (current.get(id) === open.key) continue;
       this.open.delete(id);
       void open.connector.dispose();
-      if (!current.has(id)) this.remote.stopConnection(id);
+      if (!current.has(id)) {
+        this.remote.stopConnection(id);
+        this.watched?.stopConnection(id);
+      }
     }
   }
 
@@ -259,19 +267,20 @@ export class ConnectionManager implements vscode.Disposable {
     this.reopen(connection);
   }
 
-  /** Fetch the newest rows that match a search over a range into a new run. */
-  async fetch(id: string, query: string, range: string): Promise<void> {
+  /** Fetch the newest rows that match a search over a range, or an exact window, into a new run. */
+  async fetch(id: string, query: string, range: string, window?: { fromMs: number; toMs: number }): Promise<void> {
     if (!this.trusted('searching a connection')) return;
     const connection = await this.pick(id, 'Search connection', searchable, 'No connection has logs to search.');
     if (!connection) return;
     const span = rangeMs(range) ?? 3600000;
     const now = Date.now();
+    const time = (ms: number) => new Date(ms).toISOString().slice(11, 19);
     try {
       const info = await this.remote.fetch(await this.target(connection), {
         query,
-        fromMs: now - span,
-        toMs: now,
-        title: `${query.trim() || 'All rows'} · last ${range}`,
+        fromMs: window?.fromMs ?? now - span,
+        toMs: window?.toMs ?? now,
+        title: `${query.trim() || 'All rows'} · ${window ? `${time(window.fromMs)}–${time(window.toMs)} UTC` : `last ${range}`}`,
         // The panel shows the new run, not every earlier one of the same search.
         started: (runId) => void this.showSource(connectionSourceId(connection.id), runId),
       });
@@ -341,6 +350,65 @@ export class ConnectionManager implements vscode.Disposable {
     } catch (error) {
       return { local: [], error: errorText(error) };
     }
+  }
+
+  /** Run a metric query over a range, for the Metrics tab's chart. */
+  async metricQuery(
+    id: string,
+    query: string,
+    range: string,
+  ): Promise<{
+    result?: { series: MetricSeriesData[]; statement: string; elapsedMs: number; fromMs: number; toMs: number };
+    error?: string;
+  }> {
+    if (!vscode.workspace.isTrusted) return { error: 'Trust this workspace before querying a connection.' };
+    const connection = this.find(id);
+    if (!connection) return { error: 'That connection is no longer in logline.connections.' };
+    const toMs = Date.now();
+    const fromMs = toMs - (rangeMs(range) ?? 3600000);
+    try {
+      const connector = await this.connector(connection);
+      if (!connector.queryMetrics) return { error: `${connectionLabel(connection)} has no metrics.` };
+      return { result: { ...(await connector.queryMetrics(query, fromMs, toMs)), fromMs, toMs } };
+    } catch (error) {
+      return { error: errorText(error) };
+    }
+  }
+
+  /** Metric names for suggestions while a query is typed; none when the store cannot list them. */
+  async metricNames(id: string, search: string): Promise<string[]> {
+    const connection = this.find(id);
+    if (!connection || !vscode.workspace.isTrusted) return [];
+    try {
+      return (await (await this.connector(connection)).listMetrics?.(search)) ?? [];
+    } catch {
+      return [];
+    }
+  }
+
+  /** Start or stop polling a metric query into the Metrics list. */
+  async watchMetric(id: string, query: string, enabled: boolean): Promise<void> {
+    const connection = this.find(id);
+    if (!connection || !this.watched) return;
+    if (!enabled) {
+      this.watched.unwatch(id, query);
+      return;
+    }
+    if (!this.trusted('watching a metric')) return;
+    const connector = await this.connector(connection);
+    const { queryMetrics, listMetrics } = connector;
+    if (!queryMetrics || !listMetrics) return;
+    this.watched.watch(
+      {
+        id,
+        label: connectionLabel(connection),
+        connector: {
+          queryMetrics: (...args) => queryMetrics.apply(connector, args),
+          listMetrics: (...args) => listMetrics.apply(connector, args),
+        },
+      },
+      query,
+    );
   }
 
   /** Ask for a search and a range in the Command Palette, then fetch. */

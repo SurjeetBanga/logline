@@ -123,6 +123,7 @@ test('saved connections are listed as sources before they have runs', () => {
     type: 'sqlite' as const,
     mapped: true,
     sql: true,
+    watching: [],
     tailing: false,
   };
   const without = h.snapshot();

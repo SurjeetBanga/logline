@@ -54,7 +54,10 @@ interface MessageServices {
   doctorAction(action: DoctorAction, siteId?: string): Promise<void>;
   connectAgent(): Promise<void>;
   showStatus(): Promise<void>;
-  connections?: Pick<ConnectionManager, 'fetch' | 'tail' | 'runSql' | 'preview' | 'add' | 'openLink'>;
+  connections?: Pick<
+    ConnectionManager,
+    'fetch' | 'tail' | 'runSql' | 'preview' | 'add' | 'openLink' | 'metricQuery' | 'metricNames' | 'watchMetric'
+  >;
   compare?(request: CompareRequest): CompareView;
 }
 export async function handleMessage(
@@ -225,7 +228,30 @@ export async function handleMessage(
       }
       return;
     case 'connectionFetch':
-      await services.connections?.fetch(msg.connectionId, msg.query, msg.range);
+      await services.connections?.fetch(
+        msg.connectionId,
+        msg.query,
+        msg.range,
+        msg.fromMs !== undefined && msg.toMs !== undefined ? { fromMs: msg.fromMs, toMs: msg.toMs } : undefined,
+      );
+      return;
+    case 'metricQuery': {
+      const answer = (await services.connections?.metricQuery(msg.connectionId, msg.query, msg.range)) ?? {
+        error: 'Connections are not available.',
+      };
+      send({ type: 'metricQuery', connectionId: msg.connectionId, query: msg.query, range: msg.range, ...answer });
+      return;
+    }
+    case 'metricNames':
+      send({
+        type: 'metricNames',
+        connectionId: msg.connectionId,
+        search: msg.search,
+        names: (await services.connections?.metricNames(msg.connectionId, msg.search)) ?? [],
+      });
+      return;
+    case 'metricWatch':
+      await services.connections?.watchMetric(msg.connectionId, msg.query, msg.enabled);
       return;
     case 'connectionTail':
       await services.connections?.tail(msg.connectionId, msg.query, msg.enabled);
