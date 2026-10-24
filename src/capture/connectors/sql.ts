@@ -4,14 +4,23 @@ import {
   buildSqlLogQuery,
   checkReadOnlySql,
   limitedSql,
+  rangedSql,
   rowRoles,
   rowToLine,
+  valueEncoding,
   type RowRoles,
   type TableInfo,
 } from '../../core/remote-query';
 import type { Connector, FetchRequest, FetchResult, MetricResult, Row, SqlDriver } from './types';
 
 const NUMERIC_TYPE = /int|real|double|float|numeric|decimal|serial|number/i;
+const METRIC_ROWS = 50000;
+
+/** A metric query's series name: its text on one line, shortened, so each watched query is its own metric. */
+function metricName(sql: string): string {
+  const text = sql.replace(/\s+/g, ' ').trim();
+  return text.length <= 120 ? text : `${text.slice(0, 117)}…`;
+}
 
 /** Split `schema.table`; a bare name is in the default schema. */
 function tableParts(table: string): { schema?: string; name: string } {
@@ -22,6 +31,8 @@ function tableParts(table: string): { schema?: string; name: string } {
 /** Searches a log table in SQLite or Postgres, and runs read-only queries typed by a person. */
 export class SqlConnector implements Connector {
   private table?: Promise<TableInfo>;
+  /** For each metric query, the column its time is in and how it is stored. */
+  private readonly metricTimes = new Map<string, { column: string; encoding: TimeEncoding } | null>();
 
   constructor(
     readonly connection: ConnectionConfig,
@@ -167,7 +178,7 @@ export class SqlConnector implements Connector {
 
   async runSql(sql: string, limit: number, signal?: AbortSignal): Promise<FetchResult> {
     const started = Date.now();
-    const checked = checkReadOnlySql(sql);
+    const checked = checkReadOnlySql(sql, this.driver.dialect);
     if ('error' in checked) throw new Error(checked.error);
     const statement = limitedSql(checked.sql, this.driver.dialect, limit);
     const rows = await this.query(statement.sql, statement.params, signal);
@@ -184,18 +195,41 @@ export class SqlConnector implements Connector {
   /**
    * A typed SELECT that returns a time, a value, and optionally columns that
    * name series, such as `SELECT minute AS time, avg(duration_ms) AS value FROM requests GROUP BY 1`.
-   * Rows outside the range are left out.
+   * The database returns only the rows in the range, the newest first.
    */
   async queryMetrics(sql: string, fromMs: number, toMs: number, signal?: AbortSignal): Promise<MetricResult> {
     const started = Date.now();
-    const checked = checkReadOnlySql(sql);
+    const checked = checkReadOnlySql(sql, this.driver.dialect);
     if ('error' in checked) throw new Error(checked.error);
-    const statement = limitedSql(checked.sql, this.driver.dialect, 50000);
+    const time = await this.metricTime(checked.sql, signal);
+    const statement = time
+      ? rangedSql(checked.sql, this.driver.dialect, time, fromMs, toMs, METRIC_ROWS)
+      : limitedSql(checked.sql, this.driver.dialect, METRIC_ROWS);
     const rows = await this.query(statement.sql, statement.params, signal);
-    const series = rowsToSeries(rows, 'value')
+    const series = rowsToSeries(rows, metricName(checked.sql))
       .map((one) => ({ ...one, points: one.points.filter(([time]) => time >= fromMs && time <= toMs) }))
       .filter((one) => one.points.length);
     return { series: boundSeries(series), statement: checked.sql, elapsedMs: Date.now() - started };
+  }
+
+  /** Read one row of a metric query to learn which column holds its time; remembered per query. */
+  private async metricTime(
+    sql: string,
+    signal?: AbortSignal,
+  ): Promise<{ column: string; encoding: TimeEncoding } | undefined> {
+    const known = this.metricTimes.get(sql);
+    if (known !== undefined) return known ?? undefined;
+    const sample = limitedSql(sql, this.driver.dialect, 1);
+    const [row] = await this.query(sample.sql, sample.params, signal);
+    // A query with no rows yet is read again next time.
+    if (!row) return undefined;
+    const columns = Object.keys(row);
+    const column = rowRoles(columns).timestamp ?? columns[0];
+    const encoding = column === undefined ? undefined : valueEncoding(row[column]);
+    const time = column !== undefined && encoding ? { column, encoding } : null;
+    if (this.metricTimes.size >= 100) this.metricTimes.clear();
+    this.metricTimes.set(sql, time);
+    return time ?? undefined;
   }
 
   /** A database has no catalog of metrics; queries are typed. */

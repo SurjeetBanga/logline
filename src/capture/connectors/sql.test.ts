@@ -4,6 +4,7 @@ import { mkdtempSync } from 'node:fs';
 import { isBuiltin } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { getEventListeners } from 'node:events';
 import { test } from 'node:test';
 import type { ConnectionConfig, PostgresConnection } from '../../core/connections';
 import { PostgresDriver } from './postgres-driver';
@@ -168,9 +169,16 @@ test('a query that runs too long is stopped, and the next query still works', { 
         signal: abort.signal,
       },
     );
+    // A query waiting behind the cancelled one still runs.
+    const waiting = driver.query('SELECT 2 AS two', [], { timeoutMs: 5000 });
     abort.abort();
     await assert.rejects(cancelled, /cancelled/);
-    assert.deepEqual(await driver.query('SELECT 1 AS one', [], { timeoutMs: 5000 }), [{ one: 1 }]);
+    assert.deepEqual(await waiting, [{ two: 2 }]);
+    const reused = new AbortController();
+    assert.deepEqual(await driver.query('SELECT 1 AS one', [], { timeoutMs: 5000, signal: reused.signal }), [
+      { one: 1 },
+    ]);
+    assert.equal(getEventListeners(reused.signal, 'abort').length, 0, 'a settled query stops listening');
   } finally {
     await driver.close();
   }
@@ -240,10 +248,12 @@ test('without built-in SQLite or the sqlite3 command, the error says what to ins
 /** A stand-in for pg's Client that records what it was asked. */
 function fakePg(behaviour: { fail?: (sql: string) => Error | undefined; connectError?: Error } = {}) {
   const log: string[] = [];
+  const configs: Record<string, unknown>[] = [];
   let clients = 0;
   class Client {
     constructor(readonly config: Record<string, unknown>) {
       clients++;
+      configs.push(config);
       log.push(
         `connect ${String(config.user)}@${String(config.host)}:${String(config.port)}/${String(config.database)} ${String(config.password)}`,
       );
@@ -262,7 +272,8 @@ function fakePg(behaviour: { fail?: (sql: string) => Error | undefined; connectE
       log.push('end');
     }
   }
-  return { log, clients: () => clients, load: () => ({ Client }) as never };
+  const types = { getTypeParser: () => (value: string) => `parsed ${value}` };
+  return { log, configs, clients: () => clients, load: () => ({ Client, types }) as never };
 }
 
 const postgres: PostgresConnection = {
@@ -284,13 +295,20 @@ test('Postgres queries run in a read-only transaction with a statement timeout, 
     'connect dev@db:5432/orders secret',
     'BEGIN READ ONLY',
     'SET LOCAL statement_timeout = 2500',
+    "SET LOCAL TIME ZONE 'UTC'",
     'SELECT $1 ["x"]',
     'ROLLBACK',
     'BEGIN READ ONLY',
     'SET LOCAL statement_timeout = 2500',
+    "SET LOCAL TIME ZONE 'UTC'",
     'SELECT 2',
     'ROLLBACK',
   ]);
+  // Times without a zone stay text, read as UTC, whatever this machine's zone; others use pg's parsers.
+  const types = pg.configs[0].types as { getTypeParser(oid: number, format?: string): (value: string) => unknown };
+  assert.equal(types.getTypeParser(1114)('2026-10-23 09:00:00'), '2026-10-23 09:00:00');
+  assert.equal(types.getTypeParser(1082)('2026-10-23'), '2026-10-23');
+  assert.equal(types.getTypeParser(23)('7'), 'parsed 7');
   await driver.close();
   assert.equal(pg.log.at(-1), 'end');
 });
@@ -353,6 +371,17 @@ test('a typed SELECT becomes metric series within the range', { skip: !hasSqlite
     );
     assert.deepEqual(await connector.listMetrics(), []);
     await assert.rejects(connector.queryMetrics('DELETE FROM app_logs', 0, 1), /Only SELECT/);
+    // The database returns only the range, so older rows past the row limit cannot crowd it out.
+    const seconds = `WITH RECURSIVE n(i) AS (SELECT 0 UNION ALL SELECT i + 1 FROM n WHERE i < 59999)
+      SELECT ${BASE} + i * 1000 AS time, i AS value FROM n ORDER BY time`;
+    const recent = await connector.queryMetrics(seconds, BASE + 59990000, BASE + 59999000);
+    assert.deepEqual(
+      recent.series[0].points.map(([, value]) => value),
+      [59990, 59991, 59992, 59993, 59994, 59995, 59996, 59997, 59998, 59999],
+    );
+    // Each query is its own metric, though both name their column value.
+    assert.match(recent.series[0].name, /^WITH RECURSIVE n\(i\) AS \(SELECT 0 UNION ALL/);
+    assert.notEqual(recent.series[0].name, result.series[0].name);
   } finally {
     await connector.dispose();
   }

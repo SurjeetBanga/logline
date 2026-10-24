@@ -14,11 +14,16 @@ const REGEX_TERM = /^-?(?:@?[A-Za-z_][A-Za-z0-9_.]*:(?!\/\/))?\/.+\/[dgimsuvy]*$
 const NUMBER = /^-?\d+(?:\.\d+)?$/;
 
 /**
- * Text anywhere in the message. Datadog matches whole words and Logline any part of the text, so a word becomes a
+ * Text in the message. Datadog matches whole words and Logline any part of the text, so a word becomes a
  * wildcard term; a phrase is matched as a phrase.
  */
 function text(value: string): string {
   return /\s/.test(value) ? `"${value.replace(/["\\]/g, (character) => `\\${character}`)}"` : `*${escape(value)}*`;
+}
+
+/** Text anywhere in the log: Logline's free text matches the whole line, so Datadog searches every attribute too. */
+function fullText(value: string): string {
+  return `*:${text(value)}`;
 }
 
 /** Datadog levels, which Datadog calls statuses, for each Logline level. */
@@ -59,7 +64,7 @@ function term(token: Token, typed = token.value): string | undefined {
   if (token.canonical === 'last' || token.canonical === 'timestamp' || token.canonical === 'time') return undefined;
   const not = token.negate ? '-' : '';
   if (token.canonical === 'exists') return `${not}${attribute(token.value)}:*`;
-  if (token.field === undefined) return token.value ? `${not}${text(typed)}` : undefined;
+  if (token.field === undefined) return token.value ? `${not}${fullText(typed)}` : undefined;
   const canonical = token.canonical ?? token.field;
   if (canonical === 'level') {
     // Logline matches a part of the level (`warn` matches `warning`); statuses are few, so list them.

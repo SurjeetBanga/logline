@@ -168,7 +168,7 @@ export class LogsController {
     this.agentAccess.production = {
       connections: () => this.connections.agentConnections(),
       fetch: (input) => this.connections.agentFetch(input),
-      compare: (request) => this.compare.build(request, false),
+      compare: (request, allowed) => this.compare.build(request, false, allowed),
     };
     this.store.changeScope = new ChangeScope(this.changedLines, this.logSites);
     this.agentAccess.changes = () => this.gitChanges?.status();

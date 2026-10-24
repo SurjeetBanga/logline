@@ -560,12 +560,22 @@ export class ConnectionManager implements vscode.Disposable {
   async remove(id?: string): Promise<void> {
     const connection = await this.pick(id, 'Remove connection');
     if (!connection) return;
+    // The password or keys are kept by what they open, for every workspace that connects there.
+    const secret = connection.type === 'sqlite' ? undefined : connection.type === 'datadog' ? 'Keys' : 'Password';
+    const forget = secret && `Remove and Forget ${secret}`;
     const answer = await vscode.window.showWarningMessage(
       `Remove ${connectionLabel(connection)}?`,
-      { modal: true, detail: 'Fetched rows stay in the Logs panel until cleared.' },
+      {
+        modal: true,
+        detail: [
+          'Fetched rows stay in the Logs panel until cleared.',
+          ...(secret ? [`Other workspaces that connect there keep the saved ${secret.toLowerCase()}.`] : []),
+        ].join(' '),
+      },
       'Remove',
+      ...(forget ? [forget] : []),
     );
-    if (answer !== 'Remove') return;
+    if (answer !== 'Remove' && (!forget || answer !== forget)) return;
     const settings = vscode.workspace.getConfiguration('logline');
     const inspected = settings.inspect<unknown[]>('connections');
     for (const [target, value] of [
@@ -579,7 +589,7 @@ export class ConnectionManager implements vscode.Disposable {
       );
       if (kept.length !== value.length) await settings.update('connections', kept, target);
     }
-    if (connection.type !== 'sqlite') await this.secrets?.delete(secretKey(connection));
+    if (connection.type !== 'sqlite' && answer === forget) await this.secrets?.delete(secretKey(connection));
     this.remote.stopConnection(connection.id);
   }
 

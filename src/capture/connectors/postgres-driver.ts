@@ -20,8 +20,23 @@ interface ClientConfig {
   ssl?: boolean;
   connectionTimeoutMillis: number;
   application_name: string;
+  types: TypeParsers;
 }
-type PgModule = { Client: new (config: ClientConfig) => Client };
+interface TypeParsers {
+  getTypeParser(oid: number, format?: string): unknown;
+}
+type PgModule = { Client: new (config: ClientConfig) => Client; types?: TypeParsers };
+
+// `timestamp` and `date` values have no zone; pg would read them in this
+// machine's zone. They stay text, which Logline reads as UTC, as the session does.
+const ZONELESS = new Set([1082, 1114]);
+
+function parsers(pg: PgModule): TypeParsers {
+  return {
+    getTypeParser: (oid, format) =>
+      ZONELESS.has(oid) && format !== 'binary' ? String : (pg.types?.getTypeParser(oid, format) ?? String),
+  };
+}
 
 // The package bundles pg into out/vendor/pg.js; tests and development builds
 // can also load it from node_modules.
@@ -59,6 +74,8 @@ export class PostgresDriver implements SqlDriver {
       await client.query('BEGIN READ ONLY');
       try {
         await client.query(`SET LOCAL statement_timeout = ${Math.max(1, Math.floor(options.timeoutMs))}`);
+        // Times without a zone compare as UTC, as they are read.
+        await client.query("SET LOCAL TIME ZONE 'UTC'");
         const result = await client.query(sql, params);
         return result.rows as Row[];
       } finally {
@@ -74,8 +91,8 @@ export class PostgresDriver implements SqlDriver {
 
   private connect(timeoutMs: number): Promise<Client> {
     this.client ??= (async () => {
-      const { Client } = this.load();
-      const client = new Client({
+      const pg = this.load();
+      const client = new pg.Client({
         host: this.connection.host,
         port: this.connection.port,
         database: this.connection.database,
@@ -84,6 +101,7 @@ export class PostgresDriver implements SqlDriver {
         ssl: this.connection.ssl ? true : undefined,
         connectionTimeoutMillis: timeoutMs,
         application_name: 'Logline',
+        types: parsers(pg),
       });
       client.on('error', () => {
         void this.close();

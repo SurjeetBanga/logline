@@ -68,9 +68,11 @@ function problem(status: number, headers: Headers, body: Json | undefined, text:
     );
   if (status === 429) {
     const reset = Number(headers.get('x-ratelimit-reset'));
-    return new Error(
-      `Datadog's rate limit was reached${Number.isFinite(reset) && reset > 0 ? `; try again in ${reset} s` : ''}.`,
-    );
+    const known = Number.isFinite(reset) && reset > 0;
+    // Tails wait this long before reading again.
+    return Object.assign(new Error(`Datadog's rate limit was reached${known ? `; try again in ${reset} s` : ''}.`), {
+      retryAfterMs: (known ? reset : 60) * 1000,
+    });
   }
   return new Error(`Datadog answered ${status}${errors ? `: ${errors}` : ''}.`);
 }
@@ -82,6 +84,8 @@ function problem(status: number, headers: Headers, body: Json | undefined, text:
 export class DatadogConnector implements Connector {
   /** Logs can take a minute or so to become searchable after their own time. */
   readonly tailLagMs = 60000;
+  /** Datadog limits how often an organization can search logs; tails read at most every 15 s. */
+  readonly tailPollMs = 15000;
   readonly base: string;
 
   constructor(

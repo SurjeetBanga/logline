@@ -68,20 +68,30 @@ class Params {
   }
 }
 
-/** A SQL expression for the stored time and a matching placeholder for an epoch-milliseconds value. */
-function timeTerms(request: SqlLogRequest, params: Params): { column: string; at(ms: number): string } {
-  const column = quoteIdentifier(request.mapping.timestamp);
-  const encoding = request.mapping.timestampFormat ?? request.table.time;
+/** A SQL expression for a time column and a matching placeholder for an epoch-milliseconds value. */
+function timeExpression(
+  dialect: SqlDialect,
+  name: string,
+  encoding: TimeEncoding,
+  params: Params,
+): { column: string; at(ms: number): string } {
+  const column = quoteIdentifier(name);
   if (encoding === 'epoch_s') return { column, at: (ms) => params.add(ms / 1000) };
   if (encoding === 'epoch_ms') return { column, at: (ms) => params.add(ms) };
   const iso = (ms: number) => new Date(ms).toISOString();
-  if (request.dialect === 'sqlite')
+  if (dialect === 'sqlite')
     // julianday reads ISO 8601 text with or without the T, fractions, or a zone.
     return { column: `julianday(${column})`, at: (ms) => `julianday(${params.add(iso(ms))})` };
+  // Times without a zone are read as UTC: the driver's sessions use UTC.
   return {
     column: encoding === 'native' ? column : `CAST(${column} AS timestamptz)`,
     at: (ms) => `CAST(${params.add(iso(ms))} AS timestamptz)`,
   };
+}
+
+function timeTerms(request: SqlLogRequest, params: Params): { column: string; at(ms: number): string } {
+  const encoding = request.mapping.timestampFormat ?? request.table.time;
+  return timeExpression(request.dialect, request.mapping.timestamp, encoding, params);
 }
 
 function columnNamed(columns: ColumnInfo[], name: string): ColumnInfo | undefined {
@@ -240,7 +250,7 @@ export function rowFilter(query: string): ParsedQuery | undefined {
  * Check that SQL typed by a person is one read-only query. The connection is
  * also opened read-only; this gives a clear message before the database does.
  */
-export function checkReadOnlySql(input: string): { sql: string } | { error: string } {
+export function checkReadOnlySql(input: string, dialect: SqlDialect): { sql: string } | { error: string } {
   let code = '';
   for (let index = 0; index < input.length;) {
     const character = input[index];
@@ -260,8 +270,8 @@ export function checkReadOnlySql(input: string): { sql: string } | { error: stri
       }
       index = end + 1;
       code += ' x ';
-    } else if (character === '$') {
-      // Postgres dollar quoting: $$text$$ or $tag$text$tag$.
+    } else if (character === '$' && dialect === 'postgres') {
+      // Postgres dollar quoting: $$text$$ or $tag$text$tag$. SQLite has none; there `$a` names a parameter.
       const tag = /^\$[A-Za-z_]?[A-Za-z0-9_]*\$/.exec(input.slice(index))?.[0];
       if (tag) {
         const end = input.indexOf(tag, index + tag.length);
@@ -289,6 +299,42 @@ export function limitedSql(sql: string, dialect: SqlDialect, limit: number): Sql
   return {
     sql: `SELECT * FROM (\n${sql}\n) AS logline_query LIMIT ${dialect === 'postgres' ? '$1' : '?'}`,
     params: [limit],
+  };
+}
+
+/** How a time value read back from a query is stored, to filter the query on it. */
+export function valueEncoding(value: unknown): TimeEncoding | undefined {
+  if (value instanceof Date) return 'native';
+  const number =
+    typeof value === 'number' || typeof value === 'bigint'
+      ? Number(value)
+      : typeof value === 'string' && /^-?\d+(?:\.\d+)?$/.test(value.trim())
+        ? Number(value)
+        : undefined;
+  if (number !== undefined)
+    return Number.isFinite(number) ? (Math.abs(number) < 1e11 ? 'epoch_s' : 'epoch_ms') : undefined;
+  return typeof value === 'string' && Number.isFinite(timeValueMs(value, 'iso')) ? 'iso' : undefined;
+}
+
+/**
+ * Wrap a checked query so the database returns only its rows whose `column`
+ * falls in the range, the newest first, at most `limit` of them.
+ */
+export function rangedSql(
+  sql: string,
+  dialect: SqlDialect,
+  time: { column: string; encoding: TimeEncoding },
+  fromMs: number,
+  toMs: number,
+  limit: number,
+): SqlStatement {
+  const params = new Params(dialect);
+  const terms = timeExpression(dialect, time.column, time.encoding, params);
+  const where = `${terms.column} BETWEEN ${terms.at(fromMs)} AND ${terms.at(toMs)}`;
+  const order = `${quoteIdentifier(time.column)} DESC`;
+  return {
+    sql: `SELECT * FROM (\n${sql}\n) AS logline_query WHERE ${where} ORDER BY ${order} LIMIT ${params.add(limit)}`,
+    params: params.values,
   };
 }
 

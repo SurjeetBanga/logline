@@ -77,7 +77,8 @@ export interface ProductionAccess {
     range: string;
     limit: number;
   }): Promise<ProductionFetchResult>;
-  compare(request: CompareRequest): CompareView;
+  /** Compare with the newest local runs that `allowed` admits. */
+  compare(request: CompareRequest, allowed?: (runId: string) => boolean): CompareView;
 }
 export class AgentAccessError extends Error {
   constructor(
@@ -446,11 +447,12 @@ export class AgentLogAccess {
         'INVALID_INPUT',
         'localSourceId must be a shared local source, such as the app or tests just run.',
       );
-    const view = this.production.compare({
-      baselineServerId: baseline,
-      baselineSessionId: input.prodRunId,
-      localServerId: local,
-    });
+    // Only the local runs the user shared, unless every run is.
+    const runs = this.shared.get(local)!;
+    const view = this.production.compare(
+      { baselineServerId: baseline, baselineSessionId: input.prodRunId, localServerId: local },
+      this.shareAllRuns ? undefined : (runId) => runs.has(runId),
+    );
     return {
       production: {
         runId: input.prodRunId,

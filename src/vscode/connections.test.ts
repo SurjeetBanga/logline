@@ -288,7 +288,7 @@ test('connections stay closed in untrusted workspaces', async () => {
   assert.equal(ui.messages.length, 3);
 });
 
-test('removing a connection takes it out of settings and forgets its password', async () => {
+test('removing a connection takes it out of settings, and forgets its password when asked', async () => {
   reset();
   const orders: PostgresConnection = {
     id: 'orders',
@@ -310,6 +310,11 @@ test('removing a connection takes it out of settings and forgets its password', 
   await manager.remove('orders');
   assert.deepEqual(raw.workspace, [{ id: 'other', type: 'sqlite', path: 'x.db' }, 'kept as it was']);
   assert.deepEqual(raw.global, []);
+  assert.equal(secrets.size, 1, 'other workspaces that open the same database keep the password');
+  raw.workspace = [orders];
+  ui.modal = 'Remove and Forget Password';
+  await manager.remove('orders');
+  assert.deepEqual(raw.workspace, []);
   assert.equal(secrets.size, 0);
 });
 

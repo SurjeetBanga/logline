@@ -22,11 +22,12 @@ test('a Logline search becomes Datadog log search syntax', () => {
     ['http.route:/orders', '@http.route:*\\/orders*'],
     ['exists:user_id', '@user_id:*'],
     ['-exists:user_id', '-@user_id:*'],
-    // Datadog matches whole words; a word anywhere in the message is a wildcard term, a phrase stays a phrase.
-    ['timeout', '*timeout*'],
-    ['"gateway timed out"', '"gateway timed out"'],
+    // Datadog matches whole words; a word is a wildcard term, a phrase stays a phrase. Free text, like
+    // Logline's, is searched in every attribute; a message term only in the message.
+    ['timeout', '*:*timeout*'],
+    ['"gateway timed out"', '*:"gateway timed out"'],
     ['message:declined', '*declined*'],
-    ['-healthcheck', '-*healthcheck*'],
+    ['-healthcheck', '-*:*healthcheck*'],
     ['level:error OR service:api', '(status:(error)) OR (service:*api*)'],
   ];
   for (const [input, expected] of cases) assert.equal(datadogQuery(input).query, expected, input);

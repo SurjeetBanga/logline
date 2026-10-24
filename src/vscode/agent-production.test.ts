@@ -64,7 +64,8 @@ function fixture() {
         statement: 'status:(error)',
       };
     },
-    compare: (request) => new ProductionCompare(store, registry, () => undefined).build(request, false),
+    compare: (request, allowed) =>
+      new ProductionCompare(store, registry, () => undefined).build(request, false, allowed),
   };
   return { store, registry, access, fetches, run, fail: (message?: string) => (failure = message) };
 }
@@ -159,22 +160,31 @@ test('a fetched run joins a share of selected runs, and is compared with the new
   assert.equal(before.errors[0].status, 'reproduced');
   assert.equal(before.errors[0].production, 2);
   assert.ok(Number.isSafeInteger(before.errors[0].productionSampleId));
-  // A rerun after the fix: the error is gone.
+  // A rerun after the fix is not in the selected runs, so it is not compared.
   const fixed = run('npm-test', 'npm test', [{ level: 'info', message: 'paid' }], 'process');
-  const after = access.compareWithProduction({
+  const unshared = access.compareWithProduction({
     shareId: share.shareId!,
+    prodRunId: fetched.runId,
+    localSourceId: 'npm-test',
+  }) as Record<string, any>;
+  assert.deepEqual(unshared.local.runs, [local]);
+  assert.equal(unshared.errors[0].status, 'reproduced');
+  assert.throws(
+    () => access.compareWithProduction({ shareId: share.shareId!, prodRunId: fetched.runId, localSourceId: 'web' }),
+    code('INVALID_INPUT'),
+  );
+  // Sharing every run includes it: the error is gone.
+  const all = access.shareAll();
+  const after = access.compareWithProduction({
+    shareId: all.shareId!,
     prodRunId: fetched.runId,
     localSourceId: 'npm-test',
   }) as Record<string, any>;
   assert.deepEqual(after.local.runs, [local, fixed]);
   assert.equal(after.errors[0].status, 'fixed');
-  assert.throws(
-    () => access.compareWithProduction({ shareId: share.shareId!, prodRunId: fetched.runId, localSourceId: 'web' }),
-    code('INVALID_INPUT'),
-  );
   access.production = undefined;
   assert.throws(
-    () => access.compareWithProduction({ shareId: share.shareId!, prodRunId: fetched.runId }),
+    () => access.compareWithProduction({ shareId: all.shareId!, prodRunId: fetched.runId }),
     code('CONNECTION_UNAVAILABLE'),
   );
 });

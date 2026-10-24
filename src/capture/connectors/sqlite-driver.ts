@@ -6,15 +6,19 @@ import { timedOut, type QueryOptions, type Row, type SqlDriver } from './types';
 const cancelled = () => new Error('The query was cancelled.');
 
 interface Pending {
+  sql: string;
+  params: SqlValue[];
   resolve(rows: Row[]): void;
   reject(error: Error): void;
   timer: ReturnType<typeof setTimeout>;
+  /** Removes the abort listener. */
+  release(): void;
 }
 
 /**
  * Runs queries with the editor runtime's built-in SQLite in a child process.
- * A query that times out or is cancelled ends the process; the next query
- * starts a new one. An idle process ends after a minute.
+ * A query that times out or is cancelled ends the process; the queries
+ * waiting behind it run in a new one. An idle process ends after a minute.
  */
 export class SqliteProcessDriver implements SqlDriver {
   readonly dialect = 'sqlite';
@@ -35,9 +39,11 @@ export class SqliteProcessDriver implements SqlDriver {
     const child = this.start();
     const id = ++this.next;
     return new Promise<Row[]>((resolve, reject) => {
-      const timer = setTimeout(() => this.stop(timedOut(options.timeoutMs)), options.timeoutMs);
-      options.signal?.addEventListener('abort', () => this.stop(cancelled()), { once: true });
-      this.pending.set(id, { resolve, reject, timer });
+      const timer = setTimeout(() => this.cancel(id, timedOut(options.timeoutMs)), options.timeoutMs);
+      const abort = () => this.cancel(id, cancelled());
+      options.signal?.addEventListener('abort', abort, { once: true });
+      const release = () => options.signal?.removeEventListener('abort', abort);
+      this.pending.set(id, { sql, params, resolve, reject, timer, release });
       child.send({ id, sql, params });
     });
   }
@@ -60,10 +66,8 @@ export class SqliteProcessDriver implements SqlDriver {
     child.unref();
     child.channel?.unref();
     child.on('message', (message: { id: number; rows?: Row[]; error?: string }) => {
-      const pending = this.pending.get(message.id);
+      const pending = this.settle(message.id);
       if (!pending) return;
-      this.pending.delete(message.id);
-      clearTimeout(pending.timer);
       if (message.rows) pending.resolve(message.rows);
       else pending.reject(new Error(message.error ?? 'The query failed.'));
       if (!this.pending.size) {
@@ -79,16 +83,37 @@ export class SqliteProcessDriver implements SqlDriver {
     return (this.child = child);
   }
 
+  private settle(id: number): Pending | undefined {
+    const pending = this.pending.get(id);
+    if (!pending) return undefined;
+    this.pending.delete(id);
+    clearTimeout(pending.timer);
+    pending.release();
+    return pending;
+  }
+
+  /**
+   * Fail one query. The process runs queries one at a time and cannot drop
+   * one midway, so it ends, and the queries waiting behind it are sent to a new one.
+   */
+  private cancel(id: number, error: Error): void {
+    const pending = this.settle(id);
+    if (!pending) return;
+    pending.reject(error);
+    const child = this.child;
+    this.child = undefined;
+    child?.kill('SIGKILL');
+    if (!this.pending.size) return;
+    const next = this.start();
+    for (const [waiting, { sql, params }] of this.pending) next.send({ id: waiting, sql, params });
+  }
+
   /** End the current process and fail what it was running. */
   private stop(error: Error): void {
     clearTimeout(this.idle);
     const child = this.child;
     this.child = undefined;
-    for (const [id, pending] of this.pending) {
-      this.pending.delete(id);
-      clearTimeout(pending.timer);
-      pending.reject(error);
-    }
+    for (const id of [...this.pending.keys()]) this.settle(id)?.reject(error);
     child?.kill('SIGKILL');
   }
 }
@@ -137,7 +162,8 @@ export class SqliteCliDriver implements SqlDriver {
         child.kill();
       };
       const timer = setTimeout(() => stop(timedOut(options.timeoutMs)), options.timeoutMs);
-      options.signal?.addEventListener('abort', () => stop(cancelled()), { once: true });
+      const abort = () => stop(cancelled());
+      options.signal?.addEventListener('abort', abort, { once: true });
       child.stdout!.on('data', (chunk: Buffer) => stdout.push(chunk));
       child.stderr!.on('data', (chunk: Buffer) => stderr.push(chunk));
       child.on('error', (error: NodeJS.ErrnoException) =>
@@ -151,6 +177,7 @@ export class SqliteCliDriver implements SqlDriver {
       );
       child.on('close', (code) => {
         clearTimeout(timer);
+        options.signal?.removeEventListener('abort', abort);
         this.running.delete(child);
         if (failure) return reject(failure);
         const message = Buffer.concat(stderr)

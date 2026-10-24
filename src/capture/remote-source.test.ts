@@ -301,3 +301,73 @@ test('a tail of a store that indexes late reads back over the lag and shows each
   );
   await remote.dispose();
 });
+
+test('a tail that reads a full page continues from its last row instead of reading the same rows again', async () => {
+  mock.timers.enable({ apis: ['setInterval'] });
+  const { remote, target, messages } = setup({ connectionPollSeconds: 1, connectionMaxRows: 2 });
+  const requests: FetchRequest[] = [];
+  // More rows within the lag than one read returns.
+  const rows = [row(10, 'info', 'a'), row(11, 'info', 'b'), row(12, 'info', 'c'), row(13, 'info', 'd')];
+  const connector: RemoteConnector = {
+    tailLagMs: 600000,
+    async fetchLogs(request) {
+      requests.push(request);
+      if (request.order === 'desc') return result([rows[1], rows[0]]);
+      return result(rows.filter((one) => one.timeMs! >= request.fromMs!).slice(0, request.limit));
+    },
+  };
+  const settle = async () => {
+    for (let turn = 0; turn < 20; turn++) await new Promise((resolve) => setImmediate(resolve));
+  };
+  remote.tail(target(connector), '', 'Tail');
+  await settle();
+  for (let poll = 0; poll < 3; poll++) {
+    mock.timers.tick(1000);
+    await settle();
+  }
+  assert.deepEqual(messages(), ['a', 'b', 'c', 'd']);
+  assert.deepEqual(
+    requests.map((request) => request.fromMs),
+    [undefined, BASE + 660000 - 600000, BASE + 660000, BASE + 720000],
+  );
+  await remote.dispose();
+});
+
+test('a tail of a store that limits searches reads less often, and waits when told to', async () => {
+  mock.timers.enable({ apis: ['setInterval', 'Date'], now: BASE });
+  const { remote, target, registry } = setup({ connectionPollSeconds: 1 });
+  let reads = 0;
+  let limited = true;
+  const connector: RemoteConnector = {
+    tailPollMs: 15000,
+    async fetchLogs() {
+      reads++;
+      if (reads === 2 && limited) {
+        limited = false;
+        throw Object.assign(new Error('rate limit'), { retryAfterMs: 40000 });
+      }
+      return result([]);
+    },
+  };
+  const settle = async () => {
+    for (let turn = 0; turn < 20; turn++) await new Promise((resolve) => setImmediate(resolve));
+  };
+  const id = remote.tail(target(connector), '', 'Tail');
+  await settle();
+  mock.timers.tick(14000);
+  await settle();
+  assert.equal(reads, 1, 'not read again before 15 s');
+  mock.timers.tick(1000);
+  await settle();
+  assert.equal(reads, 2);
+  assert.equal(registry.records.get(id)?.captureStatus, 'interrupted');
+  // The next two polls fall within the 40 s the store asked for.
+  mock.timers.tick(30000);
+  await settle();
+  assert.equal(reads, 2);
+  mock.timers.tick(15000);
+  await settle();
+  assert.equal(reads, 3);
+  assert.equal(registry.records.get(id)?.captureStatus, 'streaming');
+  await remote.dispose();
+});

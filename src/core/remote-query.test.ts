@@ -7,9 +7,11 @@ import {
   buildSqlLogQuery,
   checkReadOnlySql,
   limitedSql,
+  rangedSql,
   quoteTable,
   rowFilter,
   rowRoles,
+  valueEncoding,
   rowToLine,
   timeValueMs,
   type SqlLogRequest,
@@ -168,22 +170,28 @@ test('values only ever reach the database as parameters, and identifiers are quo
 });
 
 test('typed SQL must be one read-only query', () => {
-  assert.deepEqual(checkReadOnlySql('  SELECT * FROM logs;  '), { sql: 'SELECT * FROM logs' });
-  assert.deepEqual(checkReadOnlySql('with recent as (select 1) select * from recent'), {
+  assert.deepEqual(checkReadOnlySql('  SELECT * FROM logs;  ', 'postgres'), { sql: 'SELECT * FROM logs' });
+  assert.deepEqual(checkReadOnlySql('with recent as (select 1) select * from recent', 'postgres'), {
     sql: 'with recent as (select 1) select * from recent',
   });
-  assert.deepEqual(checkReadOnlySql("SELECT ';' AS semicolon -- trailing; comment"), {
+  assert.deepEqual(checkReadOnlySql("SELECT ';' AS semicolon -- trailing; comment", 'postgres'), {
     sql: "SELECT ';' AS semicolon -- trailing; comment",
   });
-  assert.deepEqual(checkReadOnlySql("SELECT 'it''s; fine', $$a;b$$, $tag$c;d$tag$, \"x;y\" /* ; */"), {
+  assert.deepEqual(checkReadOnlySql("SELECT 'it''s; fine', $$a;b$$, $tag$c;d$tag$, \"x;y\" /* ; */", 'postgres'), {
     sql: "SELECT 'it''s; fine', $$a;b$$, $tag$c;d$tag$, \"x;y\" /* ; */",
   });
-  assert.deepEqual(checkReadOnlySql('SELECT 1; DELETE FROM logs'), { error: 'Run one statement at a time.' });
-  assert.deepEqual(checkReadOnlySql('DELETE FROM logs'), { error: 'Only SELECT queries can run here.' });
-  assert.deepEqual(checkReadOnlySql('/* SELECT */ UPDATE logs SET a = 1'), {
+  assert.deepEqual(checkReadOnlySql('SELECT 1; DELETE FROM logs', 'postgres'), {
+    error: 'Run one statement at a time.',
+  });
+  assert.deepEqual(checkReadOnlySql('DELETE FROM logs', 'postgres'), { error: 'Only SELECT queries can run here.' });
+  assert.deepEqual(checkReadOnlySql('/* SELECT */ UPDATE logs SET a = 1', 'postgres'), {
     error: 'Only SELECT queries can run here.',
   });
-  assert.deepEqual(checkReadOnlySql('  -- nothing\n'), { error: 'Enter a SELECT query.' });
+  assert.deepEqual(checkReadOnlySql('  -- nothing\n', 'postgres'), { error: 'Enter a SELECT query.' });
+  // SQLite has no dollar quoting: `$a` names a parameter there, so it cannot hide a second statement.
+  const hidden = 'SELECT 1 AS x WHERE $a$ IS NULL) AS t;\n.shell touch pwned\nSELECT * FROM (SELECT $a$';
+  assert.deepEqual(checkReadOnlySql(hidden, 'sqlite'), { error: 'Run one statement at a time.' });
+  assert.deepEqual(checkReadOnlySql('SELECT $a$;$a$', 'postgres'), { sql: 'SELECT $a$;$a$' });
   // A trailing comment cannot swallow the wrapper that limits the rows.
   assert.deepEqual(limitedSql('SELECT 1 -- note', 'sqlite', 5), {
     sql: 'SELECT * FROM (\nSELECT 1 -- note\n) AS logline_query LIMIT ?',
@@ -256,4 +264,19 @@ test('fetched rows are filtered by the whole search except changed:', () => {
   const event = (message: string) => parseLogLine(JSON.stringify({ level: 'error', message }), 'remote', 1, new Date());
   assert.equal(matchesQuery(event('request timed out'), filter), false);
   assert.equal(matchesQuery(event('request timeout'), filter), true);
+});
+
+test('a metric query is narrowed to its range on the time column it returns', () => {
+  assert.deepEqual(
+    [new Date(0), 1761210000, 1761210000000, '1761210000', '2026-10-23 09:00:00', 'soon', null].map(valueEncoding),
+    ['native', 'epoch_s', 'epoch_ms', 'epoch_s', 'iso', undefined, undefined],
+  );
+  assert.deepEqual(rangedSql('SELECT 1', 'postgres', { column: 'time', encoding: 'iso' }, 0, 1000, 10), {
+    sql: 'SELECT * FROM (\nSELECT 1\n) AS logline_query WHERE CAST("time" AS timestamptz) BETWEEN CAST($1 AS timestamptz) AND CAST($2 AS timestamptz) ORDER BY "time" DESC LIMIT $3',
+    params: ['1970-01-01T00:00:00.000Z', '1970-01-01T00:00:01.000Z', 10],
+  });
+  assert.deepEqual(
+    rangedSql('SELECT 1', 'sqlite', { column: 't', encoding: 'epoch_s' }, 0, 1000, 10).params,
+    [0, 1, 10],
+  );
 });

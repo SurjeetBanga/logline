@@ -65,6 +65,10 @@ interface Run {
    * times: those at the watermark, and those within the store's indexing lag.
    */
   seen?: Map<string, number>;
+  /** Where the next read starts when the last one was cut short by the limit. */
+  catchUp?: number;
+  /** No read before this time, after the store said to wait. */
+  resumeAt?: number;
   poll?: ReturnType<typeof setInterval>;
   pumping?: Promise<void>;
 }
@@ -193,7 +197,7 @@ export class RemoteSource {
     const run = this.start(target, 'tail', title);
     run.query = query;
     run.seen = new Map();
-    const pollMs = this.config.get('connectionPollSeconds', 2) * 1000;
+    const pollMs = Math.max(this.config.get('connectionPollSeconds', 2) * 1000, target.connector.tailPollMs ?? 0);
     run.poll = setInterval(() => {
       void this.pump(run);
     }, pollMs);
@@ -207,6 +211,7 @@ export class RemoteSource {
   // Reads are serialized per tail; a poll during a read waits for the next one.
   private pump(run: Run): Promise<void> {
     if (run.stopped || run.pumping) return run.pumping ?? Promise.resolve();
+    if (run.resumeAt !== undefined && Date.now() < run.resumeAt) return Promise.resolve();
     run.pumping = (async () => {
       try {
         await this.readTail(run);
@@ -218,6 +223,8 @@ export class RemoteSource {
       } catch (error) {
         if (run.stopped) return;
         // A tail outlives a failed read: the database may be restarting or locked.
+        const retryMs = (error as { retryAfterMs?: unknown } | undefined)?.retryAfterMs;
+        run.resumeAt = typeof retryMs === 'number' && retryMs > 0 ? Date.now() + retryMs : undefined;
         run.info.error = errorText(error);
         run.record.captureStatus = 'interrupted';
         run.record.captureReason = run.info.error;
@@ -234,10 +241,12 @@ export class RemoteSource {
     const first = run.watermark === undefined;
     // A store that makes logs searchable late is read from further back.
     const lag = run.target.connector.tailLagMs ?? 0;
+    const fromMs = run.catchUp ?? run.watermark! - lag;
+    const limit = this.limit();
     const result = await run.target.connector.fetchLogs(
       first
         ? { query: run.query!, limit: TAIL_START_ROWS, order: 'desc' }
-        : { query: run.query!, fromMs: run.watermark! - lag, limit: this.limit(), order: 'asc' },
+        : { query: run.query!, fromMs, limit, order: 'asc' },
       run.abort.signal,
     );
     if (run.stopped) return;
@@ -245,14 +254,26 @@ export class RemoteSource {
     // Reads overlap at the watermark time and over the lag; only rows not shown yet are new.
     const seen = run.seen!;
     const fresh = ordered.filter((record) => !seen.has(record.line));
+    let last: number | undefined;
     for (const record of ordered) {
       if (record.timeMs === undefined) continue;
+      last = Math.max(last ?? record.timeMs, record.timeMs);
       run.watermark = Math.max(run.watermark ?? record.timeMs, record.timeMs);
       seen.set(record.line, record.timeMs);
     }
+    // A full read may have stopped short of newer rows, even ones already
+    // shown: the next read starts at its last row instead of going back over
+    // the lag. Rows past the limit at one time cannot be reached; they are skipped.
+    run.catchUp = undefined;
+    if (!first && ordered.length >= limit) {
+      run.catchUp = last !== undefined && last > fromMs ? last : fromMs + 1;
+      if (run.catchUp === fromMs + 1)
+        this.state.status = `${run.target.label}: more than ${limit.toLocaleString()} rows share one time; some were skipped`;
+    }
     // An empty table starts the tail now, so its first rows are not read as history.
     if (first && run.watermark === undefined) run.watermark = Date.now();
-    for (const [line, time] of seen) if (time < run.watermark! - lag) seen.delete(line);
+    const keepFrom = Math.min(run.watermark! - lag, run.catchUp ?? Infinity);
+    for (const [line, time] of seen) if (time < keepFrom) seen.delete(line);
     Object.assign(run.info, {
       fetched: run.info.fetched + fresh.length,
       elapsedMs: result.elapsedMs,

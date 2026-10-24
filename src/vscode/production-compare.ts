@@ -43,10 +43,13 @@ export class ProductionCompare {
     private readonly finished: (view: CompareView) => void,
   ) {}
 
-  /** The newest runs of a local source, oldest first. */
-  private localRuns(serverId: string): { id: string; label: string; startedAt: number }[] {
+  /** The newest runs of a local source that `allowed` admits, oldest first. */
+  private localRuns(
+    serverId: string,
+    allowed: (runId: string) => boolean = () => true,
+  ): { id: string; label: string; startedAt: number }[] {
     const records = [...this.registry.records.values()]
-      .filter((record) => record.serverId === serverId)
+      .filter((record) => record.serverId === serverId && allowed(record.id))
       .sort((a, b) => a.startedAt - b.startedAt);
     if (records.length)
       return records
@@ -55,7 +58,7 @@ export class ProductionCompare {
     // Imported files and runs the registry has forgotten still have their events.
     return this.store
       .sessionIds(serverId)
-      .filter((id) => id !== '*')
+      .filter((id) => id !== '*' && allowed(id))
       .slice(-LOCAL_RUNS)
       .map((id) => ({ id, label: this.store.serverLabel(serverId) ?? serverId, startedAt: 0 }));
   }
@@ -64,8 +67,12 @@ export class ProductionCompare {
     return this.store.reversePage({ serverId, ...(sessionId ? { sessionId } : {}) }, EVENTS_PER_RUN).events;
   }
 
-  /** Compare, and remember the comparison so a later local run can be reported against it. */
-  build(request: CompareRequest, pin = true): CompareView {
+  /**
+   * Compare, and remember the comparison so a later local run can be
+   * reported against it. `allowed` limits which local runs are read, such as
+   * to the runs shared with an agent.
+   */
+  build(request: CompareRequest, pin = true, allowed?: (runId: string) => boolean): CompareView {
     if (pin) {
       this.pinned = request;
       // Only runs that finish from now on are reported.
@@ -73,7 +80,7 @@ export class ProductionCompare {
         if (record.serverId === request.localServerId && record.status !== 'running') this.announced.add(record.id);
     }
     const baseline = this.events(request.baselineServerId, request.baselineSessionId);
-    const runs = this.localRuns(request.localServerId);
+    const runs = this.localRuns(request.localServerId, allowed);
     const local = runs.map((run) => this.events(request.localServerId, run.id));
     const changeScope = this.store.changeScope;
     const rows = compareSignatures(
