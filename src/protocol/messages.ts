@@ -9,6 +9,10 @@ import type { AgentShareStatus } from '../core/agent-types';
 import type { MetricSeriesView } from '../core/metrics';
 import type { TraceSummary, TraceView } from '../core/traces';
 import type { ReceiverStatus } from '../capture/otlp-receiver';
+import type { RemoteRunInfo } from '../capture/remote-source';
+import { RANGE_CHOICES, type ConnectionType } from '../core/connections';
+import type { SignatureRow } from '../core/signature-compare';
+import type { MetricSeriesData } from '../core/metric-query';
 
 export interface Filter {
   query?: string;
@@ -63,7 +67,70 @@ export type ViewRequest =
   | { type: 'showGuide'; section?: 'guide' | 'whatsNew' }
   | { type: 'run'; serverId?: string }
   | { type: 'stop'; serverId?: string; sessionId?: string }
-  | { type: 'import' | 'clear' | 'config' | 'manageServers' };
+  | { type: 'connectionPreview'; connectionId: string; query: string; range: string }
+  | {
+      type: 'connectionFetch';
+      connectionId: string;
+      query: string;
+      range: string;
+      /** An exact window, such as one selected on a metric chart, instead of the range. */
+      fromMs?: number;
+      toMs?: number;
+    }
+  | { type: 'metricQuery'; connectionId: string; query: string; range: string }
+  | { type: 'metricNames'; connectionId: string; search: string }
+  | { type: 'metricWatch'; connectionId: string; query: string; enabled: boolean }
+  | { type: 'connectionTail'; connectionId: string; query: string; enabled: boolean }
+  | { type: 'connectionSql' | 'connectionLink'; connectionId: string }
+  | { type: 'connectionAgents'; connectionId: string; enabled: boolean }
+  | ({ type: 'compare' } & CompareRequest)
+  | { type: 'import' | 'clear' | 'config' | 'manageServers' | 'addConnection' };
+
+/** Production (a run fetched from a connection, or an imported file) against a local source's newest runs. */
+export interface CompareRequest {
+  baselineServerId: string;
+  baselineSessionId?: string;
+  localServerId: string;
+}
+/** An event shown beside its counterpart, with the fields whose values differ. */
+export interface CompareSample {
+  id: number;
+  /** The run it was logged in. */
+  sessionId?: string;
+  timestamp?: string;
+  level: string;
+  message?: string;
+  fields: Record<string, string | number | boolean>;
+  differs: string[];
+}
+export interface CompareView {
+  baseline: { serverId: string; sessionId?: string; label: string; events: number };
+  local: { serverId: string; label: string };
+  /** The local source's newest runs, oldest first; each row has a count per run. */
+  runs: { id: string; label: string; startedAt: number }[];
+  rows: (SignatureRow & { samples: { baseline?: CompareSample; local?: CompareSample } })[];
+  summary: string;
+}
+
+/** A saved connection as the Logs panel lists it. */
+export interface ConnectionView {
+  id: string;
+  /** The source its runs are captured under. */
+  sourceId: string;
+  label: string;
+  type: ConnectionType;
+  /** Whether searches can run: always for Datadog, once a log table is mapped for a database. */
+  mapped: boolean;
+  /** Whether it runs SQL typed by a person (databases do, Datadog does not). */
+  sql: boolean;
+  /** Metric queries watched into the Metrics list. */
+  watching: string[];
+  /** Whether agents may fetch from it. */
+  agents: boolean;
+  tailing: boolean;
+  /** The latest fetch or tail. */
+  last?: RemoteRunInfo;
+}
 
 export interface Snapshot extends Stats {
   type: 'snapshot';
@@ -108,6 +175,14 @@ export interface Snapshot extends Stats {
   applyQuery?: string;
   /** A trace requested from the editor, opened once. */
   openTrace?: string;
+  /** A source to select, such as a connection just added, applied once. */
+  applySource?: string;
+  /** With applySource, a run of that source to select, such as a search just run. */
+  applyRun?: string;
+  /** Saved connections to log stores outside the editor. */
+  connections?: ConnectionView[];
+  /** A comparison to open, such as after a local run finished, applied once. */
+  openCompare?: CompareRequest;
   otlp?: ReceiverStatus;
   /** Traces with spans currently retained. */
   traceCount?: number;
@@ -192,7 +267,27 @@ export type HostMessage =
   | { type: 'traces'; traces: TraceSummary[] }
   | { type: 'aiCalls'; aiCalls: GenAiSummary }
   | { type: 'aiCall'; traceId: string; spanId: string; detail?: GenAiCallDetail }
-  | { type: 'metrics'; metrics: MetricSeriesView[] };
+  | { type: 'metrics'; metrics: MetricSeriesView[] }
+  | { type: 'compare'; view?: CompareView; error?: string }
+  | {
+      type: 'metricQuery';
+      connectionId: string;
+      query: string;
+      range: string;
+      result?: { series: MetricSeriesData[]; statement: string; elapsedMs: number; fromMs: number; toMs: number };
+      error?: string;
+    }
+  | { type: 'metricNames'; connectionId: string; search: string; names: string[] }
+  | {
+      type: 'connectionPreview';
+      connectionId: string;
+      query: string;
+      range: string;
+      /** The SQL the search would run, and the terms Logline would apply to the fetched rows. */
+      statement?: string;
+      local: string[];
+      error?: string;
+    };
 // Sharing status is also included in snapshots so the webview can render a
 // durable indicator after a notification-driven refresh.
 
@@ -333,10 +428,57 @@ export function parseViewRequest(value: unknown): ViewRequest | undefined {
       return { type: msg.type, serverId: filter.serverId };
     case 'stop':
       return { type: msg.type, serverId: filter.serverId, sessionId: filter.sessionId };
+    case 'connectionAgents': {
+      const connectionId = string('connectionId')?.slice(0, 128);
+      return connectionId ? { type: msg.type, connectionId, enabled: msg.enabled === true } : undefined;
+    }
+    case 'metricQuery':
+    case 'metricNames':
+    case 'metricWatch': {
+      const connectionId = string('connectionId')?.slice(0, 128);
+      const query = (string(msg.type === 'metricNames' ? 'search' : 'query') ?? '').slice(0, 2048);
+      if (!connectionId) return;
+      if (msg.type === 'metricNames') return { type: msg.type, connectionId, search: query.slice(0, 256) };
+      if (!query.trim()) return;
+      if (msg.type === 'metricWatch') return { type: msg.type, connectionId, query, enabled: msg.enabled === true };
+      const range = string('range');
+      return { type: msg.type, connectionId, query, range: range && RANGE_CHOICES.includes(range) ? range : '1h' };
+    }
+    case 'connectionFetch':
+    case 'connectionPreview':
+    case 'connectionTail':
+    case 'connectionSql':
+    case 'connectionLink': {
+      const connectionId = string('connectionId')?.slice(0, 128);
+      if (!connectionId) return;
+      if (msg.type === 'connectionSql' || msg.type === 'connectionLink') return { type: msg.type, connectionId };
+      const query = (string('query') ?? '').slice(0, 1024);
+      if (msg.type === 'connectionTail') return { type: msg.type, connectionId, query, enabled: msg.enabled === true };
+      const range = string('range');
+      const valid = range && RANGE_CHOICES.includes(range) ? range : '1h';
+      const fromMs = number('fromMs');
+      const toMs = number('toMs');
+      if (msg.type === 'connectionFetch' && fromMs !== undefined && toMs !== undefined && fromMs < toMs)
+        return { type: msg.type, connectionId, query, range: valid, fromMs, toMs };
+      return { type: msg.type, connectionId, query, range: valid };
+    }
+    case 'compare': {
+      const baselineServerId = string('baselineServerId')?.slice(0, 4096);
+      const localServerId = string('localServerId')?.slice(0, 4096);
+      const baselineSessionId = string('baselineSessionId')?.slice(0, 128);
+      if (!baselineServerId || !localServerId) return;
+      return {
+        type: msg.type,
+        baselineServerId,
+        localServerId,
+        ...(baselineSessionId ? { baselineSessionId } : {}),
+      };
+    }
     case 'import':
     case 'clear':
     case 'config':
     case 'manageServers':
+    case 'addConnection':
       return { type: msg.type };
   }
 }

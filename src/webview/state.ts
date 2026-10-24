@@ -1,5 +1,6 @@
 import type { ExceptionBlock } from '../core/exceptions';
 import type { DetailLinks } from '../protocol/messages';
+import { RANGE_CHOICES } from '../core/connections';
 export const LEVELS = ['trace', 'debug', 'info', 'warn', 'error', 'fatal', 'unclassified'];
 export interface PersistedState {
   query?: string;
@@ -16,6 +17,8 @@ export interface PersistedState {
   rowHintDismissed?: boolean;
   /** The tab the panel was left on. */
   view?: string;
+  /** The time range searched on connections. */
+  range?: string;
 }
 /** Persistent preferences and interaction state, independent of DOM rendering. */
 export class ViewerState {
@@ -49,8 +52,11 @@ export class ViewerState {
   rowHintDismissed: boolean;
   /** The selected tab, kept so the panel reopens on it. */
   view: string;
+  /** The time range a connection search covers, such as `1h`. */
+  connectionRange: string;
   constructor(saved: PersistedState = {}) {
     this.view = typeof saved.view === 'string' ? saved.view : 'logs';
+    this.connectionRange = typeof saved.range === 'string' && RANGE_CHOICES.includes(saved.range) ? saved.range : '1h';
     this.following = !saved.sort;
     this.cellHintDismissed = saved.cellHintDismissed === true;
     this.rowHintDismissed = saved.rowHintDismissed === true;
@@ -135,6 +141,7 @@ export class ViewerState {
       ...(this.cellHintDismissed ? { cellHintDismissed: true } : {}),
       ...(this.rowHintDismissed ? { rowHintDismissed: true } : {}),
       ...(this.view !== 'logs' ? { view: this.view } : {}),
+      ...(this.connectionRange !== '1h' ? { range: this.connectionRange } : {}),
     };
   }
 }

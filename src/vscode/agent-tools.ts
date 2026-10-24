@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import type { AgentAiCallsInput, AgentLogAccess, AgentSearchInput } from './agent-access';
+import type { AgentAiCallsInput, AgentLogAccess, AgentSearchInput, ProductionFetchInput } from './agent-access';
 import { AgentAccessError } from './agent-access';
 
 const MAX_BYTES = 64 * 1024;
@@ -48,10 +48,28 @@ function inputOf(options: unknown): ToolInput {
   return input && typeof input === 'object' && !Array.isArray(input) ? (input as ToolInput) : {};
 }
 
-function invoke(access: AgentLogAccess, callback: ToolCallback) {
+function invoke(access: AgentLogAccess, callback: ToolCallback, name = '') {
   return {
-    async prepareInvocation(_options: unknown) {
+    async prepareInvocation(options: unknown) {
       const MarkdownString = runtimeVscode.MarkdownString;
+      const markdown = (text: string) => (MarkdownString ? new MarkdownString(text) : text);
+      if (name === 'logline_fetch_production') {
+        // Reaches outside the editor, so the confirmation says where and how much.
+        const input = inputOf(options);
+        const label =
+          access.production?.connections().find((connection) => connection.id === input.connectionId)?.label ??
+          String(input.connectionId ?? 'a connection');
+        const what = typeof input.traceId === 'string' ? `trace ${input.traceId}` : String(input.query || 'all logs');
+        return {
+          invocationMessage: `Fetching production logs from ${label}`,
+          confirmationMessages: {
+            title: `Fetch production logs from ${label}`,
+            message: markdown(
+              `Read-only: fetch ${what} from the last ${String(input.range ?? '1h')} into a run in the Logs panel. Results are redacted.`,
+            ),
+          },
+        };
+      }
       const status = access.status();
       const runCount = status.sources.reduce((sum, source) => sum + source.runs.length, 0);
       const message =
@@ -62,7 +80,7 @@ function invoke(access: AgentLogAccess, callback: ToolCallback) {
         invocationMessage: 'Reading shared Logline runs',
         confirmationMessages: {
           title: 'Read shared Logline runs',
-          message: MarkdownString ? new MarkdownString(message) : message,
+          message: markdown(message),
         },
       };
     },
@@ -109,6 +127,14 @@ export function agentToolHandlers(access: AgentLogAccess): Map<string, ToolCallb
       },
     ],
     ['logline_get_ai_calls', (input) => access.aiCalls(input as unknown as AgentAiCallsInput)],
+    ['logline_fetch_production', (input) => access.fetchProduction(input as unknown as ProductionFetchInput)],
+    [
+      'logline_compare_with_production',
+      (input) =>
+        access.compareWithProduction(
+          input as unknown as { shareId: string; prodRunId: string; localSourceId?: string },
+        ),
+    ],
     [
       'logline_wait_for_logs',
       (input, token) => {
@@ -138,5 +164,7 @@ export function registerAgentTools(context: vscode.ExtensionContext, access: Age
   void context;
   const lm = runtimeVscode.lm;
   if (!lm?.registerTool) return [];
-  return [...agentToolHandlers(access)].map(([name, callback]) => lm.registerTool(name, invoke(access, callback)));
+  return [...agentToolHandlers(access)].map(([name, callback]) =>
+    lm.registerTool(name, invoke(access, callback, name)),
+  );
 }

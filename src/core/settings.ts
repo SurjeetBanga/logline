@@ -1,3 +1,5 @@
+import { normalizeConnections } from './connections';
+
 /** Read current settings at use time, so live configuration changes apply. */
 export interface Settings {
   get<T>(key: string, fallback: T): T;
@@ -12,6 +14,9 @@ const LIMITS: Record<string, [number, number]> = {
   maxDiskMb: [10, 10240],
   'otlp.port': [0, 65535],
   logLensMaxFiles: [100, 50000],
+  connectionMaxRows: [100, 50000],
+  connectionPollSeconds: [1, 300],
+  connectionTimeoutSeconds: [1, 300],
 };
 const INTEGERS = new Set([
   'indentation',
@@ -20,6 +25,9 @@ const INTEGERS = new Set([
   'maxLineLength',
   'otlp.port',
   'logLensMaxFiles',
+  'connectionMaxRows',
+  'connectionPollSeconds',
+  'connectionTimeoutSeconds',
 ]);
 const CHOICES: Record<string, string[]> = {
   containerPrefixes: ['auto', 'off'],
@@ -39,6 +47,7 @@ export function normalizeSetting(key: string, value: unknown, fallback: unknown)
   if (key === 'timezone') return ['local', 'utc'].includes(value as string) ? value : fallback;
   if (Object.hasOwn(CHOICES, key)) return CHOICES[key].includes(value as string) ? value : fallback;
   if (key === 'servers') return normalizeServers(value);
+  if (key === 'connections') return normalizeConnections(value);
   if (key === 'columns' || key === 'redactionFields') {
     if (!Array.isArray(value)) return fallback;
     const values = [...new Set(value.filter((item): item is string => typeof item === 'string' && item.length > 0))];

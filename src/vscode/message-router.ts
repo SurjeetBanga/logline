@@ -22,6 +22,8 @@ import type { LogTransfer } from './log-transfer';
 import { manageServers } from './servers';
 import { openSource } from './source-navigation';
 import type { AgentLogAccess } from './agent-access';
+import type { ConnectionManager } from './connections';
+import type { CompareRequest, CompareView } from '../protocol/messages';
 
 interface MessageServices {
   store: LogStore;
@@ -52,6 +54,21 @@ interface MessageServices {
   doctorAction(action: DoctorAction, siteId?: string): Promise<void>;
   connectAgent(): Promise<void>;
   showStatus(): Promise<void>;
+  connections?: Pick<
+    ConnectionManager,
+    | 'fetch'
+    | 'tail'
+    | 'runSql'
+    | 'preview'
+    | 'add'
+    | 'openLink'
+    | 'metricQuery'
+    | 'metricNames'
+    | 'watchMetric'
+    | 'allowAgents'
+    | 'revokeAgents'
+  >;
+  compare?(request: CompareRequest): CompareView;
 }
 export async function handleMessage(
   services: MessageServices,
@@ -210,6 +227,66 @@ export async function handleMessage(
     case 'manageServers':
       await manageServers();
       return;
+    case 'addConnection':
+      await services.connections?.add();
+      return;
+    case 'compare':
+      try {
+        if (services.compare) send({ type: 'compare', view: services.compare(msg) });
+      } catch (error) {
+        send({ type: 'compare', error: error instanceof Error ? error.message : String(error) });
+      }
+      return;
+    case 'connectionFetch':
+      await services.connections?.fetch(
+        msg.connectionId,
+        msg.query,
+        msg.range,
+        msg.fromMs !== undefined && msg.toMs !== undefined ? { fromMs: msg.fromMs, toMs: msg.toMs } : undefined,
+      );
+      return;
+    case 'metricQuery': {
+      const answer = (await services.connections?.metricQuery(msg.connectionId, msg.query, msg.range)) ?? {
+        error: 'Connections are not available.',
+      };
+      send({ type: 'metricQuery', connectionId: msg.connectionId, query: msg.query, range: msg.range, ...answer });
+      return;
+    }
+    case 'metricNames':
+      send({
+        type: 'metricNames',
+        connectionId: msg.connectionId,
+        search: msg.search,
+        names: (await services.connections?.metricNames(msg.connectionId, msg.search)) ?? [],
+      });
+      return;
+    case 'metricWatch':
+      await services.connections?.watchMetric(msg.connectionId, msg.query, msg.enabled);
+      return;
+    case 'connectionAgents':
+      if (msg.enabled) await services.connections?.allowAgents(msg.connectionId);
+      else await services.connections?.revokeAgents(msg.connectionId);
+      return;
+    case 'connectionTail':
+      await services.connections?.tail(msg.connectionId, msg.query, msg.enabled);
+      return;
+    case 'connectionSql':
+      await services.connections?.runSql(msg.connectionId);
+      return;
+    case 'connectionLink':
+      await services.connections?.openLink(msg.connectionId);
+      return;
+    case 'connectionPreview': {
+      const preview = (await services.connections?.preview(msg.connectionId, msg.query, msg.range)) ?? { local: [] };
+      send({
+        type: 'connectionPreview',
+        connectionId: msg.connectionId,
+        query: msg.query,
+        range: msg.range,
+        ...preview,
+      });
+      return;
+    }
     case 'run': {
       if (!vscode.workspace.isTrusted) {
         void vscode.window.showWarningMessage('Trust this workspace before running a server command.');

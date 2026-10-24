@@ -1615,7 +1615,7 @@ test('the run picker selects a run and supports keyboard navigation', () => {
 });
 
 test('the combined scope picker switches between source and run tabs', () => {
-  const { get, receive, app } = viewer();
+  const { get, receive, app, messages } = viewer();
   app.state.selectedServer = '';
   get('scopeMenu').hidden = true;
   receive({
@@ -1654,7 +1654,12 @@ test('the combined scope picker switches between source and run tabs', () => {
   get('server').listeners.get('click')!({ stopPropagation() {} });
   assert.equal(get('scopeMenu').hidden, false);
   assert.equal(get('sourcesTab').attributes['aria-selected'], 'true');
-  assert.equal(get('sourceMenu').children.length, 3);
+  assert.equal(get('sourceMenu').children.length, 4);
+  const add = get('sourceMenu').children[3];
+  assert.equal(add.textContent, 'Add connection…');
+  add.listeners.get('click')!();
+  assert.deepEqual(JSON.parse(JSON.stringify(messages.at(-1))), { type: 'addConnection' });
+  get('server').listeners.get('click')!({ stopPropagation() {} });
 
   get('runsTab').listeners.get('click')!();
   assert.equal(get('sourcesTab').attributes['aria-selected'], 'false');
@@ -3263,4 +3268,614 @@ test('My changes appears in a git repository and adds or removes changed:true', 
   snapshot({});
   assert.equal(get('changedOnly').hidden, false);
   assert.equal(get('changedOnly').attributes['aria-pressed'], 'true');
+});
+
+test('a saved range the panel does not offer falls back to the last hour', () => {
+  assert.equal(viewer({ range: '2h' }).app.state.connectionRange, '1h');
+  assert.equal(viewer({ range: '7d' }).app.state.connectionRange, '7d');
+});
+
+test('a selected connection shows its range, Run, Tail and Run SQL, with the SQL a filter becomes', () => {
+  const { get, app, receive, messages, timers, savedStates } = viewer({ server: '' });
+  const plain = (value: unknown) => JSON.parse(JSON.stringify(value));
+  const connection = {
+    id: 'app',
+    sourceId: 'conn:app',
+    label: 'SQLite · app',
+    type: 'sqlite',
+    mapped: true,
+    sql: true,
+    tailing: false,
+  };
+  const snapshot = (extra: Record<string, unknown>) =>
+    receive({
+      type: 'snapshot',
+      generation: 1,
+      newest: 100,
+      status: 'Ready',
+      command: '',
+      running: false,
+      total: 0,
+      retained: 0,
+      discarded: 0,
+      bytes: 0,
+      maxBytes: 1,
+      truncated: 0,
+      events: [],
+      columns: [],
+      page: 0,
+      pages: 1,
+      matched: 0,
+      servers: [
+        { id: 'api', label: 'API', status: 'idle', activeSessions: 0 },
+        { id: 'conn:app', label: 'SQLite · app', status: 'idle', activeSessions: 0 },
+      ],
+      sessions: [],
+      connections: [connection],
+      ...extra,
+    });
+  snapshot({});
+  assert.equal(get('connectionBar').hidden, true, 'hidden until a connection is the source');
+  // A connection just added is selected from the editor. The snapshot that asks for it was built for the previous
+  // source, so it is not rendered: the next one, for the connection, is.
+  const before = messages.length;
+  snapshot({ applySource: 'conn:app', events: [{ id: 7, level: 'info', message: 'from the previous source' }] });
+  assert.equal(app.state.selectedServer, 'conn:app');
+  assert.notEqual(app.table.events[0]?.message, 'from the previous source');
+  assert.equal(plain(messages.slice(before).find((message) => message.type === 'snapshot'))?.serverId, 'conn:app');
+  snapshot({});
+  assert.equal(get('connectionBar').hidden, false);
+  assert.equal(get('empty').textContent, 'Choose a range and press Run to fetch rows from SQLite · app.');
+  assert.equal(get('connectionResult').textContent, 'Choose a range and press Run. Nothing is fetched until you do.');
+  assert.equal(
+    messages.some((message) => message.type === 'connectionFetch'),
+    false,
+    'nothing runs on its own',
+  );
+  // The preview of the SQL the filter becomes is asked for after a pause.
+  [...timers.values()].at(-1)!();
+  assert.deepEqual(plain(messages.at(-1)), {
+    type: 'connectionPreview',
+    connectionId: 'app',
+    query: 'timeout',
+    range: '1h',
+  });
+  receive({
+    type: 'connectionPreview',
+    connectionId: 'app',
+    query: 'timeout',
+    range: '1h',
+    statement: 'SELECT * FROM "app_logs" WHERE …',
+    local: ['/time.?out/'],
+  });
+  assert.equal(
+    get('connectionPreview').textContent,
+    'Runs as: SELECT * FROM "app_logs" WHERE … · Filtered locally: /time.?out/',
+  );
+  // A preview for an older filter is ignored.
+  receive({ type: 'connectionPreview', connectionId: 'app', query: 'old', range: '1h', statement: 'stale', local: [] });
+  assert.match(get('connectionPreview').textContent, /^Runs as: SELECT/);
+  get('connectionRange').value = '24h';
+  get('connectionRange').listeners.get('change')!();
+  assert.equal(app.state.connectionRange, '24h');
+  assert.equal(savedStates.at(-1)?.range, '24h');
+  get('connectionRun').listeners.get('click')!();
+  assert.deepEqual(plain(messages.at(-1)), {
+    type: 'connectionFetch',
+    connectionId: 'app',
+    query: 'timeout',
+    range: '24h',
+  });
+  // The toolbar's run button runs the search too.
+  get('run').listeners.get('click')!();
+  assert.deepEqual(plain(messages.at(-1)).type, 'connectionFetch');
+  get('connectionTail').listeners.get('click')!();
+  assert.deepEqual(plain(messages.at(-1)), {
+    type: 'connectionTail',
+    connectionId: 'app',
+    query: 'timeout',
+    enabled: true,
+  });
+  get('connectionSql').listeners.get('click')!();
+  assert.deepEqual(plain(messages.at(-1)), { type: 'connectionSql', connectionId: 'app' });
+  const last = {
+    sessionId: 's',
+    kind: 'fetch',
+    running: false,
+    fetched: 500,
+    kept: 12,
+    total: 4800,
+    elapsedMs: 38,
+    local: [],
+    at: 0,
+  };
+  snapshot({ connections: [{ ...connection, last }] });
+  assert.equal(
+    get('connectionResult').textContent,
+    'Fetched 500 of 4,800 rows · 12 match the filter · 38 ms · read-only',
+  );
+  snapshot({ connections: [{ ...connection, last: { ...last, running: true } }] });
+  assert.equal(get('connectionResult').textContent, 'Fetching…');
+  assert.equal(get('connectionRun').disabled, true);
+  snapshot({ connections: [{ ...connection, last: { ...last, error: 'no such table: app_logs' } }] });
+  assert.equal(get('connectionResult').textContent, 'Failed: no such table: app_logs');
+  assert.equal(get('connectionResult').classList.contains('connection-error'), true);
+  snapshot({
+    connections: [{ ...connection, tailing: true, last: { ...last, kind: 'tail', running: true, kept: 3 } }],
+  });
+  assert.equal(get('connectionTail').textContent, 'Stop tail');
+  assert.equal(get('connectionTail').attributes['aria-pressed'], 'true');
+  assert.equal(get('connectionResult').textContent, 'Tailing · 3 rows');
+  assert.equal(get('connectionRun').disabled, false, 'a tail does not block a search');
+  snapshot({ connections: [{ ...connection, last: { ...last, kind: 'tail', running: false, kept: 3 } }] });
+  assert.equal(get('connectionResult').textContent, 'Tail stopped · 3 rows');
+  assert.equal(get('empty').textContent, 'No matching rows. Change the filter or the range and press Run.');
+  // A search just run is selected with its source, so earlier runs' rows do not mix in.
+  const run = {
+    id: 'run-2',
+    serverId: 'conn:app',
+    server: 'SQLite · app',
+    command: 'level:error · last 1h',
+    status: 'exited',
+    startedAt: 1,
+  };
+  snapshot({ applySource: 'conn:app', applyRun: 'run-2', sessions: [run] });
+  assert.equal(app.state.selectedSession, 'run-2');
+  snapshot({ sessions: [run] });
+  assert.equal(app.state.selectedSession, 'run-2');
+  assert.match(get('server').textContent, /level:error · last 1h/);
+  // Without a mapped table, Run asks for SQL.
+  snapshot({ connections: [{ ...connection, mapped: false }] });
+  assert.equal(get('connectionResult').textContent, 'No log table is mapped. Use Run SQL to query it.');
+  assert.equal(get('connectionPreview').textContent, '');
+  get('run').listeners.get('click')!();
+  assert.deepEqual(plain(messages.at(-1)), { type: 'connectionSql', connectionId: 'app' });
+  // Any other source hides the bar again.
+  get('sourceMenu').children[1].listeners.get('click')!();
+  assert.equal(app.state.selectedServer, 'api');
+  assert.equal(get('connectionBar').hidden, true);
+  get('run').listeners.get('click')!();
+  assert.deepEqual(plain(messages.at(-1)), { type: 'run', serverId: 'api' });
+  get('addConnection').listeners.get('click')!();
+  assert.deepEqual(plain(messages.at(-1)), { type: 'addConnection' });
+});
+
+test('the Compare tab lines up production errors with local runs and shows both sides of one', () => {
+  const { get, app, receive, messages } = viewer({ server: '' });
+  const plain = (value: unknown) => JSON.parse(JSON.stringify(value));
+  const snapshot = (extra: Record<string, unknown>) =>
+    receive({
+      type: 'snapshot',
+      generation: 1,
+      newest: 100,
+      status: 'Ready',
+      command: '',
+      running: false,
+      total: 0,
+      retained: 0,
+      discarded: 0,
+      bytes: 0,
+      maxBytes: 1,
+      truncated: 0,
+      events: [],
+      columns: [],
+      page: 0,
+      pages: 1,
+      matched: 0,
+      servers: [
+        { id: 'npm-test', label: 'npm test', status: 'exited', activeSessions: 0 },
+        { id: 'conn:prod', label: 'SQLite · prod', status: 'exited', activeSessions: 0 },
+      ],
+      ...extra,
+    });
+  const local = {
+    id: 'r1',
+    serverId: 'npm-test',
+    server: 'npm test',
+    command: 'npm test',
+    status: 'exited',
+    startedAt: 5,
+    sourceKind: 'process',
+  };
+  snapshot({ sessions: [local] });
+  assert.equal(get('compare').hidden, true, 'nothing to compare against yet');
+  const prod = {
+    id: 'p1',
+    serverId: 'conn:prod',
+    server: 'SQLite · prod',
+    command: 'level:error · last 1h',
+    status: 'exited',
+    startedAt: 9,
+    sourceKind: 'remote',
+  };
+  snapshot({ sessions: [local, prod] });
+  assert.equal(get('compare').hidden, false);
+  get('compare').listeners.get('click')!();
+  assert.equal(app.views.active(), 'compare');
+  assert.deepEqual(plain(messages.at(-1)), {
+    type: 'compare',
+    baselineServerId: 'conn:prod',
+    baselineSessionId: 'p1',
+    localServerId: 'npm-test',
+  });
+  assert.equal(get('compareStatus').textContent, 'Comparing…');
+  const sample = (id: number, region: string) => ({
+    id,
+    level: 'error',
+    message: 'timed out',
+    fields: { region },
+    differs: ['region'],
+  });
+  receive({
+    type: 'compare',
+    view: {
+      baseline: { serverId: 'conn:prod', sessionId: 'p1', label: 'SQLite · prod · level:error · last 1h', events: 40 },
+      local: { serverId: 'npm-test', label: 'npm test' },
+      runs: [
+        { id: 'r0', label: 'npm test', startedAt: 1 },
+        { id: 'r1', label: 'npm test', startedAt: 5 },
+      ],
+      rows: [
+        {
+          signature: 'timed out after <n> ms',
+          message: 'timed out after 5000 ms',
+          pattern: 'timed out after * ms',
+          baseline: 312,
+          runs: [4, 0],
+          status: 'fixed',
+          samples: { baseline: sample(7, 'eu'), local: { ...sample(9, 'local'), sessionId: 'r0' } },
+        },
+        {
+          signature: 'negative quantity <n>',
+          message: 'negative quantity 2',
+          pattern: 'negative quantity *',
+          location: 'cart.ts:42',
+          baseline: 0,
+          runs: [0, 2],
+          status: 'new',
+          changed: true,
+          samples: { local: sample(11, 'local') },
+        },
+      ],
+      summary: '1 production error fixed locally · 1 new local error from your changes',
+    },
+  });
+  assert.equal(
+    get('compareStatus').textContent,
+    '1 production error fixed locally · 1 new local error from your changes · SQLite · prod · level:error · last 1h vs npm test',
+  );
+  assert.deepEqual(
+    get('compareHead')
+      .children.map((th) => th.textContent)
+      .slice(-2),
+    ['Latest run', 'Status'],
+  );
+  const rows = get('compareRows').children;
+  assert.deepEqual(
+    rows[0].children.map((td) => td.textContent),
+    ['timed out after * ms', '312', '4', '–', 'Fixed locally'],
+  );
+  assert.equal(rows[1].children.at(-1)!.textContent, 'New');
+  assert.equal(rows[1].children.at(-1)!.children[0].textContent, ' · changed: cart.ts:42');
+  // Choosing a row shows an event from each side, with the differing field marked.
+  rows[0].listeners.get('click')!();
+  assert.equal(get('compareDetail').hidden, false);
+  const sides = get('compareDetail').children[0].children;
+  assert.equal(sides.length, 2);
+  assert.match(sides[1].children[0].textContent, /^Local · npm test · /, 'the local side names the run of its event');
+  const list = sides[0].children[1];
+  const region = list.children.findIndex((child) => child.textContent === 'region');
+  assert.equal(list.children[region].className, 'compare-diff');
+  sides[0].children[2].listeners.get('click')!();
+  assert.deepEqual(plain(messages.at(-1)), { type: 'context', id: 7 });
+  receive({ type: 'compare', error: 'boom' });
+  assert.equal(get('compareStatus').textContent, 'Could not compare: boom');
+  // A connection's run opens the comparison from the connection bar.
+  snapshot({
+    sessions: [local, prod],
+    connections: [
+      {
+        id: 'prod',
+        sourceId: 'conn:prod',
+        label: 'SQLite · prod',
+        type: 'sqlite',
+        mapped: true,
+        sql: true,
+        tailing: false,
+        last: { sessionId: 'p1', kind: 'fetch', running: false, fetched: 1, kept: 1, local: [], at: 0 },
+      },
+    ],
+    applySource: 'conn:prod',
+  });
+  snapshot({ sessions: [local, prod], connections: [] });
+  app.views.show('logs');
+  snapshot({
+    sessions: [local, prod],
+    connections: [
+      {
+        id: 'prod',
+        sourceId: 'conn:prod',
+        label: 'SQLite · prod',
+        type: 'sqlite',
+        mapped: true,
+        sql: true,
+        tailing: false,
+        last: { sessionId: 'p1', kind: 'fetch', running: false, fetched: 1, kept: 1, local: [], at: 0 },
+      },
+    ],
+  });
+  assert.equal(get('connectionCompare').hidden, false);
+  get('connectionCompare').listeners.get('click')!();
+  assert.equal(app.views.active(), 'compare');
+  assert.equal(plain(messages.at(-1)).baselineSessionId, 'p1');
+});
+
+test('a Datadog connection offers Open link instead of Run SQL, and speaks of logs', () => {
+  const { get, receive, messages, timers } = viewer({ server: 'conn:prod', query: 'level:error' });
+  const plain = (value: unknown) => JSON.parse(JSON.stringify(value));
+  const connection = {
+    id: 'prod',
+    sourceId: 'conn:prod',
+    label: 'Datadog · prod',
+    type: 'datadog',
+    mapped: true,
+    sql: false,
+    tailing: false,
+  };
+  const snapshot = (extra: Record<string, unknown>) =>
+    receive({
+      type: 'snapshot',
+      generation: 1,
+      newest: 100,
+      status: 'Ready',
+      command: '',
+      running: false,
+      total: 0,
+      retained: 0,
+      discarded: 0,
+      bytes: 0,
+      maxBytes: 1,
+      truncated: 0,
+      events: [],
+      columns: [],
+      page: 0,
+      pages: 1,
+      matched: 0,
+      servers: [{ id: 'conn:prod', label: 'Datadog · prod', status: 'idle', activeSessions: 0 }],
+      sessions: [],
+      ...extra,
+    });
+  snapshot({ connections: [connection] });
+  assert.equal(get('connectionBar').hidden, false);
+  assert.equal(get('connectionSql').hidden, true);
+  assert.equal(get('connectionLink').hidden, false);
+  assert.equal(get('empty').textContent, 'Choose a range and press Run to fetch logs from Datadog · prod.');
+  [...timers.values()].at(-1)!();
+  receive({
+    type: 'connectionPreview',
+    connectionId: 'prod',
+    query: 'level:error',
+    range: '1h',
+    statement: 'status:(error)',
+    local: [],
+  });
+  assert.equal(get('connectionPreview').textContent, 'Datadog search: status:(error)');
+  get('connectionLink').listeners.get('click')!();
+  assert.deepEqual(plain(messages.at(-1)), { type: 'connectionLink', connectionId: 'prod' });
+  const last = { sessionId: 's', kind: 'fetch', running: false, fetched: 1, kept: 1, local: [], at: 0, elapsedMs: 80 };
+  snapshot({ connections: [{ ...connection, last }] });
+  assert.equal(get('connectionResult').textContent, 'Fetched 1 log · 80 ms · read-only');
+});
+
+test('a metric query is charted, and a window dragged across it shows the logs from then', () => {
+  const { get, app, receive, messages, timers } = viewer({ server: '' });
+  const plain = (value: unknown) => JSON.parse(JSON.stringify(value));
+  const connection = {
+    id: 'prod',
+    sourceId: 'conn:prod',
+    label: 'Datadog · prod',
+    type: 'datadog',
+    mapped: true,
+    sql: false,
+    watching: [],
+    tailing: false,
+  };
+  const snapshot = (extra: Record<string, unknown>) =>
+    receive({
+      type: 'snapshot',
+      generation: 1,
+      newest: 100,
+      status: 'Ready',
+      command: '',
+      running: false,
+      total: 0,
+      retained: 0,
+      discarded: 0,
+      bytes: 0,
+      maxBytes: 1,
+      truncated: 0,
+      events: [],
+      columns: [],
+      page: 0,
+      pages: 1,
+      matched: 0,
+      servers: [{ id: 'conn:prod', label: 'Datadog · prod', status: 'idle', activeSessions: 0 }],
+      sessions: [],
+      ...extra,
+    });
+  snapshot({});
+  assert.equal(get('metricQuery').hidden, true);
+  assert.equal(get('metrics').hidden, true, 'no Metrics tab without metrics or a connection');
+  snapshot({ connections: [connection] });
+  assert.equal(get('metrics').hidden, false, 'a connection can be queried for metrics');
+  assert.equal(get('metricQuery').hidden, false);
+  assert.equal(get('metricConnection').value, 'prod');
+  assert.match((get('metricInput') as unknown as { placeholder: string }).placeholder, /^avg:/);
+  // Metric names are suggested while the first word is typed.
+  get('metricInput').value = 'trace';
+  get('metricInput').listeners.get('input')!();
+  [...timers.values()].at(-1)!();
+  assert.deepEqual(plain(messages.at(-1)), { type: 'metricNames', connectionId: 'prod', search: 'trace' });
+  receive({ type: 'metricNames', connectionId: 'prod', search: 'trace', names: ['trace.http.request.duration'] });
+  assert.equal(get('metricSuggestions').children[0].value, 'trace.http.request.duration');
+  get('metricInput').value = 'avg:trace.http.request.duration{*} by {env}';
+  get('metricInput').listeners.get('input')!();
+  get('metricRun').listeners.get('click')!();
+  assert.deepEqual(plain(messages.at(-1)), {
+    type: 'metricQuery',
+    connectionId: 'prod',
+    query: 'avg:trace.http.request.duration{*} by {env}',
+    range: '1h',
+  });
+  assert.equal(get('metricQueryStatus').textContent, 'Querying…');
+  const fromMs = Date.parse('2026-10-23T09:00:00Z');
+  const toMs = fromMs + 3600000;
+  receive({
+    type: 'metricQuery',
+    connectionId: 'prod',
+    query: 'avg:trace.http.request.duration{*} by {env}',
+    range: '1h',
+    result: {
+      series: [
+        {
+          name: 'trace.http.request.duration',
+          scope: 'env:prod',
+          unit: 'ms',
+          points: [
+            [fromMs, 100],
+            [fromMs + 720000, 880],
+            [toMs, 120],
+          ],
+        },
+        {
+          name: 'trace.http.request.duration',
+          scope: 'env:staging',
+          unit: 'ms',
+          points: [
+            [fromMs, 90],
+            [toMs, 95],
+          ],
+        },
+      ],
+      statement: 'avg:trace.http.request.duration{*} by {env}',
+      elapsedMs: 29,
+      fromMs,
+      toMs,
+    },
+  });
+  assert.match(get('metricQueryStatus').textContent, /^2 series · 5 points · 29 ms\./);
+  const chart = get('metricChart');
+  assert.equal(chart.hidden, false);
+  const [svg, tooltip, legend] = chart.children;
+  const lines = svg.children.filter((child) => (child.attributes.class ?? '').startsWith('metric-line'));
+  assert.equal(lines.length, 2);
+  // The axis reaches above the highest point, so a spike stays inside the chart.
+  const grid = svg.children.filter((child) => child.attributes.class === 'metric-grid');
+  const top = Math.min(...grid.map((line) => Number(line.attributes.y1)));
+  const highest = Math.min(
+    ...lines.flatMap((line) =>
+      String(line.attributes.points)
+        .split(' ')
+        .map((point) => Number(point.split(',')[1])),
+    ),
+  );
+  assert.ok(highest >= top, `the spike at y=${highest} is inside the axis that ends at y=${top}`);
+  const times = svg.children.filter((child) => child.attributes.class === 'metric-axis' && /:/.test(child.textContent));
+  assert.ok(times.length && times.every((label) => !/\./.test(label.textContent)), 'axis times leave out milliseconds');
+  assert.deepEqual(
+    legend.children.map((item) => item.children[1].textContent),
+    ['env:prod · 120 ms', 'env:staging · 95 ms'],
+  );
+  // Hovering shows each series' value at that time.
+  svg.listeners.get('pointermove')!({ clientX: 70 });
+  assert.equal(tooltip.hidden, false);
+  assert.match(tooltip.textContent, /env:prod: /);
+  // Dragging selects a window.
+  svg.listeners.get('pointerdown')!({ clientX: 20 });
+  svg.listeners.get('pointermove')!({ clientX: 60 });
+  svg.listeners.get('pointerup')!({ clientX: 60 });
+  assert.equal(get('metricSelection').hidden, false);
+  assert.equal(get('metricShowLogs').textContent, 'Show logs from Datadog · prod');
+  get('metricShowLogs').listeners.get('click')!();
+  const fetch = plain(messages.at(-1));
+  assert.equal(fetch.type, 'connectionFetch');
+  assert.equal(fetch.connectionId, 'prod');
+  assert.ok(fetch.fromMs >= fromMs && fetch.toMs <= toMs && fetch.fromMs < fetch.toMs);
+  get('metricShowLocal').listeners.get('click')!();
+  assert.equal(app.views.active(), 'logs');
+  assert.match(
+    app.search.query(),
+    /^timestamp:\[2026-10-23T09:\d\d:\d\d\.\d{3}Z to 2026-10-23T\d\d:\d\d:\d\d\.\d{3}Z\]$/,
+  );
+  // A click without a drag clears the selection.
+  svg.listeners.get('pointerdown')!({ clientX: 30 });
+  svg.listeners.get('pointerup')!({ clientX: 30 });
+  assert.equal(get('metricSelection').hidden, true);
+  // Watch keeps reading the query into the Metrics list.
+  get('metricWatch').listeners.get('click')!();
+  assert.deepEqual(plain(messages.at(-1)), {
+    type: 'metricWatch',
+    connectionId: 'prod',
+    query: 'avg:trace.http.request.duration{*} by {env}',
+    enabled: true,
+  });
+  snapshot({ connections: [{ ...connection, watching: ['avg:trace.http.request.duration{*} by {env}'] }] });
+  assert.equal(get('metricWatch').textContent, 'Stop watching');
+  receive({
+    type: 'metricQuery',
+    connectionId: 'prod',
+    query: 'avg:trace.http.request.duration{*} by {env}',
+    range: '1h',
+    error: 'boom',
+  });
+  assert.equal(get('metricQueryStatus').textContent, 'Could not query: boom');
+  assert.equal(chart.hidden, true);
+});
+
+test('a connection says whether agents may query it, and the button asks to change that', () => {
+  const { get, receive, messages } = viewer({ server: 'conn:prod', query: '' });
+  const plain = (value: unknown) => JSON.parse(JSON.stringify(value));
+  const connection = {
+    id: 'prod',
+    sourceId: 'conn:prod',
+    label: 'Datadog · prod',
+    type: 'datadog',
+    mapped: true,
+    sql: false,
+    watching: [],
+    agents: false,
+    tailing: false,
+  };
+  const snapshot = (agents: boolean) =>
+    receive({
+      type: 'snapshot',
+      generation: 1,
+      newest: 100,
+      status: 'Ready',
+      command: '',
+      running: false,
+      total: 0,
+      retained: 0,
+      discarded: 0,
+      bytes: 0,
+      maxBytes: 1,
+      truncated: 0,
+      events: [],
+      columns: [],
+      page: 0,
+      pages: 1,
+      matched: 0,
+      servers: [{ id: 'conn:prod', label: 'Datadog · prod', status: 'idle', activeSessions: 0 }],
+      sessions: [],
+      connections: [{ ...connection, agents }],
+    });
+  snapshot(false);
+  assert.equal(get('connectionAgents').textContent, 'Allow agents');
+  assert.equal(get('connectionAgents').attributes['aria-pressed'], 'false');
+  get('connectionAgents').listeners.get('click')!();
+  assert.deepEqual(plain(messages.at(-1)), { type: 'connectionAgents', connectionId: 'prod', enabled: true });
+  snapshot(true);
+  assert.equal(get('connectionAgents').textContent, 'Agents allowed');
+  get('connectionAgents').listeners.get('click')!();
+  assert.deepEqual(plain(messages.at(-1)), { type: 'connectionAgents', connectionId: 'prod', enabled: false });
 });

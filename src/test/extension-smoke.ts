@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { readFile, writeFile } from 'node:fs/promises';
 import { request } from 'node:http';
+import { isBuiltin } from 'node:module';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import * as vscode from 'vscode';
@@ -41,6 +42,15 @@ export async function run(): Promise<void> {
       'showLogSite',
       'connectAgent',
       'showStatus',
+      'addConnection',
+      'searchConnection',
+      'runConnectionSql',
+      'tailConnection',
+      'testConnection',
+      'removeConnection',
+      'openConnectionLink',
+      'allowAgentConnection',
+      'revokeAgentConnection',
     ]) {
       assert.ok(commands.includes(`logline.${command}`), `${command} is registered`);
     }
@@ -200,6 +210,52 @@ export async function run(): Promise<void> {
     await vscode.commands.executeCommand('logline.showTrace', traceId);
     await vscode.commands.executeCommand('logline.stopOtlpReceiver');
 
+    // Connections: SQLite queries run in a child process of the extension host's runtime, read-only, and a query
+    // past its time limit is stopped. Runtimes without built-in SQLite use the sqlite3 command, which CI may lack.
+    const sqlite = isBuiltin('node:sqlite');
+    if (sqlite) {
+      const database = join(folder.uri.fsPath, 'smoke.db');
+      const { DatabaseSync } = require('node:sqlite') as {
+        DatabaseSync: new (path: string) => { exec(sql: string): void; close(): void };
+      };
+      const writer = new DatabaseSync(database);
+      writer.exec(
+        "CREATE TABLE logs (ts TEXT, level TEXT, msg TEXT); INSERT INTO logs VALUES ('2026-10-23 09:00:00', 'ERROR', 'smoke row');",
+      );
+      writer.close();
+      const { openSqlite } = require(
+        join(extension.extensionPath, 'out', 'capture', 'connectors', 'sqlite-driver.js'),
+      ) as {
+        openSqlite: (file: string) => {
+          query(sql: string, params: unknown[], options: { timeoutMs: number }): Promise<Record<string, unknown>[]>;
+          close(): Promise<void>;
+        };
+      };
+      const driver = openSqlite(database);
+      try {
+        assert.deepEqual(
+          await driver.query('SELECT msg FROM logs WHERE level = ?', ['ERROR'], { timeoutMs: 10000 }),
+          [{ msg: 'smoke row' }],
+          'a SQLite connection reads from its child process',
+        );
+        await assert.rejects(
+          driver.query('DELETE FROM logs', [], { timeoutMs: 10000 }),
+          /readonly/,
+          'the database is open read-only',
+        );
+        await assert.rejects(
+          driver.query('WITH RECURSIVE n(x) AS (SELECT 1 UNION ALL SELECT x + 1 FROM n) SELECT COUNT(*) FROM n', [], {
+            timeoutMs: 300,
+          }),
+          /longer than 300 ms/,
+          'a query past its time limit is stopped',
+        );
+        assert.deepEqual(await driver.query('SELECT 1 AS again', [], { timeoutMs: 10000 }), [{ again: 1 }]);
+      } finally {
+        await driver.close();
+      }
+    }
+
     // Agents: the installed MCP server runs on the editor's runtime, as Connect Claude Code or Codex registers it, finds
     // this window, and gets its answer. Nothing is shared, so only the window can reply NOT_SHARED; a broken bridge says NOT_CONNECTED.
     const requests = [
@@ -241,7 +297,7 @@ export async function run(): Promise<void> {
         .map((line) => JSON.parse(line) as { id: number; result: any })
         .map((reply) => [reply.id, reply.result]),
     );
-    assert.equal(replies.get(2)?.tools?.length, 7, `the MCP server lists the seven tools (${output})`);
+    assert.equal(replies.get(2)?.tools?.length, 9, `the MCP server lists the nine tools (${output})`);
     assert.match(
       replies.get(3)?.content?.[0]?.text ?? '',
       /NOT_SHARED/,
@@ -271,6 +327,7 @@ export async function run(): Promise<void> {
           'OpenTelemetry receiver',
           'metrics',
           'trace command',
+          ...(sqlite ? ['SQLite connection'] : []),
           'MCP agent bridge',
           'status',
         ],

@@ -112,3 +112,45 @@ test('snapshot requests accept only well-formed held rows', () => {
     assert.equal(parse(have), undefined);
   }
 });
+
+test('saved connections are listed as sources before they have runs', () => {
+  const h = harness();
+  h.add(1);
+  const connection = {
+    id: 'app',
+    sourceId: 'conn:app',
+    label: 'SQLite · app',
+    type: 'sqlite' as const,
+    mapped: true,
+    sql: true,
+    watching: [],
+    agents: false,
+    tailing: false,
+  };
+  const without = h.snapshot();
+  assert.equal(without.connections, undefined);
+  const snapshot = buildSnapshot(
+    { type: 'snapshot' },
+    {
+      store: h.store,
+      ingestion: new Ingestion(h.store, () => undefined),
+      config: { get: (_key, fallback) => fallback },
+      registry: new SessionRegistry(),
+      state: new RuntimeState(() => undefined),
+      persistence: { persistDropped: 0 } as SnapshotSources['persistence'],
+      searches: { savedSearches: () => [] } as unknown as SnapshotSources['searches'],
+      running: false,
+      guideStatus: { version: '', unread: false },
+      agentAccess: { status: () => ({ active: false, sources: [] }) } as unknown as SnapshotSources['agentAccess'],
+      connections: [connection],
+    },
+  );
+  assert.deepEqual(snapshot.connections, [connection]);
+  assert.deepEqual(
+    snapshot.servers.map((server) => [server.id, server.label, server.status]),
+    [
+      ['conn:app', 'SQLite · app', 'idle'],
+      ['api', 'API', 'idle'],
+    ],
+  );
+});

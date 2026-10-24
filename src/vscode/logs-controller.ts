@@ -17,6 +17,10 @@ import { telemetryFindings, type TelemetryFinding } from '../core/telemetry-find
 import { buildTrace, SpanStore, summarizeTraces, traceLogs, type TraceSummary, type TraceView } from '../core/traces';
 import { OtelIntegration } from './otel-integration';
 import { FileFollower } from '../capture/file-follower';
+import { RemoteSource } from '../capture/remote-source';
+import { RemoteMetrics } from '../capture/remote-metrics';
+import { ConnectionManager } from './connections';
+import { ProductionCompare } from './production-compare';
 import { Ingestion } from '../capture/ingestion';
 import { ProcessRunner } from '../capture/process-runner';
 import { RuntimeState } from '../capture/runtime-state';
@@ -39,7 +43,7 @@ import { eventLocation, LogSiteIndex, LogSiteTracker } from '../core/log-sites';
 import { getField } from '../core/query';
 import { extractExceptions } from '../core/exceptions';
 import type { LogEvent } from '../core/types';
-import type { DetailLinks, DoctorAction, RowEvent } from '../protocol/messages';
+import type { CompareRequest, CompareView, DetailLinks, DoctorAction, RowEvent } from '../protocol/messages';
 import type { LogBreakpoints } from './log-breakpoints';
 import { doctorMode, type LogDoctor } from './log-doctor';
 import { SensitiveScanner, type SourceSensitive } from '../core/log-findings';
@@ -78,6 +82,14 @@ export class LogsController {
   readonly tasks = new TaskLifecycle(this.registry, this.ingestion, this.state, () => this.runner.sessions.size > 0);
   readonly terminalCapture = new TerminalCapture(this.config, this.ingestion, this.registry, this.state);
   readonly files = new FileFollower(this.config, this.registry, this.ingestion, this.state);
+  /** Runs fetched from saved connections, and tails that keep reading them. */
+  readonly remote = new RemoteSource(this.config, this.registry, this.ingestion, this.state);
+  readonly connections: ConnectionManager;
+  /** Metric queries watched on connections, polled into `metrics`. */
+  readonly remoteMetrics: RemoteMetrics;
+  /** Production errors compared with local runs, for the Compare tab. */
+  readonly compare: ProductionCompare;
+  private pendingCompare?: CompareRequest;
   readonly debug = new DebugCapture(
     this.config,
     this.registry,
@@ -125,6 +137,8 @@ export class LogsController {
   agentBridge?: AgentBridge;
   private pendingQuery?: string;
   private pendingTrace?: string;
+  private pendingSource?: string;
+  private pendingRun?: string;
   readonly transfer = new LogTransfer(this.store, this.config, this.ingestion, this.state);
   readonly searches: SavedSearches;
   private readonly globalState: Pick<vscode.ExtensionContext, 'globalState'>['globalState'];
@@ -137,9 +151,25 @@ export class LogsController {
 
   constructor(
     context: Pick<vscode.ExtensionContext, 'globalState'> &
-      Partial<Pick<vscode.ExtensionContext, 'environmentVariableCollection'>>,
+      Partial<Pick<vscode.ExtensionContext, 'environmentVariableCollection' | 'secrets'>>,
   ) {
     this.globalState = context.globalState;
+    this.remoteMetrics = new RemoteMetrics(this.metrics, this.state);
+    this.connections = new ConnectionManager(
+      this.config,
+      this.remote,
+      context.secrets,
+      (sourceId, runId, query) => this.showSource(sourceId, runId, query),
+      this.remoteMetrics,
+      context.globalState,
+    );
+    this.compare = new ProductionCompare(this.store, this.registry, (view) => void this.comparisonFinished(view));
+    // Agents fetch from connections the user allowed, and compare with production, through the sharing boundary.
+    this.agentAccess.production = {
+      connections: () => this.connections.agentConnections(),
+      fetch: (input) => this.connections.agentFetch(input),
+      compare: (request, allowed) => this.compare.build(request, false, allowed),
+    };
     this.store.changeScope = new ChangeScope(this.changedLines, this.logSites);
     this.agentAccess.changes = () => this.gitChanges?.status();
     this.otel = new OtelIntegration(
@@ -196,6 +226,10 @@ export class LogsController {
       if (event.affectsConfiguration('logline.captureTerminals'))
         this.terminalCapture.setEnabled(this.config.get('captureTerminals', false));
       if (event.affectsConfiguration('logline.servers')) this.notifications.send({ type: 'serversChanged' });
+      if (event.affectsConfiguration('logline.connections')) {
+        this.connections.refresh();
+        this.notifications.send({ type: 'update' });
+      }
       if (event.affectsConfiguration('logline.otlp.enabled')) this.otel.settingChanged();
       if (event.affectsConfiguration('logline.otlp')) void this.otel.sync();
     });
@@ -203,13 +237,24 @@ export class LogsController {
   }
   snapshot(request: Extract<ViewRequest, { type: 'snapshot' }>) {
     this.terminalCapture.pruneStale();
+    // A connection's run stays even when it matched nothing: that is its result.
     this.registry.pruneEmptyCompleted(['debug', 'otel'], (serverId, id) => this.store.sessionEventCount(serverId, id));
-    const { pendingQuery: applyQuery, pendingTrace: openTrace } = this;
-    this.pendingQuery = this.pendingTrace = undefined;
+    this.compare.check();
+    const {
+      pendingQuery: applyQuery,
+      pendingTrace: openTrace,
+      pendingSource: applySource,
+      pendingRun: applyRun,
+      pendingCompare: openCompare,
+    } = this;
+    this.pendingQuery = this.pendingTrace = this.pendingSource = this.pendingRun = this.pendingCompare = undefined;
     return {
+      ...(openCompare ? { openCompare } : {}),
       ...this.buildSnapshot(request),
       ...(applyQuery !== undefined ? { applyQuery } : {}),
       ...(openTrace ? { openTrace } : {}),
+      ...(applySource ? { applySource } : {}),
+      ...(applySource && applyRun ? { applyRun } : {}),
     };
   }
   private buildSnapshot(request: Extract<ViewRequest, { type: 'snapshot' }>) {
@@ -228,6 +273,7 @@ export class LogsController {
       otlp: this.otlp,
       spans: this.spans,
       metrics: this.metrics,
+      connections: this.connections.views(),
       rowLinks: (event) => this.rowLinks(event),
       rowLinksVersion: `${this.lens?.enabled ?? false}:${this.logSites.version}:${this.siteTracker.generation}:${this.doctor?.revision ?? 0}`,
       agentClients: this.agentBridge?.recentClients() ?? [],
@@ -287,6 +333,8 @@ export class LogsController {
         showStatus: async () => {
           await vscode.commands.executeCommand('logline.showStatus');
         },
+        connections: this.connections,
+        compare: (request) => this.compare.build(request),
       },
       send,
       message,
@@ -295,6 +343,32 @@ export class LogsController {
   /** Filter the Logs panel from the editor. The next snapshot carries the query, so a panel that is still loading applies it too. */
   async showQuery(query: string): Promise<void> {
     this.pendingQuery = query;
+    await vscode.commands.executeCommand('logline.logs.focus');
+    this.notifications.send({ type: 'update' });
+  }
+  /** A local run of the compared source finished: say what it means for the production errors. */
+  private async comparisonFinished(view: CompareView): Promise<void> {
+    const choice = await vscode.window.showInformationMessage(
+      `${view.local.label} finished: ${view.summary}`,
+      'Show Comparison',
+    );
+    if (choice !== 'Show Comparison') return;
+    this.pendingCompare = {
+      baselineServerId: view.baseline.serverId,
+      ...(view.baseline.sessionId ? { baselineSessionId: view.baseline.sessionId } : {}),
+      localServerId: view.local.serverId,
+    };
+    await vscode.commands.executeCommand('logline.logs.focus');
+    this.notifications.send({ type: 'update' });
+  }
+  /**
+   * Select a source, and optionally one of its runs and a search, in the Logs
+   * panel, delivered with the next snapshot like showQuery.
+   */
+  async showSource(sourceId: string, runId?: string, query?: string): Promise<void> {
+    this.pendingSource = sourceId;
+    this.pendingRun = runId;
+    if (query !== undefined) this.pendingQuery = query;
     await vscode.commands.executeCommand('logline.logs.focus');
     this.notifications.send({ type: 'update' });
   }
@@ -442,13 +516,17 @@ export class LogsController {
     this.ingestion.crashes.clear();
     this.spans.clear();
     this.metrics.clear();
+    this.remote.clearResults();
+    this.compare.unpin();
     this.registry.clearCompleted();
     // A clear must also remove a completed import's status. Active capture is
     // intentionally retained, so keep its truthful running state instead.
     this.state.reset(this.isRunning());
   }
   private isRunning(): boolean {
-    return this.runner.sessions.size > 0 || this.tasks.executions.size > 0 || this.files.active > 0;
+    return (
+      this.runner.sessions.size > 0 || this.tasks.executions.size > 0 || this.files.active > 0 || this.remote.active > 0
+    );
   }
   shareWithAgent(sourceIds?: string[], anchor?: number, sessionIds?: string[], chooseRuns = false): Promise<void> {
     return (this.sharingRequest ??= this.configureSharing(sourceIds, anchor, sessionIds, chooseRuns).finally(() => {
@@ -693,6 +771,7 @@ export class LogsController {
       this.tasks.stopSessionById(sessionId);
       this.files.stopSessionById(sessionId);
       this.debug.stopSessionById(sessionId);
+      this.remote.stopSessionById(sessionId);
       return;
     }
     // Stop all leaves debug sessions alone: VS Code owns them, so only an
@@ -701,9 +780,11 @@ export class LogsController {
       this.runner.stopServer(serverId);
       this.files.stopServer(serverId);
       this.debug.stopServer(serverId);
+      this.remote.stopServer(serverId);
     } else {
       this.runner.stop();
       this.files.stop();
+      this.remote.stop();
     }
     this.tasks.stop(serverId);
   }
@@ -720,6 +801,9 @@ export class LogsController {
     this.debug.dispose();
     await this.otel.dispose();
     await this.files.dispose();
+    await this.remote.dispose();
+    await this.remoteMetrics.dispose();
+    this.connections.dispose();
     // Closing streams may emit a final partial line; flush persistence afterwards.
     await this.runner.dispose();
     await this.persistence.dispose();

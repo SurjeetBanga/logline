@@ -78,6 +78,26 @@ Find where a slow request spends its time and which code is responsible.
 
 ${UNTRUSTED}`,
   },
+  {
+    name: 'reproduce-prod',
+    title: 'Reproduce a production error locally, then verify the fix',
+    description:
+      'Fetch a production failure from a connected log store, reproduce it in a local run, fix it, and confirm the fix removes it without adding new errors. Use when asked to fix something failing in production, staging, or a shared environment.',
+    body: `# Reproduce a production error locally, then verify the fix
+
+Work from production evidence to a fix that is confirmed in a local run.
+
+1. ${START}
+2. The result lists \`connections\`. Use one with \`agents: true\`; if none is allowed, ask the user to choose **Allow agents** on the connection in the Logline Logs panel, then stop.
+3. Call \`logline_fetch_production\` with the user's description as a search, such as \`query: "level:error service:checkout"\` and \`range: "1h"\`, or with a \`traceId\` when the user gave one. Read the \`errorGroups\`; note the \`runId\`.
+4. Read the largest or most relevant group: \`logline_inspect_event\` on a sample id with \`context: 10\`, and \`logline_get_trace\` when it has a \`traceId\`. Note the inputs and conditions it ran under: fields such as region, retries, user, payload size, and timing.
+5. Open the source at the failing frame and form a hypothesis. Run the app or its tests locally under the same conditions, such as a test that sends the same input. Logline captures the run.
+6. Call \`logline_compare_with_production\` with the \`runId\` as \`prodRunId\`. **Reproduced** confirms the failure. If it is **Not seen locally**, compare the production and local sample events with \`logline_inspect_event\` to find the difference in conditions, and try again.
+7. Fix the code, run the same thing again, and compare again. Done when the error is **Fixed locally** and no **New** error is marked \`fromChangedCode\`.
+8. Report the production evidence, how it was reproduced, the fix, and the comparison before and after.
+
+${UNTRUSTED}`,
+  },
 ];
 
 /** The skill folder name an agent sees. */

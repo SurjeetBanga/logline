@@ -75,14 +75,14 @@
       section2.append(empty2);
       return section2;
     }
-    function xAxisTicks(svg, bucketCount, range, xFor, height) {
+    function xAxisTicks(svg2, bucketCount, range, xFor, height) {
       const tickEvery = Math.max(1, Math.round(bucketCount / 6));
       for (let index = 0; index < bucketCount; index += tickEvery) {
         const time = bucketTime(range, bucketCount, index);
         if (time === void 0) continue;
         const label = svgEl("text", { x: xFor(index), y: height - 4, class: "chart-axis-label" });
         label.textContent = formatClock(time, range);
-        svg.append(label);
+        svg2.append(label);
       }
     }
     function volumeChart(rate, errors, range) {
@@ -98,7 +98,7 @@
       const max = Math.max(1, ...rate.map((item) => item.count));
       const barGap = 2;
       const barWidth = Math.max(1, width / bucketCount - barGap);
-      const svg = svgEl("svg", {
+      const svg2 = svgEl("svg", {
         viewBox: `0 0 ${width} ${height}`,
         class: "volume-chart",
         role: "img",
@@ -106,7 +106,7 @@
       });
       const maxLabel = svgEl("text", { x: 2, y: padTop, class: "chart-axis-label" });
       maxLabel.textContent = String(max);
-      svg.append(maxLabel);
+      svg2.append(maxLabel);
       rate.forEach((item, index) => {
         const errorCount = Math.min(item.count, errors[index]?.count ?? 0);
         const okCount = item.count - errorCount;
@@ -155,11 +155,11 @@
           dot.append(dotTitle);
           group.append(dot);
         }
-        svg.append(group);
+        svg2.append(group);
       });
-      xAxisTicks(svg, bucketCount, range, (index) => index * (barWidth + barGap) + barWidth / 2, height);
+      xAxisTicks(svg2, bucketCount, range, (index) => index * (barWidth + barGap) + barWidth / 2, height);
       section2.append(
-        svg,
+        svg2,
         chartLegend([
           { className: "swatch-ok", label: "events" },
           { className: "swatch-error", label: "errors" }
@@ -179,7 +179,7 @@
       const plotHeight = height - padTop - padBottom;
       const max = Math.max(1, ...latency.map((item) => Math.max(item.average, item.p95)));
       const step = bucketCount > 1 ? width / (bucketCount - 1) : 0;
-      const svg = svgEl("svg", {
+      const svg2 = svgEl("svg", {
         viewBox: `0 0 ${width} ${height}`,
         class: "latency-chart",
         role: "img",
@@ -187,7 +187,7 @@
       });
       const maxLabel = svgEl("text", { x: 2, y: padTop, class: "chart-axis-label" });
       maxLabel.textContent = `${Math.round(max)}ms`;
-      svg.append(maxLabel);
+      svg2.append(maxLabel);
       const pathFor = (key) => {
         let d = "";
         let drawing = false;
@@ -203,8 +203,8 @@
         });
         return d.trim();
       };
-      svg.append(svgEl("path", { d: pathFor("p95"), class: "latency-line latency-p95" }));
-      svg.append(svgEl("path", { d: pathFor("average"), class: "latency-line latency-average" }));
+      svg2.append(svgEl("path", { d: pathFor("p95"), class: "latency-line latency-p95" }));
+      svg2.append(svgEl("path", { d: pathFor("average"), class: "latency-line latency-average" }));
       latency.forEach((item, index) => {
         if (item.count === 0) return;
         const x = index * step;
@@ -219,11 +219,11 @@
         const title = svgEl("title");
         title.textContent = `${time !== void 0 ? formatClock(time, range) + "\n" : ""}average ${Math.round(item.average)}ms, p95 ${Math.round(item.p95)}ms`;
         dot.append(title);
-        svg.append(dot);
+        svg2.append(dot);
       });
-      xAxisTicks(svg, bucketCount, range, (index) => index * step, height);
+      xAxisTicks(svg2, bucketCount, range, (index) => index * step, height);
       section2.append(
-        svg,
+        svg2,
         chartLegend([
           { className: "swatch-average", label: "average" },
           { className: "swatch-p95", label: "p95" }
@@ -676,6 +676,38 @@
       searchChips: element("searchChips"),
       searchClear: element("searchClear"),
       searchError: element("searchError"),
+      connectionBar: element("connectionBar"),
+      metricQuery: element("metricQuery"),
+      metricConnection: element("metricConnection"),
+      metricInput: element("metricInput"),
+      metricSuggestions: element("metricSuggestions"),
+      metricRange: element("metricRange"),
+      metricRun: element("metricRun"),
+      metricWatch: element("metricWatch"),
+      metricQueryStatus: element("metricQueryStatus"),
+      metricChart: element("metricChart"),
+      metricSelection: element("metricSelection"),
+      metricSelectionText: element("metricSelectionText"),
+      metricShowLogs: element("metricShowLogs"),
+      metricShowLocal: element("metricShowLocal"),
+      connectionCompare: element("connectionCompare"),
+      connectionAgents: element("connectionAgents"),
+      connectionLink: element("connectionLink"),
+      compare: element("compare"),
+      compareView: element("compareView"),
+      compareBaseline: element("compareBaseline"),
+      compareLocal: element("compareLocal"),
+      compareStatus: element("compareStatus"),
+      compareHead: element("compareHead"),
+      compareRows: element("compareRows"),
+      compareDetail: element("compareDetail"),
+      addConnection: element("addConnection"),
+      connectionRange: element("connectionRange"),
+      connectionRun: element("connectionRun"),
+      connectionTail: element("connectionTail"),
+      connectionSql: element("connectionSql"),
+      connectionPreview: element("connectionPreview"),
+      connectionResult: element("connectionResult"),
       copyResults: element("copyResults"),
       fieldSuggestions: element("fieldSuggestions"),
       searchHelp: element("searchHelp"),
@@ -1125,7 +1157,7 @@
   }
   function buildIcon(name) {
     const namespace = "http://www.w3.org/2000/svg";
-    const svg = document.createElementNS(namespace, "svg");
+    const svg2 = document.createElementNS(namespace, "svg");
     for (const [key, value] of Object.entries({
       viewBox: "0 0 16 16",
       width: "14",
@@ -1137,13 +1169,13 @@
       "stroke-linecap": "round",
       "stroke-linejoin": "round"
     }))
-      svg.setAttribute(key, value);
+      svg2.setAttribute(key, value);
     for (const [tag, attributes] of ICONS[name]) {
       const part = document.createElementNS(namespace, tag);
       for (const [key, value] of Object.entries(attributes)) part.setAttribute(key, value);
-      svg.append(part);
+      svg2.append(part);
     }
-    return svg;
+    return svg2;
   }
   function eventAction(className, iconName, label, title, unavailable) {
     const button = document.createElement("button");
@@ -1802,12 +1834,12 @@ Trace ${trace.traceId}`;
   }
   function sparkline(points) {
     const namespace = "http://www.w3.org/2000/svg";
-    const svg = document.createElementNS(namespace, "svg");
-    svg.setAttribute("class", "metric-spark");
-    svg.setAttribute("viewBox", "0 0 100 24");
-    svg.setAttribute("preserveAspectRatio", "none");
-    svg.setAttribute("aria-hidden", "true");
-    if (points.length < 2) return svg;
+    const svg2 = document.createElementNS(namespace, "svg");
+    svg2.setAttribute("class", "metric-spark");
+    svg2.setAttribute("viewBox", "0 0 100 24");
+    svg2.setAttribute("preserveAspectRatio", "none");
+    svg2.setAttribute("aria-hidden", "true");
+    if (points.length < 2) return svg2;
     const values = points.map((point) => point.value);
     const low = Math.min(...values), high = Math.max(...values);
     const first = points[0].timeMs, span = Math.max(1, points[points.length - 1].timeMs - first);
@@ -1821,8 +1853,8 @@ Trace ${trace.traceId}`;
       }).join(" ")
     );
     line.setAttribute("vector-effect", "non-scaling-stroke");
-    svg.append(line);
-    return svg;
+    svg2.append(line);
+    return svg2;
   }
   function details(series) {
     const rate = series.measure === "rate";
@@ -2459,6 +2491,10 @@ Span ${call.spanId}`;
     return void 0;
   }
 
+  // src/core/connections.ts
+  var RANGES = { "15m": 15, "1h": 60, "4h": 240, "24h": 1440, "7d": 10080 };
+  var RANGE_CHOICES = Object.keys(RANGES);
+
   // src/webview/state.ts
   var LEVELS = ["trace", "debug", "info", "warn", "error", "fatal", "unclassified"];
   var ViewerState = class {
@@ -2492,8 +2528,11 @@ Span ${call.spanId}`;
     rowHintDismissed;
     /** The selected tab, kept so the panel reopens on it. */
     view;
+    /** The time range a connection search covers, such as `1h`. */
+    connectionRange;
     constructor(saved = {}) {
       this.view = typeof saved.view === "string" ? saved.view : "logs";
+      this.connectionRange = typeof saved.range === "string" && RANGE_CHOICES.includes(saved.range) ? saved.range : "1h";
       this.following = !saved.sort;
       this.cellHintDismissed = saved.cellHintDismissed === true;
       this.rowHintDismissed = saved.rowHintDismissed === true;
@@ -2573,7 +2612,8 @@ Span ${call.spanId}`;
         extraColumns: this.extraColumns,
         ...this.cellHintDismissed ? { cellHintDismissed: true } : {},
         ...this.rowHintDismissed ? { rowHintDismissed: true } : {},
-        ...this.view !== "logs" ? { view: this.view } : {}
+        ...this.view !== "logs" ? { view: this.view } : {},
+        ...this.connectionRange !== "1h" ? { range: this.connectionRange } : {}
       };
     }
   };
@@ -2932,6 +2972,670 @@ Span ${call.spanId}`;
       appendQuery: (value) => setQuery(`${appliedQuery} ${value}`, true),
       clear
     };
+  }
+
+  // src/webview/search/connection-bar.ts
+  var PREVIEW_DELAY_MS = 250;
+  function createConnectionBar(elements, state, api, scope, query, saveState, compare) {
+    let connections = [];
+    let previewKey = "";
+    let previewTimer;
+    const numbers = new Intl.NumberFormat();
+    const selected = () => connections.find((connection) => connection.sourceId === state.selectedServer);
+    const noun = (connection, count) => `${connection.sql ? "row" : "log"}${count === 1 ? "" : "s"}`;
+    function resultText(connection) {
+      const last = connection.last;
+      if (!last)
+        return connection.mapped ? "Choose a range and press Run. Nothing is fetched until you do." : "No log table is mapped. Use Run SQL to query it.";
+      const rows = `${numbers.format(last.kept)} ${noun(connection, last.kept)}`;
+      if (last.kind === "tail")
+        return !last.running ? `Tail stopped \xB7 ${rows}` : last.error ? `Tail interrupted: ${last.error}` : `Tailing \xB7 ${rows}`;
+      if (last.running) return "Fetching\u2026";
+      if (last.error) return `Failed: ${last.error}`;
+      const of = last.total !== void 0 && last.total > last.fetched ? ` of ${numbers.format(last.total)}` : "";
+      const kept = last.kept < last.fetched ? ` \xB7 ${numbers.format(last.kept)} match the filter` : "";
+      const time = last.elapsedMs !== void 0 ? ` \xB7 ${numbers.format(last.elapsedMs)} ms` : "";
+      return `Fetched ${numbers.format(last.fetched)}${of} ${noun(connection, last.fetched)}${kept}${time} \xB7 read-only`;
+    }
+    function render() {
+      const connection = selected();
+      elements.connectionBar.hidden = !connection;
+      if (!connection) {
+        clearTimeout(previewTimer);
+        previewKey = "";
+        return;
+      }
+      const busy = connection.last?.running === true && connection.last.kind !== "tail";
+      elements.connectionRange.value = state.connectionRange;
+      elements.connectionRange.disabled = !connection.mapped;
+      elements.connectionRun.disabled = !connection.mapped || busy;
+      elements.connectionRun.title = connection.mapped ? `Fetch the newest rows from ${connection.label} in this range that match the filter` : "Map a log table to search it; Run SQL works without one";
+      elements.connectionTail.disabled = !connection.mapped;
+      elements.connectionTail.setAttribute("aria-pressed", String(connection.tailing));
+      elements.connectionTail.textContent = connection.tailing ? "Stop tail" : "Tail";
+      elements.connectionTail.title = connection.tailing ? "Stop reading new rows" : "Show the newest matching rows, then keep reading rows as they are added";
+      elements.connectionResult.textContent = resultText(connection);
+      elements.connectionCompare.hidden = !connection.last || connection.last.kind === "tail";
+      elements.connectionSql.hidden = !connection.sql;
+      elements.connectionAgents.hidden = !connection.mapped;
+      elements.connectionAgents.setAttribute("aria-pressed", String(!!connection.agents));
+      elements.connectionAgents.textContent = connection.agents ? "Agents allowed" : "Allow agents";
+      elements.connectionAgents.title = connection.agents ? "Agents you share logs with can fetch logs from this connection. Click to stop them." : "Let agents you share logs with fetch logs from this connection";
+      elements.connectionLink.hidden = connection.type !== "datadog";
+      elements.connectionResult.title = connection.last?.statement ?? "";
+      elements.connectionResult.classList[connection.last?.error ? "add" : "remove"]("connection-error");
+      if (!connection.mapped) elements.connectionPreview.textContent = "";
+      else requestPreview(connection);
+    }
+    function requestPreview(connection = selected()) {
+      if (!connection?.mapped) return;
+      const message = {
+        type: "connectionPreview",
+        connectionId: connection.id,
+        query: query(),
+        range: state.connectionRange
+      };
+      const key = JSON.stringify(message);
+      if (key === previewKey) return;
+      previewKey = key;
+      clearTimeout(previewTimer);
+      previewTimer = setTimeout(() => api.postMessage(message), PREVIEW_DELAY_MS);
+    }
+    function receivePreview(preview) {
+      const connection = selected();
+      const { type, connectionId, query: query2, range } = preview;
+      if (!connection || JSON.stringify({ type, connectionId, query: query2, range }) !== previewKey) return;
+      const note = elements.connectionPreview;
+      note.classList[preview.error ? "add" : "remove"]("connection-error");
+      if (preview.error) {
+        note.textContent = preview.error;
+        note.title = "";
+        return;
+      }
+      const local = preview.local.length ? ` \xB7 Filtered locally: ${preview.local.join(" ")}` : "";
+      const sends = connection.sql ? "Runs as" : "Datadog search";
+      note.textContent = preview.statement ? `${sends}: ${preview.statement}${local}` : "";
+      note.title = preview.statement ? `${preview.statement}${preview.local.length ? `
+
+Terms SQL cannot express are applied to the fetched rows: ${preview.local.join(" ")}` : ""}` : "";
+    }
+    function run() {
+      const connection = selected();
+      if (!connection) return false;
+      if (connection.mapped)
+        api.postMessage({
+          type: "connectionFetch",
+          connectionId: connection.id,
+          query: query(),
+          range: state.connectionRange
+        });
+      else api.postMessage({ type: "connectionSql", connectionId: connection.id });
+      return true;
+    }
+    scope.listen(elements.connectionRange, "change", () => {
+      state.connectionRange = elements.connectionRange.value;
+      saveState();
+      requestPreview();
+    });
+    scope.listen(elements.connectionRun, "click", () => run());
+    scope.listen(elements.connectionTail, "click", () => {
+      const connection = selected();
+      if (connection)
+        api.postMessage({
+          type: "connectionTail",
+          connectionId: connection.id,
+          query: query(),
+          enabled: !connection.tailing
+        });
+    });
+    scope.listen(elements.connectionCompare, "click", () => {
+      const connection = selected();
+      const run2 = state.selectedSession || connection?.last?.sessionId;
+      if (connection && run2) compare(connection.sourceId, run2);
+    });
+    scope.listen(elements.connectionAgents, "click", () => {
+      const connection = selected();
+      if (connection)
+        api.postMessage({ type: "connectionAgents", connectionId: connection.id, enabled: !connection.agents });
+    });
+    scope.listen(elements.connectionLink, "click", () => {
+      const connection = selected();
+      if (connection) api.postMessage({ type: "connectionLink", connectionId: connection.id });
+    });
+    scope.listen(elements.connectionSql, "click", () => {
+      const connection = selected();
+      if (connection) api.postMessage({ type: "connectionSql", connectionId: connection.id });
+    });
+    scope.track(() => clearTimeout(previewTimer));
+    return {
+      update(list) {
+        connections = list ?? [];
+        render();
+      },
+      render,
+      receivePreview,
+      /** The filter changed: refresh the preview of the SQL it becomes. */
+      queryChanged: () => requestPreview(),
+      /** Fetch from the selected connection; false when no connection is selected. */
+      run,
+      connections: () => connections,
+      /** What the empty table says while a connection is selected, or undefined for other sources. */
+      emptyText() {
+        const connection = selected();
+        if (!connection) return void 0;
+        if (connection.last) return "No matching rows. Change the filter or the range and press Run.";
+        return connection.mapped ? `Choose a range and press Run to fetch ${connection.sql ? "rows" : "logs"} from ${connection.label}.` : `Use Run SQL to query ${connection.label}.`;
+      }
+    };
+  }
+
+  // src/webview/inspection/compare.ts
+  var STATUS = {
+    reproduced: {
+      label: "Reproduced",
+      className: "compare-reproduced",
+      title: "In production and in the newest local run"
+    },
+    fixed: {
+      label: "Fixed locally",
+      className: "compare-fixed",
+      title: "In production and an earlier local run, but not the newest"
+    },
+    notSeen: { label: "Not seen locally", className: "compare-muted", title: "In production only" },
+    new: { label: "New", className: "compare-new", title: "Only in the newest local run" },
+    localOnly: { label: "Local only", className: "compare-new", title: "In local runs, not in production" }
+  };
+  var REFRESH_MS3 = 2e3;
+  function createCompare(elements, api, scope, actions) {
+    let baselines = [];
+    let locals = [];
+    let signature = "";
+    let view;
+    let selected;
+    let newest = 0;
+    let refresh;
+    const baselineValue = (serverId, sessionId) => JSON.stringify([serverId, sessionId ?? ""]);
+    function request() {
+      const baseline = elements.compareBaseline.value;
+      const localServerId = elements.compareLocal.value;
+      if (!baseline || !localServerId) return void 0;
+      const [baselineServerId, baselineSessionId] = JSON.parse(baseline);
+      return { baselineServerId, ...baselineSessionId ? { baselineSessionId } : {}, localServerId };
+    }
+    function load() {
+      clearTimeout(refresh);
+      refresh = void 0;
+      const message = request();
+      if (!message) {
+        elements.compareStatus.textContent = !baselines.length ? "Fetch a run from a connection, or import a production log, to compare with." : "Run your app or tests locally, then choose them as Local to compare.";
+        elements.compareHead.replaceChildren();
+        elements.compareRows.replaceChildren();
+        elements.compareDetail.hidden = true;
+        return;
+      }
+      elements.compareStatus.textContent = "Comparing\u2026";
+      api.postMessage({ type: "compare", ...message });
+    }
+    function fillSelect(select, options, keep) {
+      select.replaceChildren(
+        ...options.map(({ value, label }) => {
+          const option = document.createElement("option");
+          option.value = value;
+          option.textContent = label;
+          return option;
+        })
+      );
+      select.value = options.some((option) => option.value === keep) ? keep : options[0]?.value ?? "";
+    }
+    function update(sessions = [], sources = [], latest = 0) {
+      const runs = sessions.filter((session) => session.sourceKind === "remote" || session.sourceKind === "import").sort((a, b) => b.startedAt - a.startedAt);
+      baselines = runs.map((session) => ({
+        value: baselineValue(session.serverId, session.id),
+        label: `${session.server} \xB7 ${session.command || session.id}`
+      }));
+      const local = new Set(
+        sessions.filter((session) => session.sourceKind !== "remote" && session.sourceKind !== "import").map((session) => session.serverId)
+      );
+      const lastStart = (id) => Math.max(0, ...sessions.filter((session) => session.serverId === id).map((session) => session.startedAt));
+      locals = sources.filter((source) => local.has(source.id)).sort((a, b) => lastStart(b.id) - lastStart(a.id)).map((source) => ({ id: source.id, label: source.label }));
+      elements.compare.hidden = !baselines.length;
+      const next = JSON.stringify([baselines, locals]);
+      if (next !== signature) {
+        signature = next;
+        fillSelect(elements.compareBaseline, baselines, elements.compareBaseline.value);
+        fillSelect(
+          elements.compareLocal,
+          locals.map((source) => ({ value: source.id, label: source.label })),
+          elements.compareLocal.value
+        );
+      }
+      if (latest !== newest) {
+        newest = latest;
+        if (actions.visible() && view && !refresh) refresh = setTimeout(load, REFRESH_MS3);
+      }
+    }
+    function open(target = {}) {
+      if (target.baselineServerId)
+        elements.compareBaseline.value = baselineValue(target.baselineServerId, target.baselineSessionId);
+      if (target.localServerId) elements.compareLocal.value = target.localServerId;
+      selected = void 0;
+      actions.reveal();
+      load();
+    }
+    function hide() {
+      clearTimeout(refresh);
+      refresh = void 0;
+    }
+    function receive(message) {
+      if (message.error) elements.compareStatus.textContent = `Could not compare: ${message.error}`;
+      else if (message.view) render(message.view);
+    }
+    function statusCell(row) {
+      const status = STATUS[row.status];
+      const element2 = cell(status.label, `compare-status ${status.className}`);
+      element2.title = status.title;
+      if (row.changed) {
+        const changed = document.createElement("span");
+        changed.className = "compare-changed";
+        changed.textContent = ` \xB7 changed${row.location ? `: ${row.location}` : ""}`;
+        changed.title = "Thrown from code changed since the last commit, so most likely from your change";
+        element2.append(changed);
+      }
+      return element2;
+    }
+    function render(next) {
+      view = next;
+      const header = (text, title = "", className = "") => {
+        const element2 = document.createElement("th");
+        element2.textContent = text;
+        element2.title = title;
+        element2.className = className;
+        return element2;
+      };
+      elements.compareHead.replaceChildren(
+        header("Error"),
+        header("Production", next.baseline.label, "compare-count"),
+        ...next.runs.map((run, index) => {
+          const time = run.startedAt ? actions.formatTime(run.startedAt) : "";
+          const name = index === next.runs.length - 1 ? "Latest run" : time.replace(/\.\d+$/, "") || "Run";
+          return header(name, `${run.label}${time ? ` \xB7 ${time}` : ""}`, "compare-count");
+        }),
+        header("Status")
+      );
+      const errors = next.rows.length;
+      elements.compareStatus.textContent = !errors ? `No errors in ${next.baseline.label} or the newest runs of ${next.local.label}.` : next.runs.length ? `${next.summary} \xB7 ${next.baseline.label} vs ${next.local.label}` : `${errors} production error${errors === 1 ? "" : "s"}. ${next.local.label} has no runs yet: run it to compare.`;
+      elements.compareRows.replaceChildren(
+        ...next.rows.map((row2) => {
+          const element2 = document.createElement("tr");
+          element2.className = `compare-row${row2.signature === selected ? " selected" : ""}`;
+          element2.tabIndex = 0;
+          element2.dataset.signature = row2.signature;
+          const message = cell(row2.pattern, "compare-message");
+          message.title = row2.message;
+          element2.append(
+            message,
+            cell(row2.baseline || "\u2013", "compare-count"),
+            ...row2.runs.map((count) => cell(count || "\u2013", "compare-count")),
+            statusCell(row2)
+          );
+          const choose = () => {
+            selected = selected === row2.signature ? void 0 : row2.signature;
+            render(next);
+          };
+          scope.listen(element2, "click", choose);
+          scope.listen(element2, "keydown", (event) => {
+            if (event.key === "Enter" || event.key === " ") {
+              event.preventDefault();
+              choose();
+            }
+          });
+          return element2;
+        })
+      );
+      const row = next.rows.find((candidate) => candidate.signature === selected);
+      elements.compareDetail.hidden = !row;
+      elements.compareDetail.replaceChildren(...row ? [detail(row, next)] : []);
+    }
+    function side(title, sample) {
+      const column = document.createElement("section");
+      column.className = "compare-side";
+      const heading = document.createElement("h3");
+      heading.textContent = title;
+      column.append(heading);
+      if (!sample) {
+        const none = document.createElement("p");
+        none.className = "compare-none";
+        none.textContent = "Not seen here.";
+        column.append(none);
+        return column;
+      }
+      const list = document.createElement("dl");
+      const add = (name, value, differs = false) => {
+        const term = document.createElement("dt");
+        term.textContent = name;
+        const description = document.createElement("dd");
+        description.textContent = String(value ?? "");
+        if (differs) {
+          term.className = description.className = "compare-diff";
+          description.title = "Differs from the other side";
+        }
+        list.append(term, description);
+      };
+      add("time", sample.timestamp);
+      add("level", sample.level);
+      add("message", sample.message);
+      for (const [name, value] of Object.entries(sample.fields)) add(name, value, sample.differs.includes(name));
+      const open2 = document.createElement("button");
+      open2.type = "button";
+      open2.textContent = "Surrounding logs";
+      open2.title = "Show the logs around this event";
+      scope.listen(open2, "click", () => actions.showContext(sample.id));
+      column.append(list, open2);
+      return column;
+    }
+    function detail(row, next) {
+      const container = document.createElement("div");
+      container.className = "compare-sides";
+      const run = next.runs.find((candidate) => candidate.id === row.samples.local?.sessionId);
+      container.append(
+        side(`Production \xB7 ${next.baseline.label}`, row.samples.baseline),
+        side(
+          `Local \xB7 ${run ? `${run.label}${run.startedAt ? ` \xB7 ${actions.formatTime(run.startedAt)}` : ""}` : next.local.label}`,
+          row.samples.local
+        )
+      );
+      return container;
+    }
+    scope.listen(elements.compareBaseline, "change", () => open());
+    scope.listen(elements.compareLocal, "change", () => open());
+    scope.track(() => clearTimeout(refresh));
+    return {
+      update,
+      open,
+      show: () => open(),
+      hide,
+      receive,
+      /** Whether there is a production run to compare against. */
+      available: () => baselines.length > 0
+    };
+  }
+
+  // src/webview/inspection/metric-query.ts
+  var SVG = "http://www.w3.org/2000/svg";
+  var HEIGHT = 220;
+  var MARGIN = { left: 64, right: 12, top: 10, bottom: 22 };
+  var COLORS = 6;
+  var SUGGEST_DELAY_MS = 250;
+  function svg(name, attributes) {
+    const element2 = document.createElementNS(SVG, name);
+    for (const [key, value] of Object.entries(attributes)) element2.setAttribute(key, String(value));
+    return element2;
+  }
+  function ticks(low, high, count) {
+    const span = high - low || Math.abs(high) || 1;
+    const raw = span / count;
+    const power = 10 ** Math.floor(Math.log10(raw));
+    const step = [1, 2, 5, 10].map((factor) => factor * power).find((candidate) => candidate >= raw);
+    const values = [Math.floor(low / step) * step];
+    while (values.at(-1) < high - step / 1e6) values.push(values.at(-1) + step);
+    return values;
+  }
+  function createMetricQuery(elements, api, scope, actions) {
+    let connections = [];
+    let signature = "";
+    let result;
+    let selection;
+    let suggestTimer;
+    const selected = () => connections.find((connection) => connection.id === elements.metricConnection.value);
+    elements.metricRange.value = "1h";
+    function placeholder() {
+      const connection = selected();
+      elements.metricInput.placeholder = connection?.type === "datadog" ? "avg:trace.http.request.duration{service:checkout} by {env}" : "SELECT minute AS time, avg(duration_ms) AS value, service FROM requests GROUP BY 1, 3";
+      elements.metricInput.title = connection?.type === "datadog" ? "A Datadog metric query" : "A SELECT that returns a time, a value, and optionally columns that name series";
+    }
+    function updateWatch() {
+      const query = elements.metricInput.value.trim();
+      const watched = !!query && !!selected()?.watching?.includes(query);
+      elements.metricWatch.setAttribute("aria-pressed", String(watched));
+      elements.metricWatch.textContent = watched ? "Stop watching" : "Watch";
+      elements.metricWatch.disabled = !query;
+    }
+    function update(list) {
+      connections = list ?? [];
+      elements.metricQuery.hidden = !connections.length;
+      const next = JSON.stringify(connections.map((connection) => [connection.id, connection.label]));
+      if (next !== signature) {
+        signature = next;
+        const keep = elements.metricConnection.value;
+        elements.metricConnection.replaceChildren(
+          ...connections.map((connection) => {
+            const option = document.createElement("option");
+            option.value = connection.id;
+            option.textContent = connection.label;
+            return option;
+          })
+        );
+        elements.metricConnection.value = connections.some((connection) => connection.id === keep) ? keep : (connections.find((connection) => connection.type === "datadog") ?? connections[0])?.id ?? "";
+        placeholder();
+      }
+      updateWatch();
+    }
+    function run() {
+      const connection = selected();
+      const query = elements.metricInput.value.trim();
+      if (!connection || !query) return;
+      selection = void 0;
+      elements.metricSelection.hidden = true;
+      elements.metricQueryStatus.textContent = "Querying\u2026";
+      api.postMessage({ type: "metricQuery", connectionId: connection.id, query, range: elements.metricRange.value });
+    }
+    function receive(message) {
+      if (message.connectionId !== elements.metricConnection.value || message.query !== elements.metricInput.value.trim())
+        return;
+      if (message.error || !message.result) {
+        result = void 0;
+        elements.metricQueryStatus.textContent = `Could not query: ${message.error ?? "no result"}`;
+        elements.metricChart.hidden = true;
+        return;
+      }
+      result = message.result;
+      const points = result.series.reduce((sum, series) => sum + series.points.length, 0);
+      elements.metricQueryStatus.textContent = result.series.length ? `${result.series.length} series \xB7 ${points.toLocaleString()} points \xB7 ${result.elapsedMs.toLocaleString()} ms. Drag across the chart to show the logs from that time.` : "No data for this query in the range.";
+      draw();
+    }
+    function receiveNames(message) {
+      if (message.connectionId !== elements.metricConnection.value) return;
+      elements.metricSuggestions.replaceChildren(
+        ...message.names.map((name) => {
+          const option = document.createElement("option");
+          option.value = name;
+          return option;
+        })
+      );
+    }
+    function draw() {
+      const chart = elements.metricChart;
+      const data = result;
+      chart.hidden = !data?.series.length;
+      if (!data?.series.length) return chart.replaceChildren();
+      const width = Math.max(320, chart.clientWidth || 800);
+      const unit = data.series.find((series) => series.unit)?.unit;
+      const values = data.series.flatMap((series) => series.points.map(([, value]) => value));
+      const low = Math.min(0, ...values);
+      const high = Math.max(...values, low + 1);
+      const yTicks = ticks(low, high, 4);
+      const top = yTicks.at(-1);
+      const bottom = yTicks[0];
+      const x = (time2) => MARGIN.left + (time2 - data.fromMs) / Math.max(1, data.toMs - data.fromMs) * (width - MARGIN.left - MARGIN.right);
+      const y = (value) => MARGIN.top + (1 - (value - bottom) / Math.max(1e-9, top - bottom)) * (HEIGHT - MARGIN.top - MARGIN.bottom);
+      const time = (px) => data.fromMs + (px - MARGIN.left) / Math.max(1, width - MARGIN.left - MARGIN.right) * (data.toMs - data.fromMs);
+      const root = svg("svg", {
+        class: "metric-chart-svg",
+        viewBox: `0 0 ${width} ${HEIGHT}`,
+        width,
+        height: HEIGHT,
+        role: "img"
+      });
+      root.setAttribute(
+        "aria-label",
+        `${data.series.length} series from ${actions.formatTime(data.fromMs)} to ${actions.formatTime(data.toMs)}`
+      );
+      for (const value of yTicks) {
+        root.append(
+          svg("line", { class: "metric-grid", x1: MARGIN.left, x2: width - MARGIN.right, y1: y(value), y2: y(value) })
+        );
+        const label = svg("text", { class: "metric-axis", x: MARGIN.left - 6, y: y(value) + 4, "text-anchor": "end" });
+        label.textContent = formatMetric(value, unit);
+        root.append(label);
+      }
+      for (let index = 0; index <= 4; index++) {
+        const at2 = data.fromMs + (data.toMs - data.fromMs) * index / 4;
+        const label = svg("text", {
+          class: "metric-axis",
+          x: x(at2),
+          y: HEIGHT - 6,
+          "text-anchor": index === 0 ? "start" : index === 4 ? "end" : "middle"
+        });
+        label.textContent = actions.formatTime(at2).replace(data.toMs - data.fromMs >= 36e5 ? /:\d\d\.\d+$/ : /\.\d+$/, "");
+        root.append(label);
+      }
+      data.series.forEach((series, index) => {
+        root.append(
+          svg("polyline", {
+            class: `metric-line metric-color-${index % COLORS}`,
+            points: series.points.map(([at2, value]) => `${x(at2).toFixed(1)},${y(value).toFixed(1)}`).join(" ")
+          })
+        );
+      });
+      const brush = svg("rect", {
+        class: "metric-brush",
+        x: 0,
+        y: MARGIN.top,
+        width: 0,
+        height: HEIGHT - MARGIN.top - MARGIN.bottom
+      });
+      brush.setAttribute("visibility", "hidden");
+      const cursor = svg("line", { class: "metric-cursor", x1: 0, x2: 0, y1: MARGIN.top, y2: HEIGHT - MARGIN.bottom });
+      cursor.setAttribute("visibility", "hidden");
+      root.append(brush, cursor);
+      const tooltip = document.createElement("div");
+      tooltip.className = "metric-tooltip";
+      tooltip.hidden = true;
+      const legend = document.createElement("ul");
+      legend.className = "metric-legend";
+      legend.append(
+        ...data.series.map((series, index) => {
+          const item = document.createElement("li");
+          const swatch = document.createElement("span");
+          swatch.className = `metric-swatch metric-color-${index % COLORS}`;
+          const latest = series.points.at(-1);
+          const text = document.createElement("span");
+          text.textContent = `${seriesName(series)}${latest ? ` \xB7 ${formatMetric(latest[1], series.unit)}` : ""}`;
+          item.append(swatch, text);
+          return item;
+        })
+      );
+      const at = (event) => {
+        const box = root.getBoundingClientRect();
+        const px = (event.clientX - box.left) / Math.max(1, box.width) * width;
+        return Math.min(width - MARGIN.right, Math.max(MARGIN.left, px));
+      };
+      let start;
+      scope.listen(root, "pointerdown", (event) => {
+        start = at(event);
+        brush.setAttribute("visibility", "visible");
+        brush.setAttribute("x", String(start));
+        brush.setAttribute("width", "0");
+      });
+      scope.listen(root, "pointermove", (event) => {
+        const px = at(event);
+        if (start !== void 0) {
+          brush.setAttribute("x", String(Math.min(start, px)));
+          brush.setAttribute("width", String(Math.abs(px - start)));
+        }
+        const moment = time(px);
+        cursor.setAttribute("x1", String(px));
+        cursor.setAttribute("x2", String(px));
+        cursor.setAttribute("visibility", "visible");
+        tooltip.hidden = false;
+        tooltip.textContent = [
+          actions.formatTime(moment),
+          ...data.series.map((series) => {
+            const nearest = series.points.reduce(
+              (best, point) => Math.abs(point[0] - moment) < Math.abs(best[0] - moment) ? point : best,
+              series.points[0]
+            );
+            return `${seriesName(series)}: ${nearest ? formatMetric(nearest[1], series.unit) : "\u2013"}`;
+          })
+        ].join("\n");
+      });
+      scope.listen(root, "pointerleave", () => {
+        cursor.setAttribute("visibility", "hidden");
+        tooltip.hidden = true;
+      });
+      scope.listen(root, "pointerup", (event) => {
+        if (start === void 0) return;
+        const end = at(event);
+        const [from, to] = [Math.min(start, end), Math.max(start, end)];
+        start = void 0;
+        if (to - from < 4) {
+          brush.setAttribute("visibility", "hidden");
+          select(void 0);
+          return;
+        }
+        select([Math.floor(time(from)), Math.ceil(time(to))]);
+      });
+      chart.replaceChildren(root, tooltip, legend);
+    }
+    function seriesName(series) {
+      return series.scope && series.scope !== "*" ? series.scope : series.name;
+    }
+    function select(window2) {
+      selection = window2;
+      elements.metricSelection.hidden = !window2;
+      if (!window2) return;
+      elements.metricSelectionText.textContent = `${actions.formatTime(window2[0])} \u2013 ${actions.formatTime(window2[1])} selected`;
+      elements.metricShowLogs.textContent = `Show logs from ${selected()?.label ?? "the connection"}`;
+    }
+    scope.listen(elements.metricRun, "click", run);
+    scope.listen(elements.metricInput, "keydown", (event) => {
+      if (event.key === "Enter") run();
+    });
+    scope.listen(elements.metricInput, "input", () => {
+      updateWatch();
+      clearTimeout(suggestTimer);
+      const connection = selected();
+      const search = elements.metricInput.value.trim();
+      if (!connection || connection.type !== "datadog" || !search || /[\s{(]/.test(search)) return;
+      suggestTimer = setTimeout(
+        () => api.postMessage({ type: "metricNames", connectionId: connection.id, search: search.replace(/^[a-z]+:/, "") }),
+        SUGGEST_DELAY_MS
+      );
+    });
+    scope.listen(elements.metricConnection, "change", () => {
+      placeholder();
+      updateWatch();
+    });
+    scope.listen(elements.metricWatch, "click", () => {
+      const connection = selected();
+      const query = elements.metricInput.value.trim();
+      if (!connection || !query) return;
+      api.postMessage({
+        type: "metricWatch",
+        connectionId: connection.id,
+        query,
+        enabled: !connection.watching?.includes(query)
+      });
+    });
+    scope.listen(elements.metricShowLogs, "click", () => {
+      const connection = selected();
+      if (connection && selection) actions.showLogs(connection.id, selection[0], selection[1]);
+    });
+    scope.listen(elements.metricShowLocal, "click", () => {
+      if (selection) actions.showLocal(selection[0], selection[1]);
+    });
+    scope.track(() => clearTimeout(suggestTimer));
+    return { update, receive, receiveNames, run, redraw: draw };
   }
 
   // src/webview/table/layout.ts
@@ -3881,7 +4585,7 @@ Span ${call.spanId}`;
   }
 
   // src/webview/views.ts
-  var TABS = ["logs", "analysis", "traces", "aiCalls", "metrics", "doctor"];
+  var TABS = ["logs", "analysis", "compare", "traces", "aiCalls", "metrics", "doctor"];
   function isTabName(value) {
     return typeof value === "string" && TABS.includes(value);
   }
@@ -3938,6 +4642,7 @@ Span ${call.spanId}`;
       {
         logs: elements.logsTab,
         analysis: elements.analyze,
+        compare: elements.compare,
         traces: elements.traces,
         metrics: elements.metrics,
         aiCalls: elements.aiCalls,
@@ -3946,6 +4651,7 @@ Span ${call.spanId}`;
       {
         logs: elements.logsView,
         analysis: elements.analysisView,
+        compare: elements.compareView,
         traces: elements.tracesView,
         trace: elements.traceView,
         metrics: elements.metricsView,
@@ -3987,6 +4693,15 @@ Span ${call.spanId}`;
       (traceId) => traceView.show(traceId)
     );
     const search = createSearch(elements, state, api, popovers, { filterChanged, updateScopeSelection }, scope);
+    const connectionBar = createConnectionBar(
+      elements,
+      state,
+      api,
+      scope,
+      () => search.query(),
+      saveState,
+      (baselineServerId, baselineSessionId) => compareView.open({ baselineServerId, baselineSessionId })
+    );
     const request = (force = false) => bridge.request(force);
     const traceView = createTraceView(elements, api, scope, {
       showContext: (id) => inspection.showContext(id),
@@ -4006,6 +4721,28 @@ Span ${call.spanId}`;
       receiver: () => ({ running: otlpRunning, endpoint: otlpEndpoint }),
       reveal: () => views.show("traces"),
       visible: () => views.active() === "traces"
+    });
+    const compareView = createCompare(elements, api, scope, {
+      reveal: () => views.show("compare"),
+      visible: () => views.active() === "compare",
+      formatTime: (ms) => formatTimestamp({ id: 0, level: "", timestampMs: ms }) ?? "",
+      showContext: (id) => inspection.showContext(id)
+    });
+    const metricQuery = createMetricQuery(elements, api, scope, {
+      formatTime: (ms) => formatTimestamp({ id: 0, level: "", timestampMs: ms }) ?? "",
+      showLogs: (connectionId, fromMs, toMs) => api.postMessage({
+        type: "connectionFetch",
+        connectionId,
+        query: search.query(),
+        range: state.connectionRange,
+        fromMs,
+        toMs
+      }),
+      showLocal: (fromMs, toMs) => {
+        views.show("logs");
+        selectSource("");
+        search.setQuery(`timestamp:[${new Date(fromMs).toISOString()} to ${new Date(toMs).toISOString()}]`, true);
+      }
     });
     const metricList = createMetricList(elements, api, scope, {
       reveal: () => views.show("metrics"),
@@ -4126,6 +4863,22 @@ Span ${call.spanId}`;
         metricList.receive(data.metrics);
         return;
       }
+      if (data.type === "metricQuery") {
+        metricQuery.receive(data);
+        return;
+      }
+      if (data.type === "metricNames") {
+        metricQuery.receiveNames(data);
+        return;
+      }
+      if (data.type === "compare") {
+        compareView.receive(data);
+        return;
+      }
+      if (data.type === "connectionPreview") {
+        connectionBar.receivePreview(data);
+        return;
+      }
       if (data.type === "aiCalls") {
         aiCalls.receive(data.aiCalls);
         return;
@@ -4172,6 +4925,12 @@ Span ${call.spanId}`;
         search.setQuery(data.applyQuery, true);
       }
       if (data.openTrace) traceView.show(data.openTrace);
+      if (data.applySource && data.servers?.some((server) => server.id === data.applySource) && (data.applySource !== state.selectedServer || (data.applyRun ?? "") !== state.selectedSession)) {
+        views.show("logs");
+        selectSource(data.applySource, data.applyRun);
+        bridge.flush();
+        return;
+      }
       const receiverWasRunning = otlpRunning;
       otlpRunning = data.otlp?.running === true;
       otlpEndpoint = data.otlp?.endpoint;
@@ -4184,7 +4943,8 @@ Span ${call.spanId}`;
       doctor.receive(data.doctor);
       changedFiles = data.changes?.files;
       updateChangesControl();
-      metricList.update(data.metrics, otlpRunning);
+      metricList.update(data.metrics, otlpRunning || !!data.connections?.length);
+      metricQuery.update(data.connections);
       aiCalls.update(data.aiCalls, otlpRunning);
       if (restoreTab) {
         const tab = restoreTab;
@@ -4286,6 +5046,9 @@ Span ${call.spanId}`;
           updateSourceSelection();
         }
       }
+      connectionBar.update(data.connections);
+      compareView.update(data.sessions, data.servers, data.newest);
+      if (data.openCompare) compareView.open(data.openCompare);
       if (data.sessions) {
         const sessions = data.sessions.filter(
           (session) => !state.selectedServer || session.serverId === state.selectedServer || state.selectedServer.startsWith(`${session.serverId}::`)
@@ -4356,7 +5119,7 @@ Span ${call.spanId}`;
         }
         elements.empty.hidden = rows.length > 0;
         elements.rowHint.hidden = state.rowHintDismissed || !rows.length;
-        elements.empty.textContent = data.total ? "No matching events in retained history." : "Run a server command to see its logs here.";
+        elements.empty.textContent = connectionBar.emptyText() ?? (data.total ? "No matching events in retained history." : "Run a server command to see its logs here.");
         if (state.following && !state.paused && !state.selectedSort) table.scheduleRenderWindow(true);
       }
       bridge.flush();
@@ -4463,6 +5226,7 @@ Span ${call.spanId}`;
       state.filterChanged();
       updateCopyResultsControl();
       updateChangesControl();
+      connectionBar.queryChanged();
       saveState();
       requestInteraction();
     }
@@ -4694,6 +5458,7 @@ Span ${call.spanId}`;
         requestAnalysis();
       } else if (tab === "traces") traceList.show();
       else if (tab === "metrics") metricList.show();
+      else if (tab === "compare") compareView.show();
       else if (tab === "aiCalls") aiCalls.show();
       else views.show(tab);
     }
@@ -4701,6 +5466,7 @@ Span ${call.spanId}`;
       restoreTab = void 0;
       if (previous === "trace") traceView.hide();
       if (previous === "metrics") metricList.hide();
+      if (previous === "compare") compareView.hide();
       if (previous === "aiCalls") aiCalls.hide();
       if (previous === "aiCall") aiCalls.close();
       state.view = tabOf(view);
@@ -4784,11 +5550,10 @@ Span ${call.spanId}`;
       "click",
       () => api.postMessage({ type: "breakOnQuery", query: search.query(), levels: state.currentLevels() })
     );
-    scope.listen(
-      elements.run,
-      "click",
-      () => api.postMessage({ type: "run", serverId: state.selectedServer || void 0 })
-    );
+    scope.listen(elements.run, "click", () => {
+      if (!connectionBar.run()) api.postMessage({ type: "run", serverId: state.selectedServer || void 0 });
+    });
+    scope.listen(elements.addConnection, "click", () => api.postMessage({ type: "addConnection" }));
     scope.listen(document, "visibilitychange", () => {
       if (!document.hidden) request();
     });
@@ -4845,6 +5610,15 @@ Span ${call.spanId}`;
       all.textContent = activeCount ? `All sources \xB7 ${activeCount} active` : "All sources";
       all.title = "Show logs from every source";
       scope.listen(all, "click", () => selectSource(""));
+      const add = document.createElement("button");
+      add.type = "button";
+      add.className = "source-select source-action";
+      add.textContent = "Add connection\u2026";
+      add.title = "Search and tail the log table of a SQLite or Postgres database";
+      scope.listen(add, "click", () => {
+        scopePopover.close(true);
+        api.postMessage({ type: "addConnection" });
+      });
       const options = [
         all,
         ...servers.map((server) => {
@@ -4857,7 +5631,8 @@ Span ${call.spanId}`;
           option.title = formatted.title;
           scope.listen(option, "click", () => selectSource(server.id));
           return option;
-        })
+        }),
+        add
       ];
       elements.sourceMenu.replaceChildren(...options);
       updateSourceSelection();
@@ -4870,7 +5645,8 @@ Span ${call.spanId}`;
     }
     function updateSourceSelection() {
       for (const choice of elements.sourceMenu.querySelectorAll(".source-select"))
-        choice.setAttribute("aria-selected", String(choice.dataset.sourceId === state.selectedServer));
+        if (choice.dataset.sourceId !== void 0)
+          choice.setAttribute("aria-selected", String(choice.dataset.sourceId === state.selectedServer));
       updateScopeSelection();
     }
     function updateScopeSelection() {
@@ -4896,10 +5672,10 @@ Span ${call.spanId}`;
       elements.sessionMenu.hidden = tab !== "runs";
       if (focus) (tab === "sources" ? elements.sourcesTab : elements.runsTab).focus();
     }
-    function selectSource(id) {
+    function selectSource(id, run = "") {
       search.clearAutocomplete();
       state.selectedServer = id;
-      state.selectedSession = "";
+      state.selectedSession = run;
       sessionSignature = "";
       visibleSessions = [];
       elements.server.value = id;
@@ -4911,6 +5687,7 @@ Span ${call.spanId}`;
       setScopeTab("sources");
       saveState();
       scopePopover.close(true);
+      connectionBar.render();
       requestInteraction();
     }
     function runName(session) {

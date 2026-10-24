@@ -4,13 +4,14 @@ import type { EventScope } from './event-scope';
  * The views of the Logs panel. The Traces tab shows either the list (`traces`)
  * or one trace (`trace`), and the AI calls tab its list (`aiCalls`) or one call (`aiCall`).
  */
-export type ViewName = 'logs' | 'analysis' | 'traces' | 'trace' | 'metrics' | 'aiCalls' | 'aiCall' | 'doctor';
+export type ViewName =
+  'logs' | 'analysis' | 'compare' | 'traces' | 'trace' | 'metrics' | 'aiCalls' | 'aiCall' | 'doctor';
 /** A view with its own tab, which is what the panel remembers between sessions. */
 export type TabName = Exclude<ViewName, 'trace' | 'aiCall'>;
 
-// Log views, then request-level telemetry (traces and the AI calls inside them link to each other),
-// then aggregate metrics, then the health of the logging itself.
-const TABS: readonly TabName[] = ['logs', 'analysis', 'traces', 'aiCalls', 'metrics', 'doctor'];
+// Log views (production compared with local runs among them), then request-level telemetry (traces and
+// the AI calls inside them link to each other), then aggregate metrics, then the health of the logging itself.
+const TABS: readonly TabName[] = ['logs', 'analysis', 'compare', 'traces', 'aiCalls', 'metrics', 'doctor'];
 
 export function isTabName(value: unknown): value is TabName {
   return typeof value === 'string' && (TABS as readonly string[]).includes(value);

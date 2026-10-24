@@ -5,7 +5,14 @@ import type { LogStore } from '../core/log-store';
 import { getField, parseQuery, usesChangedScope } from '../core/query';
 import type { Settings } from '../core/settings';
 import type { LogEvent } from '../core/types';
-import type { DoctorFindingView, GuideStatus, RowEvent, Snapshot, ViewRequest } from '../protocol/messages';
+import type {
+  ConnectionView,
+  DoctorFindingView,
+  GuideStatus,
+  RowEvent,
+  Snapshot,
+  ViewRequest,
+} from '../protocol/messages';
 import type { LogPersistence } from '../storage/log-persistence';
 import type { SavedSearches } from '../storage/saved-searches';
 import type { AgentLogAccess } from './agent-access';
@@ -43,6 +50,8 @@ export interface SnapshotSources {
   otlp?: { status(): ReceiverStatus };
   spans?: { traceCount: number; genAiCount?: number; genAiRevision?: number };
   metrics?: { size: number; revision: number };
+  /** Saved connections, listed as sources before they have runs. */
+  connections?: ConnectionView[];
   /** What each row links to: its log statement and that statement's worst finding. */
   rowLinks?(event: LogEvent): Pick<RowEvent, 'site' | 'finding'>;
   doctor?: { revision: number; total: number; findings?: DoctorFindingView[] };
@@ -95,6 +104,7 @@ export function buildSnapshot(
     otlp,
     spans,
     metrics,
+    connections,
     rowLinks,
     doctor,
     agentClients,
@@ -173,7 +183,13 @@ export function buildSnapshot(
     status: state.status,
     command: state.command,
     running,
-    servers: registry.serverSummaries(config.get('servers', []), store),
+    servers: registry.serverSummaries(
+      [
+        ...config.get<{ id: string; label: string }[]>('servers', []),
+        ...(connections ?? []).map((connection) => ({ id: connection.sourceId, label: connection.label })),
+      ],
+      store,
+    ),
     sessions,
     searches: { saved: searches.savedSearches() },
     newest: ingestion.sequence,
@@ -192,5 +208,6 @@ export function buildSnapshot(
     ...(doctor ? { doctor } : {}),
     ...(agentClients?.length ? { agentClients } : {}),
     ...(changes ? { changes } : {}),
+    ...(connections?.length ? { connections } : {}),
   };
 }
