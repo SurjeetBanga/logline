@@ -64,7 +64,7 @@ const mock = {
     withProgress: (_options: unknown, task: () => Promise<unknown>) => task(),
   },
 };
-const { ConnectionManager, parsePostgresUrl } = withVscode(
+const { ConnectionManager, parseMongoUrl, parsePostgresUrl, parseServerUrl } = withVscode(
   mock,
   () => require('./connections') as typeof import('./connections'),
 );
@@ -629,4 +629,149 @@ test('agents query only connections the person allowed, and their fetches are ru
   } finally {
     await fake.close();
   }
+});
+
+test('MySQL and MongoDB URLs are read the same way, and a MongoDB password never stays in the saved URL', () => {
+  assert.deepEqual(parseServerUrl(['mysql://reader', 'pw@db.local/billing?ssl-mode=REQUIRED'].join(':'), 'mysql'), {
+    connection: {
+      id: 'draft',
+      label: 'billing',
+      type: 'mysql',
+      host: 'db.local',
+      port: 3306,
+      database: 'billing',
+      user: 'reader',
+      ssl: true,
+    },
+    password: 'pw',
+  });
+  assert.equal(parseServerUrl('postgres://dev@db/orders', 'mysql'), undefined);
+  const mongo = parseMongoUrl(['mongodb+srv://reader', 'p%40ss@cluster0.example.net/app?retryWrites=true'].join(':'));
+  assert.deepEqual(mongo, {
+    connection: {
+      id: 'draft',
+      label: 'app',
+      type: 'mongodb',
+      url: 'mongodb+srv://reader@cluster0.example.net/app?retryWrites=true',
+      database: 'app',
+    },
+    password: 'p@ss',
+  });
+  assert.equal(parseMongoUrl('mongodb://reader@a:27017,b:27017/logs')?.connection.database, 'logs');
+  assert.equal(parseMongoUrl('mongodb://reader@db'), undefined, 'a database is needed');
+  assert.equal(parseMongoUrl('https://db/app'), undefined);
+});
+
+test('adding Aurora MySQL with an IAM token stores no password, and searches run as MySQL', async () => {
+  reset();
+  const { manager, secrets, store } = setup();
+  const queries: string[] = [];
+  const passwords: unknown[] = [];
+  const at = new Date(Date.now() - 60000).toISOString().replace('T', ' ').slice(0, 19);
+  // Stand in for the server: a MySQL that has one log table.
+  (manager as unknown as { driver: (connection: unknown, password?: string) => Promise<unknown> }).driver = async (
+    _connection,
+    password,
+  ) => {
+    passwords.push(password);
+    return {
+      dialect: 'mysql',
+      query: async (sql: string) => {
+        queries.push(sql);
+        if (sql.includes('VERSION()')) return [{ v: '8.0.36' }];
+        if (sql.includes('information_schema.tables')) return [{ t: 'app_logs' }];
+        if (sql.includes('information_schema.columns'))
+          return [
+            { name: 'created_at', type: 'datetime' },
+            { name: 'severity', type: 'varchar' },
+            { name: 'msg', type: 'text' },
+          ];
+        if (sql.startsWith('SELECT * FROM `app_logs`'))
+          return [{ created_at: at, severity: 'ERROR', msg: 'payment gateway timed out' }];
+        return [];
+      },
+      close: async () => undefined,
+    };
+  };
+  ui.picks.push(pick('MySQL'), pick('AWS IAM token'), pick('Default credentials'), pick('app_logs'), pick(/Use these/));
+  ui.inputs.push('mysql://app@billing.cluster-c9.us-east-1.rds.amazonaws.com/billing', 'Billing');
+  await manager.add();
+  assert.deepEqual(raw.workspace, [
+    {
+      id: 'billing',
+      label: 'Billing',
+      type: 'mysql',
+      host: 'billing.cluster-c9.us-east-1.rds.amazonaws.com',
+      port: 3306,
+      database: 'billing',
+      user: 'app',
+      ssl: true,
+      auth: { kind: 'iam' },
+      logs: { table: 'app_logs', timestamp: 'created_at', level: 'severity', message: 'msg' },
+    },
+  ]);
+  assert.equal(secrets.size, 0, 'an IAM connection keeps no secret');
+  assert.deepEqual(passwords, [undefined]);
+  assert.match(ui.messages.at(-1)!, /Added MySQL · Billing/);
+
+  await manager.fetch('billing', 'level:error', '1h');
+  const search = queries.find((sql) => sql.startsWith('SELECT * FROM `app_logs`'))!;
+  assert.match(
+    search,
+    /WHERE `created_at` BETWEEN \? AND \? AND LOWER\(CAST\(`severity` AS CHAR\)\) LIKE \? ESCAPE '!'/,
+  );
+  assert.ok(
+    store.all().some((event) => event.message === 'payment gateway timed out'),
+    'the fetched row is a log event',
+  );
+  // A host outside AWS signs in with a password, which is kept in secret storage.
+  ui.picks.push(pick('MySQL'), pick('No log table'));
+  ui.inputs.push('mysql://reader@db.local/billing', 'pw', 'Local billing');
+  await manager.add();
+  assert.equal(secrets.get('logline.connection.mysql://reader@db.local:3306/billing'), 'pw');
+  assert.match(ui.messages.at(-1)!, /Use Run SQL in the Logs panel/);
+  manager.dispose();
+});
+
+test('adding MongoDB moves the password out of the URL and can use _id as the time', async () => {
+  reset();
+  const { manager, secrets } = setup();
+  let password: string | undefined;
+  (manager as unknown as { probe: (connection: unknown, password?: string) => Promise<unknown> }).probe = async (
+    _connection,
+    given,
+  ) => {
+    password = given;
+    return {
+      test: async () => 'MongoDB 7.0.4 · 1 collection',
+      tables: async () => ['events'],
+      columns: async () => [
+        { name: '_id', type: 'objectId' },
+        { name: 'level', type: 'string' },
+        { name: 'msg', type: 'string' },
+      ],
+      dispose: async () => undefined,
+    };
+  };
+  ui.picks.push(pick('MongoDB'), pick('events'), pick(/Use these/));
+  ui.inputs.push(['mongodb+srv://reader', 'p%40ss@cluster0.example.net/app'].join(':'), 'Events');
+  await manager.add();
+  assert.equal(password, 'p@ss');
+  assert.deepEqual(raw.workspace, [
+    {
+      id: 'events',
+      label: 'Events',
+      type: 'mongodb',
+      url: 'mongodb+srv://reader@cluster0.example.net/app',
+      database: 'app',
+      logs: { table: 'events', timestamp: '_id', level: 'level', message: 'msg' },
+    },
+  ]);
+  assert.equal(secrets.get('logline.connection.mongodb://reader@cluster0.example.net/app'), 'p@ss');
+  // A URL without the database is refused at the prompt, so nothing is added.
+  ui.picks.push(pick('MongoDB'));
+  ui.inputs.push('mongodb://reader@db');
+  await manager.add();
+  assert.equal(raw.workspace?.length, 1);
+  manager.dispose();
 });

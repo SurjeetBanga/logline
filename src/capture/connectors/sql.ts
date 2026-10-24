@@ -4,6 +4,7 @@ import {
   buildSqlLogQuery,
   checkReadOnlySql,
   limitedSql,
+  quoteIdentifier,
   rangedSql,
   rowRoles,
   rowToLine,
@@ -28,7 +29,7 @@ function tableParts(table: string): { schema?: string; name: string } {
   return parts.length === 2 && parts.every(Boolean) ? { schema: parts[0], name: parts[1] } : { name: table };
 }
 
-/** Searches a log table in SQLite or Postgres, and runs read-only queries typed by a person. */
+/** Searches a log table in SQLite, Postgres, or MySQL, and runs read-only queries typed by a person. */
 export class SqlConnector implements Connector {
   private table?: Promise<TableInfo>;
   /** For each metric query, the column its time is in and how it is stored. */
@@ -50,12 +51,25 @@ export class SqlConnector implements Connector {
 
   /** The database's version and how many tables it has, to confirm the connection works. */
   async test(): Promise<string> {
+    const dialect = this.driver.dialect;
     const [version] = await this.query(
-      this.driver.dialect === 'sqlite' ? 'SELECT sqlite_version() AS v' : 'SHOW server_version',
+      dialect === 'sqlite'
+        ? 'SELECT sqlite_version() AS v'
+        : dialect === 'mysql'
+          ? 'SELECT VERSION() AS v'
+          : 'SHOW server_version',
     );
     const tables = await this.tables();
-    const number = String(version?.v ?? version?.server_version ?? '').split(' ')[0];
-    const name = this.driver.dialect === 'sqlite' ? 'SQLite' : 'Postgres';
+    const text = String(version?.v ?? version?.server_version ?? '');
+    const number = text.split(/[ -]/)[0];
+    const name =
+      dialect === 'sqlite'
+        ? 'SQLite'
+        : dialect === 'mysql'
+          ? /mariadb/i.test(text)
+            ? 'MariaDB'
+            : 'MySQL'
+          : 'Postgres';
     return `${name} ${number} · ${tables.length} table${tables.length === 1 ? '' : 's'}`;
   }
 
@@ -65,6 +79,12 @@ export class SqlConnector implements Connector {
         "SELECT name FROM sqlite_master WHERE type IN ('table', 'view') AND name NOT LIKE 'sqlite_%' ORDER BY name",
       );
       return rows.map((row) => String(row.name));
+    }
+    if (this.driver.dialect === 'mysql') {
+      const rows = await this.query(
+        'SELECT table_name AS t FROM information_schema.tables WHERE table_schema = DATABASE() ORDER BY table_name',
+      );
+      return rows.map((row) => String(row.t));
     }
     const rows = await this.query(
       "SELECT table_schema AS s, table_name AS t FROM information_schema.tables WHERE table_schema NOT IN ('pg_catalog', 'information_schema') ORDER BY table_schema = 'public' DESC, table_schema, table_name",
@@ -78,6 +98,13 @@ export class SqlConnector implements Connector {
       return rows.map((row) => ({ name: String(row.name), type: String(row.type ?? '') }));
     }
     const { schema, name } = tableParts(table);
+    if (this.driver.dialect === 'mysql') {
+      const rows = await this.query(
+        `SELECT column_name AS name, data_type AS type FROM information_schema.columns WHERE table_schema = ${schema ? '?' : 'DATABASE()'} AND table_name = ? ORDER BY ordinal_position`,
+        schema ? [schema, name] : [name],
+      );
+      return rows.map((row) => ({ name: String(row.name), type: String(row.type ?? '') }));
+    }
     const rows = await this.query(
       'SELECT column_name AS name, data_type AS type FROM information_schema.columns WHERE table_schema = $1 AND table_name = $2 ORDER BY ordinal_position',
       [schema ?? 'public', name],
@@ -105,9 +132,11 @@ export class SqlConnector implements Connector {
   }
 
   private async timeEncoding(mapping: LogTableMapping, column: ColumnInfo): Promise<TimeEncoding> {
-    if (this.driver.dialect === 'postgres' && /timestamp|^date$/i.test(column.type)) return 'native';
-    if (this.driver.dialect === 'postgres' && !NUMERIC_TYPE.test(column.type)) return 'iso';
-    const quote = (name: string) => `"${name.replace(/"/g, '""')}"`;
+    const dialect = this.driver.dialect;
+    if (dialect === 'postgres' && /timestamp|^date$/i.test(column.type)) return 'native';
+    if (dialect === 'mysql' && /^(?:datetime|timestamp|date)$/i.test(column.type)) return 'native';
+    if (dialect !== 'sqlite' && !NUMERIC_TYPE.test(column.type)) return 'iso';
+    const quote = (name: string) => quoteIdentifier(name, dialect);
     const table = tableParts(mapping.table);
     const from = table.schema ? `${quote(table.schema)}.${quote(table.name)}` : quote(table.name);
     const [sample] = await this.query(

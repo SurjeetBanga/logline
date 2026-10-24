@@ -2,7 +2,7 @@
 // setting. Secrets (passwords) never appear here; the VS Code adapter keeps
 // them in secret storage under `secretKey`.
 
-export type ConnectionType = 'sqlite' | 'postgres' | 'datadog';
+export type ConnectionType = 'sqlite' | 'postgres' | 'mysql' | 'mongodb' | 'datadog';
 /** How a timestamp column stores time; `native` is a database date/time type. */
 export type TimeEncoding = 'iso' | 'epoch_s' | 'epoch_ms' | 'native';
 
@@ -28,6 +28,14 @@ export interface SqliteConnection extends BaseConnection {
   /** Absolute, or relative to the first workspace folder. */
   path: string;
 }
+/** Sign in to Amazon RDS or Aurora with a short-lived token signed by AWS credentials, instead of a password. */
+export interface IamAuth {
+  kind: 'iam';
+  /** The AWS profile whose credentials sign the token; the default chain when left out. */
+  profile?: string;
+  /** The region of the database; read from its host name when left out. */
+  region?: string;
+}
 export interface PostgresConnection extends BaseConnection {
   type: 'postgres';
   host: string;
@@ -35,6 +43,23 @@ export interface PostgresConnection extends BaseConnection {
   database: string;
   user: string;
   ssl?: boolean;
+  auth?: IamAuth;
+}
+export interface MysqlConnection extends BaseConnection {
+  type: 'mysql';
+  host: string;
+  port: number;
+  database: string;
+  user: string;
+  ssl?: boolean;
+  auth?: IamAuth;
+}
+/** A MongoDB deployment. Its log collection is the mapping's `table`. */
+export interface MongoConnection extends BaseConnection {
+  type: 'mongodb';
+  /** A mongodb:// or mongodb+srv:// URL without a password. */
+  url: string;
+  database: string;
 }
 export interface DatadogConnection extends BaseConnection {
   type: 'datadog';
@@ -43,7 +68,8 @@ export interface DatadogConnection extends BaseConnection {
   /** Log indexes to search; all when left out. */
   indexes?: string[];
 }
-export type ConnectionConfig = SqliteConnection | PostgresConnection | DatadogConnection;
+export type ConnectionConfig =
+  SqliteConnection | PostgresConnection | MysqlConnection | MongoConnection | DatadogConnection;
 
 /** Datadog's sites, by the domain their web app is on. */
 export const DATADOG_SITES = [
@@ -78,7 +104,13 @@ export function datadogApiBase(site: string): string | undefined {
 export const MAPPED_FIELDS = ['timestamp', 'level', 'message', 'service', 'traceId'] as const;
 export type MappedField = (typeof MAPPED_FIELDS)[number];
 
-const TYPE_NAMES: Record<ConnectionType, string> = { sqlite: 'SQLite', postgres: 'Postgres', datadog: 'Datadog' };
+const TYPE_NAMES: Record<ConnectionType, string> = {
+  sqlite: 'SQLite',
+  postgres: 'Postgres',
+  mysql: 'MySQL',
+  mongodb: 'MongoDB',
+  datadog: 'Datadog',
+};
 const SOURCE_PREFIX = 'conn:';
 
 /** The source id that a connection's runs are captured under. */
@@ -100,10 +132,57 @@ export function connectionLabel(connection: Pick<ConnectionConfig, 'type' | 'lab
  * open, so the same one is shared across workspaces, and a workspace that
  * points a connection elsewhere never receives them.
  */
-export function secretKey(connection: PostgresConnection | DatadogConnection): string {
+export function secretKey(connection: Exclude<ConnectionConfig, SqliteConnection>): string {
   if (connection.type === 'datadog')
     return `logline.connection.datadog:${datadogApiBase(connection.site) ?? connection.site}`;
-  return `logline.connection.postgres://${encodeURIComponent(connection.user)}@${connection.host}:${connection.port}/${encodeURIComponent(connection.database)}`;
+  if (connection.type === 'mongodb') {
+    const url = mongoUrl(connection.url);
+    return `logline.connection.mongodb://${url ? `${url.user ? `${encodeURIComponent(url.user)}@` : ''}${url.hosts}` : connection.url}/${encodeURIComponent(connection.database)}`;
+  }
+  return `logline.connection.${connection.type}://${encodeURIComponent(connection.user)}@${connection.host}:${connection.port}/${encodeURIComponent(connection.database)}`;
+}
+
+/** Whether a host is an Amazon RDS or Aurora endpoint, which can sign in with AWS IAM. */
+export function isRdsHost(host: string): boolean {
+  return /\.rds\.amazonaws\.com(?:\.cn)?$/i.test(host);
+}
+
+/** The AWS region in an RDS or Aurora host name, such as `us-east-1`. */
+export function rdsRegion(host: string): string | undefined {
+  return /\.([a-z]{2}(?:-gov)?-[a-z]+-\d+)\.rds\.amazonaws\.com(?:\.cn)?$/i.exec(host)?.[1]?.toLowerCase();
+}
+
+/**
+ * The parts of a MongoDB URL that identify a deployment: its scheme, hosts,
+ * and user. A URL with a password, a path other than a database, or anything
+ * that is not mongodb:// or mongodb+srv:// is refused.
+ */
+export function mongoUrl(
+  value: string,
+): { srv: boolean; hosts: string; user?: string; database?: string; options: string } | undefined {
+  const match = /^mongodb(\+srv)?:\/\/(?:([^:@/?#]+)@)?([^/?#@]+)(?:\/([^?#]*))?(?:\?([^#]*))?$/.exec(value.trim());
+  if (!match) return undefined;
+  const [, srv, user, hosts, database, options] = match;
+  if (!hosts || /\s/.test(hosts)) return undefined;
+  return {
+    srv: Boolean(srv),
+    hosts,
+    ...(user ? { user: decodeURIComponent(user) } : {}),
+    ...(database ? { database: decodeURIComponent(database) } : {}),
+    options: options ?? '',
+  };
+}
+
+function normalizeAuth(value: unknown): IamAuth | undefined {
+  if (!value || typeof value !== 'object' || (value as { kind?: unknown }).kind !== 'iam') return undefined;
+  const item = value as Record<string, unknown>;
+  const profile = text(item.profile, 128);
+  const region = text(item.region, 32);
+  return {
+    kind: 'iam',
+    ...(profile ? { profile } : {}),
+    ...(region && /^[a-z]{2}(?:-gov)?-[a-z]+-\d+$/.test(region) ? { region } : {}),
+  };
 }
 
 const text = (value: unknown, max = 512): string | undefined =>
@@ -139,21 +218,30 @@ export function normalizeConnections(value: unknown): ConnectionConfig[] {
     if (item.type === 'sqlite') {
       const path = text(item.path, 4096);
       if (path) connection = { id, label, type: 'sqlite', path };
-    } else if (item.type === 'postgres') {
+    } else if (item.type === 'postgres' || item.type === 'mysql') {
       const database = text(item.database, 256);
       const user = text(item.user, 256);
-      const port = Number.isSafeInteger(item.port) && item.port > 0 && item.port < 65536 ? (item.port as number) : 5432;
+      const fallback = item.type === 'mysql' ? 3306 : 5432;
+      const port =
+        Number.isSafeInteger(item.port) && item.port > 0 && item.port < 65536 ? (item.port as number) : fallback;
+      const auth = normalizeAuth(item.auth);
       if (database && user)
         connection = {
           id,
           label,
-          type: 'postgres',
+          type: item.type,
           host: text(item.host, 256) ?? 'localhost',
           port,
           database,
           user,
-          ...(item.ssl === true ? { ssl: true } : {}),
+          // IAM tokens are only accepted over TLS.
+          ...(item.ssl === true || auth ? { ssl: true } : {}),
+          ...(auth ? { auth } : {}),
         };
+    } else if (item.type === 'mongodb') {
+      const url = text(item.url, 2048);
+      const database = text(item.database, 256) ?? (url ? mongoUrl(url)?.database : undefined);
+      if (url && mongoUrl(url) && database) connection = { id, label, type: 'mongodb', url, database };
     } else if (item.type === 'datadog') {
       const site = text(item.site, 512);
       if (site && datadogApiBase(site)) {

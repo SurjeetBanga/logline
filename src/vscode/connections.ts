@@ -1,6 +1,9 @@
 import * as path from 'node:path';
 import * as vscode from 'vscode';
 import { DatadogConnector, type DatadogKeys } from '../capture/connectors/datadog';
+import { iamPassword, listProfiles } from '../capture/connectors/aws-auth';
+import { MongoConnector } from '../capture/connectors/mongo';
+import { MysqlDriver } from '../capture/connectors/mysql-driver';
 import { PostgresDriver } from '../capture/connectors/postgres-driver';
 import { SqlConnector } from '../capture/connectors/sql';
 import { openSqlite } from '../capture/connectors/sqlite-driver';
@@ -13,7 +16,9 @@ import {
   connectionSourceId,
   datadogApiBase,
   DATADOG_SITES,
+  isRdsHost,
   MAPPED_FIELDS,
+  mongoUrl,
   normalizeConnections,
   rangeMs,
   RANGE_CHOICES,
@@ -24,6 +29,8 @@ import {
   type DatadogConnection,
   type LogTableMapping,
   type MappedField,
+  type MongoConnection,
+  type MysqlConnection,
   type PostgresConnection,
 } from '../core/connections';
 import { parseDatadogLink } from '../core/datadog-query';
@@ -48,12 +55,25 @@ const ROLE_LABELS: Record<MappedField, string> = {
 
 /** Whether a connection can be searched: Datadog always, a database once a log table is mapped. */
 const searchable = (connection: ConnectionConfig) => connection.type === 'datadog' || connection.logs !== undefined;
+/** Whether a connection runs queries typed by a person: SQL on a database, a filter or pipeline on MongoDB. */
 const sqlCapable = (connection: ConnectionConfig) => connection.type !== 'datadog';
-type SqlConnection = Exclude<ConnectionConfig, DatadogConnection>;
+type SqlConnection = Exclude<ConnectionConfig, DatadogConnection | MongoConnection>;
+/** A database that signs in with a user and a password, or an IAM token. */
+type ServerConnection = PostgresConnection | MysqlConnection;
+type PasswordConnection = ServerConnection | MongoConnection;
 
-/** Postgres refused the user name or password. */
-const authFailed = (error: unknown) =>
-  !!error && typeof error === 'object' && 'code' in error && (error.code === '28P01' || error.code === '28000');
+/** The server refused the user name or password: Postgres, MySQL, or MongoDB. */
+const authFailed = (error: unknown) => {
+  if (!error || typeof error !== 'object') return false;
+  const failure = error as { code?: unknown; errno?: unknown; codeName?: unknown };
+  return (
+    failure.code === '28P01' ||
+    failure.code === '28000' ||
+    failure.code === 'ER_ACCESS_DENIED_ERROR' ||
+    failure.errno === 1045 ||
+    failure.codeName === 'AuthenticationFailed'
+  );
+};
 
 /**
  * Saved connections (`logline.connections`): opens their databases on first
@@ -194,6 +214,7 @@ export class ConnectionManager implements vscode.Disposable {
         type: connection.type,
         mapped: searchable(connection),
         sql: sqlCapable(connection),
+        ...(connection.type === 'mongodb' ? { language: 'mongo' as const } : {}),
         watching: this.watched?.watching(connection.id) ?? [],
         agents: this.agentsAllowed(connection),
         tailing: this.remote.tailing(connection.id),
@@ -227,7 +248,11 @@ export class ConnectionManager implements vscode.Disposable {
 
   private async driver(connection: SqlConnection, password?: string): Promise<SqlDriver> {
     if (connection.type === 'sqlite') return openSqlite(this.resolvePath(connection.path));
-    return new PostgresDriver(connection, password ?? (await this.secrets?.get(secretKey(connection))));
+    // IAM sign-in makes a new token for each connection; otherwise the password typed now, or the saved one.
+    const secret = connection.auth
+      ? iamPassword({ ...connection, ...connection.auth })
+      : (password ?? (await this.secrets?.get(secretKey(connection))));
+    return connection.type === 'mysql' ? new MysqlDriver(connection, secret) : new PostgresDriver(connection, secret);
   }
 
   /** Datadog keys saved for the connection's API; none when nothing was saved. */
@@ -248,7 +273,9 @@ export class ConnectionManager implements vscode.Disposable {
     const connector =
       connection.type === 'datadog'
         ? new DatadogConnector(connection, await this.keys(connection), this.timeoutMs)
-        : new SqlConnector(connection, await this.driver(connection), this.timeoutMs);
+        : connection.type === 'mongodb'
+          ? new MongoConnector(connection, await this.secrets?.get(secretKey(connection)), this.timeoutMs)
+          : new SqlConnector(connection, await this.driver(connection), this.timeoutMs);
     this.open.set(connection.id, { key, connector });
     return connector;
   }
@@ -308,13 +335,19 @@ export class ConnectionManager implements vscode.Disposable {
   /** Report a failed fetch, offering to save a password when Postgres refused the login. */
   private async failed(connection: ConnectionConfig, error: string | undefined, cause?: unknown): Promise<void> {
     if (!error) return;
-    if (connection.type === 'postgres' && (authFailed(cause) || /password/i.test(error))) {
-      const saved = (await this.secrets?.get(secretKey(connection))) !== undefined;
+    const signsInWithPassword =
+      (connection.type === 'postgres' || connection.type === 'mysql') && !connection.auth
+        ? true
+        : connection.type === 'mongodb' && mongoUrl(connection.url)?.user !== undefined;
+    if (signsInWithPassword && (authFailed(cause) || /password|authentication failed/i.test(error))) {
+      const target = connection as PasswordConnection;
+      const saved = (await this.secrets?.get(secretKey(target))) !== undefined;
+      const user = target.type === 'mongodb' ? mongoUrl(target.url)?.user : target.user;
       const choice = await vscode.window.showErrorMessage(
-        `${connectionLabel(connection)}: the server ${saved ? 'refused the saved password' : 'needs a password'} for ${connection.user} (${error}).`,
+        `${connectionLabel(connection)}: the server ${saved ? 'refused the saved password' : 'needs a password'} for ${user} (${error}).`,
         'Enter Password…',
       );
-      if (choice) await this.askPassword(connection);
+      if (choice) await this.askPassword(target);
       return;
     }
     if (connection.type === 'datadog' && /refused the|no API key|keys? (?:are|is) missing/i.test(error)) {
@@ -363,9 +396,13 @@ export class ConnectionManager implements vscode.Disposable {
     return apiKey && appKey ? { apiKey: apiKey.trim(), appKey: appKey.trim() } : undefined;
   }
 
-  private async askPassword(connection: PostgresConnection): Promise<void> {
+  private async askPassword(connection: PasswordConnection): Promise<void> {
+    const where =
+      connection.type === 'mongodb'
+        ? `${mongoUrl(connection.url)?.user}@${mongoUrl(connection.url)?.hosts}/${connection.database}`
+        : `${connection.user}@${connection.host}/${connection.database}`;
     const password = await vscode.window.showInputBox({
-      title: `Password for ${connection.user}@${connection.host}/${connection.database}`,
+      title: `Password for ${where}`,
       password: true,
       ignoreFocusOut: true,
       prompt: 'Kept in VS Code secret storage, never in settings.',
@@ -404,15 +441,21 @@ export class ConnectionManager implements vscode.Disposable {
 
   /** Run SQL typed by the person into a new run. */
   async runSql(id?: string): Promise<void> {
-    if (!this.trusted('running SQL')) return;
-    const connection = await this.pick(id, 'Run SQL on', sqlCapable, 'No database connection yet.');
+    if (!this.trusted('running a query')) return;
+    const connection = await this.pick(id, 'Run a query on', sqlCapable, 'No database connection yet.');
     if (!connection || connection.type === 'datadog') return;
+    const rows = this.config.get('connectionMaxRows', 5000).toLocaleString();
+    const mongo = connection.type === 'mongodb';
     const sql = await vscode.window.showInputBox({
-      title: `Run SQL on ${connectionLabel(connection)}`,
-      prompt: `One SELECT, read-only. At most ${this.config.get('connectionMaxRows', 5000).toLocaleString()} rows.`,
-      placeHolder: connection.logs
-        ? `SELECT * FROM ${connection.logs.table} WHERE ${connection.logs.level ?? 'level'} = 'ERROR'`
-        : 'SELECT * FROM logs ORDER BY created_at DESC',
+      title: `${mongo ? 'Run a query' : 'Run SQL'} on ${connectionLabel(connection)}`,
+      prompt: mongo
+        ? `A filter or a pipeline of stages, in JSON, on ${connection.logs?.table ?? 'the log collection'}. Read-only. At most ${rows} documents.`
+        : `One SELECT, read-only. At most ${rows} rows.`,
+      placeHolder: mongo
+        ? `{ "${connection.logs?.level ?? 'level'}": "error" }`
+        : connection.logs
+          ? `SELECT * FROM ${connection.logs.table} WHERE ${connection.logs.level ?? 'level'} = 'ERROR'`
+          : 'SELECT * FROM logs ORDER BY created_at DESC',
       ignoreFocusOut: true,
     });
     if (!sql?.trim()) return;
@@ -420,7 +463,7 @@ export class ConnectionManager implements vscode.Disposable {
       const info = await this.remote.fetch(await this.target(connection), {
         query: '',
         sql,
-        title: `SQL: ${sql.trim().replace(/\s+/g, ' ').slice(0, 80)}`,
+        title: `${mongo ? 'Query' : 'SQL'}: ${sql.trim().replace(/\s+/g, ' ').slice(0, 80)}`,
         // The SQL chose the rows, so the panel's search is cleared rather than left to hide some of them.
         started: (runId) => void this.showSource(connectionSourceId(connection.id), runId, ''),
       });
@@ -561,7 +604,14 @@ export class ConnectionManager implements vscode.Disposable {
     const connection = await this.pick(id, 'Remove connection');
     if (!connection) return;
     // The password or keys are kept by what they open, for every workspace that connects there.
-    const secret = connection.type === 'sqlite' ? undefined : connection.type === 'datadog' ? 'Keys' : 'Password';
+    const secret =
+      connection.type === 'sqlite' ||
+      ((connection.type === 'postgres' || connection.type === 'mysql') && connection.auth) ||
+      (connection.type === 'mongodb' && !mongoUrl(connection.url)?.user)
+        ? undefined
+        : connection.type === 'datadog'
+          ? 'Keys'
+          : 'Password';
     const forget = secret && `Remove and Forget ${secret}`;
     const answer = await vscode.window.showWarningMessage(
       `Remove ${connectionLabel(connection)}?`,
@@ -598,19 +648,29 @@ export class ConnectionManager implements vscode.Disposable {
     if (!this.trusted('adding a connection')) return;
     const kind = await vscode.window.showQuickPick(
       [
-        { label: 'SQLite', description: 'A database file on this machine', type: 'sqlite' as const },
-        { label: 'Postgres', description: 'A server, by host, database, and user', type: 'postgres' as const },
         { label: 'Datadog', description: 'Logs in a Datadog organization', type: 'datadog' as const },
+        {
+          label: 'Postgres',
+          description: 'A server by URL · also Aurora PostgreSQL, RDS, Cloud SQL',
+          type: 'postgres' as const,
+        },
+        { label: 'MySQL', description: 'A server by URL · also Aurora MySQL, MariaDB, RDS', type: 'mysql' as const },
+        { label: 'MongoDB', description: 'A cluster by URL · also Atlas, DocumentDB', type: 'mongodb' as const },
+        { label: 'SQLite', description: 'A database file on this machine', type: 'sqlite' as const },
       ],
       { title: 'Add Connection (1/4): Where the logs are' },
     );
     if (!kind) return;
     if (kind.type === 'datadog') return this.addDatadog();
-    const draft = kind.type === 'sqlite' ? await this.sqliteDraft() : await this.postgresDraft();
+    const draft =
+      kind.type === 'sqlite'
+        ? await this.sqliteDraft()
+        : kind.type === 'mongodb'
+          ? await this.mongoDraft()
+          : await this.serverDraft(kind.type);
     if (!draft) return;
     const { connection, password } = draft;
-    const driver = await this.driver(connection, password);
-    const probe = new SqlConnector(connection, driver, this.timeoutMs);
+    const probe = await this.probe(connection, password);
     try {
       let tables: string[];
       try {
@@ -625,7 +685,7 @@ export class ConnectionManager implements vscode.Disposable {
         void vscode.window.showErrorMessage(`Could not connect: ${errorText(error)}`);
         return;
       }
-      const logs = await this.chooseMapping(probe, tables);
+      const logs = await this.chooseMapping(probe, tables, connection.type === 'mongodb');
       if (logs === undefined) return;
       const label = await vscode.window.showInputBox({
         title: 'Add Connection (4/4): Name',
@@ -640,17 +700,27 @@ export class ConnectionManager implements vscode.Disposable {
         label: label.trim(),
         ...(logs ? { logs } : {}),
       };
-      if (saved.type === 'postgres' && password) await this.secrets?.store(secretKey(saved), password);
+      if (saved.type !== 'sqlite' && password) await this.secrets?.store(secretKey(saved), password);
       await this.save(saved);
       await this.showSource(connectionSourceId(saved.id));
       void vscode.window.showInformationMessage(
         logs
           ? `Added ${connectionLabel(saved)}. Pick a time range and press Run in the Logs panel.`
-          : `Added ${connectionLabel(saved)}. Use Run SQL in the Logs panel to query it.`,
+          : `Added ${connectionLabel(saved)}. Use ${saved.type === 'mongodb' ? 'Run query' : 'Run SQL'} in the Logs panel to query it.`,
       );
     } finally {
       await probe.dispose();
     }
+  }
+
+  /** A connector for a connection being added, to test it and read its tables before it is saved. */
+  private async probe(
+    connection: SqlConnection | MongoConnection,
+    password?: string,
+  ): Promise<SqlConnector | MongoConnector> {
+    return connection.type === 'mongodb'
+      ? new MongoConnector(connection, password, this.timeoutMs)
+      : new SqlConnector(connection, await this.driver(connection, password), this.timeoutMs);
   }
 
   /** Save a new connection in the workspace settings, or the user settings without a workspace. */
@@ -818,16 +888,28 @@ export class ConnectionManager implements vscode.Disposable {
     };
   }
 
-  private async postgresDraft(): Promise<{ connection: SqlConnection; password?: string } | undefined> {
+  /** A Postgres or MySQL server from its URL, with how it signs in: a password, or IAM on RDS and Aurora. */
+  private async serverDraft(
+    type: 'postgres' | 'mysql',
+  ): Promise<{ connection: ServerConnection; password?: string } | undefined> {
+    const name = type === 'mysql' ? 'MySQL' : 'Postgres';
+    const example =
+      type === 'mysql' ? 'mysql://user@localhost:3306/database' : 'postgres://user@localhost:5432/database';
     const input = await vscode.window.showInputBox({
-      title: 'Add Connection (2/4): Postgres',
+      title: `Add Connection (2/4): ${name}`,
       prompt: 'A connection URL. A password in it is moved to VS Code secret storage.',
-      placeHolder: 'postgres://user@localhost:5432/database',
+      placeHolder: example,
       ignoreFocusOut: true,
-      validateInput: (value) => (parsePostgresUrl(value) ? undefined : 'Enter postgres://user@host:port/database'),
+      validateInput: (value) =>
+        parseServerUrl(value, type) ? undefined : `Enter ${example.replace('localhost', 'host')}`,
     });
-    const parsed = input ? parsePostgresUrl(input) : undefined;
+    const parsed = input ? parseServerUrl(input, type) : undefined;
     if (!parsed) return undefined;
+    if (isRdsHost(parsed.connection.host) && parsed.password === undefined) {
+      const auth = await this.chooseIam(parsed.connection.host);
+      if (auth === undefined) return undefined;
+      if (auth) return { connection: { ...parsed.connection, ssl: true, auth } };
+    }
     let password = parsed.password;
     if (password === undefined) {
       password = await vscode.window.showInputBox({
@@ -841,17 +923,109 @@ export class ConnectionManager implements vscode.Disposable {
     return { connection: parsed.connection, password: password || undefined };
   }
 
-  /** Pick the log table and confirm its columns; null means none (typed SQL only). */
-  private async chooseMapping(probe: SqlConnector, tables: string[]): Promise<LogTableMapping | null | undefined> {
-    const none = { label: 'No log table', description: 'Only run SQL you type', table: undefined };
+  /**
+   * How an RDS or Aurora database signs in: false for a password, or IAM with
+   * the profile chosen; undefined when cancelled.
+   */
+  private async chooseIam(host: string): Promise<MysqlConnection['auth'] | false | undefined> {
+    const method = await vscode.window.showQuickPick(
+      [
+        {
+          label: 'Password',
+          description: 'Kept in VS Code secret storage',
+          detail: 'Typed once, or read from the URL',
+          iam: false,
+        },
+        {
+          label: 'AWS IAM token',
+          description: 'No password stored',
+          detail: 'A 15-minute token signed with an AWS profile, made again for each connection. TLS is required.',
+          iam: true,
+        },
+      ],
+      { title: `Add Connection (2/4): How Logline signs in to ${host}` },
+    );
+    if (!method) return undefined;
+    if (!method.iam) return false;
+    const kinds = {
+      keys: 'Access key',
+      sso: 'SSO',
+      process: 'credential_process',
+      role: 'Assumes a role (needs credential_process)',
+    };
+    const profile = await vscode.window.showQuickPick(
+      [
+        {
+          label: 'Default credentials',
+          description: 'The environment, else AWS_PROFILE, else the default profile',
+          name: undefined,
+        },
+        ...listProfiles().map((item) => ({
+          label: item.name,
+          description: [kinds[item.kind], item.region].filter(Boolean).join(' · '),
+          name: item.name,
+        })),
+      ],
+      { title: 'Add Connection (3/4): AWS profile that signs the token' },
+    );
+    if (!profile) return undefined;
+    return { kind: 'iam', ...(profile.name ? { profile: profile.name } : {}) };
+  }
+
+  /** A MongoDB deployment from its URL; a password in it is moved to secret storage. */
+  private async mongoDraft(): Promise<{ connection: MongoConnection; password?: string } | undefined> {
+    const input = await vscode.window.showInputBox({
+      title: 'Add Connection (2/4): MongoDB',
+      prompt: 'A connection URL with the database. A password in it is moved to VS Code secret storage.',
+      placeHolder: 'mongodb+srv://user@cluster0.example.mongodb.net/app',
+      ignoreFocusOut: true,
+      validateInput: (value) =>
+        parseMongoUrl(value) ? undefined : 'Enter mongodb://user@host/database or mongodb+srv://…',
+    });
+    const parsed = input ? parseMongoUrl(input) : undefined;
+    if (!parsed) return undefined;
+    let password = parsed.password;
+    const user = mongoUrl(parsed.connection.url)?.user;
+    if (user && password === undefined) {
+      password = await vscode.window.showInputBox({
+        title: `Password for ${user}`,
+        prompt: 'Kept in VS Code secret storage.',
+        password: true,
+        ignoreFocusOut: true,
+      });
+      if (password === undefined) return undefined;
+    }
+    return { connection: parsed.connection, password: password || undefined };
+  }
+
+  /** Pick the log table (or collection) and confirm its columns; null means none (typed queries only). */
+  private async chooseMapping(
+    probe: { columns(table: string): Promise<ColumnInfo[]> },
+    tables: string[],
+    mongo = false,
+  ): Promise<LogTableMapping | null | undefined> {
+    const word = mongo ? 'collection' : 'table';
+    const none = {
+      label: `No log ${word}`,
+      description: mongo ? 'Only run queries you type' : 'Only run SQL you type',
+      table: undefined,
+    };
     const choice = await vscode.window.showQuickPick(
       [...tables.map((table) => ({ label: table, description: undefined, table })), none],
-      { title: 'Add Connection (3/4): Log table', placeHolder: 'The table that holds one row per log event' },
+      {
+        title: `Add Connection (3/4): Log ${word}`,
+        placeHolder: mongo
+          ? 'The collection that holds one document per log event'
+          : 'The table that holds one row per log event',
+      },
     );
     if (!choice) return undefined;
     if (choice.table === undefined) return null;
     const columns = await probe.columns(choice.table);
     const mapping: Partial<Record<MappedField, string>> = suggestMapping(columns);
+    // A collection without a time field still knows when each document was created, from its _id.
+    if (mongo && !mapping.timestamp && columns.some((column) => column.name === '_id' && column.type === 'objectId'))
+      mapping.timestamp = '_id';
     for (;;) {
       const confirm = {
         label: '$(check) Use these columns',
@@ -898,32 +1072,69 @@ export class ConnectionManager implements vscode.Disposable {
   }
 }
 
-/** Read `postgres://user:password@host:port/database?sslmode=require` into a connection. */
-export function parsePostgresUrl(value: string): { connection: PostgresConnection; password?: string } | undefined {
+/**
+ * Read `postgres://user:password@host:port/database?sslmode=require`, or
+ * `mysql://user:password@host:port/database?ssl=true`, into a connection.
+ */
+export function parseServerUrl<T extends 'postgres' | 'mysql'>(
+  value: string,
+  type: T,
+): { connection: Extract<ConnectionConfig, { type: T }>; password?: string } | undefined {
   let url: URL;
   try {
     url = new URL(value.trim());
   } catch {
     return undefined;
   }
-  if (url.protocol !== 'postgres:' && url.protocol !== 'postgresql:') return undefined;
+  const protocols = type === 'mysql' ? ['mysql:', 'mariadb:'] : ['postgres:', 'postgresql:'];
+  if (!protocols.includes(url.protocol)) return undefined;
   const database = decodeURIComponent(url.pathname.replace(/^\//, ''));
   const user = decodeURIComponent(url.username);
   if (!database || !user || !url.hostname) return undefined;
-  const ssl = ['require', 'verify-ca', 'verify-full'].includes(url.searchParams.get('sslmode') ?? '');
+  const ssl =
+    ['require', 'verify-ca', 'verify-full', 'REQUIRED', 'VERIFY_CA', 'VERIFY_IDENTITY'].includes(
+      url.searchParams.get(type === 'mysql' ? 'ssl-mode' : 'sslmode') ?? '',
+    ) || ['true', '1'].includes(url.searchParams.get('ssl') ?? '');
   const [connection] = normalizeConnections([
     {
       id: 'draft',
       label: database,
-      type: 'postgres',
+      type,
       host: url.hostname,
-      port: url.port ? Number(url.port) : 5432,
+      port: url.port ? Number(url.port) : type === 'mysql' ? 3306 : 5432,
       database,
       user,
       ssl,
     },
   ]);
-  return connection?.type === 'postgres'
-    ? { connection, ...(url.password ? { password: decodeURIComponent(url.password) } : {}) }
+  return connection?.type === type
+    ? {
+        connection: connection as Extract<ConnectionConfig, { type: T }>,
+        ...(url.password ? { password: decodeURIComponent(url.password) } : {}),
+      }
+    : undefined;
+}
+
+/** Read `postgres://user:password@host:port/database?sslmode=require` into a connection. */
+export function parsePostgresUrl(value: string): { connection: PostgresConnection; password?: string } | undefined {
+  return parseServerUrl(value, 'postgres');
+}
+
+/**
+ * Read a mongodb:// or mongodb+srv:// URL with its database into a connection.
+ * A password in it is returned apart, so the saved URL never holds one.
+ */
+export function parseMongoUrl(value: string): { connection: MongoConnection; password?: string } | undefined {
+  const match = /^(mongodb(?:\+srv)?:\/\/)(?:([^:@/?#]+)(?::([^@/?#]*))?@)?([^/?#@]+)(\/[^?#]*)?(\?[^#]*)?$/.exec(
+    value.trim(),
+  );
+  if (!match) return undefined;
+  const [, scheme, user, password, hosts, pathPart, options] = match;
+  const url = `${scheme}${user ? `${user}@` : ''}${hosts}${pathPart ?? ''}${options ?? ''}`;
+  const database = mongoUrl(url)?.database;
+  if (!database) return undefined;
+  const [connection] = normalizeConnections([{ id: 'draft', label: database, type: 'mongodb', url, database }]);
+  return connection?.type === 'mongodb'
+    ? { connection, ...(password ? { password: decodeURIComponent(password) } : {}) }
     : undefined;
 }

@@ -6,7 +6,7 @@ import type { ColumnInfo, LogTableMapping, MappedField, TimeEncoding } from './c
 import { parseQuery, type ParsedQuery, type Token } from './query';
 import { queryTokens } from './query-tokens';
 
-export type SqlDialect = 'sqlite' | 'postgres';
+export type SqlDialect = 'sqlite' | 'postgres' | 'mysql';
 export type SqlValue = string | number | null;
 export interface SqlStatement {
   sql: string;
@@ -43,18 +43,31 @@ export interface SqlLogQuery {
   local: string[];
 }
 
-export function quoteIdentifier(name: string): string {
-  return `"${name.replace(/"/g, '""')}"`;
+/** Quote a column or table name: in backticks for MySQL, in double quotes for the rest. */
+export function quoteIdentifier(name: string, dialect: SqlDialect = 'postgres'): string {
+  return dialect === 'mysql' ? `\`${name.replace(/`/g, '``')}\`` : `"${name.replace(/"/g, '""')}"`;
 }
 
 /** Quote `table` or `schema.table`. */
-export function quoteTable(table: string): string {
+export function quoteTable(table: string, dialect: SqlDialect = 'postgres'): string {
   const parts = table.split('.');
-  return parts.length === 2 && parts.every(Boolean) ? parts.map(quoteIdentifier).join('.') : quoteIdentifier(table);
+  return parts.length === 2 && parts.every(Boolean)
+    ? parts.map((part) => quoteIdentifier(part, dialect)).join('.')
+    : quoteIdentifier(table, dialect);
 }
 
-function escapeLike(value: string): string {
-  return value.replace(/[\\%_]/g, (character) => `\\${character}`);
+// MySQL reads a backslash in a string literal as an escape unless NO_BACKSLASH_ESCAPES is on, so
+// LIKE there escapes with a character that means the same in both modes.
+const likeEscape = (dialect: SqlDialect) => (dialect === 'mysql' ? '!' : '\\');
+
+function escapeLike(value: string, dialect: SqlDialect): string {
+  const escape = likeEscape(dialect);
+  return value.replace(dialect === 'mysql' ? /[!%_]/g : /[\\%_]/g, (character) => `${escape}${character}`);
+}
+
+/** A UTC time as MySQL reads a DATETIME literal; the driver's sessions use UTC. */
+function mysqlTime(ms: number): string {
+  return new Date(ms).toISOString().replace('T', ' ').replace('Z', '');
 }
 
 const NUMERIC_TYPE = /int|real|double|float|numeric|decimal|serial|number/i;
@@ -75,10 +88,16 @@ function timeExpression(
   encoding: TimeEncoding,
   params: Params,
 ): { column: string; at(ms: number): string } {
-  const column = quoteIdentifier(name);
+  const column = quoteIdentifier(name, dialect);
   if (encoding === 'epoch_s') return { column, at: (ms) => params.add(ms / 1000) };
   if (encoding === 'epoch_ms') return { column, at: (ms) => params.add(ms) };
   const iso = (ms: number) => new Date(ms).toISOString();
+  if (dialect === 'mysql')
+    // ISO text keeps its T and Z, which a MySQL DATETIME does not read; times without a zone are UTC there.
+    return {
+      column: encoding === 'native' ? column : `CAST(REPLACE(REPLACE(${column}, 'T', ' '), 'Z', '') AS DATETIME(6))`,
+      at: (ms) => params.add(mysqlTime(ms)),
+    };
   if (dialect === 'sqlite')
     // julianday reads ISO 8601 text with or without the T, fractions, or a zone.
     return { column: `julianday(${column})`, at: (ms) => `julianday(${params.add(iso(ms))})` };
@@ -109,12 +128,12 @@ function columnFor(token: Token, request: SqlLogRequest): ColumnInfo | undefined
   return columnNamed(request.table.columns, mapped ?? token.field ?? '');
 }
 
-function textOf(column: ColumnInfo): string {
-  return `LOWER(CAST(${quoteIdentifier(column.name)} AS TEXT))`;
+function textOf(column: ColumnInfo, dialect: SqlDialect): string {
+  return `LOWER(CAST(${quoteIdentifier(column.name, dialect)} AS ${dialect === 'mysql' ? 'CHAR' : 'TEXT'}))`;
 }
 
-function like(column: ColumnInfo, value: string, params: Params, prefix = false): string {
-  return `${textOf(column)} LIKE ${params.add(`${prefix ? '' : '%'}${escapeLike(value)}%`)} ESCAPE '\\'`;
+function like(column: ColumnInfo, value: string, params: Params, dialect: SqlDialect, prefix = false): string {
+  return `${textOf(column, dialect)} LIKE ${params.add(`${prefix ? '' : '%'}${escapeLike(value, dialect)}%`)} ESCAPE '${likeEscape(dialect)}'`;
 }
 
 /** SQL that holds for every row the term matches, or undefined when SQL cannot say. */
@@ -134,18 +153,19 @@ function predicate(token: Token, request: SqlLogRequest, params: Params, now: nu
   if (token.canonical === 'exists') {
     const column = columnNamed(request.table.columns, token.value);
     if (!column) return undefined;
-    return `${quoteIdentifier(column.name)} IS ${token.negate ? '' : 'NOT '}NULL`;
+    return `${quoteIdentifier(column.name, request.dialect)} IS ${token.negate ? '' : 'NOT '}NULL`;
   }
   if (token.field === undefined) {
     // Free text can match any column; its negation would have to hold for all of them.
     if (token.negate || !token.value) return undefined;
-    const terms = request.table.columns.map((column) => like(column, token.value, params));
+    const terms = request.table.columns.map((column) => like(column, token.value, params, request.dialect));
     return terms.length ? `(${terms.join(' OR ')})` : undefined;
   }
   const column = columnFor(token, request);
   if (!column) return undefined;
   const numeric = NUMERIC_TYPE.test(column.type);
-  const name = quoteIdentifier(column.name);
+  const name = quoteIdentifier(column.name, request.dialect);
+  const dialect = request.dialect;
   let condition: string | undefined;
   if (token.numericComparison) {
     if (numeric)
@@ -160,11 +180,11 @@ function predicate(token: Token, request: SqlLogRequest, params: Params, now: nu
     if (!numeric)
       condition =
         token.value === 'fatal'
-          ? `(${like(column, 'fatal', params)} OR ${like(column, 'critical', params)})`
-          : like(column, token.value, params);
+          ? `(${like(column, 'fatal', params, dialect)} OR ${like(column, 'critical', params, dialect)})`
+          : like(column, token.value, params, dialect);
   } else if (token.canonical === 'status' && /^\dxx$/.test(token.value)) {
-    condition = like(column, token.value[0], params, true);
-  } else condition = like(column, token.value, params);
+    condition = like(column, token.value[0], params, dialect, true);
+  } else condition = like(column, token.value, params, dialect);
   if (!condition) return undefined;
   return token.negate ? `(${name} IS NULL OR NOT ${condition})` : condition;
 }
@@ -222,9 +242,9 @@ export function buildSqlLogQuery(request: SqlLogRequest): SqlLogQuery {
   if (alternatives.length === 1) conditions.push(alternatives[0]);
   else if (alternatives.length) conditions.push(`(${alternatives.map((terms) => `(${terms})`).join(' OR ')})`);
   const where = conditions.length ? ` WHERE ${conditions.join(' AND ')}` : '';
-  const from = `FROM ${quoteTable(request.mapping.table)}${where}`;
+  const from = `FROM ${quoteTable(request.mapping.table, request.dialect)}${where}`;
   const countParams = [...params.values];
-  const order = `${quoteIdentifier(request.mapping.timestamp)} ${request.order === 'desc' ? 'DESC' : 'ASC'}`;
+  const order = `${quoteIdentifier(request.mapping.timestamp, request.dialect)} ${request.order === 'desc' ? 'DESC' : 'ASC'}`;
   const select = `SELECT * ${from} ORDER BY ${order} LIMIT ${params.add(request.limit)}`;
   return {
     select: { sql: select, params: params.values },
@@ -255,7 +275,12 @@ export function checkReadOnlySql(input: string, dialect: SqlDialect): { sql: str
   for (let index = 0; index < input.length;) {
     const character = input[index];
     const next = input[index + 1];
-    if (character === '-' && next === '-') {
+    // MySQL reads `--` as a comment only when a space or the end of a line follows it.
+    const dashes = character === '-' && next === '-' && (dialect !== 'mysql' || !/\S/.test(input[index + 2] ?? ' '));
+    if (dialect === 'mysql' && character === '/' && next === '*' && input[index + 2] === '!')
+      // MySQL runs the text of a /*! … */ comment, so it is not a comment to skip.
+      return { error: 'Executable comments (/*! … */) cannot run here.' };
+    if (dashes || (character === '#' && dialect === 'mysql')) {
       const end = input.indexOf('\n', index);
       index = end === -1 ? input.length : end;
       code += ' ';
@@ -265,8 +290,10 @@ export function checkReadOnlySql(input: string, dialect: SqlDialect): { sql: str
       code += ' ';
     } else if (character === "'" || character === '"' || character === '`') {
       let end = index + 1;
+      // MySQL strings also escape with a backslash, as in 'it\'s'.
+      const backslash = dialect === 'mysql' && character !== '`';
       while (end < input.length && !(input[end] === character && input[end + 1] !== character)) {
-        end += input[end] === character ? 2 : 1;
+        end += input[end] === character || (backslash && input[end] === '\\') ? 2 : 1;
       }
       index = end + 1;
       code += ' x ';
@@ -331,7 +358,7 @@ export function rangedSql(
   const params = new Params(dialect);
   const terms = timeExpression(dialect, time.column, time.encoding, params);
   const where = `${terms.column} BETWEEN ${terms.at(fromMs)} AND ${terms.at(toMs)}`;
-  const order = `${quoteIdentifier(time.column)} DESC`;
+  const order = `${quoteIdentifier(time.column, dialect)} DESC`;
   return {
     sql: `SELECT * FROM (\n${sql}\n) AS logline_query WHERE ${where} ORDER BY ${order} LIMIT ${params.add(limit)}`,
     params: params.values,
@@ -367,6 +394,15 @@ export function timeValueMs(value: unknown, encoding: TimeEncoding | 'auto'): nu
   return Number.isFinite(parsed) ? parsed : undefined;
 }
 
+const ROW_ROLES = ['level', 'message', 'service', 'traceId'] as const;
+
+/** Set a field, defining `__proto__` as a field of its own instead of the object's prototype. */
+export function setField(target: Record<string, unknown>, name: string, value: unknown): void {
+  if (name === '__proto__')
+    Object.defineProperty(target, name, { value, enumerable: true, writable: true, configurable: true });
+  else target[name] = value;
+}
+
 function plain(value: unknown): unknown {
   if (typeof value === 'bigint') return Number.isSafeInteger(Number(value)) ? Number(value) : value.toString();
   if (value instanceof Date) return Number.isFinite(value.getTime()) ? value.toISOString() : null;
@@ -383,25 +419,26 @@ export function rowToLine(
   roles: RowRoles,
   encoding: TimeEncoding | 'auto',
 ): { line: string; timeMs?: number } {
-  const entries: [string, unknown][] = [];
-  const used = new Set<string>();
+  // Built as one object, in order, since this runs for every fetched row.
+  const out: Record<string, unknown> = {};
+  const used: string[] = [];
   const timeMs = roles.timestamp !== undefined ? timeValueMs(row[roles.timestamp], encoding) : undefined;
-  if (timeMs !== undefined) entries.push(['timestamp', new Date(timeMs).toISOString()]);
-  if (roles.timestamp !== undefined) used.add(roles.timestamp);
-  for (const role of ['level', 'message', 'service', 'traceId'] as const) {
+  if (timeMs !== undefined) out.timestamp = new Date(timeMs).toISOString();
+  if (roles.timestamp !== undefined) used.push(roles.timestamp);
+  for (const role of ROW_ROLES) {
     const column = roles[role];
     if (column === undefined || !Object.hasOwn(row, column)) continue;
-    used.add(column);
+    used.push(column);
     const value = plain(row[column]);
-    if (value !== null && value !== undefined) entries.push([role, value]);
+    if (value !== null && value !== undefined) out[role] = value;
   }
-  const names = new Set(entries.map(([name]) => name));
-  for (const [name, value] of Object.entries(row)) {
-    if (used.has(name)) continue;
+  const named = Object.keys(out);
+  for (const name in row) {
+    if (!Object.hasOwn(row, name) || used.includes(name)) continue;
     // A column that shares a name with a mapped role keeps its value under another name.
-    entries.push([names.has(name) ? `${name}_column` : name, plain(value)]);
+    setField(out, named.includes(name) ? `${name}_column` : name, plain(row[name]));
   }
-  return { line: JSON.stringify(Object.fromEntries(entries)), timeMs };
+  return { line: JSON.stringify(out), timeMs };
 }
 
 /** Roles for rows from a query typed by a person: the mapping's columns when present, else guessed from names. */
