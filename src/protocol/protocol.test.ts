@@ -220,3 +220,34 @@ test('an agent permission request names its connection and whether to allow', ()
   });
   assert.equal(parseViewRequest({ type: 'connectionAgents' }), undefined);
 });
+
+test('Connect names only a known agent, and Settings opens only a Logline setting', () => {
+  assert.deepEqual(parseViewRequest({ type: 'connectAgent', agent: 'codex' }), {
+    type: 'connectAgent',
+    agent: 'codex',
+  });
+  assert.deepEqual(parseViewRequest({ type: 'connectAgent', agent: 'other' }), { type: 'connectAgent' });
+  assert.deepEqual(parseViewRequest({ type: 'config', setting: 'logline.maxMemoryMb' }), {
+    type: 'config',
+    setting: 'logline.maxMemoryMb',
+  });
+  for (const setting of ['editor.fontSize', 'logline.', 'logline.x; rm', 42])
+    assert.deepEqual(parseViewRequest({ type: 'config', setting }), { type: 'config' });
+});
+
+test('removing a source names it, and removing a connection names the connection', () => {
+  assert.deepEqual(parseViewRequest({ type: 'removeSource', serverId: 'api' }), {
+    type: 'removeSource',
+    serverId: 'api',
+  });
+  assert.equal(parseViewRequest({ type: 'removeSource' }), undefined);
+  assert.deepEqual(parseViewRequest({ type: 'removeConnection', connectionId: 'prod' }), {
+    type: 'removeConnection',
+    connectionId: 'prod',
+  });
+  assert.equal(parseViewRequest({ type: 'removeConnection' }), undefined);
+});
+
+test('the welcome reports it was seen', () => {
+  assert.deepEqual(parseViewRequest({ type: 'onboardingSeen' }), { type: 'onboardingSeen' });
+});

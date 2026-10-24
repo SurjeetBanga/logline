@@ -15,6 +15,10 @@ import { createDoctor } from './inspection/doctor';
 import { createPopovers } from './popovers';
 import { createSearch } from './search/controls';
 import { createConnectionBar } from './search/connection-bar';
+import { createSourceRail } from './search/source-rail';
+import { createSharePanel } from './share-panel';
+import { createTabRail } from './tab-rail';
+import { createTour } from './tour';
 import { createCompare } from './inspection/compare';
 import { createMetricQuery } from './inspection/metric-query';
 import { ViewerState } from './state';
@@ -26,6 +30,9 @@ import type { WebviewApi } from './types';
 import { createViews, isTabName, tabOf, type TabName, type ViewName } from './views';
 
 const HOLD_AFTER_MOVE_MS = 2000;
+// Host status texts that say nothing new; the status bar shows only the others, such as a failure.
+const STEADY_STATUS = new Set(['', 'Ready', 'Running', 'Idle', 'Stopped']);
+const MIB = 1048576;
 
 export function createViewer(api: WebviewApi) {
   const scope = new EventScope();
@@ -37,6 +44,11 @@ export function createViewer(api: WebviewApi) {
   const state = new ViewerState(saved);
   elements.search.value = saved.query ?? '';
   const { popovers, createPopover } = createPopovers(scope);
+  const sharePanel = createSharePanel(elements, api, scope, createPopover);
+  const tabRail = createTabRail(elements, state, scope, {
+    saveState: () => saveState(),
+    collapsedChanged: () => rail.applyCollapsed(),
+  });
   createTooltips(scope);
   // The remembered tab, until the first snapshot says whether it has data.
   let restoreTab: TabName | undefined;
@@ -99,6 +111,13 @@ export function createViewer(api: WebviewApi) {
     saveState,
     (baselineServerId, baselineSessionId) => compareView.open({ baselineServerId, baselineSessionId }),
   );
+  const rail = createSourceRail(elements, state, api, scope, {
+    selectSource: (id) => selectSource(id),
+    selectRun,
+    saveState,
+    query: () => search.query(),
+    collapsedChanged: () => tabRail.applyCollapsed(),
+  });
   const request = (force = false) => bridge.request(force);
   const traceView = createTraceView(elements, api, scope, {
     showContext: (id) => inspection.showContext(id),
@@ -118,12 +137,14 @@ export function createViewer(api: WebviewApi) {
     receiver: () => ({ running: otlpRunning, endpoint: otlpEndpoint }),
     reveal: () => views.show('traces'),
     visible: () => views.active() === 'traces',
+    rail: (title, items) => tabRail.set('traces', title, items),
   });
   const compareView = createCompare(elements, api, scope, {
     reveal: () => views.show('compare'),
     visible: () => views.active() === 'compare',
     formatTime: (ms) => formatTimestamp({ id: 0, level: '', timestampMs: ms }) ?? '',
     showContext: (id) => inspection.showContext(id),
+    rail: (title, items) => tabRail.set('compare', title, items),
   });
   const metricQuery = createMetricQuery(elements, api, scope, {
     formatTime: (ms) => formatTimestamp({ id: 0, level: '', timestampMs: ms }) ?? '',
@@ -145,6 +166,11 @@ export function createViewer(api: WebviewApi) {
   const metricList = createMetricList(elements, api, scope, {
     reveal: () => views.show('metrics'),
     visible: () => views.active() === 'metrics',
+    rail: (title, items) => tabRail.set('metrics', title, items),
+    queryConnection: (id) => {
+      elements.metricConnection.value = id;
+      elements.metricInput.focus();
+    },
   });
   const aiCalls = createAiCalls(elements, api, scope, {
     showTrace: (traceId) => traceView.show(traceId),
@@ -195,13 +221,11 @@ export function createViewer(api: WebviewApi) {
     () => table.currentColumns,
     () => doctor.revision(),
   );
-  let serverSignature = '';
-  let sessionSignature = '';
-  let activeScopeTab: 'sources' | 'runs' = 'sources';
   let visibleSources: Snapshot['servers'] = [];
+  // Every run in the latest snapshot, and those of the selected source.
+  let allSessions: Snapshot['sessions'] = [];
   let visibleSessions: Snapshot['sessions'] = [];
   let guideUnread = document.body?.dataset.guideUnread === 'true';
-  let agentSharingActive = false;
   elements.helpBadge.hidden = !guideUnread;
   let searchDebounce: ReturnType<typeof setTimeout> | undefined;
   let autocompleteDebounce: ReturnType<typeof setTimeout> | undefined;
@@ -248,7 +272,6 @@ export function createViewer(api: WebviewApi) {
       return;
     }
     if (data.type === 'serversChanged') {
-      serverSignature = '';
       request(true);
       return;
     }
@@ -335,6 +358,10 @@ export function createViewer(api: WebviewApi) {
       search.setQuery(data.applyQuery, true);
     }
     if (data.openTrace) traceView.show(data.openTrace);
+    if (data.startTour) scope.frame(() => startTour());
+    // The guide's Show me: point at the control once this snapshot is on screen.
+    const reveal = data.reveal;
+    if (reveal) scope.frame(() => revealControl(reveal.target, reveal.fallback));
     // A source and run chosen from the editor, such as a connection just added or a search just run. This
     // snapshot's rows and columns belong to the previous selection, so the next one is rendered instead.
     if (
@@ -351,19 +378,21 @@ export function createViewer(api: WebviewApi) {
     otlpRunning = data.otlp?.running === true;
     otlpEndpoint = data.otlp?.endpoint;
     if (otlpRunning !== receiverWasRunning) traceList.receiverChanged();
-    // The receiver's state stays visible while it runs, and leads to the traces it collected.
-    elements.otlpStatus.hidden = !otlpRunning;
-    if (otlpRunning) {
-      elements.otlpStatus.textContent =
-        `OpenTelemetry ${data.otlp?.endpoint?.replace(/^https?:\/\//, '') ?? ''}`.trim();
-      elements.otlpStatus.title = `Receiving OpenTelemetry logs, traces, and metrics on ${data.otlp?.endpoint ?? 'localhost'}. Click to see traces.`;
-    }
+    // The receiver's chip shows whether it runs, and starts or stops it.
+    elements.otlpStatus.setAttribute('aria-pressed', String(otlpRunning));
+    elements.otlpStatus.textContent = otlpRunning
+      ? `OpenTelemetry ${data.otlp?.endpoint?.replace(/^https?:\/\//, '') ?? ''}`.trim()
+      : 'OpenTelemetry off';
+    elements.otlpStatus.title = otlpRunning
+      ? `Receiving OpenTelemetry logs, traces, and metrics on ${data.otlp?.endpoint ?? 'localhost'}${data.otlp?.error ? ` (${data.otlp.error})` : ''}. Click to stop the receiver.`
+      : 'Receive OpenTelemetry logs, traces, and metrics from instrumented apps on this machine. Click to start the receiver.';
     doctor.receive(data.doctor);
     changedFiles = data.changes?.files;
     updateChangesControl();
     // A connection can be queried for metrics, so the tab shows with one too.
     metricList.update(data.metrics, otlpRunning || !!data.connections?.length);
     metricQuery.update(data.connections);
+    metricList.setConnections(data.connections);
     aiCalls.update(data.aiCalls, otlpRunning);
     // Tabs such as Metrics appear only once the snapshot says they have data.
     if (restoreTab) {
@@ -377,10 +406,6 @@ export function createViewer(api: WebviewApi) {
     elements.traces.title = data.traceCount
       ? `${numberFormat.format(data.traceCount)} traces received from OpenTelemetry. Show requests across services.`
       : 'Requests across services, from OpenTelemetry spans and logs with a trace id';
-    elements.otlpToggle.textContent = otlpRunning ? 'Stop OpenTelemetry receiver' : 'Start OpenTelemetry receiver';
-    elements.otlpToggle.title = otlpRunning
-      ? `Receiving OpenTelemetry on ${data.otlp?.endpoint ?? 'localhost'}${data.otlp?.error ? ` (${data.otlp.error})` : ''}`
-      : 'Receive OpenTelemetry logs, traces, and metrics from instrumented apps on this machine';
     if (data.generation < minimumSnapshotGeneration) {
       bridge.flush();
       return;
@@ -418,9 +443,8 @@ export function createViewer(api: WebviewApi) {
     // The OpenTelemetry chip already shows where the receiver listens.
     elements.status.textContent =
       otlpRunning && data.status.startsWith('OpenTelemetry receiver on') ? 'Ready' : data.status;
-    elements.command.textContent = data.command;
-    elements.command.title = data.command;
-    elements.stop.disabled = !data.running;
+    // Only news is shown: a steady state is already visible in the rail and the chips.
+    elements.status.hidden = STEADY_STATUS.has(elements.status.textContent);
     setLabel(
       elements.captureToggle,
       data.captureStatus?.state === 'capturing'
@@ -438,7 +462,7 @@ export function createViewer(api: WebviewApi) {
         ? 'Terminal capture is on. Click to turn it off.'
         : 'Terminal capture is off. Click to turn it on.');
     const sharing = data.agentSharing?.active;
-    agentSharingActive = Boolean(sharing);
+    sharePanel.update(data);
     const sharedRuns = sharing
       ? data.agentSharing.sources.reduce((sum, source) => sum + (source.runs?.length ?? source.sessions), 0)
       : 0;
@@ -461,92 +485,37 @@ export function createViewer(api: WebviewApi) {
       : sharing
         ? `Agents can read ${sharedRuns} selected run${sharedRuns === 1 ? '' : 's'} in this window, redacted, until you stop sharing. Later commands are not included.`
         : '';
-    // An icon button: its name and tooltip say what it stops.
-    elements.stop.setAttribute('aria-label', state.selectedServer ? 'Stop server' : 'Stop all');
-    elements.stop.title = state.selectedServer
-      ? 'Stop the running commands of the selected source'
-      : 'Stop running commands that Logline started';
-    const activeSessions = Array.isArray(data.sessions)
-      ? data.sessions.filter((session) => ['running', 'stopping'].includes(session.status))
-      : [];
-    elements.sessions.textContent = activeSessions.length
-      ? `${activeSessions.length} active session${activeSessions.length === 1 ? '' : 's'}`
-      : 'No active sessions';
     let selectionChanged = false;
     if (data.servers) {
-      const signature = JSON.stringify(
-        data.servers.map((server) => [
-          server.id,
-          server.label,
-          server.status,
-          server.activeSessions,
-          server.taskName,
-          server.taskType,
-          server.dependencies,
-          server.dependencyState,
-          server.exitReason,
-        ]),
-      );
-      if (signature !== serverSignature) {
-        serverSignature = signature;
-        visibleSources = data.servers;
-        renderSourceMenu(data.servers);
-        const selectedServer = data.servers.some((server) => server.id === state.selectedServer)
-          ? state.selectedServer
-          : '';
-        if (selectedServer !== state.selectedServer) {
-          state.selectedServer = selectedServer;
-          state.selectedSession = '';
-          sessionSignature = '';
-          selectionChanged = true;
-        }
-        elements.server.value = selectedServer;
-      } else {
-        visibleSources = data.servers;
-        updateSourceSelection();
+      visibleSources = data.servers;
+      const selectedServer = data.servers.some((server) => server.id === state.selectedServer)
+        ? state.selectedServer
+        : '';
+      if (selectedServer !== state.selectedServer) {
+        state.selectedServer = selectedServer;
+        state.selectedSession = '';
+        selectionChanged = true;
       }
     }
     connectionBar.update(data.connections);
     compareView.update(data.sessions, data.servers, data.newest);
     if (data.openCompare) compareView.open(data.openCompare);
     if (data.sessions) {
-      // A container source (`<source>::<service>`) shares the runs of the source that printed it.
-      const sessions = data.sessions.filter(
-        (session) =>
-          !state.selectedServer ||
-          session.serverId === state.selectedServer ||
-          state.selectedServer.startsWith(`${session.serverId}::`),
-      );
-      const signature = JSON.stringify(
-        sessions.map((session) => [
-          session.id,
-          session.serverId,
-          session.command,
-          session.status,
-          session.startedAt,
-          session.endedAt,
-          session.captureStatus,
-          session.captureReason,
-          session.canStop,
-        ]),
-      );
-      if (signature !== sessionSignature) {
-        sessionSignature = signature;
-        visibleSessions = sessions;
-        renderRunMenu(sessions);
-      } else {
-        visibleSessions = sessions;
-        updateRunSelection();
-      }
-      const selectedSession = sessions.some((session) => session.id === state.selectedSession)
+      allSessions = data.sessions;
+      visibleSessions = sessionsFor(state.selectedServer);
+      const selectedSession = visibleSessions.some((session) => session.id === state.selectedSession)
         ? state.selectedSession
         : '';
       if (selectedSession !== state.selectedSession) {
         state.selectedSession = selectedSession;
         selectionChanged = true;
-        updateRunSelection();
       }
     }
+    rail.update({
+      servers: data.servers,
+      sessions: data.sessions ? visibleSessions : undefined,
+      connections: data.connections ?? [],
+    });
     if (selectionChanged) {
       state.filterChanged();
       saveState();
@@ -554,17 +523,7 @@ export function createViewer(api: WebviewApi) {
       bridge.refreshRequested = true;
     }
     const number = (value: number) => numberFormat.format(value);
-    const budget = Number.isFinite(data.maxBytes) ? (data.maxBytes / 1048576).toFixed(0) : '?';
-    const memory = `${(data.bytes / 1048576).toFixed(1)} / ${budget} MiB`;
-    const skipped = data.persistDropped ? ` · ${number(data.persistDropped)} disk writes skipped` : '';
-    // The status bar keeps what needs attention; the tooltip has every count.
-    elements.counts.textContent =
-      `${number(data.retained)} retained · ${memory}` +
-      (data.discarded ? ` · ${number(data.discarded)} discarded` : '') +
-      skipped;
-    elements.counts.title =
-      `${number(data.total)} received · ${number(data.retained)} retained · ${number(data.discarded)} discarded · ${memory} · ${data.truncated} truncated` +
-      skipped;
+    renderMemory(data, number);
     updateModeLabel();
     if (Array.isArray(data.columnFields)) state.columnFields = data.columnFields;
     table.updateColumns(data.columns ?? []);
@@ -580,7 +539,9 @@ export function createViewer(api: WebviewApi) {
       heldEvents = undefined;
       state.page = data.page ?? 0;
       state.pages = data.pages ?? 1;
-      elements.page.textContent = `Page ${state.page + 1} of ${state.pages} · ${number(data.matched ?? 0)} matches`;
+      const matched = data.matched ?? 0;
+      elements.page.textContent = matched ? `${number(matched)} match${matched === 1 ? '' : 'es'}` : 'No matches';
+      elements.pageNumber.textContent = `${state.page + 1} / ${state.pages}`;
       elements.older.disabled = state.page >= state.pages - 1;
       elements.newer.disabled = state.page === 0;
       // A partial refresh that added nothing returns the same array.
@@ -662,8 +623,12 @@ export function createViewer(api: WebviewApi) {
   }
 
   function updateModeLabel() {
-    elements.older.textContent = state.selectedSort ? 'Next →' : '← Older';
-    elements.newer.textContent = state.selectedSort ? '← Previous' : 'Newer →';
+    const older = state.selectedSort ? 'Next page' : 'Older page';
+    const newer = state.selectedSort ? 'Previous page' : 'Newer page';
+    elements.older.setAttribute('aria-label', older);
+    elements.older.title = older;
+    elements.newer.setAttribute('aria-label', newer);
+    elements.newer.title = newer;
     elements.mode.textContent = state.paused
       ? 'Paused — collection continues'
       : state.selectedSort
@@ -676,6 +641,8 @@ export function createViewer(api: WebviewApi) {
             ? 'Browsing · newer logs arrived — scroll to the top for Live'
             : 'Browsing retained history';
     elements.mode.className = state.following && !state.paused ? 'live-mode' : '';
+    // Plain Live is what the Live button already says; anything else is worth a word.
+    elements.mode.hidden = state.following && !state.paused && !heldEvents && !state.selectedSort;
   }
 
   function setFollowing(value: boolean) {
@@ -830,45 +797,6 @@ export function createViewer(api: WebviewApi) {
     elements.fieldsPanel,
   );
 
-  const scopePopover = createPopover(
-    elements.server.closest<HTMLElement>('.popover-container')!,
-    elements.server,
-    elements.scopeMenu,
-  );
-  setScopeTab('sources');
-  scope.listen(elements.server, 'keydown', (event) => {
-    if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return;
-    event.preventDefault();
-    scopePopover.open();
-    const panel = activeScopeTab === 'sources' ? elements.sourceMenu : elements.sessionMenu;
-    const selector = activeScopeTab === 'sources' ? '.source-select' : '.run-select';
-    const choices = [...panel.querySelectorAll<HTMLButtonElement>(selector)];
-    choices[event.key === 'ArrowUp' ? choices.length - 1 : 0]?.focus();
-  });
-  scope.listen(elements.sourcesTab, 'click', () => setScopeTab('sources', true));
-  scope.listen(elements.runsTab, 'click', () => setScopeTab('runs', true));
-  scope.listen(elements.scopeMenu, 'keydown', (event) => {
-    const target = event.target as HTMLElement;
-    if (target.classList.contains('scope-tab')) {
-      if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
-      event.preventDefault();
-      setScopeTab(event.key === 'ArrowLeft' ? 'sources' : 'runs', true);
-      return;
-    }
-    if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return;
-    if (!target.classList.contains('source-select') && !target.classList.contains('run-select')) return;
-    const panel = activeScopeTab === 'sources' ? elements.sourceMenu : elements.sessionMenu;
-    const selector = activeScopeTab === 'sources' ? '.source-select' : '.run-select';
-    const choices = [...panel.querySelectorAll<HTMLButtonElement>(selector)];
-    const index = choices.indexOf(target as HTMLButtonElement);
-    if (index < 0) return;
-    event.preventDefault();
-    choices[(index + (event.key === 'ArrowUp' ? -1 : 1) + choices.length) % choices.length]?.focus();
-  });
-  scope.listen(elements.scopeMenu, 'focusout', (event) => {
-    if (!elements.scopeMenu.contains(event.relatedTarget as Node | null)) scopePopover.close();
-  });
-
   const actionsContainer = elements.moreActions.closest<HTMLElement>('.popover-container')!;
   // Findings shown in an expanded event inside Surrounding logs act the same way.
   scope.listen(elements.contextDetails, 'click', (event) => {
@@ -887,18 +815,15 @@ export function createViewer(api: WebviewApi) {
   }
   const actionsMenu = createPopover(actionsContainer, elements.moreActions, elements.actionsMenu);
   const actionItems = [
-    elements.shareSpecificRuns,
-    elements.connectAgent,
     elements.copyResults,
     elements.export,
     elements.import,
     elements.clear,
     elements.breakOnLogs,
-    elements.otlpToggle,
     elements.manage,
-    elements.statusAction,
     elements.config,
     elements.help,
+    elements.takeTour,
   ];
   // Copy filtered results is hidden without a filter; keyboard navigation skips it.
   const shownActions = () => actionItems.filter((item) => !item.hidden);
@@ -953,15 +878,74 @@ export function createViewer(api: WebviewApi) {
     const enabled = elements.captureToggle.getAttribute('aria-pressed') !== 'true';
     api.postMessage({ type: 'toggleTerminalCapture', enabled });
   });
-  scope.listen(elements.shareAgent, 'click', () => {
-    if (agentSharingActive) api.postMessage({ type: 'stopSharing' });
-    else api.postMessage({ type: 'shareWithAgent' });
+  scope.listen(elements.shareScope, 'click', (event) => {
+    event.stopPropagation();
+    sharePanel.open();
   });
-  scope.listen(elements.shareSpecificRuns, 'click', () =>
-    api.postMessage({ type: 'shareWithAgent', chooseRuns: true }),
+  scope.listen(elements.statusIcon, 'click', () => api.postMessage({ type: 'showStatus' }));
+
+  // The tour: one stop per area of the panel, from the menu, the guide, or the first-run welcome.
+  const tour = createTour(scope, {
+    prepare: () => {
+      if (views.active() !== 'logs') views.show('logs');
+      for (const popover of popovers) popover.close();
+    },
+    ended: () => undefined,
+  });
+  function startTour(): void {
+    elements.tourHint.hidden = true;
+    if (elements.welcomeDialog.open) elements.welcomeDialog.close();
+    tour.start();
+  }
+  scope.listen(elements.takeTour, 'click', () => startTour());
+  scope.listen(elements.tourHintStart, 'click', () => startTour());
+  scope.listen(elements.tourHintDismiss, 'click', () => (elements.tourHint.hidden = true));
+  /** Leave the welcome, remembering it was seen, and do what was chosen. */
+  const welcomeChoice = (then: () => void) => () => {
+    elements.welcomeDialog.close();
+    api.postMessage({ type: 'onboardingSeen' });
+    then();
+  };
+  scope.listen(
+    elements.welcomeTour,
+    'click',
+    welcomeChoice(() => tour.start()),
   );
-  scope.listen(elements.connectAgent, 'click', () => api.postMessage({ type: 'connectAgent' }));
-  scope.listen(elements.statusAction, 'click', () => api.postMessage({ type: 'showStatus' }));
+  scope.listen(
+    elements.welcomeExplore,
+    'click',
+    welcomeChoice(() => (elements.tourHint.hidden = false)),
+  );
+  scope.listen(
+    elements.welcomeCapture,
+    'click',
+    welcomeChoice(() => api.postMessage({ type: 'toggleTerminalCapture', enabled: true })),
+  );
+  scope.listen(
+    elements.welcomeImport,
+    'click',
+    welcomeChoice(() => api.postMessage({ type: 'import' })),
+  );
+  scope.listen(
+    elements.welcomeConnection,
+    'click',
+    welcomeChoice(() => api.postMessage({ type: 'addConnection' })),
+  );
+  scope.listen(
+    elements.welcomeOtel,
+    'click',
+    welcomeChoice(() => api.postMessage({ type: 'toggleOtlp', enabled: true })),
+  );
+  // Escape on the welcome counts as exploring: it never shows again.
+  scope.listen(elements.welcomeDialog, 'cancel', () => {
+    api.postMessage({ type: 'onboardingSeen' });
+    elements.tourHint.hidden = false;
+  });
+  if (document.body?.dataset.firstRun === 'true') elements.welcomeDialog.showModal?.();
+  createPopover(elements.counts.closest<HTMLElement>('.popover-container')!, elements.counts, elements.memoryPanel);
+  scope.listen(elements.memorySettings, 'click', () =>
+    api.postMessage({ type: 'config', setting: 'logline.maxMemoryMb' }),
+  );
 
   scope.listen(elements.saveSearch, 'click', () => {
     for (const popover of popovers) popover.close();
@@ -1019,6 +1003,7 @@ export function createViewer(api: WebviewApi) {
     if (previous === 'aiCalls') aiCalls.hide();
     if (previous === 'aiCall') aiCalls.close();
     state.view = tabOf(view);
+    tabRail.show(tabOf(view));
     saveState();
   }
 
@@ -1079,10 +1064,6 @@ export function createViewer(api: WebviewApi) {
     requestInteraction();
   });
 
-  scope.listen(elements.stop, 'click', () =>
-    api.postMessage({ type: 'stop', serverId: state.selectedServer || undefined }),
-  );
-
   scope.listen(elements.config, 'click', () => api.postMessage({ type: 'config' }));
 
   scope.listen(elements.help, 'click', () =>
@@ -1090,8 +1071,7 @@ export function createViewer(api: WebviewApi) {
   );
 
   scope.listen(elements.manage, 'click', () => api.postMessage({ type: 'manageServers' }));
-  scope.listen(elements.otlpToggle, 'click', () => api.postMessage({ type: 'toggleOtlp', enabled: !otlpRunning }));
-  scope.listen(elements.otlpStatus, 'click', () => traceList.show());
+  scope.listen(elements.otlpStatus, 'click', () => api.postMessage({ type: 'toggleOtlp', enabled: !otlpRunning }));
 
   function exportRequest(type: 'export' | 'exportForAI') {
     api.postMessage({
@@ -1109,12 +1089,6 @@ export function createViewer(api: WebviewApi) {
   scope.listen(elements.breakOnLogs, 'click', () =>
     api.postMessage({ type: 'breakOnQuery', query: search.query(), levels: state.currentLevels() }),
   );
-
-  scope.listen(elements.run, 'click', () => {
-    // A selected connection runs its search; other sources start their command.
-    if (!connectionBar.run()) api.postMessage({ type: 'run', serverId: state.selectedServer || undefined });
-  });
-  scope.listen(elements.addConnection, 'click', () => api.postMessage({ type: 'addConnection' }));
 
   scope.listen(document, 'visibilitychange', () => {
     if (!document.hidden) request();
@@ -1153,220 +1127,113 @@ export function createViewer(api: WebviewApi) {
     },
   };
 
-  function formatSource(server: Snapshot['servers'][number]): { label: string; title: string } {
-    const stateText = server.status === 'idle' ? '' : ` · ${server.status}`;
-    const activity = server.activeSessions > 1 ? ` (${server.activeSessions} active)` : '';
-    const task = server.taskName ? `Task: ${server.taskName}` : server.label;
-    const type = server.taskType ? ` (${server.taskType})` : '';
-    const dependency = server.dependencies?.length
-      ? ` · deps ${server.dependencies.join(', ')} (${server.dependencyState || 'unknown'})`
-      : server.dependencyState && server.dependencyState !== 'none'
-        ? ` · deps ${server.dependencyState}`
-        : '';
-    const reason = server.exitReason ? ` · ${server.exitReason}` : '';
-    return {
-      label: `${task}${type}${stateText}${activity}${dependency}${reason}`,
-      title:
-        [
-          server.lastSession ? `Session ${server.lastSession}` : undefined,
-          server.taskName ? `Task ${server.taskName}${server.taskType ? ` (${server.taskType})` : ''}` : undefined,
-          server.dependencyState
-            ? `Dependencies: ${server.dependencies?.join(', ') || 'none'} (${server.dependencyState})`
-            : undefined,
-          server.exitReason ? `Exit: ${server.exitReason}` : undefined,
-        ]
-          .filter(Boolean)
-          .join(' · ') || server.status,
+  /** Which tab shows a view panel. */
+  function tabForPanel(id: string): TabName | undefined {
+    const tabs: Record<string, TabName> = {
+      logsView: 'logs',
+      analysisView: 'analysis',
+      compareView: 'compare',
+      tracesView: 'traces',
+      traceView: 'traces',
+      metricsView: 'metrics',
+      aiCallsView: 'aiCalls',
+      aiCallView: 'aiCalls',
+      doctorView: 'doctor',
     };
+    return tabs[id];
   }
 
-  function renderSourceMenu(servers: Snapshot['servers']): void {
-    const focusedSource = (document.activeElement as HTMLElement | undefined)?.dataset.sourceId;
-    const all = document.createElement('button');
-    all.type = 'button';
-    all.className = 'source-select';
-    all.dataset.sourceId = '';
-    const activeCount = servers.reduce((sum, server) => sum + (server.activeSessions || 0), 0);
-    all.textContent = activeCount ? `All sources · ${activeCount} active` : 'All sources';
-    all.title = 'Show logs from every source';
-    scope.listen(all, 'click', () => selectSource(''));
-    const add = document.createElement('button');
-    add.type = 'button';
-    add.className = 'source-select source-action';
-    add.textContent = 'Add connection…';
-    add.title = 'Search and tail the log table of a SQLite or Postgres database';
-    scope.listen(add, 'click', () => {
-      scopePopover.close(true);
-      api.postMessage({ type: 'addConnection' });
-    });
-    const options = [
-      all,
-      ...servers.map((server) => {
-        const option = document.createElement('button');
-        option.type = 'button';
-        option.className = 'source-select';
-        option.dataset.sourceId = server.id;
-        const formatted = formatSource(server);
-        option.textContent = formatted.label;
-        option.title = formatted.title;
-        scope.listen(option, 'click', () => selectSource(server.id));
-        return option;
-      }),
-      add,
-    ];
-    elements.sourceMenu.replaceChildren(...options);
-    updateSourceSelection();
-    if (focusedSource !== undefined) {
-      const focus = [...elements.sourceMenu.querySelectorAll<HTMLElement>('[data-source-id]')].find(
-        (node) => node.dataset.sourceId === focusedSource,
-      );
-      focus?.focus();
+  /** Whether an element is shown: neither it nor anything around it is hidden. */
+  function shown(element: HTMLElement | null): boolean {
+    for (let node = element; node; node = node.parentElement) if (node.hidden) return false;
+    return Boolean(element);
+  }
+
+  /** Open what holds a control, such as its menu or tab; false when it cannot be shown. */
+  function bringIntoView(element: HTMLElement): boolean {
+    if (elements.actionsMenu.contains(element)) actionsMenu.open();
+    else if (elements.sharePanel.contains(element)) sharePanel.open();
+    const panel = element.closest<HTMLElement>('.view-panel');
+    if (panel?.classList.contains('view-panel')) {
+      const tab = tabForPanel(panel.id);
+      if (!tab || !views.available(tab)) return false;
+      if (tabOf(views.active()) !== tab) openView(tab);
+    } else if (
+      (elements.sourceRail.contains(element) || element.closest('.workspace-main')) &&
+      views.active() !== 'logs' &&
+      views.active() !== 'analysis'
+    )
+      // The rail and the filter row show on Logs and Analyze.
+      views.show('logs');
+    return shown(element);
+  }
+
+  /** Point at a control for the guide, or at `fallback` while the control is hidden. */
+  function revealControl(target: string, fallback?: string): void {
+    for (const id of [target, fallback]) {
+      const element = id ? document.getElementById(id) : null;
+      if (!element || !bringIntoView(element)) continue;
+      element.scrollIntoView?.({ block: 'nearest', inline: 'nearest' });
+      element.classList.add('reveal-pulse');
+      setTimeout(() => element.classList.remove('reveal-pulse'), 1800);
+      if (element.tabIndex >= 0) element.focus({ preventScroll: true });
+      return;
     }
   }
 
-  function updateSourceSelection(): void {
-    for (const choice of elements.sourceMenu.querySelectorAll<HTMLButtonElement>('.source-select'))
-      if (choice.dataset.sourceId !== undefined)
-        choice.setAttribute('aria-selected', String(choice.dataset.sourceId === state.selectedServer));
-    updateScopeSelection();
+  /** The memory chip: a meter and how much is kept, with every count in its panel. */
+  function renderMemory(data: Snapshot, number: (value: number) => string): void {
+    const used = data.bytes / MIB;
+    const budget = Number.isFinite(data.maxBytes) && data.maxBytes > 0 ? data.maxBytes / MIB : undefined;
+    const share = budget ? Math.min(1, used / budget) : 0;
+    elements.memoryFill.style.width = `${Math.round(share * 100)}%`;
+    elements.memoryFill.classList[share >= 0.9 ? 'add' : 'remove']('full');
+    const memory = `${used.toFixed(used < 10 ? 1 : 0)} / ${budget ? budget.toFixed(0) : '?'} MiB`;
+    elements.memoryText.textContent = memory;
+    elements.counts.title = `${number(data.retained)} logs kept, using ${memory}. Click for details.`;
+    elements.memorySummary.textContent = `${memory} of memory for ${number(data.retained)} logs. The oldest go first when it fills.`;
+    const rows: [string, string][] = [
+      ['Received', number(data.total)],
+      ['Kept', number(data.retained)],
+      ['Discarded, oldest first', number(data.discarded)],
+      ['Lines cut short', number(data.truncated)],
+      ...(data.persistDropped ? [['Disk writes skipped', number(data.persistDropped)] as [string, string]] : []),
+    ];
+    elements.memoryDetails.replaceChildren(
+      ...rows.flatMap(([label, value]) => {
+        const term = document.createElement('dt');
+        term.textContent = label;
+        const detail = document.createElement('dd');
+        detail.textContent = value;
+        return [term, detail];
+      }),
+    );
   }
 
+  /** The runs of a source; a container source (`<source>::<service>`) shares those of the source that printed it. */
+  function sessionsFor(id: string): Snapshot['sessions'] {
+    return allSessions.filter((session) => !id || session.serverId === id || id.startsWith(`${session.serverId}::`));
+  }
+
+  /** The selection changed outside the rail, such as by a saved search. */
   function updateScopeSelection(): void {
-    const selectedSource = visibleSources.find((server) => server.id === state.selectedServer);
-    const activeCount = visibleSources.reduce((sum, server) => sum + (server.activeSessions || 0), 0);
-    const sourceLabel =
-      selectedSource?.label ||
-      (state.selectedServer || activeCount
-        ? `All sources${activeCount ? ` · ${activeCount} active` : ''}`
-        : 'All sources');
-    const selectedRun = visibleSessions.find((session) => session.id === state.selectedSession);
-    const runLabel =
-      (selectedRun && runName(selectedRun)) ||
-      (visibleSessions.length ? `All runs · ${visibleSessions.length}` : 'All runs');
-    elements.server.value = state.selectedServer;
-    elements.server.textContent = `${sourceLabel} · ${runLabel}`;
-    elements.server.title = [
-      selectedSource?.label || 'All sources',
-      (selectedRun && runName(selectedRun)) || 'All runs',
-    ].join(' · ');
-  }
-
-  function setScopeTab(tab: 'sources' | 'runs', focus = false): void {
-    activeScopeTab = tab;
-    elements.sourcesTab.setAttribute('aria-selected', String(tab === 'sources'));
-    elements.runsTab.setAttribute('aria-selected', String(tab === 'runs'));
-    elements.sourcesTab.tabIndex = tab === 'sources' ? 0 : -1;
-    elements.runsTab.tabIndex = tab === 'runs' ? 0 : -1;
-    elements.sourceMenu.hidden = tab !== 'sources';
-    elements.sessionMenu.hidden = tab !== 'runs';
-    if (focus) (tab === 'sources' ? elements.sourcesTab : elements.runsTab).focus();
+    visibleSessions = sessionsFor(state.selectedServer);
+    rail.selectionChanged(visibleSessions);
+    connectionBar.render();
   }
 
   function selectSource(id: string, run = ''): void {
     search.clearAutocomplete();
     state.selectedServer = id;
     state.selectedSession = run;
-    sessionSignature = '';
-    visibleSessions = [];
-    elements.server.value = id;
-    elements.sessionMenu.replaceChildren();
+    visibleSessions = sessionsFor(id);
     state.page = 0;
     state.lastRows = undefined;
     table.resetAutomaticColumns();
-    updateSourceSelection();
-    setScopeTab('sources');
     saveState();
-    scopePopover.close(true);
+    rail.selectionChanged(visibleSessions);
     connectionBar.render();
     requestInteraction();
-  }
-
-  /** What a run is called in the picker: its command, else its task or source, never its internal id. */
-  function runName(session: Snapshot['sessions'][number]): string {
-    return session.command || (session.taskName ? `Task: ${session.taskName}` : '') || session.server || 'Run';
-  }
-
-  function renderRunMenu(sessions: Snapshot['sessions']): void {
-    const focusedRun = (document.activeElement as HTMLElement | undefined)?.dataset.runId;
-    const all = document.createElement('button');
-    all.type = 'button';
-    all.className = 'run-select';
-    all.dataset.runId = '';
-    all.tabIndex = 0;
-    all.textContent = sessions.length ? `All runs · ${sessions.length}` : 'All runs';
-    scope.listen(all, 'click', () => selectRun(''));
-    elements.sessionMenu.replaceChildren(all);
-    for (const session of sessions) {
-      const row = document.createElement('div');
-      row.className = 'run-option-row';
-      const select = document.createElement('button');
-      select.type = 'button';
-      select.className = 'run-select';
-      select.dataset.runId = session.id;
-      select.tabIndex = 0;
-      const started = session.startedAt ? new Date(session.startedAt).toLocaleTimeString() : '';
-      const stateText = session.status === 'running' ? 'running' : session.exitReason || session.status;
-      select.textContent = `${runName(session)} · ${started} · ${stateText}`;
-      select.title = [
-        session.cwd,
-        session.captureStatus ? `Capture: ${session.captureStatus}` : undefined,
-        session.captureReason,
-      ]
-        .filter(Boolean)
-        .join(' · ');
-      scope.listen(select, 'click', () => selectRun(session.id));
-      row.append(select);
-      if (session.status === 'running' || session.status === 'stopping') {
-        if (session.canStop === true) {
-          const stop = document.createElement('button');
-          stop.type = 'button';
-          stop.className = 'run-stop';
-          stop.dataset.runId = session.id;
-          stop.dataset.serverId = session.serverId;
-          stop.textContent = session.status === 'stopping' ? 'Stopping…' : 'Stop';
-          stop.disabled = session.status !== 'running';
-          stop.title = stop.disabled
-            ? 'This run is stopping.'
-            : session.sourceKind === 'file'
-              ? 'Stop following this file'
-              : session.sourceKind === 'debug'
-                ? 'Stop this debug session'
-                : 'Stop this command run';
-          scope.listen(stop, 'click', (event) => {
-            event.stopPropagation();
-            if (stop.disabled) return;
-            api.postMessage({ type: 'stop', serverId: session.serverId, sessionId: session.id });
-          });
-          row.append(stop);
-        } else {
-          const status = document.createElement('span');
-          status.className = 'run-stop run-stop-disabled';
-          status.textContent =
-            session.sourceKind === 'terminal' || session.sourceKind === 'otel' ? 'Capture only' : 'Unavailable';
-          status.title =
-            session.sourceKind === 'terminal'
-              ? 'Externally owned terminal commands can be captured but not stopped by Logline.'
-              : session.sourceKind === 'otel'
-                ? 'Telemetry is received from an application Logline does not own.'
-                : 'This run cannot be stopped from Logline.';
-          row.append(status);
-        }
-      }
-      elements.sessionMenu.append(row);
-    }
-    updateRunSelection();
-    if (focusedRun !== undefined) {
-      const focus = [...elements.sessionMenu.querySelectorAll<HTMLElement>('[data-run-id]')].find(
-        (node) => node.dataset.runId === focusedRun,
-      );
-      focus?.focus();
-    }
-  }
-
-  function updateRunSelection(): void {
-    for (const choice of elements.sessionMenu.querySelectorAll<HTMLButtonElement>('.run-select'))
-      choice.setAttribute('aria-selected', String(choice.dataset.runId === state.selectedSession));
-    updateScopeSelection();
   }
 
   function selectRun(id: string): void {
@@ -1375,9 +1242,7 @@ export function createViewer(api: WebviewApi) {
     state.lastRows = undefined;
     state.filterChanged();
     saveState();
-    updateRunSelection();
-    setScopeTab('runs');
-    scopePopover.close(true);
+    rail.selectionChanged();
     requestInteraction();
   }
 }

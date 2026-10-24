@@ -1,5 +1,5 @@
 import type { LogStore } from '../core/log-store';
-import type { ServerConfig, SessionSummary } from '../core/types';
+import type { ServerConfig, SessionSummary, SourceKind } from '../core/types';
 
 export interface ServerSummary {
   id: string;
@@ -13,6 +13,12 @@ export interface ServerSummary {
   dependencies?: string[];
   dependencyState?: string;
   exitReason?: string;
+  /** A saved server command, which Logline can run again. */
+  configured?: boolean;
+  /** What kind of source its newest run came from, for its icon. */
+  kind?: SourceKind;
+  /** Whether Logline can stop one of its active runs. */
+  canStop?: boolean;
 }
 
 export class SessionRegistry {
@@ -123,6 +129,7 @@ export class SessionRegistry {
     }
     const summaries: ServerSummary[] = [];
     const seen = new Set<string>();
+    const configuredIds = new Set(configured.map((server) => server.id));
     const add = (id: string, label: string) => {
       if (seen.has(id)) return;
       seen.add(id);
@@ -151,6 +158,9 @@ export class SessionRegistry {
         dependencies: detail?.dependencies,
         dependencyState: detail?.dependencyState,
         exitReason: detail?.exitReason,
+        ...(configuredIds.has(id) ? { configured: true } : {}),
+        ...(detail?.sourceKind ? { kind: detail.sourceKind } : {}),
+        ...(active.some((record) => record.canStop === true) ? { canStop: true } : {}),
       });
     };
     for (const server of configured) add(server.id, server.label);

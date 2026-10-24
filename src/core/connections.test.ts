@@ -97,3 +97,56 @@ test('a mapping is suggested from column names, each column used once', () => {
   );
   assert.deepEqual(suggestMapping([{ name: 'value', type: 'REAL' }]), {});
 });
+
+test('MySQL and MongoDB connections are kept, IAM sign-in turns on TLS, and each keeps its secret by what it opens', async () => {
+  const { isRdsHost, mongoUrl, rdsRegion } = await import('./connections.js');
+  const [billing, aurora, events, badMongo] = normalizeConnections([
+    { id: 'billing', type: 'mysql', host: 'db', database: 'billing', user: 'reader' },
+    {
+      id: 'aurora',
+      type: 'postgres',
+      host: 'orders.cluster-c9.us-east-1.rds.amazonaws.com',
+      database: 'orders',
+      user: 'app',
+      auth: { kind: 'iam', profile: 'prod', region: 'nowhere' },
+    },
+    { id: 'events', type: 'mongodb', url: 'mongodb+srv://reader@cluster0.example.net/app?retryWrites=true' },
+    { id: 'secret', type: 'mongodb', url: 'mongodb://reader:hunter2@db/app' },
+  ]);
+  assert.deepEqual(billing, {
+    id: 'billing',
+    label: 'billing',
+    type: 'mysql',
+    host: 'db',
+    port: 3306,
+    database: 'billing',
+    user: 'reader',
+  });
+  assert.deepEqual(aurora, {
+    id: 'aurora',
+    label: 'aurora',
+    type: 'postgres',
+    host: 'orders.cluster-c9.us-east-1.rds.amazonaws.com',
+    port: 5432,
+    database: 'orders',
+    user: 'app',
+    ssl: true,
+    auth: { kind: 'iam', profile: 'prod' },
+  });
+  assert.deepEqual(events, {
+    id: 'events',
+    label: 'events',
+    type: 'mongodb',
+    url: 'mongodb+srv://reader@cluster0.example.net/app?retryWrites=true',
+    database: 'app',
+  });
+  assert.equal(badMongo, undefined, 'a URL with a password is refused');
+  assert.equal(connectionLabel(billing), 'MySQL · billing');
+  assert.equal(connectionLabel(events), 'MongoDB · events');
+  assert.equal(secretKey(billing as never), 'logline.connection.mysql://reader@db:3306/billing');
+  assert.equal(secretKey(events as never), 'logline.connection.mongodb://reader@cluster0.example.net/app');
+  assert.equal(isRdsHost('orders.cluster-c9.us-east-1.rds.amazonaws.com'), true);
+  assert.equal(isRdsHost('db.example.com'), false);
+  assert.equal(rdsRegion('billing.cluster-ro-c9.eu-central-1.rds.amazonaws.com'), 'eu-central-1');
+  assert.equal(mongoUrl('https://example.com'), undefined);
+});

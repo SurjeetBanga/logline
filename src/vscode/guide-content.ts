@@ -228,6 +228,430 @@ export const GUIDE_RELEASES: GuideRelease[] = [
   },
 ];
 
+/**
+ * A card in the guide: what a feature does and where to find it. `target` is
+ * the id of the Logs panel control that Show me points at (a test keeps it in
+ * step with the panel); `fallback` is shown instead while the target is hidden,
+ * such as a connection's controls before a connection is selected. A card can
+ * instead run a command or open a setting.
+ */
+export interface GuideCard {
+  section: string;
+  title: string;
+  /** Where to find it, outermost first, such as ['Status bar', 'Capture']. */
+  where: string[];
+  text: string;
+  example?: string;
+  target?: string;
+  fallback?: string;
+  command?: string;
+  setting?: string;
+  /** A heading in docs/usage.md, by its anchor. */
+  docs?: string;
+}
+
+export interface GuideSection {
+  id: string;
+  title: string;
+  summary: string;
+  /** Marked New in the guide's sidebar. */
+  isNew?: boolean;
+}
+
+export const GUIDE_SECTIONS: GuideSection[] = [
+  {
+    id: 'capture',
+    title: 'Capture',
+    summary: 'Bring a terminal, command, task, debug session, or app into the Logs panel.',
+  },
+  {
+    id: 'connections',
+    title: 'Connections',
+    summary:
+      'Search production logs in Datadog, Postgres, MySQL and Aurora, MongoDB, or SQLite next to your local runs. Every connection is read-only.',
+    isNew: true,
+  },
+  { id: 'search', title: 'Search', summary: 'Turn a noisy stream into the few events you need.' },
+  {
+    id: 'inspect',
+    title: 'Inspect and analyze',
+    summary: 'Move from a row to the story around it, and see the patterns in what is retained.',
+  },
+  {
+    id: 'traces',
+    title: 'Traces and AI calls',
+    summary: 'Follow requests across services, and read what your app asks the model.',
+  },
+  {
+    id: 'compare',
+    title: 'Compare with production',
+    summary: 'See whether your local run reproduces a production failure, and whether your fix removes it.',
+    isNew: true,
+  },
+  {
+    id: 'share',
+    title: 'Share with agents',
+    summary: 'Let Copilot, Claude Code, or Codex read what you choose, redacted and read-only.',
+  },
+  {
+    id: 'settings',
+    title: 'Settings and memory',
+    summary: 'Keep memory bounded, redact what you export, and see what Logline is doing.',
+  },
+];
+
+export const GUIDE_CARDS: GuideCard[] = [
+  {
+    section: 'capture',
+    title: 'Capture your terminal',
+    where: ['Status bar', 'Capture'],
+    text: 'Turn on Capture, then run commands as usual in a VS Code terminal. Their output becomes searchable here.',
+    example: 'npm test',
+    target: 'captureToggle',
+    docs: 'capture-and-live-tail',
+  },
+  {
+    section: 'capture',
+    title: 'Run a command',
+    where: ['Command Palette', 'Logline: Run Command'],
+    text: 'Start a long-running process and stream its stdout and stderr into Logs.',
+    example: 'npm run dev',
+    command: 'logline.runCommand',
+  },
+  {
+    section: 'capture',
+    title: 'Your sources and runs',
+    where: ['Sources rail'],
+    text: 'Click a source to see only its logs; its runs appear beneath it. Point at one to run it again, stop it, or remove it with its logs.',
+    target: 'sourceRail',
+  },
+  {
+    section: 'capture',
+    title: 'Save server commands',
+    where: ['More actions', 'Manage servers…'],
+    text: 'Save a label, command, working directory, and environment, with optional auto-start or JSON-only output.',
+    example: 'jsonOnly: true',
+    target: 'manage',
+  },
+  {
+    section: 'capture',
+    title: 'Capture a VS Code task',
+    where: ['Command Palette', 'Logline: Convert VS Code Task to Logline'],
+    text: 'Convert shell, process, launch, or terminal tasks while keeping their dependencies.',
+    example: '"type": "logline"',
+    command: 'logline.convertTask',
+  },
+  {
+    section: 'capture',
+    title: 'Debug sessions',
+    where: ['Run and Debug', 'F5'],
+    text: 'Debug Console output from every debugger streams in as its own source, and each restart is a new run.',
+    example: 'logline.captureDebugSessions',
+    setting: 'logline.captureDebugSessions',
+  },
+  {
+    section: 'capture',
+    title: 'Follow a file, Compose, or Kubernetes',
+    where: ['Command Palette', 'Logline: Follow Log File'],
+    text: 'Tail a log file like tail -F, or a Docker Compose project. Compose and kubectl logs --prefix output becomes one source per service.',
+    example: 'kubectl logs --prefix',
+    command: 'logline.followFile',
+  },
+  {
+    section: 'capture',
+    title: 'Receive OpenTelemetry',
+    where: ['Status bar', 'OpenTelemetry'],
+    text: 'Start a receiver on this machine. Instrumented apps you start from Logline, a debug session, or a new terminal send their logs, traces, and metrics to it.',
+    example: 'http://127.0.0.1:4318',
+    target: 'otlpStatus',
+    docs: 'opentelemetry-and-traces',
+  },
+  {
+    section: 'connections',
+    title: 'Add a connection',
+    where: ['Sources rail', '+'],
+    text: 'Pick Datadog, Postgres, MySQL, MongoDB, or SQLite. Passwords and keys stay in VS Code secret storage, never in settings; Aurora and RDS can sign in with AWS IAM instead.',
+    target: 'railAddConnection',
+    fallback: 'sourceRail',
+    docs: 'connections-datadog-postgres-mysql-mongodb-and-sqlite',
+  },
+  {
+    section: 'connections',
+    title: 'Search production',
+    where: ['Select a connection', 'Run'],
+    text: 'Your search becomes the store’s own query, shown before it runs. Each Run is a run of its own, so earlier results stay to compare.',
+    example: 'service:checkout level:error',
+    target: 'connectionRun',
+    fallback: 'sourceRail',
+  },
+  {
+    section: 'connections',
+    title: 'Tail as it happens',
+    where: ['Connection controls', 'Tail'],
+    text: 'New rows and logs appear as they arrive. Stop the tail from the connection’s row in the rail.',
+    target: 'connectionTail',
+    fallback: 'sourceRail',
+  },
+  {
+    section: 'connections',
+    title: 'Run SQL',
+    where: ['Connection controls', 'Run SQL…'],
+    text: 'Run a read-only SELECT on a database. Columns named like a time, level, or message are read as those.',
+    example: "SELECT * FROM app_logs WHERE severity = 'error'",
+    target: 'connectionSql',
+    fallback: 'sourceRail',
+  },
+  {
+    section: 'connections',
+    title: 'Open a Datadog link',
+    where: ['Connection controls', 'Open link…'],
+    text: 'Paste a Log Explorer link to fetch its search and, for a log with a trace, every log of that trace.',
+    target: 'connectionLink',
+    fallback: 'sourceRail',
+  },
+  {
+    section: 'connections',
+    title: 'Chart a metric',
+    where: ['Metrics tab', 'Metric query'],
+    text: 'Chart a Datadog metric or a SELECT of time and value, then drag across a spike to fetch the logs from that window.',
+    example: 'avg:trace.http.request.duration{*}',
+    target: 'metricInput',
+    fallback: 'metrics',
+    docs: 'metrics-from-connections',
+  },
+  {
+    section: 'search',
+    title: 'Build a query',
+    where: ['Search box'],
+    text: 'Combine free text, phrases, negation, OR, field filters, numeric ranges, regular expressions, and time windows. Applied terms become chips you can edit.',
+    example: 'status:5xx last:15m',
+    target: 'search',
+  },
+  {
+    section: 'search',
+    title: 'Search syntax',
+    where: ['Search box', 'Syntax'],
+    text: 'Every operator, with an example of each.',
+    example: 'message:/time.?out/i',
+    target: 'searchHelp',
+  },
+  {
+    section: 'search',
+    title: 'Filter by level',
+    where: ['Filter row', 'All levels'],
+    text: 'Choose any combination of Trace, Debug, Info, Warn, Error, Fatal, and Unclassified.',
+    target: 'levelButton',
+  },
+  {
+    section: 'search',
+    title: 'Filter from a value',
+    where: ['Table', 'right-click a value'],
+    text: 'Include or exclude a value without retyping it. Your other filters stay.',
+    example: 'service:"checkout"',
+    target: 'eventsTable',
+  },
+  {
+    section: 'search',
+    title: 'Reuse a search',
+    where: ['Search box', 'Saved searches'],
+    text: 'Save the current query, source, and levels, and apply them again later.',
+    target: 'searchTools',
+  },
+  {
+    section: 'search',
+    title: 'Logs from your changes',
+    where: ['Filter row', 'My changes'],
+    text: 'In a git repository, keep only logs from code you changed since the last commit.',
+    example: 'level:error changed:true',
+    target: 'changedOnly',
+    fallback: 'search',
+  },
+  {
+    section: 'inspect',
+    title: 'Live and Browse',
+    where: ['Filter row', 'Live'],
+    text: 'Live keeps the newest rows on top. Scroll down to read and rows hold still; scroll back to the top to follow again.',
+    target: 'follow',
+  },
+  {
+    section: 'inspect',
+    title: 'Expand an event',
+    where: ['Table', 'click a message'],
+    text: 'Read its formatted payload and exceptions, open the line that logged it, and see the logs around it from the same run.',
+    target: 'eventsTable',
+  },
+  {
+    section: 'inspect',
+    title: 'Analyze the filter',
+    where: ['Analyze tab'],
+    text: 'Error rate and latency at a glance, volume over time, status codes, top values, patterns, and error groups. Click any of them to filter to it.',
+    target: 'analyze',
+  },
+  {
+    section: 'inspect',
+    title: 'Choose columns',
+    where: ['Filter row', 'Columns'],
+    text: 'Show detected or custom fields. Drag headers to reorder and dividers to resize; click a header to sort.',
+    example: 'method · path · status',
+    target: 'fieldsButton',
+  },
+  {
+    section: 'inspect',
+    title: 'Jump between logs and code',
+    where: ['Editor', 'CodeLens above a log call'],
+    text: 'Log statements show how often they fired and their recent values. Click the CodeLens to filter Logs.',
+    example: 'logline.logLenses',
+    setting: 'logline.logLenses',
+  },
+  {
+    section: 'inspect',
+    title: 'Break when it logs',
+    where: ['More actions', 'Break on matching logs'],
+    text: 'Pause a debug session right after it logs anything that matches your filter.',
+    target: 'breakOnLogs',
+  },
+  {
+    section: 'inspect',
+    title: 'Fix risky log statements',
+    where: ['Issues tab'],
+    text: 'Log doctor flags statements that logged secrets or personal data, dropped an exception, or flood the logs, with quick fixes.',
+    command: 'logline.showLogHealth',
+  },
+  {
+    section: 'traces',
+    title: 'Follow a request',
+    where: ['Traces tab'],
+    text: 'Recent requests, then every span across services as a waterfall, with the logs that share its trace id. Where the time went ranks the slowest work.',
+    target: 'traces',
+    docs: 'opentelemetry-and-traces',
+  },
+  {
+    section: 'traces',
+    title: 'Read AI calls',
+    where: ['AI calls tab'],
+    text: 'Every LLM call, tool execution, and agent run with its model, tokens, and latency, and each call’s conversation.',
+    example: 'gen_ai.*',
+    target: 'aiCalls',
+    fallback: 'traces',
+  },
+  {
+    section: 'traces',
+    title: 'Watch metrics',
+    where: ['Metrics tab'],
+    text: 'OpenTelemetry metrics with each series’ latest value and trend, next to metric queries you watch on a connection.',
+    target: 'metrics',
+    fallback: 'otlpStatus',
+  },
+  {
+    section: 'compare',
+    title: 'Compare with local',
+    where: ['Connection controls', 'Compare with local'],
+    text: 'Line up a production run’s errors with your newest local runs, matched by message across machines.',
+    target: 'compare',
+    fallback: 'sourceRail',
+    docs: 'compare-production-with-local-runs',
+  },
+  {
+    section: 'compare',
+    title: 'What each status means',
+    where: ['Compare tab'],
+    text: 'Reproduced: in production and your newest run. Fixed locally: gone from your newest run. Not seen locally: production only. New: only in your newest run.',
+  },
+  {
+    section: 'share',
+    title: 'Share with agent',
+    where: ['Top row', 'Share with agent'],
+    text: 'Share what is captured in this window until you stop. Common credentials are redacted, and agents cannot run or stop anything.',
+    target: 'shareAgent',
+    docs: 'claude-code-codex-and-other-mcp-clients',
+  },
+  {
+    section: 'share',
+    title: 'Choose what agents read',
+    where: ['Share with agent', '▾'],
+    text: 'Share everything, or only the runs you pick. Expanding an event also shares its exact run.',
+    target: 'shareMenuButton',
+  },
+  {
+    section: 'share',
+    title: 'Connect Claude Code or Codex',
+    where: ['Share with agent', '▾', 'Connect…'],
+    text: 'Register Logline with an agent once. It also gets skills such as one that checks a change in the logs it produces.',
+    example: '/logline-verify',
+    target: 'shareMenuButton',
+  },
+  {
+    section: 'share',
+    title: 'Let agents fetch production logs',
+    where: ['Share with agent', '▾', 'Production access'],
+    text: 'Allow a connection, and agents you share with can fetch its logs and check that a fix removed an error.',
+    target: 'shareMenuButton',
+  },
+  {
+    section: 'share',
+    title: 'Export or copy',
+    where: ['More actions', 'Export logs…'],
+    text: 'Save JSON Lines, JSON, CSV, or AI context Markdown with the current source, run, and filters, redacted by default.',
+    example: 'AI context (Markdown)',
+    target: 'export',
+  },
+  {
+    section: 'share',
+    title: 'Import offline logs',
+    where: ['More actions', 'Import logs…'],
+    text: 'Load JSON, JSONL, CSV, or plain text into a source of its own for searching and analysis.',
+    target: 'import',
+  },
+  {
+    section: 'settings',
+    title: 'Memory',
+    where: ['Status bar', 'memory meter'],
+    text: 'Logs stay within a memory budget, oldest first out. The meter’s panel shows what was received, kept, and discarded.',
+    example: '50,000 events · 100 MiB',
+    target: 'counts',
+  },
+  {
+    section: 'settings',
+    title: 'Redact what you export',
+    where: ['Settings', 'Agents and privacy'],
+    text: 'Common credentials and secret-like fields are redacted by default. Add your own field names and replacement text.',
+    example: '[REDACTED]',
+    setting: 'logline.redactExports',
+  },
+  {
+    section: 'settings',
+    title: 'Keep logs on disk',
+    where: ['Settings', 'Memory and disk'],
+    text: 'Also write captured logs to .logline/latest.log, rolled over at a size you choose.',
+    example: '.logline/latest.log',
+    setting: 'logline.persistLogs',
+  },
+  {
+    section: 'settings',
+    title: 'Status and troubleshooting',
+    where: ['Status bar', '✓'],
+    text: 'What Logline is doing in this window, with a fix for anything off or broken.',
+    target: 'statusIcon',
+  },
+];
+
+/** Keyboard shortcuts in the Logs panel, for the guide's Keyboard section. */
+export const GUIDE_KEYS: [keys: string, action: string][] = [
+  ['← →', 'Move between tabs'],
+  ['↑ ↓  Home  End', 'Move between sources and runs in the rail, or items in a menu'],
+  ['Delete', 'Remove the focused source in the rail'],
+  ['Enter', 'Apply the filter you typed'],
+  ['Escape', 'Close a menu, panel, or surrounding logs'],
+  ['Arrow keys in the table', 'Move between cells; Enter opens a cell’s actions'],
+];
+
+/** How far someone has got, for the guide's Get started steps. */
+export interface GuideProgress {
+  captured: boolean;
+  searched: boolean;
+  shared: boolean;
+}
+
 export const latestGuideRelease = GUIDE_RELEASES[0];
 export const GUIDE_STATE_KEY = 'logline.guide.lastSeenVersion';
 

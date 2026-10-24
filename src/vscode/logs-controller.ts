@@ -36,21 +36,33 @@ import { buildSnapshot } from './snapshot';
 import { TaskLifecycle } from './tasks/lifecycle';
 import { ViewNotifications } from './view-notifications';
 import { TerminalCapture } from './terminal-capture';
-import { GUIDE_STATE_KEY, guideStatus as getGuideStatus } from './guide-content';
+import { GUIDE_STATE_KEY, guideStatus as getGuideStatus, type GuideProgress } from './guide-content';
+
+/** The guide's Get started steps done in this profile. */
+const PROGRESS_KEY = 'logline.onboarding.progress';
+/** Set once the first-run welcome was seen, or for a profile that used Logline before it existed. */
+const WELCOME_KEY = 'logline.onboarding.welcomed';
 import { AgentAccessError, AgentLogAccess } from './agent-access';
 import { ChangedLines, ChangeScope } from '../core/changed-lines';
 import { eventLocation, LogSiteIndex, LogSiteTracker } from '../core/log-sites';
 import { getField } from '../core/query';
 import { extractExceptions } from '../core/exceptions';
 import type { LogEvent } from '../core/types';
-import type { CompareRequest, CompareView, DetailLinks, DoctorAction, RowEvent } from '../protocol/messages';
+import type {
+  AgentSetupView,
+  CompareRequest,
+  CompareView,
+  DetailLinks,
+  DoctorAction,
+  RowEvent,
+} from '../protocol/messages';
 import type { LogBreakpoints } from './log-breakpoints';
 import { doctorMode, type LogDoctor } from './log-doctor';
 import { SensitiveScanner, type SourceSensitive } from '../core/log-findings';
 import type { GitChanges } from './git-changes';
 import type { LogLens } from './log-lens';
 import type { AgentBridge } from './agent-bridge';
-import { agentLaunch, connectAgent, copilotAvailable } from './agent-setup';
+import { agentLaunch, agentsWithSkills, connectAgent, copilotAvailable } from './agent-setup';
 import { mcpScriptPath } from '../protocol/agent-bridge';
 import { openSourceLocation } from './source-navigation';
 
@@ -139,6 +151,8 @@ export class LogsController {
   private pendingTrace?: string;
   private pendingSource?: string;
   private pendingRun?: string;
+  private pendingReveal?: { target: string; fallback?: string };
+  private pendingTour = false;
   readonly transfer = new LogTransfer(this.store, this.config, this.ingestion, this.state);
   readonly searches: SavedSearches;
   private readonly globalState: Pick<vscode.ExtensionContext, 'globalState'>['globalState'];
@@ -246,10 +260,18 @@ export class LogsController {
       pendingSource: applySource,
       pendingRun: applyRun,
       pendingCompare: openCompare,
+      pendingReveal: reveal,
+      pendingTour: startTour,
     } = this;
+    this.pendingTour = false;
     this.pendingQuery = this.pendingTrace = this.pendingSource = this.pendingRun = this.pendingCompare = undefined;
+    this.pendingReveal = undefined;
+    // The guide's first steps tick off from what was done; a search is remembered once it happens.
+    if (request.query?.trim()) this.markProgress('searched');
     return {
       ...(openCompare ? { openCompare } : {}),
+      ...(reveal ? { reveal } : {}),
+      ...(startTour ? { startTour } : {}),
       ...this.buildSnapshot(request),
       ...(applyQuery !== undefined ? { applyQuery } : {}),
       ...(openTrace ? { openTrace } : {}),
@@ -277,6 +299,7 @@ export class LogsController {
       rowLinks: (event) => this.rowLinks(event),
       rowLinksVersion: `${this.lens?.enabled ?? false}:${this.logSites.version}:${this.siteTracker.generation}:${this.doctor?.revision ?? 0}`,
       agentClients: this.agentBridge?.recentClients() ?? [],
+      agentSetup: this.agentSetup(),
       changes: this.gitChanges?.status(),
       doctor:
         this.doctor && doctorMode(this.config) !== 'off'
@@ -309,6 +332,8 @@ export class LogsController {
         snapshot: (request) => this.snapshot(request),
         clear: () => this.clear(),
         stop: (serverId, sessionId) => this.stop(serverId, sessionId),
+        removeSource: (serverId) => this.removeSource(serverId),
+        welcomed: () => this.welcomed(),
         runner: this.runner,
         showGuide: (section) => this.guideOpener?.(section),
         agentAccess: this.agentAccess,
@@ -329,7 +354,7 @@ export class LogsController {
         breakOnEvent: (id) => this.breakOnEvent(id),
         breakOnQuery: (query, levels) => this.breakOnQuery(query, levels),
         doctorAction: (action, siteId) => this.doctorAction(action, siteId),
-        connectAgent: () => this.connectAgent(),
+        connectAgent: (agent) => this.connectAgent(agent),
         showStatus: async () => {
           await vscode.commands.executeCommand('logline.showStatus');
         },
@@ -369,6 +394,50 @@ export class LogsController {
     this.pendingSource = sourceId;
     this.pendingRun = runId;
     if (query !== undefined) this.pendingQuery = query;
+    await vscode.commands.executeCommand('logline.logs.focus');
+    this.notifications.send({ type: 'update' });
+  }
+  /** Point at a control in the Logs panel for the guide's Show me, delivered with the next snapshot like showQuery. */
+  async reveal(target: string, fallback?: string): Promise<void> {
+    this.pendingReveal = { target, ...(fallback ? { fallback } : {}) };
+    await vscode.commands.executeCommand('logline.logs.focus');
+    this.notifications.send({ type: 'update' });
+  }
+  /** How far someone has got, for the guide's Get started steps. Each step stays done once it is. */
+  guideProgress(): GuideProgress {
+    if (this.store.total > 0) this.markProgress('captured');
+    if (this.agentAccess.status().active) this.markProgress('shared');
+    const done = this.globalState.get<Partial<GuideProgress>>(PROGRESS_KEY) ?? {};
+    return { captured: done.captured === true, searched: done.searched === true, shared: done.shared === true };
+  }
+  private markProgress(step: keyof GuideProgress): void {
+    const done = this.globalState.get<Partial<GuideProgress>>(PROGRESS_KEY) ?? {};
+    if (done[step]) return;
+    void Promise.resolve(this.globalState.update(PROGRESS_KEY, { ...done, [step]: true })).catch(() => undefined);
+    // The Welcome page walkthrough ticks its search step off from this.
+    if (step === 'searched') void vscode.commands?.executeCommand?.('setContext', 'logline.searched', true);
+  }
+  /**
+   * Whether the Logs panel should welcome someone: only on a fresh install. A
+   * profile with anything stored, such as saved searches or the guide's last
+   * seen version, used Logline before the welcome existed and never sees it.
+   */
+  firstRun(): boolean {
+    if (this.globalState.get<boolean>(WELCOME_KEY)) return false;
+    const stored = this.globalState.keys?.() ?? [];
+    if (stored.some((key) => key !== WELCOME_KEY)) {
+      void Promise.resolve(this.globalState.update(WELCOME_KEY, true)).catch(() => undefined);
+      return false;
+    }
+    return true;
+  }
+  /** The welcome was answered, or dismissed: it does not show again. */
+  welcomed(): void {
+    void Promise.resolve(this.globalState.update(WELCOME_KEY, true)).catch(() => undefined);
+  }
+  /** Start the panel tour from the Command Palette or the guide, with the next snapshot like showQuery. */
+  async startTour(): Promise<void> {
+    this.pendingTour = true;
     await vscode.commands.executeCommand('logline.logs.focus');
     this.notifications.send({ type: 'update' });
   }
@@ -479,15 +548,28 @@ export class LogsController {
         'Logline could not find the log statement for this event in the workspace.',
       );
   }
-  /** Register Logline with Claude Code, Codex, or another MCP client. */
-  async connectAgent(): Promise<void> {
+  private agentSetupCache?: { at: number; connected: string[] };
+  /** Which agents can read shared logs. The skills folders are read at most every 10 seconds, not per snapshot. */
+  private agentSetup(): AgentSetupView {
+    const now = Date.now();
+    if (!this.agentSetupCache || now - this.agentSetupCache.at > 10_000)
+      this.agentSetupCache = { at: now, connected: agentsWithSkills() };
+    return {
+      external: this.agentBridge?.running ?? false,
+      copilot: copilotAvailable(),
+      connected: this.agentSetupCache.connected,
+    };
+  }
+  /** Register Logline with Claude Code, Codex, or another MCP client; the Share panel names the agent. */
+  async connectAgent(agent?: 'claude' | 'codex'): Promise<void> {
     if (!this.agentBridge?.running) {
       void vscode.window.showWarningMessage(
         'Logline is not accepting MCP clients in this window. Turn on logline.externalAgents to connect Claude Code or Codex.',
       );
       return;
     }
-    await connectAgent(agentLaunch(mcpScriptPath()));
+    await connectAgent(agentLaunch(mcpScriptPath()), undefined, agent);
+    this.agentSetupCache = undefined;
   }
   async doctorAction(action: DoctorAction, siteId?: string): Promise<void> {
     if (!this.doctor) {
@@ -522,6 +604,42 @@ export class LogsController {
     // A clear must also remove a completed import's status. Active capture is
     // intentionally retained, so keep its truthful running state instead.
     this.state.reset(this.isRunning());
+  }
+  /**
+   * Stop a source if it is running, then drop its logs and runs, like closing
+   * a terminal. A saved server command stays in settings, so it can run again.
+   */
+  async removeSource(serverId: string): Promise<number> {
+    if (!serverId) return 0;
+    const label = this.store.serverLabel(serverId) ?? serverId;
+    const belongsTo = (id: string) => id === serverId || id.startsWith(`${serverId}::`);
+    const running = [...this.registry.records.values()].some(
+      (record) => belongsTo(record.serverId) && record.status === 'running' && record.canStop === true,
+    );
+    // Removing a source that is running stops its process, which one key press should not do unasked.
+    if (running) {
+      const answer = await vscode.window.showWarningMessage(
+        `Stop ${label} and remove its logs?`,
+        {
+          modal: true,
+          detail: 'Its process is stopped, and its logs and runs leave the panel. This cannot be undone.',
+        },
+        'Stop and Remove',
+      );
+      if (answer !== 'Stop and Remove' || this.disposing) return 0;
+    }
+    this.stop(serverId);
+    const removed = this.store.removeSource(serverId);
+    // A run that is still capturing, such as OpenTelemetry, a terminal, or a process that is
+    // shutting down, keeps adding logs under its record, so only finished runs are dropped.
+    for (const [id, record] of this.registry.records)
+      if (belongsTo(record.serverId) && record.status !== 'running' && record.status !== 'stopping')
+        this.registry.records.delete(id);
+    this.agentAccess.forgetSource(serverId);
+    this.state.status = `Removed ${label}${removed ? ` and its ${removed.toLocaleString()} log${removed === 1 ? '' : 's'}` : ''}`;
+    // The view's rows and pages no longer line up with what is retained.
+    this.state.invalidate();
+    return removed;
   }
   private isRunning(): boolean {
     return (

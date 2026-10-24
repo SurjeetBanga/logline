@@ -39,8 +39,8 @@ export function createPopovers(scope: EventScope) {
           panel.classList.contains('level-menu') ||
           panel.classList.contains('saved-searches') ||
           panel.classList.contains('actions-menu') ||
-          panel.classList.contains('session-menu') ||
-          panel.classList.contains('scope-menu')
+          panel.classList.contains('share-panel') ||
+          panel.classList.contains('memory-panel')
         ) {
           const trigger = button.getBoundingClientRect();
           const margin = 8;
@@ -58,7 +58,8 @@ export function createPopovers(scope: EventScope) {
           const maxLeft = Math.max(margin, window.innerWidth - margin - panelWidth);
           const preferredLeft = trigger.right - panelWidth;
           panel.style.left = `${Math.max(margin, Math.min(preferredLeft, maxLeft))}px`;
-          panel.style.top = openAbove ? `${margin}px` : `${trigger.bottom + 4}px`;
+          // Above its trigger, a panel is anchored by its bottom only, so a short one is not stretched to the top.
+          panel.style.top = openAbove ? 'auto' : `${trigger.bottom + 4}px`;
           panel.style.bottom = openAbove ? `${window.innerHeight - trigger.top + 4}px` : '';
           panel.style.maxHeight = `${maxHeight}px`;
           return;

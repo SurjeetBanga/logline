@@ -3,7 +3,12 @@ import type { Elements } from '../dom';
 import { cell } from '../dom';
 import type { EventScope } from '../event-scope';
 import type { WebviewApi } from '../types';
+import type { TabRailItem } from '../tab-rail';
+import { serviceColor } from './service-color';
 import { formatDuration } from './trace';
+
+/** Slower than this is a slow request, for the rail's filter. */
+const SLOW_MS = 1000;
 
 /**
  * The Traces tab: recent requests across services, from OpenTelemetry
@@ -21,9 +26,16 @@ export function createTraceList(
     /** Shows the list in place of the table. */
     reveal(): void;
     visible(): boolean;
+    /** The rail beside the list: its services and filters. */
+    rail?(title: string, items: TabRailItem[]): void;
   },
 ) {
   let traces: TraceSummary[] = [];
+  // Services left out of the list; new services show by default.
+  const hidden = new Set<string>();
+  let errorsOnly = false;
+  let slowOnly = false;
+  let opened: string | undefined;
 
   function show() {
     elements.tracesStatus.textContent = 'Loading…';
@@ -32,12 +44,11 @@ export function createTraceList(
     api.postMessage({ type: 'traces' });
   }
 
-  scope.listen(elements.tracesErrorsOnly, 'change', render);
   scope.listen(elements.tracesStartReceiver, 'click', () => actions.startReceiver());
   scope.listen(elements.tracesRows, 'click', (event) => {
     const row = (event.target as HTMLElement).closest<HTMLElement>('[data-trace-id]');
     if (!row?.dataset.traceId) return;
-    actions.showTrace(row.dataset.traceId);
+    open(row.dataset.traceId);
   });
   scope.listen(elements.tracesRows, 'keydown', (event) => {
     const key = (event as KeyboardEvent).key;
@@ -45,8 +56,57 @@ export function createTraceList(
     const row = (event.target as HTMLElement).closest<HTMLElement>('[data-trace-id]');
     if (!row?.dataset.traceId) return;
     event.preventDefault();
-    actions.showTrace(row.dataset.traceId);
+    open(row.dataset.traceId);
   });
+
+  function open(traceId: string) {
+    opened = traceId;
+    for (const row of elements.tracesRows.querySelectorAll<HTMLElement>('.traces-row'))
+      row.classList[row.dataset.traceId === traceId ? 'add' : 'remove']('selected');
+    actions.showTrace(traceId);
+  }
+
+  /** Services, with how many traces each is in, and the filters, for the rail. */
+  function railItems(): TabRailItem[] {
+    const counts = new Map<string, number>();
+    for (const trace of traces)
+      for (const service of trace.services) counts.set(service, (counts.get(service) ?? 0) + 1);
+    const toggle = (change: () => void) => () => {
+      change();
+      render();
+    };
+    return [
+      ...[...counts.entries()]
+        .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+        .map(([service, count]): TabRailItem => ({
+          kind: 'item',
+          key: `service:${service}`,
+          label: service,
+          meta: count.toLocaleString(),
+          color: serviceColor(service),
+          checked: !hidden.has(service),
+          title: `${hidden.has(service) ? 'Show' : 'Hide'} traces through ${service}`,
+          onSelect: toggle(() => (hidden.has(service) ? hidden.delete(service) : hidden.add(service))),
+        })),
+      { kind: 'group', label: 'Show' },
+      {
+        kind: 'item',
+        key: 'errors',
+        label: 'Only traces with errors',
+        meta: traces.filter((trace) => trace.errors).length.toLocaleString(),
+        checked: errorsOnly,
+        onSelect: toggle(() => (errorsOnly = !errorsOnly)),
+      },
+      {
+        kind: 'item',
+        key: 'slow',
+        label: 'Slower than 1 s',
+        meta: traces.filter((trace) => trace.durationMs >= SLOW_MS).length.toLocaleString(),
+        checked: slowOnly,
+        onSelect: toggle(() => (slowOnly = !slowOnly)),
+      },
+    ];
+  }
 
   // The receiver can start or stop while the list is shown.
   function receiverChanged() {
@@ -59,8 +119,14 @@ export function createTraceList(
   }
 
   function render() {
-    const errorsOnly = elements.tracesErrorsOnly.checked;
-    const shown = errorsOnly ? traces.filter((trace) => trace.errors) : traces;
+    actions.rail?.('Services', railItems());
+    const shown = traces.filter(
+      (trace) =>
+        (!errorsOnly || trace.errors) &&
+        (!slowOnly || trace.durationMs >= SLOW_MS) &&
+        // A trace through no listed service, such as one from logs alone, stays.
+        (!trace.services.length || trace.services.some((service) => !hidden.has(service))),
+    );
     const withSpans = traces.filter((trace) => trace.spans).length;
     const receiver = actions.receiver();
     // Offer to start the receiver only when it is not already running.
@@ -76,12 +142,13 @@ export function createTraceList(
     elements.tracesStatus.textContent =
       `${traces.length.toLocaleString()} recent ${traces.length === 1 ? 'trace' : 'traces'} · ${failed.toLocaleString()} with errors` +
       (withSpans < traces.length ? ` · ${(traces.length - withSpans).toLocaleString()} from logs only` : '') +
+      (shown.length < traces.length ? ` · ${shown.length.toLocaleString()} shown` : '') +
       ' · Choose one to see its waterfall';
     const longest = Math.max(1, ...shown.map((trace) => trace.durationMs));
     elements.tracesRows.replaceChildren(
       ...shown.map((trace) => {
         const row = document.createElement('tr');
-        row.className = `traces-row${trace.errors ? ' trace-error' : ''}`;
+        row.className = `traces-row${trace.errors ? ' trace-error' : ''}${trace.traceId === opened ? ' selected' : ''}`;
         row.dataset.traceId = trace.traceId;
         row.tabIndex = 0;
         row.setAttribute(
@@ -99,7 +166,10 @@ export function createTraceList(
         for (const service of trace.services.slice(0, 4)) {
           const chip = document.createElement('span');
           chip.className = 'service-chip';
-          chip.textContent = service;
+          const dot = document.createElement('span');
+          dot.className = 'service-dot';
+          dot.style.background = serviceColor(service);
+          chip.append(dot, document.createTextNode(service));
           chip.title = service;
           services.append(chip);
         }

@@ -34,6 +34,8 @@ interface MessageServices {
   snapshot(request: Extract<ViewRequest, { type: 'snapshot' }>): Snapshot;
   clear(): void;
   stop(serverId?: string, sessionId?: string): void;
+  removeSource(serverId: string): Promise<number>;
+  welcomed?(): void;
   showGuide(section: 'guide' | 'whatsNew'): void;
   agentAccess: AgentLogAccess;
   shareWithAgent(sourceIds?: string[], anchor?: number, sessionIds?: string[], chooseRuns?: boolean): Promise<void>;
@@ -52,7 +54,7 @@ interface MessageServices {
   breakOnEvent(id: number): Promise<void>;
   breakOnQuery(query: string, levels: string[]): Promise<void>;
   doctorAction(action: DoctorAction, siteId?: string): Promise<void>;
-  connectAgent(): Promise<void>;
+  connectAgent(agent?: 'claude' | 'codex'): Promise<void>;
   showStatus(): Promise<void>;
   connections?: Pick<
     ConnectionManager,
@@ -67,6 +69,7 @@ interface MessageServices {
     | 'watchMetric'
     | 'allowAgents'
     | 'revokeAgents'
+    | 'remove'
   >;
   compare?(request: CompareRequest): CompareView;
 }
@@ -173,7 +176,7 @@ export async function handleMessage(
       services.stopSharing();
       return;
     case 'connectAgent':
-      await services.connectAgent();
+      await services.connectAgent(msg.agent);
       return;
     case 'showStatus':
       await services.showStatus();
@@ -218,11 +221,22 @@ export async function handleMessage(
     case 'clear':
       services.clear();
       return;
+    case 'onboardingSeen':
+      services.welcomed?.();
+      return;
+    case 'removeSource':
+      // Asks first when the source is running.
+      await services.removeSource(msg.serverId);
+      return;
+    case 'removeConnection':
+      // Asks first: it changes settings, and can forget the password.
+      await services.connections?.remove(msg.connectionId);
+      return;
     case 'stop':
       services.stop(msg.serverId, msg.sessionId);
       return;
     case 'config':
-      await vscode.commands.executeCommand('workbench.action.openSettings', '@ext:surjeetbanga.logline');
+      await vscode.commands.executeCommand('workbench.action.openSettings', msg.setting ?? '@ext:surjeetbanga.logline');
       return;
     case 'manageServers':
       await manageServers();

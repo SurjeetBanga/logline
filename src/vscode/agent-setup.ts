@@ -240,40 +240,47 @@ async function connectHost(host: HostAgent, launch: AgentLaunch, after: string):
  * another MCP client. Agents then read only what is shared with Share with
  * agent, like Copilot.
  */
-export async function connectAgent(launch: AgentLaunch, host: HostAgent | undefined = hostAgent()): Promise<void> {
-  const picked = await vscode.window.showQuickPick(
-    [
-      ...(host
-        ? [
-            {
-              label: `${host.name} agent`,
-              description: 'Edit MCP settings',
-              detail: `Add Logline to ${host.file}, for all your projects.`,
-              agent: 'host' as const,
-            },
-          ]
-        : []),
-      {
-        label: 'Claude Code',
-        description: 'claude mcp add',
-        detail: 'For all your projects, in the terminal and the Claude Code extension.',
-        agent: 'claude' as const,
-      },
-      {
-        label: 'Codex',
-        description: 'codex mcp add',
-        detail: 'For all your projects. The Codex CLI, IDE extension, and app share this setting.',
-        agent: 'codex' as const,
-      },
-      {
-        label: 'Other MCP client',
-        description: 'Copy configuration',
-        detail: 'Copy a stdio server entry (command, args, env) to add to your client.',
-        agent: undefined,
-      },
-    ],
-    { title: 'Connect an agent to Logline', placeHolder: 'Which agent should read the logs you share?' },
-  );
+export async function connectAgent(
+  launch: AgentLaunch,
+  host: HostAgent | undefined = hostAgent(),
+  /** An agent chosen in the Share panel, which skips the picker. */
+  chosen?: Agent,
+): Promise<void> {
+  const picked = chosen
+    ? { agent: chosen }
+    : await vscode.window.showQuickPick(
+        [
+          ...(host
+            ? [
+                {
+                  label: `${host.name} agent`,
+                  description: 'Edit MCP settings',
+                  detail: `Add Logline to ${host.file}, for all your projects.`,
+                  agent: 'host' as const,
+                },
+              ]
+            : []),
+          {
+            label: 'Claude Code',
+            description: 'claude mcp add',
+            detail: 'For all your projects, in the terminal and the Claude Code extension.',
+            agent: 'claude' as const,
+          },
+          {
+            label: 'Codex',
+            description: 'codex mcp add',
+            detail: 'For all your projects. The Codex CLI, IDE extension, and app share this setting.',
+            agent: 'codex' as const,
+          },
+          {
+            label: 'Other MCP client',
+            description: 'Copy configuration',
+            detail: 'Copy a stdio server entry (command, args, env) to add to your client.',
+            agent: undefined,
+          },
+        ],
+        { title: 'Connect an agent to Logline', placeHolder: 'Which agent should read the logs you share?' },
+      );
   if (!picked) return;
   const after =
     'Restart the agent so it loads Logline, then choose Share with agent in the Logs panel. Agents read only what you share, always redacted.';

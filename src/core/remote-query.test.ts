@@ -280,3 +280,70 @@ test('a metric query is narrowed to its range on the time column it returns', ()
     [0, 1, 10],
   );
 });
+
+test('MySQL quotes with backticks, casts to CHAR, escapes LIKE with !, and compares native times as UTC text', () => {
+  const native = buildSqlLogQuery({
+    dialect: 'mysql',
+    mapping,
+    table: { ...table, time: 'native' },
+    query: 'level:error 50%_off -user_id:>3',
+    fromMs: FROM,
+    toMs: TO,
+    limit: 500,
+    order: 'desc',
+  });
+  assert.equal(
+    native.select.sql,
+    "SELECT * FROM `app_logs` WHERE `created_at` BETWEEN ? AND ? AND LOWER(CAST(`severity` AS CHAR)) LIKE ? ESCAPE '!' AND " +
+      "(LOWER(CAST(`id` AS CHAR)) LIKE ? ESCAPE '!' OR LOWER(CAST(`created_at` AS CHAR)) LIKE ? ESCAPE '!' OR LOWER(CAST(`severity` AS CHAR)) LIKE ? ESCAPE '!' OR " +
+      "LOWER(CAST(`msg` AS CHAR)) LIKE ? ESCAPE '!' OR LOWER(CAST(`user_id` AS CHAR)) LIKE ? ESCAPE '!' OR LOWER(CAST(`status` AS CHAR)) LIKE ? ESCAPE '!') AND " +
+      '(`user_id` IS NULL OR NOT `user_id` > ?) ORDER BY `created_at` DESC LIMIT ?',
+  );
+  assert.deepEqual(native.select.params.slice(0, 4), [
+    '2026-10-23 09:00:00.000',
+    '2026-10-23 10:00:00.000',
+    '%error%',
+    '%50!%!_off%',
+  ]);
+  // ISO text keeps its T and Z, which MySQL reads only after they are removed.
+  const iso = buildSqlLogQuery({ dialect: 'mysql', mapping, table, query: '', fromMs: FROM, limit: 10, order: 'asc' });
+  assert.match(
+    iso.select.sql,
+    /WHERE CAST\(REPLACE\(REPLACE\(`created_at`, 'T', ' '\), 'Z', ''\) AS DATETIME\(6\)\) >= \?/,
+  );
+  assert.equal(quoteTable('logs.app`x', 'mysql'), '`logs`.`app``x`');
+});
+
+test('typed MySQL is one read-only statement, with # comments read as comments', () => {
+  assert.deepEqual(checkReadOnlySql('SELECT 1 # ; DROP TABLE x', 'mysql'), { sql: 'SELECT 1 # ; DROP TABLE x' });
+  assert.deepEqual(checkReadOnlySql('SELECT 1; DELETE FROM logs', 'mysql'), { error: 'Run one statement at a time.' });
+  assert.deepEqual(checkReadOnlySql("SELECT 'it\\'s; DROP TABLE x'", 'mysql'), {
+    sql: "SELECT 'it\\'s; DROP TABLE x'",
+  });
+  assert.deepEqual(checkReadOnlySql("SELECT '\\\\'; DELETE FROM logs", 'mysql'), {
+    error: 'Run one statement at a time.',
+  });
+  assert.deepEqual(checkReadOnlySql('SELECT 1 /*!50000 , SLEEP(600) */', 'mysql'), {
+    error: 'Executable comments (/*! … */) cannot run here.',
+  });
+  assert.deepEqual(checkReadOnlySql('SELECT 1--1; DELETE FROM logs', 'mysql'), {
+    error: 'Run one statement at a time.',
+  });
+  assert.deepEqual(checkReadOnlySql('SELECT 1 -- ; DELETE', 'mysql'), { sql: 'SELECT 1 -- ; DELETE' });
+  assert.deepEqual(limitedSql('SELECT 1', 'mysql', 5), {
+    sql: 'SELECT * FROM (\nSELECT 1\n) AS logline_query LIMIT ?',
+    params: [5],
+  });
+  const ranged = rangedSql('SELECT t, v FROM m', 'mysql', { column: 't', encoding: 'native' }, FROM, TO, 9);
+  assert.match(ranged.sql, /WHERE `t` BETWEEN \? AND \? ORDER BY `t` DESC LIMIT \?$/);
+});
+
+test("a column named __proto__ is a field like any other, not the line object's prototype", () => {
+  const row = JSON.parse('{"created_at":"2026-10-23T09:00:00Z","msg":"hi","__proto__":{"polluted":true}}') as Record<
+    string,
+    unknown
+  >;
+  const { line } = rowToLine(row, rowRoles(Object.keys(row), mapping), 'iso');
+  assert.equal(line, '{"timestamp":"2026-10-23T09:00:00.000Z","message":"hi","__proto__":{"polluted":true}}');
+  assert.equal(({} as { polluted?: boolean }).polluted, undefined);
+});

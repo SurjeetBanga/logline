@@ -308,6 +308,17 @@ export class AgentLogAccess {
     this.shared = selected;
   }
 
+  /** A removed source leaves a selected share; sharing ends when nothing selected is left. */
+  forgetSource(sourceId: string): void {
+    if (this.shareAllRuns || !this.shareId) return;
+    let changed = false;
+    for (const id of [...this.shared.keys()])
+      if (id === sourceId || id.startsWith(`${sourceId}::`)) changed = this.shared.delete(id) || changed;
+    if (!changed) return;
+    if (!this.shared.size) this.revoke();
+    else this.revision++;
+  }
+
   revoke(): void {
     this.shareAllRuns = false;
     this.shared.clear();

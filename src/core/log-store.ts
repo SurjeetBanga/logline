@@ -438,6 +438,29 @@ export class LogStore {
     }
   }
 
+  /**
+   * Drop every retained event of a source, and of the container sources split
+   * from it (`<source>::<service>`), compacting the ring once. Totals keep
+   * counting them as received; they are not discarded for space.
+   */
+  removeSource(serverId: string): number {
+    const belongs = (id: string | undefined) => id === serverId || (id?.startsWith(`${serverId}::`) ?? false);
+    const kept: Slot[] = [];
+    for (let i = 0; i < this.size; i++) {
+      const slot = this.slots[(this.head + i) % this.maxRows]!;
+      if (!belongs(slot.event.serverId)) kept.push(slot);
+    }
+    const removed = this.size - kept.length;
+    if (!removed) return 0;
+    const { total, discarded, truncated } = this;
+    this.clear();
+    this.total = total;
+    this.discarded = discarded;
+    this.truncated = truncated;
+    for (const slot of kept) this.insertSlot(slot);
+    return removed;
+  }
+
   page({
     query = '',
     serverId,

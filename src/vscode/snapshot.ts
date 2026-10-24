@@ -6,6 +6,7 @@ import { getField, parseQuery, usesChangedScope } from '../core/query';
 import type { Settings } from '../core/settings';
 import type { LogEvent } from '../core/types';
 import type {
+  AgentSetupView,
   ConnectionView,
   DoctorFindingView,
   GuideStatus,
@@ -57,6 +58,8 @@ export interface SnapshotSources {
   doctor?: { revision: number; total: number; findings?: DoctorFindingView[] };
   /** MCP clients such as Claude Code that called recently. */
   agentClients?: string[];
+  /** Which agents can read shared logs. */
+  agentSetup?: AgentSetupView;
   /** Changes whenever `rowLinks` could answer differently for an event already sent. */
   rowLinksVersion?: string;
   /** Files changed since the last commit, while the workspace is a git repository. */
@@ -108,6 +111,7 @@ export function buildSnapshot(
     rowLinks,
     doctor,
     agentClients,
+    agentSetup,
     rowLinksVersion,
     changes,
   }: SnapshotSources,
@@ -207,6 +211,7 @@ export function buildSnapshot(
     ...(spans?.genAiCount ? { aiCalls: { calls: spans.genAiCount, revision: spans.genAiRevision ?? 0 } } : {}),
     ...(doctor ? { doctor } : {}),
     ...(agentClients?.length ? { agentClients } : {}),
+    ...(agentSetup ? { agentSetup } : {}),
     ...(changes ? { changes } : {}),
     ...(connections?.length ? { connections } : {}),
   };

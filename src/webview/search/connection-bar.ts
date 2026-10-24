@@ -45,14 +45,16 @@ export function createConnectionBar(
 
   // A database has rows; Datadog has logs.
   const noun = (connection: ConnectionView, count: number) =>
-    `${connection.sql ? 'row' : 'log'}${count === 1 ? '' : 's'}`;
+    `${connection.language === 'mongo' ? 'document' : connection.sql ? 'row' : 'log'}${count === 1 ? '' : 's'}`;
 
   function resultText(connection: ConnectionView): string {
     const last = connection.last;
     if (!last)
       return connection.mapped
         ? 'Choose a range and press Run. Nothing is fetched until you do.'
-        : 'No log table is mapped. Use Run SQL to query it.';
+        : connection.language === 'mongo'
+          ? 'No log collection is mapped. Use Run query to query it.'
+          : 'No log table is mapped. Use Run SQL to query it.';
     const rows = `${numbers.format(last.kept)} ${noun(connection, last.kept)}`;
     if (last.kind === 'tail')
       return !last.running
@@ -93,6 +95,11 @@ export function createConnectionBar(
     // The run to compare: the one selected in the run picker, else the latest.
     elements.connectionCompare.hidden = !connection.last || connection.last.kind === 'tail';
     elements.connectionSql.hidden = !connection.sql;
+    elements.connectionSql.textContent = connection.language === 'mongo' ? 'Run query…' : 'Run SQL…';
+    elements.connectionSql.title =
+      connection.language === 'mongo'
+        ? 'Run a read-only filter or pipeline you type, in JSON'
+        : 'Run a read-only SELECT you type';
     elements.connectionAgents.hidden = !connection.mapped;
     elements.connectionAgents.setAttribute('aria-pressed', String(!!connection.agents));
     elements.connectionAgents.textContent = connection.agents ? 'Agents allowed' : 'Allow agents';
@@ -209,7 +216,7 @@ export function createConnectionBar(
       if (connection.last) return 'No matching rows. Change the filter or the range and press Run.';
       return connection.mapped
         ? `Choose a range and press Run to fetch ${connection.sql ? 'rows' : 'logs'} from ${connection.label}.`
-        : `Use Run SQL to query ${connection.label}.`;
+        : `Use ${connection.language === 'mongo' ? 'Run query' : 'Run SQL'} to query ${connection.label}.`;
     },
   };
 }

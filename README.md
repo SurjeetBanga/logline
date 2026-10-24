@@ -23,7 +23,7 @@
 
 **Debugging with F5?** Whatever the Debug Console shows appears in Logs automatically, for every debugger. For launch configurations that print to the integrated terminal (the Python and Java default), turn on terminal capture.
 
-**Using OpenTelemetry?** Choose **More actions → Start OpenTelemetry receiver**. Instrumented apps you start from Logline, a debug session, or a new terminal send their logs, traces, and metrics to Logline with no collector and no code changes. The **Traces** tab shows recent requests, and the trace button on any row shows that request across services. The **Metrics** tab shows each series' latest value and trend. Apps that call an LLM and follow the GenAI conventions get an **AI calls** tab with each call's model, tokens, and conversation.
+**Using OpenTelemetry?** Click **OpenTelemetry off** in the Logs panel's status bar to start the receiver. Instrumented apps you start from Logline, a debug session, or a new terminal send their logs, traces, and metrics to Logline with no collector and no code changes. The **Traces** tab shows recent requests, and the trace button on any row shows that request across services. The **Metrics** tab shows each series' latest value and trend. Apps that call an LLM and follow the GenAI conventions get an **AI calls** tab with each call's model, tokens, and conversation.
 
 **Running Docker Compose?** Run **Logline: Follow Docker Compose Project**, or run `docker compose up` with **Run Command** or in a captured terminal. Each service becomes its own source, and its JSON or logfmt lines keep their level and fields.
 

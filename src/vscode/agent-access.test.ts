@@ -425,3 +425,21 @@ test('several agents can wait at once, up to a bound', async () => {
     'finished waits free their slot',
   );
 });
+
+test('a removed source leaves a selected share, and sharing ends when none is left', () => {
+  const { access } = fixture();
+  access.share(['api', 'web']);
+  const revision = access.status().revision;
+  access.forgetSource('api');
+  assert.equal(access.status().active, true);
+  assert.deepEqual(
+    access.status().sources.map((source) => source.id),
+    ['web'],
+  );
+  assert.ok(access.status().revision > revision, 'agents see the share changed');
+  access.forgetSource('web');
+  assert.equal(access.status().active, false, 'nothing selected is left to share');
+  access.shareAll();
+  access.forgetSource('api');
+  assert.equal(access.status().active, true, 'sharing everything follows what is retained instead');
+});

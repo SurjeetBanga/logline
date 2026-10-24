@@ -927,3 +927,33 @@ test('fieldSuggestions value counts refresh when events arrive or are evicted', 
   store.clear();
   assert.deepEqual(store.fieldSuggestions('service:a').values, []);
 });
+
+test('removing a source drops its events and container sources, keeps the rest in order, and keeps the totals', () => {
+  const store = new LogStore(10, 1024 * 1024);
+  const add = (id: number, serverId: string, sessionId = 'run', fields?: Record<string, string>) =>
+    store.add({ id, raw: `e${id}`, message: `e${id}`, level: 'info', serverId, server: serverId, sessionId, fields });
+  add(1, 'api', 'run', { route: '/a' });
+  add(2, 'worker', 'w1', { queue: 'jobs' });
+  add(3, 'api::db', 'run');
+  add(4, 'api-gateway');
+  add(5, 'api', 'run', { route: '/b' });
+  const before = store.stats();
+  assert.equal(store.removeSource('api'), 3);
+  assert.deepEqual(
+    store.all().map((event) => event.id),
+    [2, 4],
+    'api-gateway is a different source, not a container of api',
+  );
+  assert.deepEqual(store.serverIds().sort(), ['api-gateway', 'worker']);
+  assert.equal(store.find(5), undefined);
+  assert.equal(store.find(4)?.id, 4, 'the ring still finds events by id');
+  assert.equal(store.stats().total, before.total);
+  assert.equal(store.stats().discarded, before.discarded, 'removed events were not discarded for space');
+  assert.ok(store.stats().bytes < before.bytes);
+  assert.ok(!store.fieldNames().includes('route'), 'fields only the removed source had are gone');
+  assert.ok(store.fieldNames().includes('queue'));
+  assert.equal(store.removeSource('missing'), 0);
+  for (let id = 6; id <= 20; id++) add(id, 'worker', 'w1');
+  assert.equal(store.size, 10, 'the compacted ring keeps its size limit');
+  assert.equal(store.all().at(-1)?.id, 20);
+});

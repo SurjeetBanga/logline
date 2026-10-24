@@ -386,3 +386,19 @@ test('a typed SELECT becomes metric series within the range', { skip: !hasSqlite
     await connector.dispose();
   }
 });
+
+test('Postgres on RDS signs in with a token made for each connection, over TLS with Amazon’s certificates', async () => {
+  const pg = fakePg();
+  let tokens = 0;
+  const driver = new PostgresDriver(
+    { ...postgres, host: 'orders.cluster-c9.eu-west-1.rds.amazonaws.com', ssl: true, auth: { kind: 'iam' } },
+    async () => `token-${++tokens}`,
+    pg.load,
+  );
+  await driver.query('SELECT 1', [], { timeoutMs: 1000 });
+  const config = pg.configs[0] as { password: string; ssl: { ca: string[]; rejectUnauthorized: boolean } };
+  assert.equal(config.password, 'token-1');
+  assert.equal(config.ssl.rejectUnauthorized, true);
+  assert.ok(config.ssl.ca.length > 10);
+  await driver.close();
+});

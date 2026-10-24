@@ -1,8 +1,10 @@
 import type { MetricSeriesView } from '../../core/metrics';
+import type { ConnectionView } from '../../protocol/messages';
 import type { Elements } from '../dom';
-import { cell } from '../dom';
 import type { EventScope } from '../event-scope';
+import type { TabRailItem } from '../tab-rail';
 import type { WebviewApi } from '../types';
+import { serviceColor } from './service-color';
 import { formatDuration } from './trace';
 
 const REFRESH_MS = 5000;
@@ -46,10 +48,10 @@ export function formatMetric(value: number, unit = '', rate = false): string {
   return `${number(value)}${label ? ` ${label}` : ''}${suffix}`;
 }
 
-function sparkline(points: MetricSeriesView['points']): SVGSVGElement {
+function sparkline(points: MetricSeriesView['points'], className = 'metric-spark'): SVGSVGElement {
   const namespace = 'http://www.w3.org/2000/svg';
   const svg = document.createElementNS(namespace, 'svg');
-  svg.setAttribute('class', 'metric-spark');
+  svg.setAttribute('class', className);
   svg.setAttribute('viewBox', '0 0 100 24');
   svg.setAttribute('preserveAspectRatio', 'none');
   svg.setAttribute('aria-hidden', 'true');
@@ -113,9 +115,16 @@ export function createMetricList(
     /** Shows the list in place of the table. */
     reveal(): void;
     visible(): boolean;
+    /** The rail beside the cards: services, and connections to query. */
+    rail?(title: string, items: TabRailItem[]): void;
+    /** Choose a connection in the metric query bar. */
+    queryConnection?(id: string): void;
   },
 ) {
   let metrics: MetricSeriesView[] = [];
+  let connections: ConnectionView[] = [];
+  let service: string | undefined;
+  let selected: string | undefined;
   let revision: number | undefined;
   let pending = false;
   let loadedAt = -Infinity;
@@ -143,7 +152,7 @@ export function createMetricList(
 
   function show() {
     elements.metricsStatus.textContent = 'Loading…';
-    elements.metricsRows.replaceChildren();
+    elements.metricsCards.replaceChildren();
     actions.reveal();
     load();
   }
@@ -176,54 +185,158 @@ export function createMetricList(
     if (changed && actions.visible()) refreshSoon();
   }
 
+  /** Where metrics come from, for the rail: every service, and the connections that can be queried. */
+  function railItems(): TabRailItem[] {
+    const counts = new Map<string, number>();
+    for (const series of metrics) counts.set(series.service, (counts.get(series.service) ?? 0) + 1);
+    const choose = (next: string | undefined) => () => {
+      service = next;
+      render();
+    };
+    return [
+      {
+        kind: 'item',
+        key: 'all',
+        label: 'Everything',
+        meta: metrics.length.toLocaleString(),
+        selected: service === undefined,
+        onSelect: choose(undefined),
+      },
+      ...(counts.size ? [{ kind: 'group', label: 'OpenTelemetry' } as TabRailItem] : []),
+      ...[...counts.entries()]
+        .sort((a, b) => a[0].localeCompare(b[0]))
+        .map(([name, count]): TabRailItem => ({
+          kind: 'item',
+          key: `service:${name}`,
+          label: name,
+          meta: count.toLocaleString(),
+          color: serviceColor(name),
+          selected: service === name,
+          onSelect: choose(name),
+        })),
+      ...(connections.length ? [{ kind: 'group', label: 'Connections' } as TabRailItem] : []),
+      ...connections.map((connection): TabRailItem => ({
+        kind: 'item',
+        key: `connection:${connection.id}`,
+        label: connection.label,
+        meta: connection.watching.length ? `${connection.watching.length} watched` : undefined,
+        title: `Query metrics from ${connection.label}`,
+        onSelect: () => actions.queryConnection?.(connection.id),
+      })),
+    ];
+  }
+
+  function latestText(series: MetricSeriesView): string {
+    if (series.latest === undefined) return '–';
+    const label = MEASURE_LABELS[series.measure];
+    return `${label ? `${label} ` : ''}${series.bound ? '≤ ' : ''}${formatMetric(series.latest, series.unit, series.measure === 'rate')}`;
+  }
+
+  /** The chosen series, charted larger above the cards with everything known about its latest point. */
+  function renderDetail(series: MetricSeriesView | undefined): void {
+    elements.metricDetail.hidden = !series;
+    if (!series) {
+      elements.metricDetail.replaceChildren();
+      return;
+    }
+    const header = document.createElement('div');
+    header.className = 'metric-detail-header';
+    const title = document.createElement('h3');
+    title.textContent = series.name;
+    const value = document.createElement('strong');
+    value.className = 'metric-detail-value';
+    value.textContent = latestText(series);
+    const close = document.createElement('button');
+    close.type = 'button';
+    close.className = 'icon-button';
+    close.textContent = '×';
+    close.setAttribute('aria-label', 'Close the chart');
+    close.title = 'Close the chart';
+    scope.listen(close, 'click', () => {
+      selected = undefined;
+      render();
+    });
+    header.append(title, value, close);
+    const about = document.createElement('p');
+    about.className = 'metric-detail-about';
+    about.textContent = details(series).split('\n').join(' · ');
+    elements.metricDetail.replaceChildren(header, sparkline(series.points, 'metric-spark metric-chart-large'), about);
+  }
+
+  function card(series: MetricSeriesView): HTMLElement {
+    const item = document.createElement('div');
+    item.setAttribute('role', 'listitem');
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = `metric-card${series.key === selected ? ' selected' : ''}`;
+    button.dataset.key = series.key;
+    button.title = details(series);
+    button.setAttribute('aria-pressed', String(series.key === selected));
+    const name = document.createElement('span');
+    name.className = 'metric-name';
+    name.textContent = series.name;
+    const source = document.createElement('span');
+    source.className = 'metric-service';
+    const dot = document.createElement('span');
+    dot.className = 'service-dot';
+    dot.style.background = serviceColor(series.service);
+    source.append(dot, document.createTextNode(series.service));
+    const attributes = document.createElement('span');
+    attributes.className = 'metric-attributes';
+    attributes.textContent = series.attributes.map(([key, value]) => `${key}=${value}`).join(' ');
+    const bottom = document.createElement('span');
+    bottom.className = 'metric-card-bottom';
+    const latest = document.createElement('span');
+    latest.className = 'metric-latest';
+    latest.textContent = latestText(series);
+    bottom.append(latest, sparkline(series.points));
+    button.append(name, source);
+    if (attributes.textContent) button.append(attributes);
+    button.append(bottom);
+    scope.listen(button, 'click', () => {
+      selected = selected === series.key ? undefined : series.key;
+      render();
+    });
+    item.append(button);
+    return item;
+  }
+
   function render() {
+    actions.rail?.('Metrics from', railItems());
     const terms = elements.metricsFilter.value.trim().toLowerCase().split(/\s+/).filter(Boolean);
-    const shown = terms.length
-      ? metrics.filter((series) => {
-          const text =
-            `${series.name} ${series.service} ${series.attributes.map(([key, value]) => `${key}=${value}`).join(' ')}`.toLowerCase();
-          return terms.every((term) => text.includes(term));
-        })
-      : metrics;
+    const shown = metrics.filter((series) => {
+      if (service !== undefined && series.service !== service) return false;
+      if (!terms.length) return true;
+      const text =
+        `${series.name} ${series.service} ${series.attributes.map(([key, value]) => `${key}=${value}`).join(' ')}`.toLowerCase();
+      return terms.every((term) => text.includes(term));
+    });
     if (!metrics.length) {
       elements.metricsStatus.textContent =
         'No metrics yet. Apps started while the OpenTelemetry receiver runs send metrics every 5 seconds.';
-      elements.metricsRows.replaceChildren();
+      elements.metricsCards.replaceChildren();
+      renderDetail(undefined);
       return;
     }
     const services = new Set(metrics.map((series) => series.service)).size;
     elements.metricsStatus.textContent =
       `${metrics.length.toLocaleString()} series from ${services.toLocaleString()} ${services === 1 ? 'service' : 'services'}` +
       (shown.length < metrics.length ? ` · ${shown.length.toLocaleString()} match` : '');
-    elements.metricsRows.replaceChildren(
-      ...shown.map((series) => {
-        const row = document.createElement('tr');
-        row.className = 'metrics-row';
-        const name = cell(series.name, 'metric-name');
-        name.title = details(series);
-        const service = cell('', 'traces-services');
-        const chip = document.createElement('span');
-        chip.className = 'service-chip';
-        chip.textContent = chip.title = series.service;
-        service.append(chip);
-        const pairs = series.attributes.map(([key, value]) => `${key}=${value}`).join(' ');
-        const attributes = cell(pairs, 'metric-attributes');
-        attributes.title = series.attributes.map(([key, value]) => `${key}: ${value}`).join('\n');
-        const label = MEASURE_LABELS[series.measure];
-        const latest = cell(
-          series.latest === undefined
-            ? '–'
-            : `${label ? `${label} ` : ''}${series.bound ? '≤ ' : ''}${formatMetric(series.latest, series.unit, series.measure === 'rate')}`,
-          'metric-latest',
-        );
-        latest.title = details(series);
-        const trend = cell('', 'metric-trend');
-        trend.append(sparkline(series.points));
-        row.append(name, service, attributes, latest, trend);
-        return row;
-      }),
-    );
+    elements.metricsCards.replaceChildren(...shown.map(card));
+    renderDetail(metrics.find((series) => series.key === selected));
   }
 
-  return { show, hide, receive, update };
+  /** The saved connections, which the rail offers for metric queries. */
+  function setConnections(list: ConnectionView[] | undefined) {
+    const next = list ?? [];
+    if (
+      JSON.stringify(next.map((item) => [item.id, item.label, item.watching])) ===
+      JSON.stringify(connections.map((item) => [item.id, item.label, item.watching]))
+    )
+      return;
+    connections = next;
+    if (actions.visible()) actions.rail?.('Metrics from', railItems());
+  }
+
+  return { show, hide, receive, update, setConnections };
 }

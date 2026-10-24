@@ -4,6 +4,7 @@ import { test } from 'node:test';
 import { withVscode } from '../test/vscode-mock';
 
 let created = 0;
+const executed: unknown[][] = [];
 let lastPanel:
   | {
       messages: unknown[];
@@ -65,7 +66,11 @@ const { GuidePanel } = withVscode(
         return panel;
       },
     },
-    commands: { executeCommand: async () => undefined },
+    commands: {
+      executeCommand: async (...args: unknown[]) => {
+        executed.push(args);
+      },
+    },
   },
   () => require('./guide-panel') as typeof import('./guide-panel'),
 );
@@ -92,5 +97,44 @@ test('guide panel reuses its editor tab and acknowledges What’s new after rend
   assert.equal(created, 1);
   assert.equal(lastPanel!.revealCount, 1);
   assert.deepEqual(lastPanel!.messages.at(-1), { type: 'selectSection', section: 'guide' });
+  guide.dispose();
+});
+
+test('the guide sends progress, shows controls, and only runs what its cards name', async () => {
+  executed.length = 0;
+  const revealed: unknown[] = [];
+  const guide = new GuidePanel(
+    { extensionUri: { fsPath: process.cwd() } as unknown as import('vscode').Uri },
+    async () => undefined,
+    {
+      progress: () => ({ captured: true, searched: false, shared: false }),
+      reveal: (target, fallback) => revealed.push([target, fallback]),
+      unreadHighlights: () => 3,
+    },
+  );
+  guide.open();
+  const html = lastPanel!.webview.html;
+  assert.match(html, /window\.__LOGLINE_GUIDE__ = \{"releases":/);
+  assert.match(html, /"unreadHighlights":3/);
+  assert.doesNotMatch(html, /\{\{[A-Z_]+\}\}/, 'every placeholder is filled');
+  lastPanel!.receive({ type: 'guideReady' });
+  assert.deepEqual(lastPanel!.messages.at(-1), {
+    type: 'guideProgress',
+    progress: { captured: true, searched: false, shared: false },
+  });
+  lastPanel!.receive({ type: 'reveal', target: 'captureToggle' });
+  lastPanel!.receive({ type: 'reveal', target: 'connectionRun', fallback: 'sourceRail' });
+  lastPanel!.receive({ type: 'reveal', target: '<script>' });
+  lastPanel!.receive({ type: 'reveal', target: 'search', fallback: 'not valid!' });
+  assert.deepEqual(revealed, [
+    ['captureToggle', undefined],
+    ['connectionRun', 'sourceRail'],
+    ['search', undefined],
+  ]);
+  lastPanel!.receive({ type: 'runCommand', command: 'logline.runCommand' });
+  lastPanel!.receive({ type: 'runCommand', command: 'workbench.action.terminal.sendSequence' });
+  lastPanel!.receive({ type: 'openSetting', setting: 'logline.persistLogs' });
+  lastPanel!.receive({ type: 'openSetting', setting: 'editor.fontSize' });
+  assert.deepEqual(executed, [['logline.runCommand'], ['workbench.action.openSettings', 'logline.persistLogs']]);
   guide.dispose();
 });

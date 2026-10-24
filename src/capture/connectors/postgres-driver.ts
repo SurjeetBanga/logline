@@ -1,6 +1,7 @@
 import { existsSync } from 'node:fs';
 import * as path from 'node:path';
-import type { PostgresConnection } from '../../core/connections';
+import { isRdsHost, type PostgresConnection } from '../../core/connections';
+import { rdsCertificates } from './aws-auth';
 import type { SqlValue } from '../../core/remote-query';
 import { timedOut, type QueryOptions, type Row, type SqlDriver } from './types';
 
@@ -17,7 +18,7 @@ interface ClientConfig {
   database: string;
   user: string;
   password?: string;
-  ssl?: boolean;
+  ssl?: boolean | { ca: string[]; rejectUnauthorized: boolean };
   connectionTimeoutMillis: number;
   application_name: string;
   types: TypeParsers;
@@ -56,7 +57,8 @@ export class PostgresDriver implements SqlDriver {
 
   constructor(
     private readonly connection: PostgresConnection,
-    private readonly password: string | undefined,
+    /** A saved password, or one made for each connection, such as an IAM token. */
+    private readonly password: string | undefined | ((timeoutMs: number) => Promise<string | undefined>),
     private readonly load: () => PgModule = loadPg,
   ) {}
 
@@ -92,13 +94,21 @@ export class PostgresDriver implements SqlDriver {
   private connect(timeoutMs: number): Promise<Client> {
     this.client ??= (async () => {
       const pg = this.load();
+      const password = typeof this.password === 'function' ? await this.password(timeoutMs) : this.password;
+      // RDS and Aurora present certificates from Amazon's own authorities, which Node does not trust by default.
+      const rds = this.connection.auth !== undefined || isRdsHost(this.connection.host);
       const client = new pg.Client({
         host: this.connection.host,
         port: this.connection.port,
         database: this.connection.database,
         user: this.connection.user,
-        password: this.password,
-        ssl: this.connection.ssl ? true : undefined,
+        password,
+        ssl:
+          this.connection.ssl || this.connection.auth
+            ? rds
+              ? { ca: rdsCertificates(), rejectUnauthorized: true }
+              : true
+            : undefined,
         connectionTimeoutMillis: timeoutMs,
         application_name: 'Logline',
         types: parsers(pg),

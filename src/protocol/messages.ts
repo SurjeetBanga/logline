@@ -49,7 +49,8 @@ export type ViewRequest =
   | { type: 'openSource'; id: number; block: number; line: number }
   | { type: 'openLogSite' | 'breakOnEvent'; id: number }
   | { type: 'doctorAction'; action: DoctorAction; siteId?: string }
-  | { type: 'connectAgent' }
+  | { type: 'connectAgent'; agent?: 'claude' | 'codex' }
+  | { type: 'onboardingSeen' }
   | { type: 'showStatus' }
   | ({ type: 'breakOnQuery' } & Filter)
   | { type: 'trace'; traceId: string }
@@ -67,6 +68,8 @@ export type ViewRequest =
   | { type: 'showGuide'; section?: 'guide' | 'whatsNew' }
   | { type: 'run'; serverId?: string }
   | { type: 'stop'; serverId?: string; sessionId?: string }
+  | { type: 'removeSource'; serverId: string }
+  | { type: 'removeConnection'; connectionId: string }
   | { type: 'connectionPreview'; connectionId: string; query: string; range: string }
   | {
       type: 'connectionFetch';
@@ -84,7 +87,8 @@ export type ViewRequest =
   | { type: 'connectionSql' | 'connectionLink'; connectionId: string }
   | { type: 'connectionAgents'; connectionId: string; enabled: boolean }
   | ({ type: 'compare' } & CompareRequest)
-  | { type: 'import' | 'clear' | 'config' | 'manageServers' | 'addConnection' };
+  | { type: 'config'; setting?: string }
+  | { type: 'import' | 'clear' | 'manageServers' | 'addConnection' };
 
 /** Production (a run fetched from a connection, or an imported file) against a local source's newest runs. */
 export interface CompareRequest {
@@ -121,8 +125,10 @@ export interface ConnectionView {
   type: ConnectionType;
   /** Whether searches can run: always for Datadog, once a log table is mapped for a database. */
   mapped: boolean;
-  /** Whether it runs SQL typed by a person (databases do, Datadog does not). */
+  /** Whether it runs queries typed by a person (databases do, Datadog does not). */
   sql: boolean;
+  /** What those queries are written in, when not SQL: MongoDB filters and pipelines. */
+  language?: 'mongo';
   /** Metric queries watched into the Metrics list. */
   watching: string[];
   /** Whether agents may fetch from it. */
@@ -183,6 +189,10 @@ export interface Snapshot extends Stats {
   connections?: ConnectionView[];
   /** A comparison to open, such as after a local run finished, applied once. */
   openCompare?: CompareRequest;
+  /** A control to point at for the guide's Show me, and one to point at while it is hidden, applied once. */
+  reveal?: { target: string; fallback?: string };
+  /** Start the guided tour of the panel, applied once. */
+  startTour?: boolean;
   otlp?: ReceiverStatus;
   /** Traces with spans currently retained. */
   traceCount?: number;
@@ -197,8 +207,19 @@ export interface Snapshot extends Stats {
   doctor?: { revision: number; total: number; findings?: DoctorFindingView[] };
   /** MCP clients such as Claude Code and Codex that read shared logs recently. */
   agentClients?: string[];
+  /** Which agents can read shared logs, for the Share panel. */
+  agentSetup?: AgentSetupView;
   /** Files changed since the last commit, while the workspace is a git repository. */
   changes?: { files: number };
+}
+/** Which agents are set up to read shared logs. */
+export interface AgentSetupView {
+  /** Whether Logline accepts MCP clients such as Claude Code and Codex in this window (logline.externalAgents). */
+  external: boolean;
+  /** Whether GitHub Copilot Chat is installed. */
+  copilot: boolean;
+  /** Agents with Logline's skills installed, which Connect set up: `Claude Code`, `Codex`. */
+  connected: string[];
 }
 /**
  * A table row: the event with its displayed fields, plus what the row links
@@ -410,9 +431,13 @@ export function parseViewRequest(value: unknown): ViewRequest | undefined {
         anchor: index('anchor'),
         chooseRuns: msg.chooseRuns === true,
       };
-    case 'stopSharing':
     case 'connectAgent':
+      return msg.agent === 'claude' || msg.agent === 'codex'
+        ? { type: msg.type, agent: msg.agent }
+        : { type: msg.type };
+    case 'stopSharing':
     case 'showStatus':
+    case 'onboardingSeen':
       return { type: msg.type };
     case 'askCopilot':
       return { type: msg.type, anchor: index('anchor') };
@@ -428,6 +453,12 @@ export function parseViewRequest(value: unknown): ViewRequest | undefined {
       return { type: msg.type, serverId: filter.serverId };
     case 'stop':
       return { type: msg.type, serverId: filter.serverId, sessionId: filter.sessionId };
+    case 'removeSource':
+      return filter.serverId ? { type: msg.type, serverId: filter.serverId } : undefined;
+    case 'removeConnection': {
+      const connectionId = string('connectionId')?.slice(0, 128);
+      return connectionId ? { type: msg.type, connectionId } : undefined;
+    }
     case 'connectionAgents': {
       const connectionId = string('connectionId')?.slice(0, 128);
       return connectionId ? { type: msg.type, connectionId, enabled: msg.enabled === true } : undefined;
@@ -474,9 +505,15 @@ export function parseViewRequest(value: unknown): ViewRequest | undefined {
         ...(baselineSessionId ? { baselineSessionId } : {}),
       };
     }
+    case 'config': {
+      // Only a Logline setting can be opened by name.
+      const setting = string('setting');
+      return setting && /^logline\.[A-Za-z][\w.]{0,63}$/.test(setting)
+        ? { type: msg.type, setting }
+        : { type: msg.type };
+    }
     case 'import':
     case 'clear':
-    case 'config':
     case 'manageServers':
     case 'addConnection':
       return { type: msg.type };

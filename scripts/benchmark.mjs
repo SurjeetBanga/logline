@@ -235,6 +235,35 @@ timed('remote-sql', 'Turn 1,000 searches into SQL for a log table', async () => 
       buildSqlLogQuery({ dialect: 'sqlite', mapping: logTable, table, query, limit: 5000, order: 'desc' });
   };
 });
+timed('mongo-filter', 'Turn 1,000 searches into MongoDB filters for a log collection', async () => {
+  const { buildMongoLogQuery } = await load('core/mongo-query.js');
+  const fields = [
+    ...Object.keys(tableRows(1)[0]).map((name) => ({ name, type: name.endsWith('id') ? 'number' : 'string' })),
+    { name: 'http.status', type: 'number' },
+    { name: 'http.path', type: 'string' },
+  ];
+  const searches = Array.from(
+    { length: 1000 },
+    (_, i) => `level:error user_id:>${i % 97} -route:/health http.status:5xx http.path:/orders OR msg:timeout`,
+  );
+  return () => {
+    for (const query of searches) buildMongoLogQuery({ mapping: logTable, fields, query, now: receivedAt.getTime() });
+  };
+});
+timed('mongo-docs', 'Turn 5,000 fetched MongoDB documents, with dates and nested fields, into log lines', async () => {
+  const { plainDocument } = await load('capture/connectors/mongo.js');
+  const { rowRoles, rowToLine } = await load('core/remote-query.js');
+  const documents = tableRows(5000).map((row, i) => ({
+    ...row,
+    _id: { _bsontype: 'ObjectId', toHexString: () => i.toString(16).padStart(24, '0') },
+    created_at: new Date(receivedAt.getTime() + i * 1000),
+    http: { status: i % 10 ? 200 : 503, path: '/orders/42', timing: { totalMs: i % 900 } },
+  }));
+  const roles = rowRoles([...Object.keys(documents[0]), 'http.status'], logTable);
+  return () => {
+    for (const document of documents) rowToLine(plainDocument(document), roles, 'iso');
+  };
+});
 /** An OTLP/JSON trace request of `count` spans, each with `attributes(i)` as its attributes. */
 function spanRequest(count, attributes) {
   const value = (item) => (typeof item === 'number' ? { intValue: String(item) } : { stringValue: String(item) });
@@ -456,6 +485,23 @@ timed('stream', 'Sorted page while 1,000 events stream in, 50 at a time', async 
       for (let i = 0; i < 50; i++) store.add(copy());
       store.page({ sort: 'durationMs', sortDirection: 'desc' });
     }
+  };
+});
+
+timed('removeSource', 'Remove a 100-event source from 50,000 retained events', async () => {
+  const { LogStore } = await load('core/log-store.js');
+  const { parseLogLine } = await load('core/log-event.js');
+  // A store of its own: removing compacts the whole ring, and the shared store stays as other cases expect it.
+  const template = parseLogLine(line(1), 'stdout', 1, receivedAt);
+  let next = 0;
+  const copy = (serverId) => ({ ...template, id: ++next, serverId });
+  const store = new LogStore(RETAINED, 100 * 1024 * 1024);
+  for (let i = 0; i < RETAINED - 100; i++) store.add(copy('api'));
+  for (let i = 0; i < 100; i++) store.add(copy('worker'));
+  // Each measurement removes the small source and puts it back, so the store is the same every time.
+  return () => {
+    assert.equal(store.removeSource('worker'), 100);
+    for (let i = 0; i < 100; i++) store.add(copy('worker'));
   };
 });
 

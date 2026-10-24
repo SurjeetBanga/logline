@@ -5,6 +5,7 @@ import { LogsController } from './vscode/logs-controller';
 import { LogsProvider } from './vscode/logs-view-provider';
 import { registerTasks } from './vscode/tasks/provider';
 import { GuidePanel } from './vscode/guide-panel';
+import { latestGuideRelease } from './vscode/guide-content';
 import { registerAgentTools, runAgentTool } from './vscode/agent-tools';
 import { AgentBridge, installMcpScript } from './vscode/agent-bridge';
 import { copilotAvailable, refreshInstalledSkills } from './vscode/agent-setup';
@@ -18,7 +19,12 @@ let controller: LogsController | undefined;
 
 export function activate(context: vscode.ExtensionContext): { provider: LogsProvider } {
   controller = new LogsController(context);
-  const guide = new GuidePanel(context, () => controller!.acknowledgeGuide());
+  const guide = new GuidePanel(context, () => controller!.acknowledgeGuide(), {
+    progress: () => controller!.guideProgress(),
+    reveal: (target, fallback) => void controller!.reveal(target, fallback),
+    takeTour: () => void controller!.startTour(),
+    unreadHighlights: () => (controller!.guideStatus().unread ? (latestGuideRelease.highlights.length ?? 0) : 0),
+  });
   controller.setGuideOpener((section) => guide.open(section));
   const provider = new LogsProvider(context, controller);
   context.subscriptions.push(
