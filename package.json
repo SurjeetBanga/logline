@@ -877,6 +877,9 @@
   "overrides": {
     "ovsx": {
       "@vscode/vsce": "$@vscode/vsce"
+    },
+    "@azure/identity": {
+      "@azure/msal-node": "^7.1.0"
     }
   }
 }
