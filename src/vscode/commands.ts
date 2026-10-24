@@ -101,6 +101,12 @@ export function registerCommands(
     vscode.commands.registerCommand('logline.openConnectionLink', (id?: unknown) =>
       controller.connections.openLink(typeof id === 'string' ? id : undefined),
     ),
+    vscode.commands.registerCommand('logline.allowAgentConnection', (id?: unknown) =>
+      controller.connections.allowAgents(typeof id === 'string' ? id : undefined),
+    ),
+    vscode.commands.registerCommand('logline.revokeAgentConnection', (id?: unknown) =>
+      controller.connections.revokeAgents(typeof id === 'string' ? id : undefined),
+    ),
     vscode.commands.registerCommand('logline.tailConnection', (id?: unknown) =>
       controller.connections.tail(typeof id === 'string' ? id : undefined, ''),
     ),

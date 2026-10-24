@@ -39,12 +39,35 @@ test('agent tools register all actions, format bounded results, and translate va
     wait: async () => ({ events: [], matched: 0, newest: 1, partial: false, hasMore: false }),
     trace: (shareId: string, traceId: string) => ({ traceId, shareId, spans: [] }),
     aiCalls: (input: { shareId: string }) => ({ shareId: input.shareId, calls: [] }),
+    production: { connections: () => [{ id: 'prod', label: 'Datadog · prod', type: 'datadog', agents: true }] },
+    fetchProduction: async (input: { connectionId: string }) => ({ runId: 'r1', connection: input.connectionId }),
+    compareWithProduction: (input: { prodRunId: string }) => ({ summary: `compared ${input.prodRunId}` }),
   } as any;
   const disposables = registerAgentTools({} as any, access);
-  assert.equal(registrations.size, 7);
-  assert.equal(disposables.length, 7);
+  assert.equal(registrations.size, 9);
+  assert.equal(disposables.length, 9);
   const prepared = await registrations.get('logline_search_logs').prepareInvocation({ input: {} });
   assert.match(prepared.invocationMessage, /Reading shared/);
+  // Fetching production reaches outside the editor, so its confirmation names where and how much.
+  const production = await registrations
+    .get('logline_fetch_production')
+    .prepareInvocation({ input: { connectionId: 'prod', query: 'level:error', range: '4h' } });
+  assert.equal(production.invocationMessage, 'Fetching production logs from Datadog · prod');
+  assert.equal(production.confirmationMessages.title, 'Fetch production logs from Datadog · prod');
+  assert.match(production.confirmationMessages.message.value, /level:error from the last 4h/);
+  const byTrace = await registrations
+    .get('logline_fetch_production')
+    .prepareInvocation({ input: { connectionId: 'other', traceId: 't1' } });
+  assert.match(byTrace.confirmationMessages.message.value, /trace t1 from the last 1h/);
+  assert.match(
+    (await registrations.get('logline_fetch_production').invoke({ input: { connectionId: 'prod' } })).content[0].value,
+    /"runId":"r1"/,
+  );
+  assert.match(
+    (await registrations.get('logline_compare_with_production').invoke({ input: { prodRunId: 'r1' } })).content[0]
+      .value,
+    /compared r1/,
+  );
   const result = await registrations.get('logline_search_logs').invoke({ input: { shareId: 'share' } });
   const text = result.content[0].value;
   assert.ok(Buffer.byteLength(text, 'utf8') <= 64 * 1024);

@@ -49,6 +49,8 @@ export async function run(): Promise<void> {
       'testConnection',
       'removeConnection',
       'openConnectionLink',
+      'allowAgentConnection',
+      'revokeAgentConnection',
     ]) {
       assert.ok(commands.includes(`logline.${command}`), `${command} is registered`);
     }
@@ -295,7 +297,7 @@ export async function run(): Promise<void> {
         .map((line) => JSON.parse(line) as { id: number; result: any })
         .map((reply) => [reply.id, reply.result]),
     );
-    assert.equal(replies.get(2)?.tools?.length, 7, `the MCP server lists the seven tools (${output})`);
+    assert.equal(replies.get(2)?.tools?.length, 9, `the MCP server lists the nine tools (${output})`);
     assert.match(
       replies.get(3)?.content?.[0]?.text ?? '',
       /NOT_SHARED/,

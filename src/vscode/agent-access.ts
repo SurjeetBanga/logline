@@ -1,11 +1,12 @@
 import { createHash, randomBytes } from 'node:crypto';
 import { extractExceptions } from '../core/exceptions';
 import { formatDetails } from '../core/format-details';
-import { analyzeEvents } from '../core/log-analysis';
+import { analyzeEvents, groupErrors, patternText } from '../core/log-analysis';
 import { withChangedScope } from '../core/changed-query';
 import { createRedactor, type RedactionOptions, type Redactor } from '../core/redaction';
 import type { LogStore, PageOptions } from '../core/log-store';
-import type { AgentRunStatus, AgentShareStatus } from '../core/agent-types';
+import type { AgentConnection, AgentRunStatus, AgentShareStatus } from '../core/agent-types';
+import type { CompareRequest, CompareView } from '../protocol/messages';
 import type { SessionRegistry } from '../capture/session-registry';
 import type { LogEvent, SessionSummary } from '../core/types';
 import type { Span } from '../core/otlp';
@@ -29,7 +30,55 @@ export interface AgentAiCallsInput {
 }
 
 export type AgentErrorCode =
-  'NOT_SHARED' | 'SHARE_CHANGED' | 'INVALID_INPUT' | 'EVENT_UNAVAILABLE' | 'CANCELLED' | 'BUSY';
+  | 'NOT_SHARED'
+  | 'SHARE_CHANGED'
+  | 'INVALID_INPUT'
+  | 'EVENT_UNAVAILABLE'
+  | 'CANCELLED'
+  | 'BUSY'
+  | 'CONNECTION_UNAVAILABLE'
+  | 'RANGE_TOO_LARGE'
+  | 'REMOTE_ERROR';
+
+/** Production fetches an agent may make, for each connection, per minute. */
+const PRODUCTION_FETCHES_PER_MINUTE = 10;
+/** The ranges an agent may fetch: up to a day. */
+const PRODUCTION_RANGES = ['15m', '1h', '4h', '24h'];
+
+export interface ProductionFetchInput {
+  shareId: string;
+  connectionId: string;
+  query?: string;
+  traceId?: string;
+  range?: string;
+  limit?: number;
+}
+
+/** What a production fetch did, as the connection layer reports it. */
+export interface ProductionFetchResult {
+  sessionId?: string;
+  sourceId: string;
+  label: string;
+  fetched: number;
+  kept: number;
+  total?: number;
+  local: string[];
+  statement?: string;
+  error?: string;
+}
+
+/** Saved connections, for agents: which they may query, and the queries themselves. Attached by the controller. */
+export interface ProductionAccess {
+  connections(): AgentConnection[];
+  fetch(input: {
+    connectionId: string;
+    query: string;
+    traceId?: string;
+    range: string;
+    limit: number;
+  }): Promise<ProductionFetchResult>;
+  compare(request: CompareRequest): CompareView;
+}
 export class AgentAccessError extends Error {
   constructor(
     readonly code: AgentErrorCode,
@@ -85,6 +134,10 @@ export class AgentLogAccess {
   private readonly activeWaits = new Set<symbol>();
   /** Files changed since the last commit, or undefined outside a git repository. */
   changes?: () => { files: number } | undefined;
+  /** Saved connections agents can fetch production logs from, when the user allowed them. */
+  production?: ProductionAccess;
+  /** When each connection was fetched from by agents in the last minute. */
+  private readonly productionFetches = new Map<string, number[]>();
   constructor(
     private readonly store: LogStore,
     private readonly registry: SessionRegistry,
@@ -272,7 +325,151 @@ export class AgentLogAccess {
 
   list(input?: { shareId?: string }): AgentShareStatus {
     this.assertShare(input?.shareId);
-    return this.status();
+    const connections = this.production?.connections();
+    return { ...this.status(), ...(connections?.length ? { connections } : {}) };
+  }
+
+  /** Add a run made for an agent to a share of selected runs, so the agent can read it. */
+  private addRun(sourceId: string, sessionId: string): void {
+    if (this.shareAllRuns) return;
+    const sessions = this.shared.get(sourceId) ?? new Set<string>();
+    sessions.add(sessionId);
+    this.shared.set(sourceId, sessions);
+  }
+
+  /**
+   * Fetch production logs from a connection the user allowed, into a run of
+   * its own, and summarize them: the agent reads them with the other tools.
+   */
+  async fetchProduction(input: ProductionFetchInput): Promise<unknown> {
+    if (!input || typeof input !== 'object' || typeof input.shareId !== 'string')
+      throw new AgentAccessError('INVALID_INPUT', 'shareId is required.');
+    this.assertShare(input.shareId);
+    if (typeof input.connectionId !== 'string' || !input.connectionId)
+      throw new AgentAccessError(
+        'INVALID_INPUT',
+        'connectionId is required; list connections with logline_list_shared_sources.',
+      );
+    if (input.query !== undefined && (typeof input.query !== 'string' || input.query.length > 256))
+      throw new AgentAccessError('INVALID_INPUT', 'query must be at most 256 characters.');
+    if (
+      input.traceId !== undefined &&
+      (typeof input.traceId !== 'string' || !/^[A-Za-z0-9_-]{1,128}$/.test(input.traceId))
+    )
+      throw new AgentAccessError('INVALID_INPUT', 'traceId must be letters, digits, - or _.');
+    const range = input.range ?? '1h';
+    if (typeof range !== 'string' || !PRODUCTION_RANGES.includes(range))
+      throw new AgentAccessError('RANGE_TOO_LARGE', `range must be one of ${PRODUCTION_RANGES.join(', ')}.`);
+    const limit = Math.max(1, Math.min(1000, Number.isFinite(input.limit) ? Math.floor(input.limit!) : 500));
+    const connection = this.production?.connections().find((candidate) => candidate.id === input.connectionId);
+    if (!connection)
+      throw new AgentAccessError('CONNECTION_UNAVAILABLE', `There is no connection ${input.connectionId}.`);
+    if (!connection.agents)
+      throw new AgentAccessError(
+        'CONNECTION_UNAVAILABLE',
+        `The user has not allowed agents to query ${connection.label}. Ask them to choose Allow agents on it in the Logline Logs panel.`,
+      );
+    const now = Date.now();
+    const recent = (this.productionFetches.get(connection.id) ?? []).filter((time) => time > now - 60000);
+    if (recent.length >= PRODUCTION_FETCHES_PER_MINUTE)
+      throw new AgentAccessError(
+        'BUSY',
+        `At most ${PRODUCTION_FETCHES_PER_MINUTE} fetches a minute from ${connection.label}; search the runs already fetched with logline_search_logs.`,
+      );
+    this.productionFetches.set(connection.id, [...recent, now]);
+    const result = await this.production!.fetch({
+      connectionId: connection.id,
+      query: input.query ?? '',
+      ...(input.traceId ? { traceId: input.traceId } : {}),
+      range,
+      limit,
+    });
+    if (result.error || !result.sessionId)
+      throw new AgentAccessError(
+        'REMOTE_ERROR',
+        `${connection.label}: ${this.redactor.text(result.error ?? 'the fetch failed')}`,
+      );
+    // A share can have changed while the fetch ran; only a current one gets the run.
+    if (this.shareId === input.shareId) this.addRun(result.sourceId, result.sessionId);
+    const events = this.store.reversePage({ serverId: result.sourceId, sessionId: result.sessionId }, 5000).events;
+    return {
+      runId: result.sessionId,
+      sourceId: result.sourceId,
+      connection: result.label,
+      fetched: result.fetched,
+      kept: result.kept,
+      ...(result.total !== undefined ? { totalInRange: result.total } : {}),
+      ...(result.local.length ? { filteredLocally: result.local } : {}),
+      ...(result.statement ? { sentAs: this.redactor.text(result.statement) } : {}),
+      errorGroups: groupErrors(events)
+        .slice(0, 10)
+        .map((group) => ({
+          pattern: this.redactor.text(patternText(group.message)),
+          count: group.count,
+          sampleIds: group.sampleIds.slice(0, 3),
+          ...(group.location ? { location: group.location } : {}),
+        })),
+      next: 'Read these with logline_search_logs or logline_analyze_logs (sessionIds: [runId]) and logline_inspect_event; after a local run, call logline_compare_with_production.',
+    };
+  }
+
+  /** Compare a production run's errors with a shared local source's newest runs. */
+  compareWithProduction(input: { shareId: string; prodRunId: string; localSourceId?: string }): unknown {
+    if (!input || typeof input !== 'object' || typeof input.shareId !== 'string')
+      throw new AgentAccessError('INVALID_INPUT', 'shareId is required.');
+    this.assertShare(input.shareId);
+    if (!this.production) throw new AgentAccessError('CONNECTION_UNAVAILABLE', 'Comparing is not available.');
+    if (typeof input.prodRunId !== 'string') throw new AgentAccessError('INVALID_INPUT', 'prodRunId is required.');
+    const sources = [...this.shared.entries()];
+    const baseline = sources.find(([, sessions]) => sessions.has(input.prodRunId))?.[0];
+    if (!baseline)
+      throw new AgentAccessError(
+        'INVALID_INPUT',
+        'prodRunId is not a shared run; use the runId logline_fetch_production returned.',
+      );
+    // By default, the shared local source that ran most recently.
+    const latest = (sourceId: string) =>
+      Math.max(
+        0,
+        ...[...this.registry.records.values()]
+          .filter((record) => record.serverId === sourceId)
+          .map((record) => record.startedAt),
+      );
+    const local =
+      input.localSourceId ??
+      sources
+        .map(([id]) => id)
+        .filter((id) => id !== baseline && !id.startsWith('conn:'))
+        .sort((a, b) => latest(b) - latest(a))[0];
+    if (!local || !this.shared.has(local))
+      throw new AgentAccessError(
+        'INVALID_INPUT',
+        'localSourceId must be a shared local source, such as the app or tests just run.',
+      );
+    const view = this.production.compare({
+      baselineServerId: baseline,
+      baselineSessionId: input.prodRunId,
+      localServerId: local,
+    });
+    return {
+      production: {
+        runId: input.prodRunId,
+        label: this.redactor.text(view.baseline.label),
+        events: view.baseline.events,
+      },
+      local: { sourceId: local, label: this.redactor.text(view.local.label), runs: view.runs.map((run) => run.id) },
+      summary: view.summary,
+      errors: view.rows.map((row) => ({
+        status: row.status,
+        pattern: this.redactor.text(row.pattern),
+        production: row.baseline,
+        runs: row.runs,
+        ...(row.changed ? { fromChangedCode: true } : {}),
+        ...(row.location ? { location: row.location } : {}),
+        ...(row.baselineSample !== undefined ? { productionSampleId: row.baselineSample } : {}),
+        ...(row.localSample !== undefined ? { localSampleId: row.localSample } : {}),
+      })),
+    };
   }
 
   search(input: AgentSearchInput): AgentSearchResult {

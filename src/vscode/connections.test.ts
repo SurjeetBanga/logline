@@ -88,6 +88,7 @@ function setup() {
   const remote = new RemoteSource(config, registry, new Ingestion(store, () => undefined), state);
   const secrets = new Map<string, string>();
   const shown: string[] = [];
+  const memento = new Map<string, unknown>();
   const manager = new ConnectionManager(
     config,
     remote,
@@ -97,8 +98,13 @@ function setup() {
       delete: async (key: string) => void secrets.delete(key),
     },
     async (sourceId, runId) => void shown.push(runId ? `${sourceId}#${runId}` : sourceId),
+    undefined,
+    {
+      get: <T>(key: string, fallback?: T) => (memento.has(key) ? memento.get(key) : fallback) as T,
+      update: async (key: string, value: unknown) => void memento.set(key, value),
+    },
   );
-  return { store, registry, remote, manager, secrets, shown };
+  return { store, registry, remote, manager, secrets, shown, memento };
 }
 
 function reset() {
@@ -237,6 +243,7 @@ test(
         mapped: true,
         sql: true,
         watching: [],
+        agents: false,
         tailing: false,
       },
     ]);
@@ -446,6 +453,7 @@ test('a Datadog connection is added with its keys, searched, and opened from a l
       mapped: true,
       sql: false,
       watching: [],
+      agents: false,
       tailing: false,
     });
     assert.deepEqual(await manager.preview('prod', 'level:error /x/', '1h'), {
@@ -533,6 +541,74 @@ test('metric queries, name suggestions, watches, and windowed fetches go through
     // Without a place to put watched metrics, Watch does nothing.
     await manager.watchMetric('prod', 'avg:latency{*}', true);
     assert.deepEqual(manager.views()[0].watching, []);
+    manager.dispose();
+  } finally {
+    await fake.close();
+  }
+});
+
+test('agents query only connections the person allowed, and their fetches are runs of their own', async () => {
+  reset();
+  const now = Date.now();
+  const fake = await startFakeDatadog({
+    token: 'tok-agents',
+    logs: [
+      {
+        id: 'a',
+        timestamp: new Date(now - 60000).toISOString(),
+        status: 'error',
+        message: 'declined',
+        attributes: { dd: { trace_id: 'trace-xyz-1' } },
+      },
+      {
+        id: 'b',
+        timestamp: new Date(now - 50000).toISOString(),
+        status: 'info',
+        message: 'retry',
+        attributes: { dd: { trace_id: 'trace-xyz-1' } },
+      },
+    ],
+  });
+  try {
+    raw.workspace = [
+      { id: 'prod', label: 'prod', type: 'datadog', site: fake.url },
+      { id: 'raw', label: 'raw', type: 'sqlite', path: 'x.db' },
+    ];
+    const { manager, secrets, memento, registry } = setup();
+    secrets.set(`logline.connection.datadog:${fake.url}`, JSON.stringify({ token: 'tok-agents' }));
+    assert.deepEqual(manager.agentConnections(), [
+      { id: 'prod', label: 'Datadog · prod', type: 'datadog', agents: false },
+    ]);
+    const refused = await manager.agentFetch({ connectionId: 'prod', query: '', range: '1h', limit: 10 });
+    assert.equal(refused.error, 'Agents may not query this connection.');
+    // Allowing asks first; cancelling allows nothing.
+    ui.modal = undefined;
+    await manager.allowAgents('prod');
+    assert.equal(manager.agentConnections()[0].agents, false);
+    ui.modal = 'Allow';
+    await manager.allowAgents('prod');
+    assert.equal(manager.views()[0].agents, true);
+    // Kept by what the connection opens, not its id: another workspace's name for it is allowed too.
+    assert.deepEqual(memento.get('logline.agentConnections.v1'), [`logline.connection.datadog:${fake.url}`]);
+    const fetched = await manager.agentFetch({ connectionId: 'prod', query: 'level:error', range: '1h', limit: 10 });
+    assert.deepEqual(
+      [fetched.fetched, fetched.kept, fetched.label, fetched.sourceId],
+      [1, 1, 'Datadog · prod', 'conn:prod'],
+    );
+    assert.equal(registry.records.get(fetched.sessionId!)?.command, 'Agent: level:error · last 1h');
+    const trace = await manager.agentFetch({
+      connectionId: 'prod',
+      query: '',
+      traceId: 'trace-xyz-1',
+      range: '1h',
+      limit: 10,
+    });
+    assert.equal(trace.kept, 2);
+    assert.equal(trace.statement, 'trace_id:trace-xyz-1');
+    assert.equal(registry.records.get(trace.sessionId!)?.command, 'Agent: trace trace-xyz-1 · last 1h');
+    await manager.revokeAgents();
+    assert.equal(manager.agentConnections()[0].agents, false);
+    assert.deepEqual(memento.get('logline.agentConnections.v1'), []);
     manager.dispose();
   } finally {
     await fake.close();

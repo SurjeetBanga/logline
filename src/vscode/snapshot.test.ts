@@ -124,6 +124,7 @@ test('saved connections are listed as sources before they have runs', () => {
     mapped: true,
     sql: true,
     watching: [],
+    agents: false,
     tailing: false,
   };
   const without = h.snapshot();

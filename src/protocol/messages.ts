@@ -82,6 +82,7 @@ export type ViewRequest =
   | { type: 'metricWatch'; connectionId: string; query: string; enabled: boolean }
   | { type: 'connectionTail'; connectionId: string; query: string; enabled: boolean }
   | { type: 'connectionSql' | 'connectionLink'; connectionId: string }
+  | { type: 'connectionAgents'; connectionId: string; enabled: boolean }
   | ({ type: 'compare' } & CompareRequest)
   | { type: 'import' | 'clear' | 'config' | 'manageServers' | 'addConnection' };
 
@@ -122,6 +123,8 @@ export interface ConnectionView {
   sql: boolean;
   /** Metric queries watched into the Metrics list. */
   watching: string[];
+  /** Whether agents may fetch from it. */
+  agents: boolean;
   tailing: boolean;
   /** The latest fetch or tail. */
   last?: RemoteRunInfo;
@@ -423,6 +426,10 @@ export function parseViewRequest(value: unknown): ViewRequest | undefined {
       return { type: msg.type, serverId: filter.serverId };
     case 'stop':
       return { type: msg.type, serverId: filter.serverId, sessionId: filter.sessionId };
+    case 'connectionAgents': {
+      const connectionId = string('connectionId')?.slice(0, 128);
+      return connectionId ? { type: msg.type, connectionId, enabled: msg.enabled === true } : undefined;
+    }
     case 'metricQuery':
     case 'metricNames':
     case 'metricWatch': {

@@ -3816,3 +3816,51 @@ test('a metric query is charted, and a window dragged across it shows the logs f
   assert.equal(get('metricQueryStatus').textContent, 'Could not query: boom');
   assert.equal(chart.hidden, true);
 });
+
+test('a connection says whether agents may query it, and the button asks to change that', () => {
+  const { get, receive, messages } = viewer({ server: 'conn:prod', query: '' });
+  const plain = (value: unknown) => JSON.parse(JSON.stringify(value));
+  const connection = {
+    id: 'prod',
+    sourceId: 'conn:prod',
+    label: 'Datadog · prod',
+    type: 'datadog',
+    mapped: true,
+    sql: false,
+    watching: [],
+    agents: false,
+    tailing: false,
+  };
+  const snapshot = (agents: boolean) =>
+    receive({
+      type: 'snapshot',
+      generation: 1,
+      newest: 100,
+      status: 'Ready',
+      command: '',
+      running: false,
+      total: 0,
+      retained: 0,
+      discarded: 0,
+      bytes: 0,
+      maxBytes: 1,
+      truncated: 0,
+      events: [],
+      columns: [],
+      page: 0,
+      pages: 1,
+      matched: 0,
+      servers: [{ id: 'conn:prod', label: 'Datadog · prod', status: 'idle', activeSessions: 0 }],
+      sessions: [],
+      connections: [{ ...connection, agents }],
+    });
+  snapshot(false);
+  assert.equal(get('connectionAgents').textContent, 'Allow agents');
+  assert.equal(get('connectionAgents').attributes['aria-pressed'], 'false');
+  get('connectionAgents').listeners.get('click')!();
+  assert.deepEqual(plain(messages.at(-1)), { type: 'connectionAgents', connectionId: 'prod', enabled: true });
+  snapshot(true);
+  assert.equal(get('connectionAgents').textContent, 'Agents allowed');
+  get('connectionAgents').listeners.get('click')!();
+  assert.deepEqual(plain(messages.at(-1)), { type: 'connectionAgents', connectionId: 'prod', enabled: false });
+});

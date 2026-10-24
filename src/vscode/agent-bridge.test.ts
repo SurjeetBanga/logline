@@ -184,10 +184,13 @@ test('the MCP server speaks the protocol and forwards tool calls', async () => {
       inputSchema: { type: 'object' },
     },
     { name: 'logline_search_logs', modelDescription: 'Search.' },
+    { name: 'logline_fetch_production', modelDescription: 'Fetch.' },
   ]);
   assert.match(tools[0].description, /If nothing is shared, ask the user to choose Share with agent/);
   assert.deepEqual(tools[1].inputSchema, { type: 'object', properties: {} });
   assert.deepEqual(tools[0].annotations, { readOnlyHint: true, destructiveHint: false, openWorldHint: false });
+  // Fetching production reaches a store outside the editor.
+  assert.deepEqual(tools[2].annotations, { readOnlyHint: true, destructiveHint: false, openWorldHint: true });
 
   let windows: BridgeWindow[] = [];
   const calls: unknown[][] = [];
@@ -223,7 +226,7 @@ test('the MCP server speaks the protocol and forwards tool calls', async () => {
     '2025-06-18',
   );
   assert.equal(await server.handle({ jsonrpc: '2.0', method: 'notifications/initialized' }), undefined);
-  assert.equal(((await server.handle({ jsonrpc: '2.0', id: 3, method: 'tools/list' })) as any).result.tools.length, 2);
+  assert.equal(((await server.handle({ jsonrpc: '2.0', id: 3, method: 'tools/list' })) as any).result.tools.length, 3);
   assert.equal(
     ((await server.handle({ jsonrpc: '2.0', id: 4, method: 'tools/call', params: { name: 'rm_rf' } })) as any).error
       .code,

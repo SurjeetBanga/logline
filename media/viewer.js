@@ -691,6 +691,7 @@
       metricShowLogs: element("metricShowLogs"),
       metricShowLocal: element("metricShowLocal"),
       connectionCompare: element("connectionCompare"),
+      connectionAgents: element("connectionAgents"),
       connectionLink: element("connectionLink"),
       compare: element("compare"),
       compareView: element("compareView"),
@@ -3016,6 +3017,10 @@ Span ${call.spanId}`;
       elements.connectionResult.textContent = resultText(connection);
       elements.connectionCompare.hidden = !connection.last || connection.last.kind === "tail";
       elements.connectionSql.hidden = !connection.sql;
+      elements.connectionAgents.hidden = !connection.mapped;
+      elements.connectionAgents.setAttribute("aria-pressed", String(!!connection.agents));
+      elements.connectionAgents.textContent = connection.agents ? "Agents allowed" : "Allow agents";
+      elements.connectionAgents.title = connection.agents ? "Agents you share logs with can fetch logs from this connection. Click to stop them." : "Let agents you share logs with fetch logs from this connection";
       elements.connectionLink.hidden = connection.type !== "datadog";
       elements.connectionResult.title = connection.last?.statement ?? "";
       elements.connectionResult.classList[connection.last?.error ? "add" : "remove"]("connection-error");
@@ -3087,6 +3092,11 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
       const connection = selected();
       const run2 = state.selectedSession || connection?.last?.sessionId;
       if (connection && run2) compare(connection.sourceId, run2);
+    });
+    scope.listen(elements.connectionAgents, "click", () => {
+      const connection = selected();
+      if (connection)
+        api.postMessage({ type: "connectionAgents", connectionId: connection.id, enabled: !connection.agents });
     });
     scope.listen(elements.connectionLink, "click", () => {
       const connection = selected();

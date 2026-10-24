@@ -30,6 +30,11 @@ import { parseDatadogLink } from '../core/datadog-query';
 import { slugify } from '../core/server-config';
 import type { Settings } from '../core/settings';
 import type { ConnectionView } from '../protocol/messages';
+import type { AgentConnection } from '../core/agent-types';
+import type { ProductionFetchResult } from './agent-access';
+
+/** Where the connections agents may query are remembered, across workspaces. */
+const AGENT_ACCESS_KEY = 'logline.agentConnections.v1';
 
 type Secrets = Pick<vscode.SecretStorage, 'get' | 'store' | 'delete'>;
 
@@ -66,7 +71,110 @@ export class ConnectionManager implements vscode.Disposable {
     private readonly showSource: (sourceId: string, runId?: string) => Promise<void>,
     /** Watched metric queries, polled into the Metrics list. */
     private readonly watched?: RemoteMetrics,
+    /** Remembers which connections agents may query; outside settings, so a workspace cannot grant it. */
+    private readonly consent?: Pick<vscode.Memento, 'get' | 'update'>,
   ) {}
+
+  /** What a connection opens: the same database or API, whatever a workspace calls it. */
+  private identity(connection: ConnectionConfig): string {
+    if (connection.type === 'sqlite') return `sqlite:${this.resolvePath(connection.path)}`;
+    return secretKey(connection);
+  }
+
+  private agentsAllowed(connection: ConnectionConfig): boolean {
+    return (this.consent?.get<string[]>(AGENT_ACCESS_KEY, []) ?? []).includes(this.identity(connection));
+  }
+
+  /** Let agents fetch from a connection, after the person confirms what that means. */
+  async allowAgents(id?: string): Promise<void> {
+    const connection = await this.pick(id, 'Allow agents to query', searchable, 'No connection has logs to search.');
+    if (!connection || !this.consent || this.agentsAllowed(connection)) return;
+    const answer = await vscode.window.showWarningMessage(
+      `Allow agents to query ${connectionLabel(connection)}?`,
+      {
+        modal: true,
+        detail:
+          'Agents you share logs with (Copilot, and Claude Code, Codex, or other MCP clients you connected) can fetch up to 24 hours of its logs at a time, at most 10 times a minute, into runs you can see in the Logs panel. Results are redacted. You can stop this at any time.',
+      },
+      'Allow',
+    );
+    if (answer !== 'Allow') return;
+    const allowed = this.consent.get<string[]>(AGENT_ACCESS_KEY, []);
+    await this.consent.update(AGENT_ACCESS_KEY, [...new Set([...allowed, this.identity(connection)])]);
+  }
+
+  async revokeAgents(id?: string): Promise<void> {
+    const connection = await this.pick(
+      id,
+      'Stop agents querying',
+      (candidate) => this.agentsAllowed(candidate),
+      'Agents may not query any connection.',
+    );
+    if (!connection || !this.consent) return;
+    const identity = this.identity(connection);
+    await this.consent.update(
+      AGENT_ACCESS_KEY,
+      this.consent.get<string[]>(AGENT_ACCESS_KEY, []).filter((entry) => entry !== identity),
+    );
+  }
+
+  /** Connections as agents see them. */
+  agentConnections(): AgentConnection[] {
+    return this.list()
+      .filter(searchable)
+      .map((connection) => ({
+        id: connection.id,
+        label: connectionLabel(connection),
+        type: connection.type,
+        agents: this.agentsAllowed(connection),
+      }));
+  }
+
+  /**
+   * A fetch an agent asked for, already checked by the agent boundary: the
+   * newest logs that match its search, or every log of a trace, as a run.
+   */
+  async agentFetch(input: {
+    connectionId: string;
+    query: string;
+    traceId?: string;
+    range: string;
+    limit: number;
+  }): Promise<ProductionFetchResult> {
+    const connection = this.find(input.connectionId);
+    const sourceId = connectionSourceId(input.connectionId);
+    if (!connection || !this.agentsAllowed(connection) || !vscode.workspace.isTrusted)
+      return {
+        sourceId,
+        label: input.connectionId,
+        fetched: 0,
+        kept: 0,
+        local: [],
+        error: 'Agents may not query this connection.',
+      };
+    const now = Date.now();
+    // A trace id is the store's own trace field: Datadog's trace_id, a mapped table's trace id column.
+    const trace = input.traceId;
+    const info = await this.remote.fetch(await this.target(connection), {
+      query: trace && connection.type !== 'datadog' ? `traceId:${trace}` : input.query,
+      ...(trace && connection.type === 'datadog' ? { native: `trace_id:${trace}` } : {}),
+      fromMs: now - (rangeMs(input.range) ?? 3600000),
+      toMs: now,
+      limit: input.limit,
+      title: `Agent: ${trace ? `trace ${trace.slice(0, 16)}` : input.query.trim() || 'all logs'} · last ${input.range}`,
+    });
+    return {
+      sessionId: info.sessionId,
+      sourceId,
+      label: connectionLabel(connection),
+      fetched: info.fetched,
+      kept: info.kept,
+      ...(info.total !== undefined ? { total: info.total } : {}),
+      local: info.local,
+      ...(info.statement ? { statement: info.statement } : {}),
+      ...(info.error ? { error: info.error } : {}),
+    };
+  }
 
   list(): ConnectionConfig[] {
     return this.config.get<ConnectionConfig[]>('connections', []);
@@ -87,6 +195,7 @@ export class ConnectionManager implements vscode.Disposable {
         mapped: searchable(connection),
         sql: sqlCapable(connection),
         watching: this.watched?.watching(connection.id) ?? [],
+        agents: this.agentsAllowed(connection),
         tailing: this.remote.tailing(connection.id),
         ...(last ? { last } : {}),
       };

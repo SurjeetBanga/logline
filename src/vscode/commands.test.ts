@@ -71,7 +71,7 @@ test('commands register the complete action surface and honor trust/focus/config
     },
     terminalCapture: { availableTerminals: () => [], toggleSource: () => undefined },
     connections: Object.fromEntries(
-      ['add', 'query', 'runSql', 'tail', 'test', 'remove', 'openLink'].map((name) => [
+      ['add', 'query', 'runSql', 'tail', 'test', 'remove', 'openLink', 'allowAgents', 'revokeAgents'].map((name) => [
         name,
         async (...args: unknown[]) => calls.push({ name: `connections.${name}`, value: args }),
       ]),
@@ -85,7 +85,7 @@ test('commands register the complete action surface and honor trust/focus/config
   } as any;
   const guideCalls: string[] = [];
   const registrations = registerCommands(controller, (section) => guideCalls.push(section));
-  assert.equal(handlers.size, 31);
+  assert.equal(handlers.size, 33);
   await handlers.get('logline.runCommand')!();
   for (const name of [
     'logline.stopCommand',
@@ -136,6 +136,8 @@ test('commands register the complete action surface and honor trust/focus/config
   await handlers.get('logline.testConnection')!();
   await handlers.get('logline.removeConnection')!('prod');
   await handlers.get('logline.openConnectionLink')!('prod');
+  await handlers.get('logline.allowAgentConnection')!('prod');
+  await handlers.get('logline.revokeAgentConnection')!();
   assert.deepEqual(
     calls.filter((call) => String(call.name).startsWith('connections.')),
     [
@@ -146,6 +148,8 @@ test('commands register the complete action surface and honor trust/focus/config
       { name: 'connections.test', value: [undefined] },
       { name: 'connections.remove', value: ['prod'] },
       { name: 'connections.openLink', value: ['prod'] },
+      { name: 'connections.allowAgents', value: ['prod'] },
+      { name: 'connections.revokeAgents', value: [undefined] },
     ],
   );
   assert.ok(calls.some((call) => call.name === 'command' && call.value === 'logline.logs.focus'));

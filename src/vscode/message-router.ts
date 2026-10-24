@@ -56,7 +56,17 @@ interface MessageServices {
   showStatus(): Promise<void>;
   connections?: Pick<
     ConnectionManager,
-    'fetch' | 'tail' | 'runSql' | 'preview' | 'add' | 'openLink' | 'metricQuery' | 'metricNames' | 'watchMetric'
+    | 'fetch'
+    | 'tail'
+    | 'runSql'
+    | 'preview'
+    | 'add'
+    | 'openLink'
+    | 'metricQuery'
+    | 'metricNames'
+    | 'watchMetric'
+    | 'allowAgents'
+    | 'revokeAgents'
   >;
   compare?(request: CompareRequest): CompareView;
 }
@@ -252,6 +262,10 @@ export async function handleMessage(
       return;
     case 'metricWatch':
       await services.connections?.watchMetric(msg.connectionId, msg.query, msg.enabled);
+      return;
+    case 'connectionAgents':
+      if (msg.enabled) await services.connections?.allowAgents(msg.connectionId);
+      else await services.connections?.revokeAgents(msg.connectionId);
       return;
     case 'connectionTail':
       await services.connections?.tail(msg.connectionId, msg.query, msg.enabled);

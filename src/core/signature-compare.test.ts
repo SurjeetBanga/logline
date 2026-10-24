@@ -71,7 +71,11 @@ test('new errors from changed code are marked, and the summary says what a run d
     '1 production error fixed locally · 1 new local error from your changes',
   );
   assert.equal(summarizeComparison(compareSignatures(production, [before])), '1 production error reproduced');
-  assert.equal(summarizeComparison([]), 'No production errors in this run.');
+  assert.equal(summarizeComparison([]), 'No errors in production or the newest run.');
+  assert.equal(
+    summarizeComparison(compareSignatures(production, [[event('info', 'ok')]])),
+    'None of the production errors occurred in the newest run.',
+  );
   assert.equal(compareSignatures(production, [before, [fromChange, elsewhere]], undefined, 1).length, 1);
 });
 

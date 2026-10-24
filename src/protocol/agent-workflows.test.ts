@@ -41,7 +41,7 @@ test('the MCP server offers the workflows as prompts', async () => {
   const list = ((await server.handle({ jsonrpc: '2.0', id: 2, method: 'prompts/list' })) as any).result.prompts;
   assert.deepEqual(
     list.map((prompt: { name: string }) => prompt.name),
-    ['verify', 'triage', 'slow-request'],
+    ['verify', 'triage', 'slow-request', 'reproduce-prod'],
   );
   assert.ok(list.every((prompt: { title?: string; description?: string }) => prompt.title && prompt.description));
   const triage = (
@@ -71,7 +71,12 @@ test("skills install into each agent's folder and stay current without touching 
   assert.equal(skillsDirectory('codex', {}, '/home/me'), join('/home/me', '.agents', 'skills'));
 
   const claude = join(temp(), 'skills');
-  assert.deepEqual(installSkills(claude), ['logline-verify', 'logline-triage', 'logline-slow-request']);
+  assert.deepEqual(installSkills(claude), [
+    'logline-verify',
+    'logline-triage',
+    'logline-slow-request',
+    'logline-reproduce-prod',
+  ]);
   const verify = join(claude, 'logline-verify', 'SKILL.md');
   assert.equal(readFileSync(verify, 'utf8'), skillFile(AGENT_WORKFLOWS[0]));
   const written = statSync(verify).mtimeMs;

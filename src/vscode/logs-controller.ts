@@ -161,8 +161,15 @@ export class LogsController {
       context.secrets,
       (sourceId, runId) => this.showSource(sourceId, runId),
       this.remoteMetrics,
+      context.globalState,
     );
     this.compare = new ProductionCompare(this.store, this.registry, (view) => void this.comparisonFinished(view));
+    // Agents fetch from connections the user allowed, and compare with production, through the sharing boundary.
+    this.agentAccess.production = {
+      connections: () => this.connections.agentConnections(),
+      fetch: (input) => this.connections.agentFetch(input),
+      compare: (request) => this.compare.build(request, false),
+    };
     this.store.changeScope = new ChangeScope(this.changedLines, this.logSites);
     this.agentAccess.changes = () => this.gitChanges?.status();
     this.otel = new OtelIntegration(

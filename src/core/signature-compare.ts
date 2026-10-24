@@ -143,7 +143,10 @@ export function summarizeComparison(rows: SignatureRow[]): string {
           : `${errors}, ${changed} from your changes`,
     );
   }
-  return parts.length ? parts.join(' · ') : 'No production errors in this run.';
+  if (parts.length) return parts.join(' · ');
+  return rows.some((row) => row.baseline > 0)
+    ? 'None of the production errors occurred in the newest run.'
+    : 'No errors in production or the newest run.';
 }
 
 /** Fields whose values differ between two events, for highlighting them side by side. */

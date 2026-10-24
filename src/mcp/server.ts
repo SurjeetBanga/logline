@@ -44,7 +44,12 @@ export function mcpTools(tools: ManifestTool[]): McpTool[] {
       'If nothing is shared, ask the user to choose Share with agent in the Logline Logs panel in VS Code.',
     ),
     inputSchema: tool.inputSchema ?? { type: 'object', properties: {} },
-    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
+    // Fetching production logs reaches a store outside the editor; every other tool reads what Logline holds.
+    annotations: {
+      readOnlyHint: true,
+      destructiveHint: false,
+      openWorldHint: tool.name === 'logline_fetch_production',
+    },
   }));
 }
 

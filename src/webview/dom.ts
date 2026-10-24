@@ -34,6 +34,7 @@ export function getElements() {
     metricShowLogs: element<HTMLButtonElement>('metricShowLogs'),
     metricShowLocal: element<HTMLButtonElement>('metricShowLocal'),
     connectionCompare: element<HTMLButtonElement>('connectionCompare'),
+    connectionAgents: element<HTMLButtonElement>('connectionAgents'),
     connectionLink: element<HTMLButtonElement>('connectionLink'),
     compare: element<HTMLButtonElement>('compare'),
     compareView: element<HTMLElement>('compareView'),

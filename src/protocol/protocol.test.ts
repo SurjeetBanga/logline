@@ -206,3 +206,17 @@ test('metric requests need a connection and a query; a fetch can name an exact w
     { type: 'connectionFetch', connectionId: 'prod', query: '', range: '1h' },
   );
 });
+
+test('an agent permission request names its connection and whether to allow', () => {
+  assert.deepEqual(parseViewRequest({ type: 'connectionAgents', connectionId: 'prod', enabled: true }), {
+    type: 'connectionAgents',
+    connectionId: 'prod',
+    enabled: true,
+  });
+  assert.deepEqual(parseViewRequest({ type: 'connectionAgents', connectionId: 'prod', enabled: 'yes' }), {
+    type: 'connectionAgents',
+    connectionId: 'prod',
+    enabled: false,
+  });
+  assert.equal(parseViewRequest({ type: 'connectionAgents' }), undefined);
+});

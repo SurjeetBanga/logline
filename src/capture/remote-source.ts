@@ -41,6 +41,8 @@ export interface FetchOptions {
   sql?: string;
   /** A query in the store's own syntax, such as from a link, instead of `query`. */
   native?: string;
+  /** At most this many rows, fewer than `connectionMaxRows`. */
+  limit?: number;
   /** What the run is called in the run picker. */
   title: string;
   /** Called with the new run's session id as soon as it exists. */
@@ -154,7 +156,7 @@ export class RemoteSource {
             ...(options.native !== undefined ? { native: options.native } : {}),
             fromMs: options.fromMs,
             toMs: options.toMs,
-            limit: this.limit(),
+            limit: Math.min(options.limit ?? Infinity, this.limit()),
             order: 'desc',
             countTotal: true,
           },

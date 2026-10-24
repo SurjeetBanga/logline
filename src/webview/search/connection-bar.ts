@@ -15,6 +15,7 @@ type Elements = Pick<
   | 'connectionResult'
   | 'connectionCompare'
   | 'connectionLink'
+  | 'connectionAgents'
 >;
 type Preview = Extract<HostMessage, { type: 'connectionPreview' }>;
 
@@ -92,6 +93,12 @@ export function createConnectionBar(
     // The run to compare: the one selected in the run picker, else the latest.
     elements.connectionCompare.hidden = !connection.last || connection.last.kind === 'tail';
     elements.connectionSql.hidden = !connection.sql;
+    elements.connectionAgents.hidden = !connection.mapped;
+    elements.connectionAgents.setAttribute('aria-pressed', String(!!connection.agents));
+    elements.connectionAgents.textContent = connection.agents ? 'Agents allowed' : 'Allow agents';
+    elements.connectionAgents.title = connection.agents
+      ? 'Agents you share logs with can fetch logs from this connection. Click to stop them.'
+      : 'Let agents you share logs with fetch logs from this connection';
     elements.connectionLink.hidden = connection.type !== 'datadog';
     elements.connectionResult.title = connection.last?.statement ?? '';
     elements.connectionResult.classList[connection.last?.error ? 'add' : 'remove']('connection-error');
@@ -167,6 +174,11 @@ export function createConnectionBar(
     const connection = selected();
     const run = state.selectedSession || connection?.last?.sessionId;
     if (connection && run) compare(connection.sourceId, run);
+  });
+  scope.listen(elements.connectionAgents, 'click', () => {
+    const connection = selected();
+    if (connection)
+      api.postMessage({ type: 'connectionAgents', connectionId: connection.id, enabled: !connection.agents });
   });
   scope.listen(elements.connectionLink, 'click', () => {
     const connection = selected();
