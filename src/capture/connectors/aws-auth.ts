@@ -295,8 +295,15 @@ export function iamPassword(
       throw new AwsAuthError(
         `The region of ${target.host} is not in its name: set "region" in the connection's "auth" in logline.connections.`,
       );
-    const credentials = await resolveCredentials(target.profile, environment, AbortSignal.timeout(timeoutMs));
-    return rdsAuthToken({ ...target, region, credentials, now: environment.now() });
+    // A timer of its own, unlike AbortSignal.timeout's, keeps the process waiting for it.
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      const credentials = await resolveCredentials(target.profile, environment, controller.signal);
+      return rdsAuthToken({ ...target, region, credentials, now: environment.now() });
+    } finally {
+      clearTimeout(timer);
+    }
   };
 }
 

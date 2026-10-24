@@ -24,7 +24,8 @@ function environment(files: Record<string, string>, extra: Partial<AwsEnvironmen
   return {
     env: {},
     home: '/home/me',
-    readFile: (path) => files[path],
+    // Paths are joined with backslashes on Windows; the files here are named with forward slashes.
+    readFile: (path) => files[path.replace(/\\/g, '/')],
     fetch: async () => ({ ok: false, status: 500, json: async () => ({}) }),
     run: async () => '',
     now: () => Date.parse('2026-10-24T12:00:00Z'),
