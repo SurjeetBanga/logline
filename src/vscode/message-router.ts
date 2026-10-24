@@ -54,7 +54,7 @@ interface MessageServices {
   doctorAction(action: DoctorAction, siteId?: string): Promise<void>;
   connectAgent(): Promise<void>;
   showStatus(): Promise<void>;
-  connections?: Pick<ConnectionManager, 'fetch' | 'tail' | 'runSql' | 'preview' | 'add'>;
+  connections?: Pick<ConnectionManager, 'fetch' | 'tail' | 'runSql' | 'preview' | 'add' | 'openLink'>;
   compare?(request: CompareRequest): CompareView;
 }
 export async function handleMessage(
@@ -232,6 +232,9 @@ export async function handleMessage(
       return;
     case 'connectionSql':
       await services.connections?.runSql(msg.connectionId);
+      return;
+    case 'connectionLink':
+      await services.connections?.openLink(msg.connectionId);
       return;
     case 'connectionPreview': {
       const preview = (await services.connections?.preview(msg.connectionId, msg.query, msg.range)) ?? { local: [] };

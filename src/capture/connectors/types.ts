@@ -22,6 +22,8 @@ export interface RemoteRecord {
 
 export interface FetchRequest {
   query: string;
+  /** A query in the store's own syntax, sent as it is instead of translating `query`. */
+  native?: string;
   fromMs?: number;
   toMs?: number;
   limit: number;
@@ -48,6 +50,20 @@ export interface RemoteConnector {
   fetchLogs(request: FetchRequest, signal?: AbortSignal): Promise<FetchResult>;
   /** Run a query typed by a person; only stores that speak SQL have it. */
   runSql?(sql: string, limit: number, signal?: AbortSignal): Promise<FetchResult>;
+  /**
+   * How late a log can become searchable after its own time, such as while a
+   * service indexes it. Tails read this far back and skip what they showed.
+   */
+  readonly tailLagMs?: number;
+}
+
+/** A connection's store, as the editor uses it. */
+export interface Connector extends RemoteConnector {
+  /** A short description of what was reached, to confirm the connection works. */
+  test(): Promise<string>;
+  /** What a search would send, and which terms Logline would apply itself, without running it. */
+  preview(query: string, fromMs?: number, toMs?: number): Promise<{ statement: string; local: string[] }>;
+  dispose(): Promise<void>;
 }
 
 /** The error for a query stopped at its time limit. */

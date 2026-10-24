@@ -122,6 +122,7 @@ test('saved connections are listed as sources before they have runs', () => {
     label: 'SQLite · app',
     type: 'sqlite' as const,
     mapped: true,
+    sql: true,
     tailing: false,
   };
   const without = h.snapshot();

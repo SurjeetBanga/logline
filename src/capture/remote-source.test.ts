@@ -267,3 +267,37 @@ test('clearing logs forgets finished results but not a running tail', async () =
   assert.equal(remote.last('app')?.kind, 'tail');
   await remote.dispose();
 });
+
+test('a tail of a store that indexes late reads back over the lag and shows each log once', async () => {
+  mock.timers.enable({ apis: ['setInterval'] });
+  const { remote, target, messages } = setup({ connectionPollSeconds: 1 });
+  const requests: FetchRequest[] = [];
+  const reads: RemoteRecord[][] = [
+    [row(10, 'info', 'ten')],
+    // A log from minute 9.5 became searchable only now, after one from minute 11.
+    [row(10, 'info', 'ten'), { ...row(9, 'info', 'late'), timeMs: BASE + 570000 }, row(11, 'info', 'eleven')],
+    [row(11, 'info', 'eleven')],
+  ];
+  const connector: RemoteConnector = {
+    tailLagMs: 120000,
+    async fetchLogs(request) {
+      requests.push(request);
+      return result(reads.shift() ?? []);
+    },
+  };
+  const settle = async () => {
+    for (let turn = 0; turn < 20; turn++) await new Promise((resolve) => setImmediate(resolve));
+  };
+  remote.tail(target(connector), '', 'Tail');
+  await settle();
+  mock.timers.tick(1000);
+  await settle();
+  mock.timers.tick(1000);
+  await settle();
+  assert.deepEqual(messages(), ['ten', 'late', 'eleven']);
+  assert.deepEqual(
+    requests.map((request) => request.fromMs),
+    [undefined, BASE + 600000 - 120000, BASE + 660000 - 120000],
+  );
+  await remote.dispose();
+});

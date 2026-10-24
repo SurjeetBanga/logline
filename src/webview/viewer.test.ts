@@ -3284,6 +3284,7 @@ test('a selected connection shows its range, Run, Tail and Run SQL, with the SQL
     label: 'SQLite · app',
     type: 'sqlite',
     mapped: true,
+    sql: true,
     tailing: false,
   };
   const snapshot = (extra: Record<string, unknown>) =>
@@ -3578,6 +3579,7 @@ test('the Compare tab lines up production errors with local runs and shows both 
         label: 'SQLite · prod',
         type: 'sqlite',
         mapped: true,
+        sql: true,
         tailing: false,
         last: { sessionId: 'p1', kind: 'fetch', running: false, fetched: 1, kept: 1, local: [], at: 0 },
       },
@@ -3595,6 +3597,7 @@ test('the Compare tab lines up production errors with local runs and shows both 
         label: 'SQLite · prod',
         type: 'sqlite',
         mapped: true,
+        sql: true,
         tailing: false,
         last: { sessionId: 'p1', kind: 'fetch', running: false, fetched: 1, kept: 1, local: [], at: 0 },
       },
@@ -3604,4 +3607,61 @@ test('the Compare tab lines up production errors with local runs and shows both 
   get('connectionCompare').listeners.get('click')!();
   assert.equal(app.views.active(), 'compare');
   assert.equal(plain(messages.at(-1)).baselineSessionId, 'p1');
+});
+
+test('a Datadog connection offers Open link instead of Run SQL, and speaks of logs', () => {
+  const { get, receive, messages, timers } = viewer({ server: 'conn:prod', query: 'level:error' });
+  const plain = (value: unknown) => JSON.parse(JSON.stringify(value));
+  const connection = {
+    id: 'prod',
+    sourceId: 'conn:prod',
+    label: 'Datadog · prod',
+    type: 'datadog',
+    mapped: true,
+    sql: false,
+    tailing: false,
+  };
+  const snapshot = (extra: Record<string, unknown>) =>
+    receive({
+      type: 'snapshot',
+      generation: 1,
+      newest: 100,
+      status: 'Ready',
+      command: '',
+      running: false,
+      total: 0,
+      retained: 0,
+      discarded: 0,
+      bytes: 0,
+      maxBytes: 1,
+      truncated: 0,
+      events: [],
+      columns: [],
+      page: 0,
+      pages: 1,
+      matched: 0,
+      servers: [{ id: 'conn:prod', label: 'Datadog · prod', status: 'idle', activeSessions: 0 }],
+      sessions: [],
+      ...extra,
+    });
+  snapshot({ connections: [connection] });
+  assert.equal(get('connectionBar').hidden, false);
+  assert.equal(get('connectionSql').hidden, true);
+  assert.equal(get('connectionLink').hidden, false);
+  assert.equal(get('empty').textContent, 'Choose a range and press Run to fetch logs from Datadog · prod.');
+  [...timers.values()].at(-1)!();
+  receive({
+    type: 'connectionPreview',
+    connectionId: 'prod',
+    query: 'level:error',
+    range: '1h',
+    statement: 'status:(error)',
+    local: [],
+  });
+  assert.equal(get('connectionPreview').textContent, 'Datadog search: status:(error)');
+  get('connectionLink').listeners.get('click')!();
+  assert.deepEqual(plain(messages.at(-1)), { type: 'connectionLink', connectionId: 'prod' });
+  const last = { sessionId: 's', kind: 'fetch', running: false, fetched: 1, kept: 1, local: [], at: 0, elapsedMs: 80 };
+  snapshot({ connections: [{ ...connection, last }] });
+  assert.equal(get('connectionResult').textContent, 'Fetched 1 log · 80 ms · read-only');
 });

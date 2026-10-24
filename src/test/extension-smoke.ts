@@ -48,6 +48,7 @@ export async function run(): Promise<void> {
       'tailConnection',
       'testConnection',
       'removeConnection',
+      'openConnectionLink',
     ]) {
       assert.ok(commands.includes(`logline.${command}`), `${command} is registered`);
     }

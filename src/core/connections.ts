@@ -2,7 +2,7 @@
 // setting. Secrets (passwords) never appear here; the VS Code adapter keeps
 // them in secret storage under `secretKey`.
 
-export type ConnectionType = 'sqlite' | 'postgres';
+export type ConnectionType = 'sqlite' | 'postgres' | 'datadog';
 /** How a timestamp column stores time; `native` is a database date/time type. */
 export type TimeEncoding = 'iso' | 'epoch_s' | 'epoch_ms' | 'native';
 
@@ -36,13 +36,49 @@ export interface PostgresConnection extends BaseConnection {
   user: string;
   ssl?: boolean;
 }
-export type ConnectionConfig = SqliteConnection | PostgresConnection;
+export interface DatadogConnection extends BaseConnection {
+  type: 'datadog';
+  /** A Datadog site such as `datadoghq.eu`, or the URL of its API. */
+  site: string;
+  /** Log indexes to search; all when left out. */
+  indexes?: string[];
+}
+export type ConnectionConfig = SqliteConnection | PostgresConnection | DatadogConnection;
+
+/** Datadog's sites, by the domain their web app is on. */
+export const DATADOG_SITES = [
+  'datadoghq.com',
+  'us3.datadoghq.com',
+  'us5.datadoghq.com',
+  'datadoghq.eu',
+  'ap1.datadoghq.com',
+  'ap2.datadoghq.com',
+  'ddog-gov.com',
+];
+
+/**
+ * The API a Datadog site answers on. A URL is accepted too, for proxies; over
+ * plain http only on this machine, since requests carry the keys.
+ */
+export function datadogApiBase(site: string): string | undefined {
+  if (DATADOG_SITES.includes(site)) return `https://api.${site}`;
+  let url: URL;
+  try {
+    url = new URL(site);
+  } catch {
+    return undefined;
+  }
+  const loopback = ['127.0.0.1', 'localhost', '[::1]'].includes(url.hostname);
+  if (url.protocol !== 'https:' && !(url.protocol === 'http:' && loopback)) return undefined;
+  if (url.username || url.password || url.search || url.hash) return undefined;
+  return `${url.origin}${url.pathname.replace(/\/+$/, '')}`;
+}
 
 /** The roles a mapping can assign, in the order the setup asks for them. */
 export const MAPPED_FIELDS = ['timestamp', 'level', 'message', 'service', 'traceId'] as const;
 export type MappedField = (typeof MAPPED_FIELDS)[number];
 
-const TYPE_NAMES: Record<ConnectionType, string> = { sqlite: 'SQLite', postgres: 'Postgres' };
+const TYPE_NAMES: Record<ConnectionType, string> = { sqlite: 'SQLite', postgres: 'Postgres', datadog: 'Datadog' };
 const SOURCE_PREFIX = 'conn:';
 
 /** The source id that a connection's runs are captured under. */
@@ -59,8 +95,14 @@ export function connectionLabel(connection: Pick<ConnectionConfig, 'type' | 'lab
   return `${TYPE_NAMES[connection.type]} · ${connection.label}`;
 }
 
-/** Where a connection's password is kept: the same database shares it across workspaces. */
-export function secretKey(connection: PostgresConnection): string {
+/**
+ * Where a connection's password or keys are kept: by the database or API they
+ * open, so the same one is shared across workspaces, and a workspace that
+ * points a connection elsewhere never receives them.
+ */
+export function secretKey(connection: PostgresConnection | DatadogConnection): string {
+  if (connection.type === 'datadog')
+    return `logline.connection.datadog:${datadogApiBase(connection.site) ?? connection.site}`;
   return `logline.connection.postgres://${encodeURIComponent(connection.user)}@${connection.host}:${connection.port}/${encodeURIComponent(connection.database)}`;
 }
 
@@ -112,10 +154,19 @@ export function normalizeConnections(value: unknown): ConnectionConfig[] {
           user,
           ...(item.ssl === true ? { ssl: true } : {}),
         };
+    } else if (item.type === 'datadog') {
+      const site = text(item.site, 512);
+      if (site && datadogApiBase(site)) {
+        const indexes = Array.isArray(item.indexes)
+          ? item.indexes.filter((index: unknown): index is string => typeof index === 'string' && !!index.trim())
+          : [];
+        connection = { id, label, type: 'datadog', site, ...(indexes.length ? { indexes } : {}) };
+      }
     }
     if (!connection) return [];
     seen.add(id);
-    if (logs) connection.logs = logs;
+    // Datadog logs need no table mapping.
+    if (logs && connection.type !== 'datadog') connection.logs = logs;
     return [connection];
   });
 }

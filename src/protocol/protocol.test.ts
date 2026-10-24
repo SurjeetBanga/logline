@@ -167,3 +167,11 @@ test('compare requests name a production source and a local source', () => {
     },
   );
 });
+
+test('a Datadog link request names its connection', () => {
+  assert.deepEqual(parseViewRequest({ type: 'connectionLink', connectionId: 'prod', url: 'ignored' }), {
+    type: 'connectionLink',
+    connectionId: 'prod',
+  });
+  assert.equal(parseViewRequest({ type: 'connectionLink' }), undefined);
+});

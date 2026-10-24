@@ -68,7 +68,7 @@ export type ViewRequest =
   | { type: 'stop'; serverId?: string; sessionId?: string }
   | { type: 'connectionFetch' | 'connectionPreview'; connectionId: string; query: string; range: string }
   | { type: 'connectionTail'; connectionId: string; query: string; enabled: boolean }
-  | { type: 'connectionSql'; connectionId: string }
+  | { type: 'connectionSql' | 'connectionLink'; connectionId: string }
   | ({ type: 'compare' } & CompareRequest)
   | { type: 'import' | 'clear' | 'config' | 'manageServers' | 'addConnection' };
 
@@ -103,8 +103,10 @@ export interface ConnectionView {
   sourceId: string;
   label: string;
   type: ConnectionType;
-  /** Whether a log table is mapped, so searches can run; without one only typed SQL can. */
+  /** Whether searches can run: always for Datadog, once a log table is mapped for a database. */
   mapped: boolean;
+  /** Whether it runs SQL typed by a person (databases do, Datadog does not). */
+  sql: boolean;
   tailing: boolean;
   /** The latest fetch or tail. */
   last?: RemoteRunInfo;
@@ -400,10 +402,11 @@ export function parseViewRequest(value: unknown): ViewRequest | undefined {
     case 'connectionFetch':
     case 'connectionPreview':
     case 'connectionTail':
-    case 'connectionSql': {
+    case 'connectionSql':
+    case 'connectionLink': {
       const connectionId = string('connectionId')?.slice(0, 128);
       if (!connectionId) return;
-      if (msg.type === 'connectionSql') return { type: msg.type, connectionId };
+      if (msg.type === 'connectionSql' || msg.type === 'connectionLink') return { type: msg.type, connectionId };
       const query = (string('query') ?? '').slice(0, 1024);
       if (msg.type === 'connectionTail') return { type: msg.type, connectionId, query, enabled: msg.enabled === true };
       const range = string('range');

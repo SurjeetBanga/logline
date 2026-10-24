@@ -678,6 +678,7 @@
       searchError: element("searchError"),
       connectionBar: element("connectionBar"),
       connectionCompare: element("connectionCompare"),
+      connectionLink: element("connectionLink"),
       compare: element("compare"),
       compareView: element("compareView"),
       compareBaseline: element("compareBaseline"),
@@ -2967,11 +2968,12 @@ Span ${call.spanId}`;
     let previewTimer;
     const numbers = new Intl.NumberFormat();
     const selected = () => connections.find((connection) => connection.sourceId === state.selectedServer);
+    const noun = (connection, count) => `${connection.sql ? "row" : "log"}${count === 1 ? "" : "s"}`;
     function resultText(connection) {
       const last = connection.last;
       if (!last)
         return connection.mapped ? "Choose a range and press Run. Nothing is fetched until you do." : "No log table is mapped. Use Run SQL to query it.";
-      const rows = `${numbers.format(last.kept)} row${last.kept === 1 ? "" : "s"}`;
+      const rows = `${numbers.format(last.kept)} ${noun(connection, last.kept)}`;
       if (last.kind === "tail")
         return !last.running ? `Tail stopped \xB7 ${rows}` : last.error ? `Tail interrupted: ${last.error}` : `Tailing \xB7 ${rows}`;
       if (last.running) return "Fetching\u2026";
@@ -2979,7 +2981,7 @@ Span ${call.spanId}`;
       const of = last.total !== void 0 && last.total > last.fetched ? ` of ${numbers.format(last.total)}` : "";
       const kept = last.kept < last.fetched ? ` \xB7 ${numbers.format(last.kept)} match the filter` : "";
       const time = last.elapsedMs !== void 0 ? ` \xB7 ${numbers.format(last.elapsedMs)} ms` : "";
-      return `Fetched ${numbers.format(last.fetched)}${of} row${last.fetched === 1 ? "" : "s"}${kept}${time} \xB7 read-only`;
+      return `Fetched ${numbers.format(last.fetched)}${of} ${noun(connection, last.fetched)}${kept}${time} \xB7 read-only`;
     }
     function render() {
       const connection = selected();
@@ -3000,6 +3002,8 @@ Span ${call.spanId}`;
       elements.connectionTail.title = connection.tailing ? "Stop reading new rows" : "Show the newest matching rows, then keep reading rows as they are added";
       elements.connectionResult.textContent = resultText(connection);
       elements.connectionCompare.hidden = !connection.last || connection.last.kind === "tail";
+      elements.connectionSql.hidden = !connection.sql;
+      elements.connectionLink.hidden = connection.type !== "datadog";
       elements.connectionResult.title = connection.last?.statement ?? "";
       elements.connectionResult.classList[connection.last?.error ? "add" : "remove"]("connection-error");
       if (!connection.mapped) elements.connectionPreview.textContent = "";
@@ -3031,7 +3035,8 @@ Span ${call.spanId}`;
         return;
       }
       const local = preview.local.length ? ` \xB7 Filtered locally: ${preview.local.join(" ")}` : "";
-      note.textContent = preview.statement ? `Runs as: ${preview.statement}${local}` : "";
+      const sends = connection.sql ? "Runs as" : "Datadog search";
+      note.textContent = preview.statement ? `${sends}: ${preview.statement}${local}` : "";
       note.title = preview.statement ? `${preview.statement}${preview.local.length ? `
 
 Terms SQL cannot express are applied to the fetched rows: ${preview.local.join(" ")}` : ""}` : "";
@@ -3070,6 +3075,10 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
       const run2 = state.selectedSession || connection?.last?.sessionId;
       if (connection && run2) compare(connection.sourceId, run2);
     });
+    scope.listen(elements.connectionLink, "click", () => {
+      const connection = selected();
+      if (connection) api.postMessage({ type: "connectionLink", connectionId: connection.id });
+    });
     scope.listen(elements.connectionSql, "click", () => {
       const connection = selected();
       if (connection) api.postMessage({ type: "connectionSql", connectionId: connection.id });
@@ -3092,7 +3101,7 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
         const connection = selected();
         if (!connection) return void 0;
         if (connection.last) return "No matching rows. Change the filter or the range and press Run.";
-        return connection.mapped ? `Choose a range and press Run to fetch rows from ${connection.label}.` : `Use Run SQL to query ${connection.label}.`;
+        return connection.mapped ? `Choose a range and press Run to fetch ${connection.sql ? "rows" : "logs"} from ${connection.label}.` : `Use Run SQL to query ${connection.label}.`;
       }
     };
   }

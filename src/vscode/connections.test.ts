@@ -10,6 +10,7 @@ import { RuntimeState } from '../capture/runtime-state';
 import { SessionRegistry } from '../capture/session-registry';
 import { normalizeConnections, secretKey, type PostgresConnection } from '../core/connections';
 import { LogStore } from '../core/log-store';
+import { startFakeDatadog } from '../test/fake-datadog';
 import { withVscode } from '../test/vscode-mock';
 
 const hasSqlite = isBuiltin('node:sqlite');
@@ -228,7 +229,15 @@ test(
     ];
     const { manager, store, remote } = setup();
     assert.deepEqual(manager.views(), [
-      { id: 'app', sourceId: 'conn:app', label: 'SQLite · app', type: 'sqlite', mapped: true, tailing: false },
+      {
+        id: 'app',
+        sourceId: 'conn:app',
+        label: 'SQLite · app',
+        type: 'sqlite',
+        mapped: true,
+        sql: true,
+        tailing: false,
+      },
     ]);
     const preview = await manager.preview('app', 'level:error /declined/', '15m');
     assert.deepEqual(preview.local, ['/declined/']);
@@ -352,7 +361,7 @@ test('with no connections, commands offer to add one', async () => {
   await manager.test();
   assert.deepEqual(ui.messages, ['info: No connections yet.']);
   await manager.query();
-  assert.equal(ui.messages.at(-1), 'info: No connection has a log table to search.');
+  assert.equal(ui.messages.at(-1), 'info: No connection has logs to search.');
 });
 
 test('a refused Postgres login offers to save a password, which the next query uses', async () => {
@@ -395,4 +404,99 @@ test('a refused Postgres login offers to save a password, which the next query u
   assert.equal(secrets.size, 1);
   ui.errorChoice = undefined;
   await manager.runSql('orders').catch(() => undefined);
+});
+
+test('a Datadog connection is added with its keys, searched, and opened from a link with its trace', async () => {
+  reset();
+  const apiKey = ['dd', 'api'].join('-');
+  const appKey = ['dd', 'app'].join('-');
+  const now = Date.now();
+  const log = (i: number, status: string, message: string, trace: string) => ({
+    id: `log-${i}`,
+    timestamp: new Date(now - (60 - i) * 60000).toISOString(),
+    status,
+    message,
+    service: 'checkout',
+    attributes: { dd: { trace_id: trace } },
+  });
+  const fake = await startFakeDatadog({
+    apiKey,
+    appKey,
+    logs: [
+      log(1, 'info', 'cart opened', 'trace-a'),
+      log(2, 'error', 'payment gateway timed out', 'trace-a'),
+      log(3, 'info', 'retrying payment', 'trace-a'),
+      log(4, 'error', 'card declined', 'trace-bbbb'),
+    ],
+  });
+  try {
+    const { manager, store, secrets, shown, registry } = setup();
+    ui.picks.push(pick('Datadog'), pick('Other…'), pick('API and application keys'));
+    ui.inputs.push(fake.url, apiKey, appKey, 'prod');
+    await manager.add();
+    assert.deepEqual(raw.workspace, [{ id: 'prod', label: 'prod', type: 'datadog', site: fake.url }]);
+    assert.deepEqual(JSON.parse(secrets.get(`logline.connection.datadog:${fake.url}`)!), { apiKey, appKey });
+    assert.deepEqual(shown, ['conn:prod']);
+    assert.deepEqual(manager.views()[0], {
+      id: 'prod',
+      sourceId: 'conn:prod',
+      label: 'Datadog · prod',
+      type: 'datadog',
+      mapped: true,
+      sql: false,
+      tailing: false,
+    });
+    assert.deepEqual(await manager.preview('prod', 'level:error /x/', '1h'), {
+      statement: 'status:(error)',
+      local: ['/x/'],
+    });
+    await manager.fetch('prod', 'level:error', '24h');
+    assert.deepEqual(
+      store.all().map((event) => event.message),
+      ['payment gateway timed out', 'card declined'],
+    );
+    // Run SQL is for databases only.
+    await manager.runSql('prod');
+    assert.equal(ui.messages.length, 1, 'no SQL prompt for Datadog');
+    // A Log Explorer link: its search and range, then the trace of the log it points at.
+    const link = `https://app.datadoghq.com/logs?query=${encodeURIComponent('status:error')}&event=log-2&from_ts=${now - 7200000}&to_ts=${now}`;
+    await manager.openLink('prod', link);
+    const runs = [...registry.records.values()].map((record) => record.command);
+    assert.deepEqual(runs.slice(-2), ['Link: status:error', 'Trace trace-a']);
+    const traceRun = [...registry.records.values()].at(-1)!;
+    assert.deepEqual(
+      store
+        .all()
+        .filter((event) => event.sessionId === traceRun.id)
+        .map((event) => event.message),
+      ['cart opened', 'payment gateway timed out', 'retrying payment'],
+    );
+    assert.equal(shown.at(-1), `conn:prod#${traceRun.id}`);
+    // A trace id on its own fetches the trace.
+    await manager.openLink('prod', 'trace-bbbb');
+    assert.equal([...registry.records.values()].at(-1)!.command, 'Trace trace-bbbb');
+    // Keys Datadog refuses can be entered again, and the next search uses them.
+    secrets.set(`logline.connection.datadog:${fake.url}`, JSON.stringify({ apiKey: 'old', appKey: 'old' }));
+    raw.workspace = [{ id: 'prod', label: 'prod', type: 'datadog', site: fake.url, indexes: ['main'] }];
+    manager.refresh();
+    ui.errorChoice = 'Enter Keys…';
+    ui.picks.push(pick('Access token'));
+    ui.inputs.push('a-token');
+    await manager.fetch('prod', '', '1h');
+    assert.match(ui.messages.at(-1)!, /^error: Datadog · prod: Datadog refused the API or application key \(403/);
+    assert.deepEqual(JSON.parse(secrets.get(`logline.connection.datadog:${fake.url}`)!), { token: 'a-token' });
+    manager.dispose();
+  } finally {
+    await fake.close();
+  }
+});
+
+test('a Datadog site that cannot be reached is reported and not saved', async () => {
+  reset();
+  const { manager } = setup();
+  ui.picks.push(pick('Datadog'), pick('Other…'), pick('Access token'));
+  ui.inputs.push('http://127.0.0.1:1', 'a-token');
+  await manager.add();
+  assert.equal(updates.length, 0);
+  assert.match(ui.messages.at(-1)!, /^error: Could not connect: Could not reach Datadog/);
 });

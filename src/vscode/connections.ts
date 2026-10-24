@@ -1,13 +1,16 @@
 import * as path from 'node:path';
 import * as vscode from 'vscode';
+import { DatadogConnector, type DatadogKeys } from '../capture/connectors/datadog';
 import { PostgresDriver } from '../capture/connectors/postgres-driver';
 import { SqlConnector } from '../capture/connectors/sql';
 import { openSqlite } from '../capture/connectors/sqlite-driver';
-import { errorText, type SqlDriver } from '../capture/connectors/types';
+import { errorText, type Connector, type RemoteRecord, type SqlDriver } from '../capture/connectors/types';
 import type { RemoteSource, RemoteTarget } from '../capture/remote-source';
 import {
   connectionLabel,
   connectionSourceId,
+  datadogApiBase,
+  DATADOG_SITES,
   MAPPED_FIELDS,
   normalizeConnections,
   rangeMs,
@@ -16,10 +19,12 @@ import {
   suggestMapping,
   type ColumnInfo,
   type ConnectionConfig,
+  type DatadogConnection,
   type LogTableMapping,
   type MappedField,
   type PostgresConnection,
 } from '../core/connections';
+import { parseDatadogLink } from '../core/datadog-query';
 import { slugify } from '../core/server-config';
 import type { Settings } from '../core/settings';
 import type { ConnectionView } from '../protocol/messages';
@@ -34,6 +39,11 @@ const ROLE_LABELS: Record<MappedField, string> = {
   traceId: 'Trace id',
 };
 
+/** Whether a connection can be searched: Datadog always, a database once a log table is mapped. */
+const searchable = (connection: ConnectionConfig) => connection.type === 'datadog' || connection.logs !== undefined;
+const sqlCapable = (connection: ConnectionConfig) => connection.type !== 'datadog';
+type SqlConnection = Exclude<ConnectionConfig, DatadogConnection>;
+
 /** Postgres refused the user name or password. */
 const authFailed = (error: unknown) =>
   !!error && typeof error === 'object' && 'code' in error && (error.code === '28P01' || error.code === '28000');
@@ -44,7 +54,7 @@ const authFailed = (error: unknown) =>
  * test, search, and tail them.
  */
 export class ConnectionManager implements vscode.Disposable {
-  private readonly open = new Map<string, { key: string; connector: SqlConnector }>();
+  private readonly open = new Map<string, { key: string; connector: Connector }>();
 
   constructor(
     private readonly config: Settings,
@@ -70,7 +80,8 @@ export class ConnectionManager implements vscode.Disposable {
         sourceId: connectionSourceId(connection.id),
         label: connectionLabel(connection),
         type: connection.type,
-        mapped: connection.logs !== undefined,
+        mapped: searchable(connection),
+        sql: sqlCapable(connection),
         tailing: this.remote.tailing(connection.id),
         ...(last ? { last } : {}),
       };
@@ -95,23 +106,41 @@ export class ConnectionManager implements vscode.Disposable {
     return path.isAbsolute(expanded) ? expanded : path.resolve(folder ?? '', expanded);
   }
 
-  private async driver(connection: ConnectionConfig, password?: string): Promise<SqlDriver> {
+  private timeoutMs = () => this.config.get('connectionTimeoutSeconds', 10) * 1000;
+
+  private async driver(connection: SqlConnection, password?: string): Promise<SqlDriver> {
     if (connection.type === 'sqlite') return openSqlite(this.resolvePath(connection.path));
     return new PostgresDriver(connection, password ?? (await this.secrets?.get(secretKey(connection))));
   }
 
-  private async connector(connection: ConnectionConfig): Promise<SqlConnector> {
+  /** Datadog keys saved for the connection's API; none when nothing was saved. */
+  private async keys(connection: DatadogConnection): Promise<DatadogKeys> {
+    try {
+      const saved = JSON.parse((await this.secrets?.get(secretKey(connection))) ?? '{}') as DatadogKeys;
+      return saved && typeof saved === 'object' ? saved : {};
+    } catch {
+      return {};
+    }
+  }
+
+  private async connector(connection: ConnectionConfig): Promise<Connector> {
     const key = JSON.stringify(connection);
     const open = this.open.get(connection.id);
     if (open?.key === key) return open.connector;
     if (open) void open.connector.dispose();
-    const connector = new SqlConnector(
-      connection,
-      await this.driver(connection),
-      () => this.config.get('connectionTimeoutSeconds', 10) * 1000,
-    );
+    const connector =
+      connection.type === 'datadog'
+        ? new DatadogConnector(connection, await this.keys(connection), this.timeoutMs)
+        : new SqlConnector(connection, await this.driver(connection), this.timeoutMs);
     this.open.set(connection.id, { key, connector });
     return connector;
+  }
+
+  /** Forget an open connector, so the next query opens it again, such as with a new password. */
+  private reopen(connection: ConnectionConfig): void {
+    const open = this.open.get(connection.id);
+    this.open.delete(connection.id);
+    void open?.connector.dispose();
   }
 
   private async target(connection: ConnectionConfig): Promise<RemoteTarget> {
@@ -129,19 +158,21 @@ export class ConnectionManager implements vscode.Disposable {
     return false;
   }
 
-  /** The connection to act on: the one named, else the only one, else one the person picks. */
-  private async pick(id: string | undefined, title: string, mappedOnly = false): Promise<ConnectionConfig | undefined> {
-    const connections = this.list().filter((connection) => !mappedOnly || connection.logs);
+  /** The connection to act on: the one named, else the only one that fits, else one the person picks. */
+  private async pick(
+    id: string | undefined,
+    title: string,
+    fits: (connection: ConnectionConfig) => boolean = () => true,
+    none = 'No connections yet.',
+  ): Promise<ConnectionConfig | undefined> {
+    const connections = this.list().filter(fits);
     if (id) {
       const connection = this.find(id);
       if (!connection) void vscode.window.showWarningMessage('That connection is no longer in logline.connections.');
       return connection;
     }
     if (!connections.length) {
-      const add = await vscode.window.showInformationMessage(
-        mappedOnly ? 'No connection has a log table to search.' : 'No connections yet.',
-        'Add Connection…',
-      );
+      const add = await vscode.window.showInformationMessage(none, 'Add Connection…');
       if (add) await this.add();
       return undefined;
     }
@@ -149,7 +180,7 @@ export class ConnectionManager implements vscode.Disposable {
     const choice = await vscode.window.showQuickPick(
       connections.map((connection) => ({
         label: connectionLabel(connection),
-        description: connection.logs?.table,
+        description: connection.type === 'datadog' ? connection.site : connection.logs?.table,
         connection,
       })),
       { title },
@@ -169,7 +200,50 @@ export class ConnectionManager implements vscode.Disposable {
       if (choice) await this.askPassword(connection);
       return;
     }
+    if (connection.type === 'datadog' && /refused the|no API key|keys? (?:are|is) missing/i.test(error)) {
+      const choice = await vscode.window.showErrorMessage(`${connectionLabel(connection)}: ${error}`, 'Enter Keys…');
+      if (choice) {
+        const keys = await this.askKeys(connection.site);
+        if (keys) {
+          await this.secrets?.store(secretKey(connection), JSON.stringify(keys));
+          this.reopen(connection);
+        }
+      }
+      return;
+    }
     void vscode.window.showErrorMessage(`${connectionLabel(connection)}: ${error}`);
+  }
+
+  /** Ask for Datadog API and application keys, or an access token, for a site. */
+  private async askKeys(site: string): Promise<DatadogKeys | undefined> {
+    const how = await vscode.window.showQuickPick(
+      [
+        {
+          label: 'API and application keys',
+          description: 'Organization Settings › API Keys and Application Keys',
+          token: false,
+        },
+        { label: 'Access token', description: 'A personal or service access token', token: true },
+      ],
+      { title: `Add Connection (3/4): How Logline signs in to ${site}`, ignoreFocusOut: true },
+    );
+    if (!how) return undefined;
+    const ask = (title: string, prompt: string) =>
+      vscode.window.showInputBox({
+        title,
+        prompt,
+        password: true,
+        ignoreFocusOut: true,
+        validateInput: (value) => (value.trim() ? undefined : 'Required'),
+      });
+    const note = 'Kept in VS Code secret storage, never in settings. It needs the logs_read_data permission.';
+    if (how.token) {
+      const token = await ask(`Datadog access token for ${site}`, note);
+      return token ? { token: token.trim() } : undefined;
+    }
+    const apiKey = await ask(`Datadog API key for ${site}`, note);
+    const appKey = apiKey && (await ask(`Datadog application key for ${site}`, note));
+    return apiKey && appKey ? { apiKey: apiKey.trim(), appKey: appKey.trim() } : undefined;
   }
 
   private async askPassword(connection: PostgresConnection): Promise<void> {
@@ -182,15 +256,13 @@ export class ConnectionManager implements vscode.Disposable {
     if (password === undefined) return;
     await this.secrets?.store(secretKey(connection), password);
     // The next query reconnects with the new password.
-    const open = this.open.get(connection.id);
-    this.open.delete(connection.id);
-    void open?.connector.dispose();
+    this.reopen(connection);
   }
 
   /** Fetch the newest rows that match a search over a range into a new run. */
   async fetch(id: string, query: string, range: string): Promise<void> {
     if (!this.trusted('searching a connection')) return;
-    const connection = await this.pick(id, 'Search connection', true);
+    const connection = await this.pick(id, 'Search connection', searchable, 'No connection has logs to search.');
     if (!connection) return;
     const span = rangeMs(range) ?? 3600000;
     const now = Date.now();
@@ -212,8 +284,8 @@ export class ConnectionManager implements vscode.Disposable {
   /** Run SQL typed by the person into a new run. */
   async runSql(id?: string): Promise<void> {
     if (!this.trusted('running SQL')) return;
-    const connection = await this.pick(id, 'Run SQL on');
-    if (!connection) return;
+    const connection = await this.pick(id, 'Run SQL on', sqlCapable, 'No database connection yet.');
+    if (!connection || connection.type === 'datadog') return;
     const sql = await vscode.window.showInputBox({
       title: `Run SQL on ${connectionLabel(connection)}`,
       prompt: `One SELECT, read-only. At most ${this.config.get('connectionMaxRows', 5000).toLocaleString()} rows.`,
@@ -238,7 +310,7 @@ export class ConnectionManager implements vscode.Disposable {
 
   /** Start or stop reading new rows from a connection as they are added. */
   async tail(id: string | undefined, query: string, enabled?: boolean): Promise<void> {
-    const connection = await this.pick(id, 'Tail connection', true);
+    const connection = await this.pick(id, 'Tail connection', searchable, 'No connection has logs to search.');
     if (!connection) return;
     const on = enabled ?? !this.remote.tailing(connection.id);
     if (!on) {
@@ -261,7 +333,7 @@ export class ConnectionManager implements vscode.Disposable {
     range: string,
   ): Promise<{ statement?: string; local: string[]; error?: string }> {
     const connection = this.find(id);
-    if (!connection?.logs || !vscode.workspace.isTrusted) return { local: [] };
+    if (!connection || !searchable(connection) || !vscode.workspace.isTrusted) return { local: [] };
     const span = rangeMs(range) ?? 3600000;
     const now = Date.now();
     try {
@@ -274,7 +346,7 @@ export class ConnectionManager implements vscode.Disposable {
   /** Ask for a search and a range in the Command Palette, then fetch. */
   async query(id?: string): Promise<void> {
     if (!this.trusted('searching a connection')) return;
-    const connection = await this.pick(id, 'Search connection', true);
+    const connection = await this.pick(id, 'Search connection', searchable, 'No connection has logs to search.');
     if (!connection) return;
     const query = await vscode.window.showInputBox({
       title: `Search ${connectionLabel(connection)}`,
@@ -326,7 +398,7 @@ export class ConnectionManager implements vscode.Disposable {
       );
       if (kept.length !== value.length) await settings.update('connections', kept, target);
     }
-    if (connection.type === 'postgres') await this.secrets?.delete(secretKey(connection));
+    if (connection.type !== 'sqlite') await this.secrets?.delete(secretKey(connection));
     this.remote.stopConnection(connection.id);
   }
 
@@ -337,15 +409,17 @@ export class ConnectionManager implements vscode.Disposable {
       [
         { label: 'SQLite', description: 'A database file on this machine', type: 'sqlite' as const },
         { label: 'Postgres', description: 'A server, by host, database, and user', type: 'postgres' as const },
+        { label: 'Datadog', description: 'Logs in a Datadog organization', type: 'datadog' as const },
       ],
-      { title: 'Add Connection (1/4): Database' },
+      { title: 'Add Connection (1/4): Where the logs are' },
     );
     if (!kind) return;
+    if (kind.type === 'datadog') return this.addDatadog();
     const draft = kind.type === 'sqlite' ? await this.sqliteDraft() : await this.postgresDraft();
     if (!draft) return;
     const { connection, password } = draft;
     const driver = await this.driver(connection, password);
-    const probe = new SqlConnector(connection, driver, () => this.config.get('connectionTimeoutSeconds', 10) * 1000);
+    const probe = new SqlConnector(connection, driver, this.timeoutMs);
     try {
       let tables: string[];
       try {
@@ -369,26 +443,15 @@ export class ConnectionManager implements vscode.Disposable {
         ignoreFocusOut: true,
       });
       if (!label?.trim()) return;
-      const ids = new Set(this.list().map((existing) => existing.id));
-      const base = slugify(label);
-      let id = base;
-      for (let suffix = 2; ids.has(id); suffix++) id = `${base}-${suffix}`;
       const saved: ConnectionConfig = {
         ...connection,
-        id,
+        id: this.uniqueId(label),
         label: label.trim(),
         ...(logs ? { logs } : {}),
       };
       if (saved.type === 'postgres' && password) await this.secrets?.store(secretKey(saved), password);
-      const settings = vscode.workspace.getConfiguration('logline');
-      const target = vscode.workspace.workspaceFolders?.length
-        ? vscode.ConfigurationTarget.Workspace
-        : vscode.ConfigurationTarget.Global;
-      const inspected = settings.inspect<unknown[]>('connections');
-      const current =
-        target === vscode.ConfigurationTarget.Workspace ? inspected?.workspaceValue : inspected?.globalValue;
-      await settings.update('connections', [...(Array.isArray(current) ? current : []), saved], target);
-      await this.showSource(connectionSourceId(id));
+      await this.save(saved);
+      await this.showSource(connectionSourceId(saved.id));
       void vscode.window.showInformationMessage(
         logs
           ? `Added ${connectionLabel(saved)}. Pick a time range and press Run in the Logs panel.`
@@ -399,7 +462,141 @@ export class ConnectionManager implements vscode.Disposable {
     }
   }
 
-  private async sqliteDraft(): Promise<{ connection: ConnectionConfig; password?: string } | undefined> {
+  /** Save a new connection in the workspace settings, or the user settings without a workspace. */
+  private async save(connection: ConnectionConfig): Promise<void> {
+    const settings = vscode.workspace.getConfiguration('logline');
+    const target = vscode.workspace.workspaceFolders?.length
+      ? vscode.ConfigurationTarget.Workspace
+      : vscode.ConfigurationTarget.Global;
+    const inspected = settings.inspect<unknown[]>('connections');
+    const current =
+      target === vscode.ConfigurationTarget.Workspace ? inspected?.workspaceValue : inspected?.globalValue;
+    await settings.update('connections', [...(Array.isArray(current) ? current : []), connection], target);
+  }
+
+  private uniqueId(label: string): string {
+    const ids = new Set(this.list().map((existing) => existing.id));
+    const base = slugify(label);
+    let id = base;
+    for (let suffix = 2; ids.has(id); suffix++) id = `${base}-${suffix}`;
+    return id;
+  }
+
+  private async addDatadog(): Promise<void> {
+    const choice = await vscode.window.showQuickPick(
+      [
+        ...DATADOG_SITES.map((site) => ({ label: site, description: site === 'datadoghq.com' ? 'US1' : undefined })),
+        { label: 'Other…', description: 'The URL of a Datadog API, such as a proxy' },
+      ],
+      { title: 'Add Connection (2/4): Datadog site', placeHolder: 'The domain of your Datadog web app' },
+    );
+    if (!choice) return;
+    const site =
+      choice.label === 'Other…'
+        ? (
+            await vscode.window.showInputBox({
+              title: 'Add Connection (2/4): Datadog API URL',
+              placeHolder: 'https://datadog-proxy.example.com',
+              ignoreFocusOut: true,
+              validateInput: (value) =>
+                datadogApiBase(value.trim()) ? undefined : 'Enter an https URL (http only on this machine)',
+            })
+          )?.trim()
+        : choice.label;
+    if (!site) return;
+    const keys = await this.askKeys(site);
+    if (!keys) return;
+    const draft: DatadogConnection = { id: 'draft', label: 'datadog', type: 'datadog', site };
+    try {
+      await vscode.window.withProgress(
+        { location: vscode.ProgressLocation.Notification, title: `Connecting to Datadog at ${site}…` },
+        () => new DatadogConnector(draft, keys, this.timeoutMs).test(),
+      );
+    } catch (error) {
+      void vscode.window.showErrorMessage(`Could not connect: ${errorText(error)}`);
+      return;
+    }
+    const label = await vscode.window.showInputBox({
+      title: 'Add Connection (4/4): Name',
+      prompt: 'Shown in the Logs panel’s source list, such as prod.',
+      value: 'prod',
+      ignoreFocusOut: true,
+    });
+    if (!label?.trim()) return;
+    const saved: DatadogConnection = { ...draft, id: this.uniqueId(label), label: label.trim() };
+    await this.secrets?.store(secretKey(saved), JSON.stringify(keys));
+    await this.save(saved);
+    await this.showSource(connectionSourceId(saved.id));
+    void vscode.window.showInformationMessage(
+      `Added ${connectionLabel(saved)}. Pick a time range and press Run in the Logs panel, or open a log link with Open Link.`,
+    );
+  }
+
+  /**
+   * Fetch what a Datadog link points at: its search over its time range and,
+   * when it names a log with a trace id, that log's whole trace. A trace id on
+   * its own fetches the trace.
+   */
+  async openLink(id?: string, input?: string): Promise<void> {
+    if (!this.trusted('searching a connection')) return;
+    const connection = await this.pick(
+      id,
+      'Open Datadog link',
+      (candidate) => candidate.type === 'datadog',
+      'No Datadog connection yet.',
+    );
+    if (!connection) return;
+    const text =
+      input ??
+      (await vscode.window.showInputBox({
+        title: `Open a Datadog link or trace id in ${connectionLabel(connection)}`,
+        prompt: 'A Log Explorer link (its search, time range, and selected log are used), or a trace id.',
+        placeHolder: 'https://app.datadoghq.com/logs?query=service:checkout&event=…',
+        ignoreFocusOut: true,
+        validateInput: (value) =>
+          !value.trim() || parseDatadogLink(value) ? undefined : 'Paste a Log Explorer link or a trace id',
+      }));
+    const link = text ? parseDatadogLink(text) : undefined;
+    if (!link) return;
+    const sourceId = connectionSourceId(connection.id);
+    const started = (runId: string) => void this.showSource(sourceId, runId);
+    const target = await this.target(connection);
+    const trace = async (traceId: string, aroundMs?: number) => {
+      // A trace lasts seconds to minutes; half an hour each side of its log is plenty, and a day without one.
+      const now = Date.now();
+      const info = await this.remote.fetch(target, {
+        query: '',
+        native: `trace_id:${traceId}`,
+        fromMs: aroundMs !== undefined ? aroundMs - 1800000 : now - 86400000,
+        toMs: aroundMs !== undefined ? aroundMs + 1800000 : now,
+        title: `Trace ${traceId.slice(0, 16)}`,
+        started,
+      });
+      await this.failed(connection, info.error);
+    };
+    try {
+      if (link.traceId) return await trace(link.traceId);
+      let linked: RemoteRecord | undefined;
+      const info = await this.remote.fetch(target, {
+        query: '',
+        native: link.query ?? '*',
+        fromMs: link.fromMs,
+        toMs: link.toMs,
+        title: `Link: ${link.query ?? 'log'}`,
+        started,
+        inspect: (records) => {
+          linked = records.find((record) => record.line.includes(`"datadog.id":${JSON.stringify(link.eventId)}`));
+        },
+      });
+      await this.failed(connection, info.error);
+      const traceId = linked && (JSON.parse(linked.line) as { traceId?: unknown }).traceId;
+      if (typeof traceId === 'string' && traceId) await trace(traceId, linked!.timeMs);
+    } catch (error) {
+      await this.failed(connection, errorText(error), error);
+    }
+  }
+
+  private async sqliteDraft(): Promise<{ connection: SqlConnection; password?: string } | undefined> {
     const folder = vscode.workspace.workspaceFolders?.[0]?.uri;
     const [file] =
       (await vscode.window.showOpenDialog({
@@ -429,7 +626,7 @@ export class ConnectionManager implements vscode.Disposable {
     };
   }
 
-  private async postgresDraft(): Promise<{ connection: ConnectionConfig; password?: string } | undefined> {
+  private async postgresDraft(): Promise<{ connection: SqlConnection; password?: string } | undefined> {
     const input = await vscode.window.showInputBox({
       title: 'Add Connection (2/4): Postgres',
       prompt: 'A connection URL. A password in it is moved to VS Code secret storage.',

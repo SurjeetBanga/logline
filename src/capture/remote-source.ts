@@ -39,10 +39,14 @@ export interface FetchOptions {
   toMs?: number;
   /** Run this SQL instead of searching the mapped table. */
   sql?: string;
+  /** A query in the store's own syntax, such as from a link, instead of `query`. */
+  native?: string;
   /** What the run is called in the run picker. */
   title: string;
   /** Called with the new run's session id as soon as it exists. */
   started?(sessionId: string): void;
+  /** Sees the fetched records before they are filtered and ingested. */
+  inspect?(records: RemoteRecord[]): void;
 }
 
 interface Run {
@@ -54,8 +58,11 @@ interface Run {
   // Tails only.
   query?: string;
   watermark?: number;
-  /** Lines already ingested at the watermark time, which the next read returns again. */
-  atWatermark?: Set<string>;
+  /**
+   * Lines already ingested that the next read can return again, with their
+   * times: those at the watermark, and those within the store's indexing lag.
+   */
+  seen?: Map<string, number>;
   poll?: ReturnType<typeof setInterval>;
   pumping?: Promise<void>;
 }
@@ -144,6 +151,7 @@ export class RemoteSource {
         result = await connector.fetchLogs(
           {
             query: options.query,
+            ...(options.native !== undefined ? { native: options.native } : {}),
             fromMs: options.fromMs,
             toMs: options.toMs,
             limit: this.limit(),
@@ -153,6 +161,7 @@ export class RemoteSource {
           run.abort.signal,
         );
       if (run.stopped) return run.info;
+      options.inspect?.(result.records);
       Object.assign(run.info, {
         fetched: result.records.length,
         total: result.total,
@@ -162,7 +171,8 @@ export class RemoteSource {
       });
       // A search returns the newest rows first; they enter oldest first. Typed SQL keeps its own order.
       const records = options.sql === undefined ? [...result.records].reverse() : result.records;
-      await this.ingest(run, records, options.sql === undefined ? rowFilter(options.query) : undefined);
+      const filter = options.sql === undefined && options.native === undefined ? rowFilter(options.query) : undefined;
+      await this.ingest(run, records, filter);
       this.finish(run, run.stopped ? 'stopped' : `${run.info.kept.toLocaleString()} rows`);
       this.state.status = `Fetched ${run.info.kept.toLocaleString()} rows from ${target.label}`;
     } catch (error) {
@@ -180,7 +190,7 @@ export class RemoteSource {
   tail(target: RemoteTarget, query: string, title: string): string {
     const run = this.start(target, 'tail', title);
     run.query = query;
-    run.atWatermark = new Set();
+    run.seen = new Map();
     const pollMs = this.config.get('connectionPollSeconds', 2) * 1000;
     run.poll = setInterval(() => {
       void this.pump(run);
@@ -220,27 +230,27 @@ export class RemoteSource {
 
   private async readTail(run: Run): Promise<void> {
     const first = run.watermark === undefined;
+    // A store that makes logs searchable late is read from further back.
+    const lag = run.target.connector.tailLagMs ?? 0;
     const result = await run.target.connector.fetchLogs(
       first
         ? { query: run.query!, limit: TAIL_START_ROWS, order: 'desc' }
-        : { query: run.query!, fromMs: run.watermark, limit: this.limit(), order: 'asc' },
+        : { query: run.query!, fromMs: run.watermark! - lag, limit: this.limit(), order: 'asc' },
       run.abort.signal,
     );
     if (run.stopped) return;
     const ordered = first ? [...result.records].reverse() : result.records;
-    // Rows at the watermark time come back on every read until a newer row
-    // arrives; only the ones not seen yet are new.
-    const fresh = ordered.filter((record) => record.timeMs !== run.watermark || !run.atWatermark!.has(record.line));
+    // Reads overlap at the watermark time and over the lag; only rows not shown yet are new.
+    const seen = run.seen!;
+    const fresh = ordered.filter((record) => !seen.has(record.line));
     for (const record of ordered) {
       if (record.timeMs === undefined) continue;
-      if (run.watermark === undefined || record.timeMs > run.watermark) {
-        run.watermark = record.timeMs;
-        run.atWatermark!.clear();
-      }
-      if (record.timeMs === run.watermark) run.atWatermark!.add(record.line);
+      run.watermark = Math.max(run.watermark ?? record.timeMs, record.timeMs);
+      seen.set(record.line, record.timeMs);
     }
     // An empty table starts the tail now, so its first rows are not read as history.
     if (first && run.watermark === undefined) run.watermark = Date.now();
+    for (const [line, time] of seen) if (time < run.watermark! - lag) seen.delete(line);
     Object.assign(run.info, {
       fetched: run.info.fetched + fresh.length,
       elapsedMs: result.elapsedMs,

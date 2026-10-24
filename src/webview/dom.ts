@@ -21,6 +21,7 @@ export function getElements() {
     searchError: element<HTMLElement>('searchError'),
     connectionBar: element<HTMLElement>('connectionBar'),
     connectionCompare: element<HTMLButtonElement>('connectionCompare'),
+    connectionLink: element<HTMLButtonElement>('connectionLink'),
     compare: element<HTMLButtonElement>('compare'),
     compareView: element<HTMLElement>('compareView'),
     compareBaseline: element<HTMLSelectElement>('compareBaseline'),

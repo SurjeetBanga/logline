@@ -8,7 +8,7 @@ import {
   type RowRoles,
   type TableInfo,
 } from '../../core/remote-query';
-import type { FetchRequest, FetchResult, RemoteConnector, Row, SqlDriver } from './types';
+import type { Connector, FetchRequest, FetchResult, Row, SqlDriver } from './types';
 
 const NUMERIC_TYPE = /int|real|double|float|numeric|decimal|serial|number/i;
 
@@ -19,7 +19,7 @@ function tableParts(table: string): { schema?: string; name: string } {
 }
 
 /** Searches a log table in SQLite or Postgres, and runs read-only queries typed by a person. */
-export class SqlConnector implements RemoteConnector {
+export class SqlConnector implements Connector {
   private table?: Promise<TableInfo>;
 
   constructor(
