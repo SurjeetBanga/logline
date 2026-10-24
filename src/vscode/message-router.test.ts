@@ -32,8 +32,9 @@ const mockVscode = {
     },
   },
   commands: {
-    executeCommand: async (name: string) => {
+    executeCommand: async (name: string, ...args: unknown[]) => {
       calls.push({ name: 'command', value: name });
+      if (args.length) calls.push({ name: 'commandArgs', value: args });
     },
   },
 };
@@ -231,4 +232,40 @@ test('message router correlates snapshot failures to the requesting view', async
   const sent: unknown[] = [];
   await handleMessage(service as any, (message) => sent.push(message), { type: 'snapshot', requestId: 7 });
   assert.deepEqual(sent, [{ type: 'snapshotError', requestId: 7, message: 'snapshot unavailable' }]);
+});
+
+test('message router removes a source, asks before removing a connection, and opens a named setting', async () => {
+  calls.length = 0;
+  const service = {
+    ...services(),
+    removeSource: (serverId: string) => {
+      calls.push({ name: 'removeSource', value: serverId });
+      return Promise.resolve(3);
+    },
+    connectAgent: async (agent?: string) => {
+      calls.push({ name: 'connectAgent', value: agent });
+    },
+    connections: {
+      remove: async (id: string) => {
+        calls.push({ name: 'removeConnection', value: id });
+      },
+    },
+  };
+  for (const request of [
+    { type: 'removeSource', serverId: 'api' },
+    { type: 'removeSource' },
+    { type: 'removeConnection', connectionId: 'prod' },
+    { type: 'connectAgent', agent: 'claude' },
+    { type: 'config', setting: 'logline.maxMemoryMb' },
+  ])
+    await handleMessage(service as any, () => undefined, request);
+  assert.deepEqual(
+    calls.filter((call) => call.name !== 'command').map((call) => [call.name, call.value]),
+    [
+      ['removeSource', 'api'],
+      ['removeConnection', 'prod'],
+      ['connectAgent', 'claude'],
+      ['commandArgs', ['logline.maxMemoryMb']],
+    ],
+  );
 });

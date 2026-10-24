@@ -19,6 +19,8 @@ export interface PersistedState {
   view?: string;
   /** The time range searched on connections. */
   range?: string;
+  /** Whether the Sources rail was collapsed or opened by hand. */
+  rail?: 'collapsed' | 'open';
 }
 /** Persistent preferences and interaction state, independent of DOM rendering. */
 export class ViewerState {
@@ -54,7 +56,10 @@ export class ViewerState {
   view: string;
   /** The time range a connection search covers, such as `1h`. */
   connectionRange: string;
+  /** The Sources rail's state when set by hand; undefined follows the panel's width. */
+  railCollapsed?: boolean;
   constructor(saved: PersistedState = {}) {
+    if (saved.rail === 'collapsed' || saved.rail === 'open') this.railCollapsed = saved.rail === 'collapsed';
     this.view = typeof saved.view === 'string' ? saved.view : 'logs';
     this.connectionRange = typeof saved.range === 'string' && RANGE_CHOICES.includes(saved.range) ? saved.range : '1h';
     this.following = !saved.sort;
@@ -142,6 +147,7 @@ export class ViewerState {
       ...(this.rowHintDismissed ? { rowHintDismissed: true } : {}),
       ...(this.view !== 'logs' ? { view: this.view } : {}),
       ...(this.connectionRange !== '1h' ? { range: this.connectionRange } : {}),
+      ...(this.railCollapsed !== undefined ? { rail: this.railCollapsed ? 'collapsed' : 'open' } : {}),
     };
   }
 }

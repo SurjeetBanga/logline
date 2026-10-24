@@ -39,6 +39,7 @@ test('webview provider initializes the bridge, forwards messages, and releases l
       },
     },
     guideStatus: () => ({ version: 'v1', unread: true }),
+    firstRun: () => false,
     handleMessage: async (send: (message: unknown) => void, message: unknown) => send({ type: 'details', message }),
   } as any;
   const view = {

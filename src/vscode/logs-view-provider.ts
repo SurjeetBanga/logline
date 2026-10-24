@@ -31,6 +31,7 @@ export class LogsProvider implements vscode.WebviewViewProvider {
       '{{STYLE_URI}}': String(view.webview.asWebviewUri(vscode.Uri.joinPath(media, 'viewer.css'))),
       '{{SCRIPT_URI}}': String(view.webview.asWebviewUri(vscode.Uri.joinPath(media, 'viewer.js'))),
       '{{GUIDE_UNREAD}}': String(this.controller.guideStatus().unread),
+      '{{FIRST_RUN}}': String(this.controller.firstRun()),
     };
     view.webview.html = readFileSync(vscode.Uri.joinPath(media, 'viewer.html').fsPath, 'utf8').replace(
       /\{\{[A-Z_]+\}\}/g,

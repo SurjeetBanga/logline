@@ -3,6 +3,7 @@ import type { SignatureStatus } from '../../core/signature-compare';
 import type { Elements } from '../dom';
 import { cell } from '../dom';
 import type { EventScope } from '../event-scope';
+import type { TabRailItem } from '../tab-rail';
 import type { WebviewApi } from '../types';
 
 type Session = Snapshot['sessions'][number];
@@ -24,6 +25,14 @@ const STATUS: Record<SignatureStatus, { label: string; className: string; title:
   new: { label: 'New', className: 'compare-new', title: 'Only in the newest local run' },
   localOnly: { label: 'Local only', className: 'compare-new', title: 'In local runs, not in production' },
 };
+// The rail's color for each status, matching the table's.
+const STATUS_COLORS: Record<SignatureStatus, string> = {
+  reproduced: 'var(--vscode-charts-red, #f14c4c)',
+  fixed: 'var(--vscode-charts-green, #89d185)',
+  notSeen: 'var(--vscode-descriptionForeground, #9d9d9d)',
+  new: 'var(--vscode-charts-orange, #d18616)',
+  localOnly: 'var(--vscode-charts-orange, #d18616)',
+};
 /** Changes in the newest local run are checked again at most this often. */
 const REFRESH_MS = 2000;
 
@@ -43,8 +52,13 @@ export function createCompare(
     formatTime(ms: number): string;
     /** Open an event's surrounding logs. */
     showContext(id: number): void;
+    /** The rail beside the table: errors by status. */
+    rail?(title: string, items: TabRailItem[]): void;
   },
 ) {
+  // Which errors the table shows: every status, or one; and optionally only those from changed code.
+  let status: SignatureStatus | 'all' = 'all';
+  let changedOnly = false;
   let baselines: { value: string; label: string }[] = [];
   let locals: { id: string; label: string }[] = [];
   let signature = '';
@@ -165,8 +179,58 @@ export function createCompare(
     return element;
   }
 
+  /** Errors by status, with counts, and whether to keep only those from changed code. */
+  function railItems(next: CompareView | undefined): TabRailItem[] {
+    const rows = next?.rows ?? [];
+    const choose = (value: SignatureStatus | 'all') => () => {
+      status = value;
+      if (view) render(view);
+    };
+    const statuses = (Object.keys(STATUS) as SignatureStatus[]).filter((key) => rows.some((row) => row.status === key));
+    return [
+      {
+        kind: 'item',
+        key: 'all',
+        label: 'All errors',
+        meta: rows.length.toLocaleString(),
+        selected: status === 'all',
+        onSelect: choose('all'),
+      },
+      ...(statuses.length ? [{ kind: 'group', label: 'By status' } as TabRailItem] : []),
+      ...statuses.map((key): TabRailItem => ({
+        kind: 'item',
+        key,
+        label: STATUS[key].label,
+        meta: rows.filter((row) => row.status === key).length.toLocaleString(),
+        color: STATUS_COLORS[key],
+        selected: status === key,
+        title: STATUS[key].title,
+        onSelect: choose(key),
+      })),
+      { kind: 'group', label: 'Only' },
+      {
+        kind: 'item',
+        key: 'changed',
+        label: 'From your changes',
+        meta: rows.filter((row) => row.changed).length.toLocaleString(),
+        checked: changedOnly,
+        title: 'Errors thrown from code changed since the last commit',
+        onSelect: () => {
+          changedOnly = !changedOnly;
+          if (view) render(view);
+        },
+      },
+    ];
+  }
+
   function render(next: CompareView): void {
     view = next;
+    actions.rail?.('Show', railItems(next));
+    // A status chosen in the rail that no error has any more falls back to all of them.
+    if (status !== 'all' && !next.rows.some((row) => row.status === status)) status = 'all';
+    const rows = next.rows.filter(
+      (row) => (status === 'all' || row.status === status) && (!changedOnly || row.changed),
+    );
     const header = (text: string, title = '', className = '') => {
       const element = document.createElement('th');
       element.textContent = text;
@@ -191,8 +255,9 @@ export function createCompare(
       : next.runs.length
         ? `${next.summary} · ${next.baseline.label} vs ${next.local.label}`
         : `${errors} production error${errors === 1 ? '' : 's'}. ${next.local.label} has no runs yet: run it to compare.`;
+    if (rows.length < errors) elements.compareStatus.textContent += ` · ${rows.length} shown`;
     elements.compareRows.replaceChildren(
-      ...next.rows.map((row) => {
+      ...rows.map((row) => {
         const element = document.createElement('tr');
         element.className = `compare-row${row.signature === selected ? ' selected' : ''}`;
         element.tabIndex = 0;

@@ -459,6 +459,23 @@ timed('stream', 'Sorted page while 1,000 events stream in, 50 at a time', async 
   };
 });
 
+timed('removeSource', 'Remove a 100-event source from 50,000 retained events', async () => {
+  const { LogStore } = await load('core/log-store.js');
+  const { parseLogLine } = await load('core/log-event.js');
+  // A store of its own: removing compacts the whole ring, and the shared store stays as other cases expect it.
+  const template = parseLogLine(line(1), 'stdout', 1, receivedAt);
+  let next = 0;
+  const copy = (serverId) => ({ ...template, id: ++next, serverId });
+  const store = new LogStore(RETAINED, 100 * 1024 * 1024);
+  for (let i = 0; i < RETAINED - 100; i++) store.add(copy('api'));
+  for (let i = 0; i < 100; i++) store.add(copy('worker'));
+  // Each measurement removes the small source and puts it back, so the store is the same every time.
+  return () => {
+    assert.equal(store.removeSource('worker'), 100);
+    for (let i = 0; i < 100; i++) store.add(copy('worker'));
+  };
+});
+
 if (args.list) {
   console.log(JSON.stringify(cases.map(({ name }) => name)));
   process.exit(0);

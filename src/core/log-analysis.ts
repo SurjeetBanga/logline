@@ -55,6 +55,8 @@ export interface AnalysisSummary {
 export interface AnalysisResult {
   rate: { bucket: number; count: number; anomalous: boolean }[];
   errors: { bucket: number; count: number; anomalous: boolean }[];
+  /** Warnings per bucket, apart from errors, so volume can be shown by level. */
+  warnings?: { bucket: number; count: number }[];
   latency: { bucket: number; average: number; p95: number; count: number; anomalous: boolean }[];
   statusCodes: { code: string; count: number }[];
   errorGroups: ErrorGroup[];
@@ -421,6 +423,7 @@ export function analyzeEvents(events: LogEvent[], options: AnalysisOptions = {})
   const { from, to } = timeRange(events, options);
   const rate = Array.from({ length: 30 }, (_, bucket) => ({ bucket, count: 0 }));
   const errors = Array.from({ length: 30 }, (_, bucket) => ({ bucket, count: 0 }));
+  const warnings = Array.from({ length: 30 }, (_, bucket) => ({ bucket, count: 0 }));
   const latencyBuckets = Array.from({ length: 30 }, () => [] as number[]);
   const latencies: number[] = [];
   const status = new Map<string, number>();
@@ -445,6 +448,7 @@ export function analyzeEvents(events: LogEvent[], options: AnalysisOptions = {})
     }
     rate[index].count++;
     if (error) errors[index].count++;
+    else if (event.level === 'warn' || event.level === 'warning') warnings[index].count++;
     if (latency !== undefined) latencyBuckets[index].push(latency);
   }
   const latency = latencyBuckets.map((values, bucket) => {
@@ -459,6 +463,7 @@ export function analyzeEvents(events: LogEvent[], options: AnalysisOptions = {})
   return {
     rate: rate.map((item, index) => ({ ...item, anomalous: rateAnomalies[index] })),
     errors: errors.map((item, index) => ({ ...item, anomalous: errorAnomalies[index] })),
+    warnings,
     latency: latency.map((item, index) => ({ ...item, anomalous: latencyAnomalies[index] })),
     statusCodes: [...status.entries()].sort((a, b) => b[1] - a[1]).map(([code, count]) => ({ code, count })),
     errorGroups: groupErrors(events, { from, to }),

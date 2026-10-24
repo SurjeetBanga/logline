@@ -47,8 +47,8 @@
       return range.from + index * bucketSize;
     }
     function formatClock(ms, range) {
-      const span2 = range?.from !== void 0 && range?.to !== void 0 ? range.to - range.from : void 0;
-      const formatter = timeAxisFormatter(span2);
+      const span3 = range?.from !== void 0 && range?.to !== void 0 ? range.to - range.from : void 0;
+      const formatter = timeAxisFormatter(span3);
       return formatter ? formatter.format(ms) : new Date(ms).toLocaleTimeString();
     }
     function chartLegend(items) {
@@ -85,13 +85,13 @@
         svg2.append(label);
       }
     }
-    function volumeChart(rate, errors, range) {
+    function volumeChart(rate, errors, range, warnings = []) {
       const bucketCount = rate.length;
-      if (!bucketCount || !rate.some((item) => item.count > 0)) return emptySection("Event volume");
+      if (!bucketCount || !rate.some((item) => item.count > 0)) return emptySection("Volume by level");
       const section2 = document.createElement("section");
       section2.className = "chart-section chart-wide";
       const heading = document.createElement("h3");
-      heading.textContent = "Event volume";
+      heading.textContent = "Volume by level";
       section2.append(heading);
       const width = 720, height = 130, padTop = 10, padBottom = 18;
       const plotHeight = height - padTop - padBottom;
@@ -109,9 +109,11 @@
       svg2.append(maxLabel);
       rate.forEach((item, index) => {
         const errorCount = Math.min(item.count, errors[index]?.count ?? 0);
-        const okCount = item.count - errorCount;
+        const warnCount = Math.min(item.count - errorCount, warnings[index]?.count ?? 0);
+        const okCount = item.count - errorCount - warnCount;
         const x = index * (barWidth + barGap);
         const okHeight = okCount / max * plotHeight;
+        const warnHeight = warnCount / max * plotHeight;
         const errorHeight = errorCount / max * plotHeight;
         const anomalous = item.anomalous || errors[index]?.anomalous;
         const group = svgEl("g", { class: anomalous ? "volume-bar anomalous" : "volume-bar" });
@@ -130,9 +132,19 @@
             svgEl("rect", {
               x,
               width: barWidth,
-              y: padTop + plotHeight - okHeight - errorHeight,
+              y: padTop + plotHeight - okHeight - warnHeight - errorHeight,
               height: okHeight,
               class: "volume-bar-ok"
+            })
+          );
+        if (warnHeight > 0)
+          group.append(
+            svgEl("rect", {
+              x,
+              width: barWidth,
+              y: padTop + plotHeight - warnHeight - errorHeight,
+              height: Math.max(1, warnHeight),
+              class: "volume-bar-warn"
             })
           );
         if (errorHeight > 0)
@@ -146,7 +158,7 @@
             })
           );
         const title = svgEl("title");
-        title.textContent = `${time !== void 0 ? formatClock(time, range) + "\n" : ""}${count(item.count)} event${item.count === 1 ? "" : "s"}${errorCount ? `, ${count(errorCount)} error${errorCount === 1 ? "" : "s"}` : ""}${group.dataset.term ? "\nClick to show these events" : ""}`;
+        title.textContent = `${time !== void 0 ? formatClock(time, range) + "\n" : ""}${count(item.count)} event${item.count === 1 ? "" : "s"}${errorCount ? `, ${count(errorCount)} error${errorCount === 1 ? "" : "s"}` : ""}${warnCount ? `, ${count(warnCount)} warning${warnCount === 1 ? "" : "s"}` : ""}${group.dataset.term ? "\nClick to show these events, or drag across bars to choose a window" : ""}`;
         group.append(title);
         if (anomalous) {
           const dot = svgEl("circle", { cx: x + barWidth / 2, cy: padTop - 5, r: 2.5, class: "anomaly-marker" });
@@ -158,16 +170,92 @@
         svg2.append(group);
       });
       xAxisTicks(svg2, bucketCount, range, (index) => index * (barWidth + barGap) + barWidth / 2, height);
+      const selection = document.createElement("div");
+      selection.className = "volume-selection-bar";
+      selection.hidden = true;
+      brush(svg2, selection, { rate, errors, range, barWidth, barGap, plotBottom: padTop + plotHeight });
       section2.append(
         svg2,
         chartLegend([
-          { className: "swatch-ok", label: "events" },
+          { className: "swatch-ok", label: "info and others" },
+          { className: "swatch-warn", label: "warnings" },
           { className: "swatch-error", label: "errors" }
-        ])
+        ]),
+        selection
       );
       return section2;
     }
-    function latencyChart(latency, range) {
+    function brush(svg2, bar, chart) {
+      const { rate, range } = chart;
+      const bucketCount = rate.length;
+      if (range.from === void 0 || range.to === void 0 || !scope) return;
+      const step = chart.barWidth + chart.barGap;
+      const outline = svgEl("rect", { y: 0, height: chart.plotBottom, class: "volume-selection", visibility: "hidden" });
+      svg2.append(outline);
+      let start;
+      let dragged = false;
+      const bucketAt = (event) => {
+        const box = svg2.getBoundingClientRect();
+        const share = box.width ? (event.clientX - box.left) / box.width : 0;
+        return Math.max(0, Math.min(bucketCount - 1, Math.floor(share * bucketCount)));
+      };
+      const show = (first, last) => {
+        const low = Math.min(first, last);
+        const high = Math.max(first, last);
+        outline.setAttribute("x", String(low * step));
+        outline.setAttribute("width", String((high - low + 1) * step));
+        outline.setAttribute("visibility", "visible");
+        return [low, high];
+      };
+      scope.listen(svg2, "pointerdown", (event) => {
+        if (event.button !== 0) return;
+        start = bucketAt(event);
+        dragged = false;
+      });
+      scope.listen(svg2, "pointermove", (event) => {
+        if (start === void 0) return;
+        const here = bucketAt(event);
+        if (here !== start) dragged = true;
+        if (dragged) show(start, here);
+      });
+      scope.listen(svg2, "pointerup", (event) => {
+        if (start === void 0) return;
+        const first = start;
+        start = void 0;
+        if (!dragged) return;
+        const [low, high] = show(first, bucketAt(event));
+        const from = bucketTime(range, bucketCount, low);
+        const to = bucketTime(range, bucketCount, high + 1);
+        const logs = rate.slice(low, high + 1).reduce((sum, item) => sum + item.count, 0);
+        const errorCount = chart.errors.slice(low, high + 1).reduce((sum, item) => sum + item.count, 0);
+        const text = document.createElement("span");
+        text.textContent = `${formatClock(from, range)} \u2013 ${formatClock(to, range)} selected \xB7 ${count(logs)} log${logs === 1 ? "" : "s"}${errorCount ? `, ${count(errorCount)} error${errorCount === 1 ? "" : "s"}` : ""}`;
+        const showLogs = document.createElement("button");
+        showLogs.type = "button";
+        showLogs.textContent = "Show in Logs";
+        showLogs.dataset.term = `timestamp:[${new Date(from).toISOString()} TO ${new Date(to).toISOString()}]`;
+        const clear = document.createElement("button");
+        clear.type = "button";
+        clear.textContent = "Clear";
+        scope.listen(clear, "click", () => {
+          bar.hidden = true;
+          outline.setAttribute("visibility", "hidden");
+        });
+        bar.replaceChildren(text, showLogs, clear);
+        bar.hidden = false;
+      });
+      scope.listen(
+        svg2,
+        "click",
+        (event) => {
+          if (!dragged) return;
+          dragged = false;
+          event.stopPropagation();
+        },
+        { capture: true }
+      );
+    }
+    function latencyChart(latency, range, narrow = false) {
       const bucketCount = latency.length;
       if (!bucketCount || !latency.some((item) => item.count > 0)) return emptySection("Latency (ms)");
       const section2 = document.createElement("section");
@@ -175,7 +263,7 @@
       const heading = document.createElement("h3");
       heading.textContent = "Latency (ms)";
       section2.append(heading);
-      const width = 720, height = 110, padTop = 10, padBottom = 18;
+      const width = narrow ? 400 : 720, height = narrow ? 180 : 110, padTop = 10, padBottom = 18;
       const plotHeight = height - padTop - padBottom;
       const max = Math.max(1, ...latency.map((item) => Math.max(item.average, item.p95)));
       const step = bucketCount > 1 ? width / (bucketCount - 1) : 0;
@@ -284,7 +372,7 @@
     function duration(ms) {
       return ms >= 1e4 ? `${(ms / 1e3).toFixed(ms >= 1e5 ? 0 : 1)} s` : `${Math.round(ms)} ms`;
     }
-    function span(range) {
+    function span2(range) {
       if (range.from === void 0 || range.to === void 0) return void 0;
       const ms = range.to - range.from;
       const minutes = ms / 6e4;
@@ -296,23 +384,38 @@
       const tiles2 = document.createElement("div");
       tiles2.className = "analysis-tiles chart-wide";
       if (!summary2) return tiles2;
-      tiles2.append(tile2("Events", count(summary2.events), span(analysis.range)));
+      tiles2.append(tile2("Logs", count(summary2.events), span2(analysis.range)));
       tiles2.append(
         tile2(
           "Errors",
           count(summary2.errors),
-          `${percent(summary2.errors, summary2.events)} of events`,
+          `${percent(summary2.errors, summary2.events)} of logs`,
           summary2.errors ? "error" : void 0
         )
       );
-      if (summary2.latency)
+      if (summary2.latency) {
+        const peak = (analysis.latency ?? []).reduce(
+          (worst, item) => item.count && (!worst || item.p95 > worst.p95) ? item : worst,
+          void 0
+        );
+        const peakTime = peak && bucketTime(analysis.range, analysis.latency.length, peak.bucket);
         tiles2.append(
           tile2(
-            "Latency p95",
+            "p95 latency",
             duration(summary2.latency.p95),
-            `p50 ${duration(summary2.latency.p50)} \xB7 p99 ${duration(summary2.latency.p99)}`
+            peak && peakTime !== void 0 && peak.p95 > summary2.latency.p95 ? `peak ${duration(peak.p95)} at ${formatClock(peakTime, analysis.range)}` : `p50 ${duration(summary2.latency.p50)} \xB7 p99 ${duration(summary2.latency.p99)}`
           )
         );
+      }
+      const groups2 = analysis.errorGroups ?? [];
+      const fresh = groups2.filter((group) => group.isNew).length;
+      tiles2.append(
+        tile2(
+          "Error groups",
+          count(groups2.length),
+          fresh ? `${count(fresh)} new in this range` : groups2.length ? "none new" : void 0
+        )
+      );
       if (summary2.sources > 1) tiles2.append(tile2("Sources", count(summary2.sources)));
       return tiles2;
     }
@@ -436,23 +539,24 @@
         note.classList.add("chart-wide");
         content.append(note);
       }
-      content.append(volumeChart(analysis.rate ?? [], analysis.errors ?? [], analysis.range));
-      content.append(latencyChart(analysis.latency ?? [], analysis.range));
-      const breakdowns = document.createElement("div");
-      breakdowns.className = "analysis-breakdowns chart-wide";
-      breakdowns.append(statusSection(analysis.statusCodes ?? []), ...(analysis.topValues ?? []).map(facetSection));
-      content.append(breakdowns);
+      content.append(volumeChart(analysis.rate ?? [], analysis.errors ?? [], analysis.range, analysis.warnings));
       const errorGroups = analysis.errorGroups ?? [];
-      const groups2 = section(
-        `Error groups${errorGroups.length ? ` \xB7 ${count(errorGroups.length)}` : ""}`,
-        "chart-section chart-wide"
-      );
+      const groups2 = section(`Error groups${errorGroups.length ? ` \xB7 ${count(errorGroups.length)}` : ""}`);
       const errorTotal = errorGroups.reduce((sum, item) => sum + item.count, 0);
       const errorMax = Math.max(1, ...errorGroups.map((item) => item.count));
       for (const item of errorGroups.slice(0, 20))
         groups2.append(groupRow(item, errorTotal, errorMax, { detail: seen(item, analysis.range) }));
       if (!errorGroups.length) groups2.append(empty("No errors in these logs."));
-      content.append(groups2);
+      const pair = document.createElement("div");
+      pair.className = "analysis-pair chart-wide";
+      const latency = latencyChart(analysis.latency ?? [], analysis.range, true);
+      latency.classList.remove("chart-wide");
+      pair.append(groups2, latency);
+      content.append(pair);
+      const breakdowns = document.createElement("div");
+      breakdowns.className = "analysis-breakdowns chart-wide";
+      breakdowns.append(statusSection(analysis.statusCodes ?? []), ...(analysis.topValues ?? []).map(facetSection));
+      content.append(breakdowns);
       const patterns = section("Log patterns", "chart-section chart-wide");
       const patternMax = Math.max(1, ...(analysis.patterns ?? []).map((item) => item.count));
       for (const item of analysis.patterns ?? [])
@@ -701,7 +805,6 @@
       compareHead: element("compareHead"),
       compareRows: element("compareRows"),
       compareDetail: element("compareDetail"),
-      addConnection: element("addConnection"),
       connectionRange: element("connectionRange"),
       connectionRun: element("connectionRun"),
       connectionTail: element("connectionTail"),
@@ -728,36 +831,62 @@
       levelButton: element("levelButton"),
       changedOnly: element("changedOnly"),
       levelMenu: element("levelMenu"),
-      server: element("server"),
-      scopeMenu: element("scopeMenu"),
-      sourcesTab: element("sourcesTab"),
-      runsTab: element("runsTab"),
-      sourceMenu: element("sourceMenu"),
-      sessionMenu: element("sessionMenu"),
+      sourceRail: element("sourceRail"),
+      railList: element("railList"),
+      railToggle: element("railToggle"),
+      railStopAll: element("railStopAll"),
+      tabRail: element("tabRail"),
+      tabRailTitle: element("tabRailTitle"),
+      tabRailList: element("tabRailList"),
+      tabRailToggle: element("tabRailToggle"),
       follow: element("follow"),
       moreActions: element("moreActions"),
       actionsMenu: element("actionsMenu"),
       help: element("help"),
+      takeTour: element("takeTour"),
+      welcomeDialog: element("welcomeDialog"),
+      welcomeTour: element("welcomeTour"),
+      welcomeExplore: element("welcomeExplore"),
+      welcomeCapture: element("welcomeCapture"),
+      welcomeImport: element("welcomeImport"),
+      welcomeConnection: element("welcomeConnection"),
+      welcomeOtel: element("welcomeOtel"),
+      tourHint: element("tourHint"),
+      tourHintStart: element("tourHintStart"),
+      tourHintDismiss: element("tourHintDismiss"),
       helpBadge: element("helpBadge"),
       config: element("config"),
       manage: element("manage"),
       export: element("export"),
       import: element("import"),
       clear: element("clear"),
-      stop: element("stop"),
-      run: element("run"),
       captureToggle: element("captureToggle"),
       shareAgent: element("shareAgent"),
       shareSpecificRuns: element("shareSpecificRuns"),
-      connectAgent: element("connectAgent"),
+      shareMenuButton: element("shareMenuButton"),
+      sharePanel: element("sharePanel"),
+      shareState: element("shareState"),
+      shareScopeAll: element("shareScopeAll"),
+      shareScopeRuns: element("shareScopeRuns"),
+      shareRunsHint: element("shareRunsHint"),
+      shareAgentList: element("shareAgentList"),
+      shareProduction: element("shareProduction"),
+      shareConnectionList: element("shareConnectionList"),
+      shareToggle: element("shareToggle"),
       statusAction: element("statusAction"),
       shareScope: element("shareScope"),
       status: element("status"),
-      sessions: element("sessions"),
-      command: element("command"),
       older: element("older"),
       newer: element("newer"),
       page: element("page"),
+      pageNumber: element("pageNumber"),
+      memoryFill: element("memoryFill"),
+      memoryText: element("memoryText"),
+      memoryPanel: element("memoryPanel"),
+      memorySummary: element("memorySummary"),
+      memoryDetails: element("memoryDetails"),
+      memorySettings: element("memorySettings"),
+      statusIcon: element("statusIcon"),
       mode: element("mode"),
       counts: element("counts"),
       contextDialog: element("contextDialog"),
@@ -773,14 +902,14 @@
       tracesView: element("tracesView"),
       tracesStatus: element("tracesStatus"),
       tracesRows: element("tracesRows"),
-      tracesErrorsOnly: element("tracesErrorsOnly"),
       tracesStartReceiver: element("tracesStartReceiver"),
       metrics: element("metrics"),
       metricCount: element("metricCount"),
       metricsView: element("metricsView"),
       metricsFilter: element("metricsFilter"),
       metricsStatus: element("metricsStatus"),
-      metricsRows: element("metricsRows"),
+      metricsCards: element("metricsCards"),
+      metricDetail: element("metricDetail"),
       aiCalls: element("aiCalls"),
       aiCallCount: element("aiCallCount"),
       aiCallsView: element("aiCallsView"),
@@ -812,7 +941,6 @@
       traceHotspots: element("traceHotspots"),
       traceHotspotList: element("traceHotspotList"),
       traceFilter: element("traceFilter"),
-      otlpToggle: element("otlpToggle"),
       breakOnLogs: element("breakOnLogs"),
       saveSearchDialog: element("saveSearchDialog"),
       saveSearchForm: element("saveSearchForm"),
@@ -1516,16 +1644,16 @@
       const total = Math.max(trace.durationMs, 1e-3);
       const logsBySpan = /* @__PURE__ */ new Map();
       const unattached = [];
-      const spanIds = new Set(trace.spans.map((span) => span.spanId));
+      const spanIds = new Set(trace.spans.map((span2) => span2.spanId));
       for (const log of trace.logs) {
         if (log.spanId && spanIds.has(log.spanId))
           logsBySpan.set(log.spanId, [...logsBySpan.get(log.spanId) ?? [], log]);
         else unattached.push(log);
       }
       const rows = [];
-      for (const span of trace.spans) {
-        rows.push(spanRow(span, total));
-        for (const log of logsBySpan.get(span.spanId) ?? []) rows.push(logRow(log, total, span.depth + 1));
+      for (const span2 of trace.spans) {
+        rows.push(spanRow(span2, total));
+        for (const log of logsBySpan.get(span2.spanId) ?? []) rows.push(logRow(log, total, span2.depth + 1));
       }
       if (unattached.length) {
         if (trace.spans.length) {
@@ -1607,31 +1735,31 @@
     container.append(track);
     return container;
   }
-  function spanRow(span, total) {
+  function spanRow(span2, total) {
     const row = document.createElement("tr");
-    row.className = `trace-span${span.error ? " trace-error" : ""}${span.critical ? " trace-critical" : ""}`;
-    row.dataset.service = span.service;
-    row.dataset.name = span.name;
+    row.className = `trace-span${span2.error ? " trace-error" : ""}${span2.critical ? " trace-critical" : ""}`;
+    row.dataset.service = span2.service;
+    row.dataset.name = span2.name;
     const name = cell("", "trace-name");
     const label = document.createElement("span");
     label.className = "trace-indent";
-    label.style.paddingInlineStart = `${Math.min(span.depth, 24) * 14}px`;
-    label.textContent = `${span.error ? "\u26A0 " : ""}${span.name}`;
+    label.style.paddingInlineStart = `${Math.min(span2.depth, 24) * 14}px`;
+    label.textContent = `${span2.error ? "\u26A0 " : ""}${span2.name}`;
     name.append(label);
-    if (span.genAi) {
+    if (span2.genAi) {
       const content = document.createElement("div");
       content.className = "trace-name-content";
       const chip = document.createElement("button");
       chip.type = "button";
       chip.className = "trace-genai";
-      chip.dataset.spanId = span.spanId;
-      const { label: subjectLabel, modelCalls } = span.genAi;
+      chip.dataset.spanId = span2.spanId;
+      const { label: subjectLabel, modelCalls } = span2.genAi;
       const subject = subjectLabel.replace(/^tool · /, "");
       const details2 = [
         modelCalls && `${modelCalls.calls} ${modelCalls.calls === 1 ? "call" : "calls"}`,
-        tokenUsage(modelCalls ?? span.genAi)
+        tokenUsage(modelCalls ?? span2.genAi)
       ].filter((fact) => !!fact);
-      const facts = [...span.name.includes(subject) ? [] : [subjectLabel], ...details2];
+      const facts = [...span2.name.includes(subject) ? [] : [subjectLabel], ...details2];
       const text = document.createElement("span");
       text.className = "trace-genai-text";
       text.textContent = facts.join(" \xB7 ");
@@ -1643,22 +1771,22 @@
       name.replaceChildren(content);
     }
     name.title = [
-      `${span.name} (${span.kind})`,
-      `Self time: ${formatDuration(span.selfMs)} of ${formatDuration(span.durationMs)}`,
-      span.statusMessage ? `Error: ${span.statusMessage}` : void 0,
-      ...Object.entries(span.attributes).map(
+      `${span2.name} (${span2.kind})`,
+      `Self time: ${formatDuration(span2.selfMs)} of ${formatDuration(span2.durationMs)}`,
+      span2.statusMessage ? `Error: ${span2.statusMessage}` : void 0,
+      ...Object.entries(span2.attributes).map(
         ([key, value]) => `${key} = ${typeof value === "string" ? value : JSON.stringify(value)}`
       ),
-      ...span.events.map((event) => `event: ${event.name} at +${formatDuration(event.offsetMs)}`)
+      ...span2.events.map((event) => `event: ${event.name} at +${formatDuration(event.offsetMs)}`)
     ].filter(Boolean).join("\n");
-    const bar = timeline(span.offsetMs, span.durationMs, total, "trace-bar");
-    bar.setAttribute("aria-label", `Starts at +${formatDuration(span.offsetMs)}`);
+    const bar = timeline(span2.offsetMs, span2.durationMs, total, "trace-bar");
+    bar.setAttribute("aria-label", `Starts at +${formatDuration(span2.offsetMs)}`);
     row.append(
       name,
-      cell(span.service, "trace-service"),
+      cell(span2.service, "trace-service"),
       bar,
-      cell(formatDuration(span.durationMs), "trace-duration"),
-      cell(formatDuration(span.selfMs), "trace-duration trace-self")
+      cell(formatDuration(span2.durationMs), "trace-duration"),
+      cell(formatDuration(span2.selfMs), "trace-duration trace-self")
     );
     return row;
   }
@@ -1698,21 +1826,41 @@
     return row;
   }
 
+  // src/webview/inspection/service-color.ts
+  var COLORS = [
+    "var(--vscode-charts-blue, #3794ff)",
+    "var(--vscode-charts-orange, #d18616)",
+    "var(--vscode-charts-green, #89d185)",
+    "var(--vscode-charts-purple, #b180d7)",
+    "var(--vscode-charts-yellow, #cca700)",
+    "var(--vscode-terminal-ansiCyan, #4ec9b0)",
+    "var(--vscode-terminal-ansiMagenta, #c586c0)"
+  ];
+  function serviceColor(name) {
+    let hash = 0;
+    for (let index = 0; index < name.length; index++) hash = hash * 31 + name.charCodeAt(index) >>> 0;
+    return COLORS[hash % COLORS.length];
+  }
+
   // src/webview/inspection/traces.ts
+  var SLOW_MS = 1e3;
   function createTraceList(elements, api, scope, actions) {
     let traces = [];
+    const hidden = /* @__PURE__ */ new Set();
+    let errorsOnly = false;
+    let slowOnly = false;
+    let opened;
     function show() {
       elements.tracesStatus.textContent = "Loading\u2026";
       elements.tracesRows.replaceChildren();
       actions.reveal();
       api.postMessage({ type: "traces" });
     }
-    scope.listen(elements.tracesErrorsOnly, "change", render);
     scope.listen(elements.tracesStartReceiver, "click", () => actions.startReceiver());
     scope.listen(elements.tracesRows, "click", (event) => {
       const row = event.target.closest("[data-trace-id]");
       if (!row?.dataset.traceId) return;
-      actions.showTrace(row.dataset.traceId);
+      open(row.dataset.traceId);
     });
     scope.listen(elements.tracesRows, "keydown", (event) => {
       const key = event.key;
@@ -1720,8 +1868,52 @@
       const row = event.target.closest("[data-trace-id]");
       if (!row?.dataset.traceId) return;
       event.preventDefault();
-      actions.showTrace(row.dataset.traceId);
+      open(row.dataset.traceId);
     });
+    function open(traceId) {
+      opened = traceId;
+      for (const row of elements.tracesRows.querySelectorAll(".traces-row"))
+        row.classList[row.dataset.traceId === traceId ? "add" : "remove"]("selected");
+      actions.showTrace(traceId);
+    }
+    function railItems() {
+      const counts = /* @__PURE__ */ new Map();
+      for (const trace of traces)
+        for (const service of trace.services) counts.set(service, (counts.get(service) ?? 0) + 1);
+      const toggle = (change) => () => {
+        change();
+        render();
+      };
+      return [
+        ...[...counts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).map(([service, count]) => ({
+          kind: "item",
+          key: `service:${service}`,
+          label: service,
+          meta: count.toLocaleString(),
+          color: serviceColor(service),
+          checked: !hidden.has(service),
+          title: `${hidden.has(service) ? "Show" : "Hide"} traces through ${service}`,
+          onSelect: toggle(() => hidden.has(service) ? hidden.delete(service) : hidden.add(service))
+        })),
+        { kind: "group", label: "Show" },
+        {
+          kind: "item",
+          key: "errors",
+          label: "Only traces with errors",
+          meta: traces.filter((trace) => trace.errors).length.toLocaleString(),
+          checked: errorsOnly,
+          onSelect: toggle(() => errorsOnly = !errorsOnly)
+        },
+        {
+          kind: "item",
+          key: "slow",
+          label: "Slower than 1 s",
+          meta: traces.filter((trace) => trace.durationMs >= SLOW_MS).length.toLocaleString(),
+          checked: slowOnly,
+          onSelect: toggle(() => slowOnly = !slowOnly)
+        }
+      ];
+    }
     function receiverChanged() {
       if (actions.visible()) render();
     }
@@ -1730,8 +1922,11 @@
       if (actions.visible()) render();
     }
     function render() {
-      const errorsOnly = elements.tracesErrorsOnly.checked;
-      const shown = errorsOnly ? traces.filter((trace) => trace.errors) : traces;
+      actions.rail?.("Services", railItems());
+      const shown2 = traces.filter(
+        (trace) => (!errorsOnly || trace.errors) && (!slowOnly || trace.durationMs >= SLOW_MS) && // A trace through no listed service, such as one from logs alone, stays.
+        (!trace.services.length || trace.services.some((service) => !hidden.has(service)))
+      );
       const withSpans = traces.filter((trace) => trace.spans).length;
       const receiver = actions.receiver();
       elements.tracesStartReceiver.hidden = receiver.running || withSpans > 0;
@@ -1741,12 +1936,12 @@
         return;
       }
       const failed = traces.filter((trace) => trace.errors).length;
-      elements.tracesStatus.textContent = `${traces.length.toLocaleString()} recent ${traces.length === 1 ? "trace" : "traces"} \xB7 ${failed.toLocaleString()} with errors` + (withSpans < traces.length ? ` \xB7 ${(traces.length - withSpans).toLocaleString()} from logs only` : "") + " \xB7 Choose one to see its waterfall";
-      const longest = Math.max(1, ...shown.map((trace) => trace.durationMs));
+      elements.tracesStatus.textContent = `${traces.length.toLocaleString()} recent ${traces.length === 1 ? "trace" : "traces"} \xB7 ${failed.toLocaleString()} with errors` + (withSpans < traces.length ? ` \xB7 ${(traces.length - withSpans).toLocaleString()} from logs only` : "") + (shown2.length < traces.length ? ` \xB7 ${shown2.length.toLocaleString()} shown` : "") + " \xB7 Choose one to see its waterfall";
+      const longest = Math.max(1, ...shown2.map((trace) => trace.durationMs));
       elements.tracesRows.replaceChildren(
-        ...shown.map((trace) => {
+        ...shown2.map((trace) => {
           const row = document.createElement("tr");
-          row.className = `traces-row${trace.errors ? " trace-error" : ""}`;
+          row.className = `traces-row${trace.errors ? " trace-error" : ""}${trace.traceId === opened ? " selected" : ""}`;
           row.dataset.traceId = trace.traceId;
           row.tabIndex = 0;
           row.setAttribute(
@@ -1764,7 +1959,10 @@ Trace ${trace.traceId}`;
           for (const service of trace.services.slice(0, 4)) {
             const chip = document.createElement("span");
             chip.className = "service-chip";
-            chip.textContent = service;
+            const dot = document.createElement("span");
+            dot.className = "service-dot";
+            dot.style.background = serviceColor(service);
+            chip.append(dot, document.createTextNode(service));
             chip.title = service;
             services.append(chip);
           }
@@ -1832,22 +2030,22 @@ Trace ${trace.traceId}`;
     const label = unit === "1" ? "" : unit.replace(/^\{(.*)\}$/, "$1");
     return `${number(value)}${label ? ` ${label}` : ""}${suffix}`;
   }
-  function sparkline(points) {
+  function sparkline(points, className = "metric-spark") {
     const namespace = "http://www.w3.org/2000/svg";
     const svg2 = document.createElementNS(namespace, "svg");
-    svg2.setAttribute("class", "metric-spark");
+    svg2.setAttribute("class", className);
     svg2.setAttribute("viewBox", "0 0 100 24");
     svg2.setAttribute("preserveAspectRatio", "none");
     svg2.setAttribute("aria-hidden", "true");
     if (points.length < 2) return svg2;
     const values = points.map((point) => point.value);
     const low = Math.min(...values), high = Math.max(...values);
-    const first = points[0].timeMs, span = Math.max(1, points[points.length - 1].timeMs - first);
+    const first = points[0].timeMs, span2 = Math.max(1, points[points.length - 1].timeMs - first);
     const line = document.createElementNS(namespace, "polyline");
     line.setAttribute(
       "points",
       points.map((point) => {
-        const x = (point.timeMs - first) / span * 100;
+        const x = (point.timeMs - first) / span2 * 100;
         const y = high === low ? 12 : 22 - (point.value - low) / (high - low) * 20;
         return `${x.toFixed(2)},${y.toFixed(2)}`;
       }).join(" ")
@@ -1874,6 +2072,9 @@ Trace ${trace.traceId}`;
   }
   function createMetricList(elements, api, scope, actions) {
     let metrics = [];
+    let connections = [];
+    let service;
+    let selected;
     let revision;
     let pending = false;
     let loadedAt = -Infinity;
@@ -1896,7 +2097,7 @@ Trace ${trace.traceId}`;
     }
     function show() {
       elements.metricsStatus.textContent = "Loading\u2026";
-      elements.metricsRows.replaceChildren();
+      elements.metricsCards.replaceChildren();
       actions.reveal();
       load();
     }
@@ -1919,47 +2120,142 @@ Trace ${trace.traceId}`;
       revision = summary2?.revision;
       if (changed && actions.visible()) refreshSoon();
     }
+    function railItems() {
+      const counts = /* @__PURE__ */ new Map();
+      for (const series of metrics) counts.set(series.service, (counts.get(series.service) ?? 0) + 1);
+      const choose = (next) => () => {
+        service = next;
+        render();
+      };
+      return [
+        {
+          kind: "item",
+          key: "all",
+          label: "Everything",
+          meta: metrics.length.toLocaleString(),
+          selected: service === void 0,
+          onSelect: choose(void 0)
+        },
+        ...counts.size ? [{ kind: "group", label: "OpenTelemetry" }] : [],
+        ...[...counts.entries()].sort((a, b) => a[0].localeCompare(b[0])).map(([name, count]) => ({
+          kind: "item",
+          key: `service:${name}`,
+          label: name,
+          meta: count.toLocaleString(),
+          color: serviceColor(name),
+          selected: service === name,
+          onSelect: choose(name)
+        })),
+        ...connections.length ? [{ kind: "group", label: "Connections" }] : [],
+        ...connections.map((connection) => ({
+          kind: "item",
+          key: `connection:${connection.id}`,
+          label: connection.label,
+          meta: connection.watching.length ? `${connection.watching.length} watched` : void 0,
+          title: `Query metrics from ${connection.label}`,
+          onSelect: () => actions.queryConnection?.(connection.id)
+        }))
+      ];
+    }
+    function latestText(series) {
+      if (series.latest === void 0) return "\u2013";
+      const label = MEASURE_LABELS[series.measure];
+      return `${label ? `${label} ` : ""}${series.bound ? "\u2264 " : ""}${formatMetric(series.latest, series.unit, series.measure === "rate")}`;
+    }
+    function renderDetail(series) {
+      elements.metricDetail.hidden = !series;
+      if (!series) {
+        elements.metricDetail.replaceChildren();
+        return;
+      }
+      const header = document.createElement("div");
+      header.className = "metric-detail-header";
+      const title = document.createElement("h3");
+      title.textContent = series.name;
+      const value = document.createElement("strong");
+      value.className = "metric-detail-value";
+      value.textContent = latestText(series);
+      const close = document.createElement("button");
+      close.type = "button";
+      close.className = "icon-button";
+      close.textContent = "\xD7";
+      close.setAttribute("aria-label", "Close the chart");
+      close.title = "Close the chart";
+      scope.listen(close, "click", () => {
+        selected = void 0;
+        render();
+      });
+      header.append(title, value, close);
+      const about = document.createElement("p");
+      about.className = "metric-detail-about";
+      about.textContent = details(series).split("\n").join(" \xB7 ");
+      elements.metricDetail.replaceChildren(header, sparkline(series.points, "metric-spark metric-chart-large"), about);
+    }
+    function card(series) {
+      const item = document.createElement("div");
+      item.setAttribute("role", "listitem");
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = `metric-card${series.key === selected ? " selected" : ""}`;
+      button.dataset.key = series.key;
+      button.title = details(series);
+      button.setAttribute("aria-pressed", String(series.key === selected));
+      const name = document.createElement("span");
+      name.className = "metric-name";
+      name.textContent = series.name;
+      const source = document.createElement("span");
+      source.className = "metric-service";
+      const dot = document.createElement("span");
+      dot.className = "service-dot";
+      dot.style.background = serviceColor(series.service);
+      source.append(dot, document.createTextNode(series.service));
+      const attributes = document.createElement("span");
+      attributes.className = "metric-attributes";
+      attributes.textContent = series.attributes.map(([key, value]) => `${key}=${value}`).join(" ");
+      const bottom = document.createElement("span");
+      bottom.className = "metric-card-bottom";
+      const latest = document.createElement("span");
+      latest.className = "metric-latest";
+      latest.textContent = latestText(series);
+      bottom.append(latest, sparkline(series.points));
+      button.append(name, source);
+      if (attributes.textContent) button.append(attributes);
+      button.append(bottom);
+      scope.listen(button, "click", () => {
+        selected = selected === series.key ? void 0 : series.key;
+        render();
+      });
+      item.append(button);
+      return item;
+    }
     function render() {
+      actions.rail?.("Metrics from", railItems());
       const terms = elements.metricsFilter.value.trim().toLowerCase().split(/\s+/).filter(Boolean);
-      const shown = terms.length ? metrics.filter((series) => {
+      const shown2 = metrics.filter((series) => {
+        if (service !== void 0 && series.service !== service) return false;
+        if (!terms.length) return true;
         const text = `${series.name} ${series.service} ${series.attributes.map(([key, value]) => `${key}=${value}`).join(" ")}`.toLowerCase();
         return terms.every((term) => text.includes(term));
-      }) : metrics;
+      });
       if (!metrics.length) {
         elements.metricsStatus.textContent = "No metrics yet. Apps started while the OpenTelemetry receiver runs send metrics every 5 seconds.";
-        elements.metricsRows.replaceChildren();
+        elements.metricsCards.replaceChildren();
+        renderDetail(void 0);
         return;
       }
       const services = new Set(metrics.map((series) => series.service)).size;
-      elements.metricsStatus.textContent = `${metrics.length.toLocaleString()} series from ${services.toLocaleString()} ${services === 1 ? "service" : "services"}` + (shown.length < metrics.length ? ` \xB7 ${shown.length.toLocaleString()} match` : "");
-      elements.metricsRows.replaceChildren(
-        ...shown.map((series) => {
-          const row = document.createElement("tr");
-          row.className = "metrics-row";
-          const name = cell(series.name, "metric-name");
-          name.title = details(series);
-          const service = cell("", "traces-services");
-          const chip = document.createElement("span");
-          chip.className = "service-chip";
-          chip.textContent = chip.title = series.service;
-          service.append(chip);
-          const pairs = series.attributes.map(([key, value]) => `${key}=${value}`).join(" ");
-          const attributes = cell(pairs, "metric-attributes");
-          attributes.title = series.attributes.map(([key, value]) => `${key}: ${value}`).join("\n");
-          const label = MEASURE_LABELS[series.measure];
-          const latest = cell(
-            series.latest === void 0 ? "\u2013" : `${label ? `${label} ` : ""}${series.bound ? "\u2264 " : ""}${formatMetric(series.latest, series.unit, series.measure === "rate")}`,
-            "metric-latest"
-          );
-          latest.title = details(series);
-          const trend = cell("", "metric-trend");
-          trend.append(sparkline(series.points));
-          row.append(name, service, attributes, latest, trend);
-          return row;
-        })
-      );
+      elements.metricsStatus.textContent = `${metrics.length.toLocaleString()} series from ${services.toLocaleString()} ${services === 1 ? "service" : "services"}` + (shown2.length < metrics.length ? ` \xB7 ${shown2.length.toLocaleString()} match` : "");
+      elements.metricsCards.replaceChildren(...shown2.map(card));
+      renderDetail(metrics.find((series) => series.key === selected));
     }
-    return { show, hide, receive, update };
+    function setConnections(list) {
+      const next = list ?? [];
+      if (JSON.stringify(next.map((item) => [item.id, item.label, item.watching])) === JSON.stringify(connections.map((item) => [item.id, item.label, item.watching])))
+        return;
+      connections = next;
+      if (actions.visible()) actions.rail?.("Metrics from", railItems());
+    }
+    return { show, hide, receive, update, setConnections };
   }
 
   // src/core/otlp.ts
@@ -2117,7 +2413,7 @@ Trace ${trace.traceId}`;
       detail = message.detail;
       renderCall(message.detail);
     }
-    function shown(calls) {
+    function shown2(calls) {
       const kind = elements.aiCallsKind.value;
       const errorsOnly = elements.aiCallsErrorsOnly.checked;
       const terms = elements.aiCallsFilter.value.trim().toLowerCase().split(/\s+/).filter(Boolean);
@@ -2145,7 +2441,7 @@ Trace ${trace.traceId}`;
         return;
       }
       if (model !== void 0 && !summary2.models.some((totals) => totals.model === model)) model = void 0;
-      const rows = shown(summary2.calls);
+      const rows = shown2(summary2.calls);
       elements.aiCallsStatus.textContent = `${whole.format(summary2.total)} AI ${summary2.total === 1 ? "call" : "calls"}` + (summary2.errors ? ` \xB7 ${whole.format(summary2.errors)} failed` : "") + (summary2.total > summary2.calls.length ? ` \xB7 newest ${whole.format(summary2.calls.length)} listed` : "") + (rows.length < summary2.calls.length ? ` \xB7 ${whole.format(rows.length)} match` : "") + (model !== void 0 ? ` \xB7 ${model} only` : "") + " \xB7 Choose one to read its conversation";
       elements.aiCallsTiles.replaceChildren(...tiles(summary2));
       elements.aiModelRows.replaceChildren(...summary2.models.map((totals) => modelRow(totals, totals.model === model)));
@@ -2386,7 +2682,7 @@ Span ${call.spanId}`;
           panel.style.bottom = "";
           panel.style.maxHeight = "";
           panel.style.position = "";
-          if (panel.classList.contains("fields-panel") || panel.classList.contains("cheat-sheet") || panel.classList.contains("level-menu") || panel.classList.contains("saved-searches") || panel.classList.contains("actions-menu") || panel.classList.contains("session-menu") || panel.classList.contains("scope-menu")) {
+          if (panel.classList.contains("fields-panel") || panel.classList.contains("cheat-sheet") || panel.classList.contains("level-menu") || panel.classList.contains("saved-searches") || panel.classList.contains("actions-menu") || panel.classList.contains("share-panel") || panel.classList.contains("memory-panel")) {
             const trigger = button.getBoundingClientRect();
             const margin2 = 8;
             const spaceBelow2 = window.innerHeight - trigger.bottom - margin2;
@@ -2398,7 +2694,7 @@ Span ${call.spanId}`;
             const maxLeft = Math.max(margin2, window.innerWidth - margin2 - panelWidth);
             const preferredLeft = trigger.right - panelWidth;
             panel.style.left = `${Math.max(margin2, Math.min(preferredLeft, maxLeft))}px`;
-            panel.style.top = openAbove ? `${margin2}px` : `${trigger.bottom + 4}px`;
+            panel.style.top = openAbove ? "auto" : `${trigger.bottom + 4}px`;
             panel.style.bottom = openAbove ? `${window.innerHeight - trigger.top + 4}px` : "";
             panel.style.maxHeight = `${maxHeight}px`;
             return;
@@ -2530,7 +2826,10 @@ Span ${call.spanId}`;
     view;
     /** The time range a connection search covers, such as `1h`. */
     connectionRange;
+    /** The Sources rail's state when set by hand; undefined follows the panel's width. */
+    railCollapsed;
     constructor(saved = {}) {
+      if (saved.rail === "collapsed" || saved.rail === "open") this.railCollapsed = saved.rail === "collapsed";
       this.view = typeof saved.view === "string" ? saved.view : "logs";
       this.connectionRange = typeof saved.range === "string" && RANGE_CHOICES.includes(saved.range) ? saved.range : "1h";
       this.following = !saved.sort;
@@ -2613,7 +2912,8 @@ Span ${call.spanId}`;
         ...this.cellHintDismissed ? { cellHintDismissed: true } : {},
         ...this.rowHintDismissed ? { rowHintDismissed: true } : {},
         ...this.view !== "logs" ? { view: this.view } : {},
-        ...this.connectionRange !== "1h" ? { range: this.connectionRange } : {}
+        ...this.connectionRange !== "1h" ? { range: this.connectionRange } : {},
+        ...this.railCollapsed !== void 0 ? { rail: this.railCollapsed ? "collapsed" : "open" } : {}
       };
     }
   };
@@ -2887,7 +3187,6 @@ Span ${call.spanId}`;
           state.selectedServer = item.serverId || "";
           state.selectedSession = "";
           state.checkedLevels = new Set(Array.isArray(item.levels) ? item.levels : LEVELS);
-          elements.server.value = state.selectedServer;
           updateScopeSelection();
           buildLevelMenu();
           updateLevelButtonLabel();
@@ -2982,12 +3281,12 @@ Span ${call.spanId}`;
     let previewTimer;
     const numbers = new Intl.NumberFormat();
     const selected = () => connections.find((connection) => connection.sourceId === state.selectedServer);
-    const noun = (connection, count) => `${connection.sql ? "row" : "log"}${count === 1 ? "" : "s"}`;
+    const noun2 = (connection, count) => `${connection.language === "mongo" ? "document" : connection.sql ? "row" : "log"}${count === 1 ? "" : "s"}`;
     function resultText(connection) {
       const last = connection.last;
       if (!last)
-        return connection.mapped ? "Choose a range and press Run. Nothing is fetched until you do." : "No log table is mapped. Use Run SQL to query it.";
-      const rows = `${numbers.format(last.kept)} ${noun(connection, last.kept)}`;
+        return connection.mapped ? "Choose a range and press Run. Nothing is fetched until you do." : connection.language === "mongo" ? "No log collection is mapped. Use Run query to query it." : "No log table is mapped. Use Run SQL to query it.";
+      const rows = `${numbers.format(last.kept)} ${noun2(connection, last.kept)}`;
       if (last.kind === "tail")
         return !last.running ? `Tail stopped \xB7 ${rows}` : last.error ? `Tail interrupted: ${last.error}` : `Tailing \xB7 ${rows}`;
       if (last.running) return "Fetching\u2026";
@@ -2995,7 +3294,7 @@ Span ${call.spanId}`;
       const of = last.total !== void 0 && last.total > last.fetched ? ` of ${numbers.format(last.total)}` : "";
       const kept = last.kept < last.fetched ? ` \xB7 ${numbers.format(last.kept)} match the filter` : "";
       const time = last.elapsedMs !== void 0 ? ` \xB7 ${numbers.format(last.elapsedMs)} ms` : "";
-      return `Fetched ${numbers.format(last.fetched)}${of} ${noun(connection, last.fetched)}${kept}${time} \xB7 read-only`;
+      return `Fetched ${numbers.format(last.fetched)}${of} ${noun2(connection, last.fetched)}${kept}${time} \xB7 read-only`;
     }
     function render() {
       const connection = selected();
@@ -3017,6 +3316,8 @@ Span ${call.spanId}`;
       elements.connectionResult.textContent = resultText(connection);
       elements.connectionCompare.hidden = !connection.last || connection.last.kind === "tail";
       elements.connectionSql.hidden = !connection.sql;
+      elements.connectionSql.textContent = connection.language === "mongo" ? "Run query\u2026" : "Run SQL\u2026";
+      elements.connectionSql.title = connection.language === "mongo" ? "Run a read-only filter or pipeline you type, in JSON" : "Run a read-only SELECT you type";
       elements.connectionAgents.hidden = !connection.mapped;
       elements.connectionAgents.setAttribute("aria-pressed", String(!!connection.agents));
       elements.connectionAgents.textContent = connection.agents ? "Agents allowed" : "Allow agents";
@@ -3124,8 +3425,911 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
         const connection = selected();
         if (!connection) return void 0;
         if (connection.last) return "No matching rows. Change the filter or the range and press Run.";
-        return connection.mapped ? `Choose a range and press Run to fetch ${connection.sql ? "rows" : "logs"} from ${connection.label}.` : `Use Run SQL to query ${connection.label}.`;
+        return connection.mapped ? `Choose a range and press Run to fetch ${connection.sql ? "rows" : "logs"} from ${connection.label}.` : `Use ${connection.language === "mongo" ? "Run query" : "Run SQL"} to query ${connection.label}.`;
       }
+    };
+  }
+
+  // src/webview/search/source-rail.ts
+  var NARROW_PANEL = 520;
+  var ICONS2 = {
+    all: "M8 2.5l5.5 3L8 8.5 2.5 5.5zM2.5 8.5l5.5 3 5.5-3M2.5 11.2l5.5 3 5.5-3",
+    terminal: "M2.5 4l3.5 3.5L2.5 11M8 12h5.5",
+    task: "M2.5 4.5l1.5 1.5 2.5-2.5M8.5 5h5M2.5 10.5l1.5 1.5 2.5-2.5M8.5 11h5",
+    debug: "M5.5 6h5v4a2.5 2.5 0 0 1-5 0zM6.5 6V5a1.5 1.5 0 0 1 3 0v1M2.5 8.5h3M10.5 8.5h3M3 12.5l2.6-1.3M13 12.5l-2.6-1.3M3 4.5l2.6 1.5M13 4.5l-2.6 1.5",
+    file: "M4 2.5h5l3 3v8H4zM9 2.5v3h3",
+    otel: "M2 3.5h7M4 7.5h8M7 11.5h7",
+    cloud: "M4.5 12.5h7a2.5 2.5 0 0 0 .4-5A3.6 3.6 0 0 0 5 6.7a2.9 2.9 0 0 0-.5 5.8z",
+    database: "M3 4c0-1 2.2-1.8 5-1.8s5 .8 5 1.8-2.2 1.8-5 1.8S3 5 3 4zM3 4v8c0 1 2.2 1.8 5 1.8s5-.8 5-1.8V4M3 8c0 1 2.2 1.8 5 1.8s5-.8 5-1.8",
+    run: "M5 3l7 5-7 5z",
+    stop: "M4.5 4.5h7v7h-7z",
+    add: "M8 3v10M3 8h10",
+    remove: "M3 4.5h10M6.5 4.5V3h3v1.5M4.5 4.5l.6 8.5h5.8l.6-8.5M7 7v4M9 7v4"
+  };
+  function icon2(name, size = 14) {
+    const svg2 = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    svg2.setAttribute("viewBox", "0 0 16 16");
+    svg2.setAttribute("width", String(size));
+    svg2.setAttribute("height", String(size));
+    svg2.setAttribute("fill", "none");
+    svg2.setAttribute("stroke", "currentColor");
+    svg2.setAttribute("stroke-width", "1.4");
+    svg2.setAttribute("stroke-linecap", "round");
+    svg2.setAttribute("stroke-linejoin", "round");
+    svg2.setAttribute("aria-hidden", "true");
+    const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+    path.setAttribute("d", ICONS2[name] ?? ICONS2.terminal);
+    svg2.append(path);
+    return svg2;
+  }
+  function span(className, text = "") {
+    const element2 = document.createElement("span");
+    element2.className = className;
+    element2.textContent = text;
+    return element2;
+  }
+  function iconFor(server) {
+    if (server.taskName || server.kind === "task") return "task";
+    if (server.kind === "debug") return "debug";
+    if (server.kind === "import" || server.kind === "file") return "file";
+    if (server.kind === "otel") return "otel";
+    return "terminal";
+  }
+  function sourceName(server) {
+    return server.taskName ? `Task: ${server.taskName}` : server.label;
+  }
+  function sourceTitle(server) {
+    return [
+      sourceName(server),
+      server.status === "idle" ? void 0 : server.status,
+      server.taskType ? `Task type ${server.taskType}` : void 0,
+      server.dependencies?.length ? `Dependencies: ${server.dependencies.join(", ")} (${server.dependencyState || "unknown"})` : void 0,
+      server.exitReason ? `Exit: ${server.exitReason}` : void 0
+    ].filter(Boolean).join(" \xB7 ");
+  }
+  var noun = (connection, count) => `${connection.language === "mongo" ? "document" : connection.sql ? "row" : "log"}${count === 1 ? "" : "s"}`;
+  function connectionStatus(connection, format) {
+    const last = connection.last;
+    if (connection.tailing)
+      return last?.error ? "Tail interrupted" : `Tailing \xB7 ${format(last?.kept ?? 0)} ${noun(connection, last?.kept ?? 0)}`;
+    if (last?.running) return "Fetching\u2026";
+    if (last?.error) return "Last fetch failed";
+    if (last) return `${format(last.kept)} ${noun(connection, last.kept)}`;
+    return connection.mapped ? "Not fetched yet" : connection.language === "mongo" ? "No log collection \xB7 queries only" : "No log table \xB7 SQL only";
+  }
+  function runName(session) {
+    return session.command || (session.taskName ? `Task: ${session.taskName}` : "") || session.server || "Run";
+  }
+  function createSourceRail(elements, state, api, scope, actions) {
+    const numbers = new Intl.NumberFormat();
+    const format = (value) => numbers.format(value);
+    let servers = [];
+    let sessions = [];
+    let connections = [];
+    let signature = "";
+    const removers = /* @__PURE__ */ new Map();
+    function collapsed() {
+      return state.railCollapsed ?? window.innerWidth < NARROW_PANEL;
+    }
+    function applyCollapsed() {
+      const value = collapsed();
+      elements.sourceRail.classList[value ? "add" : "remove"]("collapsed");
+      elements.railToggle.setAttribute("aria-expanded", String(!value));
+      const label = value ? "Expand sources" : "Collapse sources";
+      elements.railToggle.setAttribute("aria-label", label);
+      elements.railToggle.title = label;
+    }
+    function actionButton(kind, label, onClick) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = `rail-action rail-${kind}`;
+      button.setAttribute("aria-label", label);
+      button.title = label;
+      button.append(icon2(kind, 13));
+      scope.listen(button, "click", (event) => {
+        event.stopPropagation();
+        onClick();
+      });
+      return button;
+    }
+    function row(options) {
+      const selected = options.id === state.selectedServer;
+      const wrapper = document.createElement("div");
+      wrapper.className = `rail-row${selected ? " selected" : ""}`;
+      wrapper.dataset.sourceId = options.id;
+      const select = document.createElement("button");
+      select.type = "button";
+      select.className = "rail-select rail-focusable";
+      select.dataset.sourceId = options.id;
+      select.title = options.title;
+      select.tabIndex = selected ? 0 : -1;
+      select.setAttribute("aria-current", String(selected));
+      const glyph = span("rail-glyph");
+      glyph.append(icon2(options.icon));
+      select.append(glyph);
+      const text = span("rail-text");
+      text.append(span("rail-name", options.name));
+      if (options.status)
+        text.append(span(`rail-status${options.statusClass ? ` ${options.statusClass}` : ""}`, options.status));
+      select.append(text);
+      if (options.agents) {
+        const badge = span("rail-agents", "\u2726");
+        badge.title = "Agents may fetch from this connection";
+        select.append(badge);
+      }
+      if (options.meta) select.append(span("rail-meta", options.meta));
+      if (options.dot) {
+        const dot = span(`rail-dot ${options.dot}`);
+        dot.setAttribute("aria-label", options.dot);
+        select.append(dot);
+      }
+      scope.listen(select, "click", () => actions.selectSource(options.id));
+      wrapper.append(select);
+      if (options.actions?.length) {
+        wrapper.classList.add("has-actions");
+        const group2 = span("rail-actions");
+        group2.append(...options.actions);
+        wrapper.append(group2);
+      }
+      return wrapper;
+    }
+    function serverRow(server) {
+      const running = server.status === "running" || server.status === "stopping";
+      const rowActions = [];
+      if (server.configured && !running)
+        rowActions.push(
+          actionButton("run", `Run ${sourceName(server)}`, () => api.postMessage({ type: "run", serverId: server.id }))
+        );
+      if (running && server.canStop)
+        rowActions.push(
+          actionButton(
+            "stop",
+            `Stop ${sourceName(server)}`,
+            () => api.postMessage({ type: "stop", serverId: server.id })
+          )
+        );
+      const remove = () => api.postMessage({ type: "removeSource", serverId: server.id });
+      removers.set(server.id, remove);
+      rowActions.push(
+        actionButton(
+          "remove",
+          running && server.canStop ? `Stop and remove ${sourceName(server)}` : `Remove ${sourceName(server)} and its logs`,
+          remove
+        )
+      );
+      return row({
+        id: server.id,
+        name: sourceName(server),
+        icon: iconFor(server),
+        title: sourceTitle(server),
+        meta: server.activeSessions > 1 ? `${server.activeSessions} active` : void 0,
+        dot: server.status === "running" ? "running" : server.status === "stopping" ? "stopping" : server.status === "failed" ? "failed" : server.configured || server.status === "exited" ? "stopped" : void 0,
+        actions: rowActions
+      });
+    }
+    function connectionRow(connection) {
+      const rowActions = [];
+      if (connection.tailing)
+        rowActions.push(
+          actionButton(
+            "stop",
+            `Stop tailing ${connection.label}`,
+            () => api.postMessage({
+              type: "connectionTail",
+              connectionId: connection.id,
+              query: actions.query(),
+              enabled: false
+            })
+          )
+        );
+      const remove = () => api.postMessage({ type: "removeConnection", connectionId: connection.id });
+      removers.set(connection.sourceId, remove);
+      rowActions.push(actionButton("remove", `Remove connection ${connection.label}\u2026`, remove));
+      const status = connectionStatus(connection, format);
+      return row({
+        id: connection.sourceId,
+        name: connection.label,
+        icon: connection.type === "datadog" ? "cloud" : "database",
+        title: `${connection.label} \xB7 ${status}`,
+        status,
+        statusClass: connection.tailing ? "live" : connection.last?.error ? "error" : void 0,
+        dot: connection.tailing ? "tailing" : void 0,
+        agents: connection.agents,
+        actions: rowActions
+      });
+    }
+    function runRows() {
+      const group2 = document.createElement("div");
+      group2.className = "rail-runs";
+      group2.setAttribute("role", "group");
+      group2.setAttribute("aria-label", "Runs");
+      const all = runButton("", sessions.length ? `All runs \xB7 ${sessions.length}` : "All runs", "");
+      group2.append(all);
+      for (const session of sessions) {
+        const wrapper = document.createElement("div");
+        wrapper.className = "run-option-row";
+        const started = session.startedAt ? new Date(session.startedAt).toLocaleTimeString() : "";
+        const stateText = session.status === "running" ? "running" : session.exitReason || session.status;
+        const button = runButton(session.id, runName(session), [started, stateText].filter(Boolean).join(" \xB7 "));
+        button.title = [
+          runName(session),
+          session.cwd,
+          session.captureStatus && `Capture: ${session.captureStatus}`,
+          session.captureReason
+        ].filter(Boolean).join(" \xB7 ");
+        wrapper.append(button);
+        if ((session.status === "running" || session.status === "stopping") && session.canStop === true) {
+          const stop = actionButton(
+            "stop",
+            session.status === "stopping" ? "This run is stopping" : session.sourceKind === "file" ? "Stop following this file" : session.sourceKind === "debug" ? "Stop this debug session" : "Stop this run",
+            () => api.postMessage({ type: "stop", serverId: session.serverId, sessionId: session.id })
+          );
+          stop.classList.add("run-stop");
+          stop.dataset.runId = session.id;
+          stop.disabled = session.status !== "running";
+          wrapper.append(stop);
+        }
+        group2.append(wrapper);
+      }
+      return group2;
+    }
+    function runButton(id, label, meta) {
+      const selected = id === state.selectedSession;
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "run-select rail-focusable";
+      button.dataset.runId = id;
+      button.tabIndex = -1;
+      button.setAttribute("aria-current", String(selected));
+      button.append(span("rail-name", label));
+      if (meta) button.append(span("rail-meta", meta));
+      scope.listen(button, "click", () => actions.selectRun(id));
+      return button;
+    }
+    function group(label, extra) {
+      const heading = document.createElement("div");
+      heading.className = "rail-group";
+      heading.append(span("rail-group-label", label));
+      if (extra) heading.append(extra);
+      return heading;
+    }
+    function addButton() {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.id = "railAddConnection";
+      button.className = "rail-action rail-add";
+      button.setAttribute("aria-label", "Add connection");
+      button.title = "Add a Datadog, Postgres, MySQL, MongoDB, or SQLite connection";
+      button.append(icon2("add", 13));
+      scope.listen(button, "click", () => api.postMessage({ type: "addConnection" }));
+      return button;
+    }
+    function render() {
+      removers.clear();
+      const focusedSource = document.activeElement?.dataset?.sourceId;
+      const focusedRun = document.activeElement?.dataset?.runId;
+      const connectionIds = new Set(connections.map((connection) => connection.sourceId));
+      const local = servers.filter((server) => !connectionIds.has(server.id));
+      const active = servers.reduce((sum, server) => sum + (server.activeSessions || 0), 0);
+      const children = [
+        row({
+          id: "",
+          name: "All sources",
+          icon: "all",
+          title: "Show logs from every source",
+          meta: active ? `${active} active` : void 0
+        })
+      ];
+      const withRuns = (element2, id) => {
+        children.push(element2);
+        if (id && id === state.selectedServer && sessions.length) children.push(runRows());
+      };
+      if (local.length) children.push(group("Local"));
+      for (const server of local) withRuns(serverRow(server), server.id);
+      const add = addButton();
+      children.push(group("Connections", add));
+      if (connections.length)
+        for (const connection of connections) withRuns(connectionRow(connection), connection.sourceId);
+      else {
+        const empty = document.createElement("div");
+        empty.className = "rail-empty";
+        const text = document.createElement("p");
+        text.textContent = "Search Datadog, Postgres, MySQL, MongoDB, or SQLite logs next to your local runs.";
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "rail-empty-add";
+        button.textContent = "Add connection";
+        scope.listen(button, "click", () => api.postMessage({ type: "addConnection" }));
+        empty.append(text, button);
+        children.push(empty);
+      }
+      elements.railList.replaceChildren(...children);
+      const running = servers.some((server) => server.canStop && (server.status === "running" || server.status === "stopping")) || connections.some((connection) => connection.tailing);
+      elements.railStopAll.hidden = !running;
+      const focus = [...elements.railList.querySelectorAll(".rail-focusable")].find(
+        (node) => focusedRun !== void 0 ? node.dataset.runId === focusedRun : node.dataset.sourceId === focusedSource
+      );
+      if (focusedSource !== void 0 || focusedRun !== void 0) focus?.focus();
+    }
+    function key() {
+      return JSON.stringify([
+        state.selectedServer,
+        state.selectedSession,
+        servers.map((server) => [
+          server.id,
+          server.label,
+          server.status,
+          server.activeSessions,
+          server.taskName,
+          server.taskType,
+          server.dependencies,
+          server.dependencyState,
+          server.exitReason,
+          server.configured,
+          server.kind,
+          server.canStop
+        ]),
+        sessions.map((session) => [
+          session.id,
+          session.command,
+          session.status,
+          session.startedAt,
+          session.exitReason,
+          session.captureStatus,
+          session.canStop
+        ]),
+        connections.map((connection) => [
+          connection.sourceId,
+          connection.label,
+          connection.type,
+          connection.mapped,
+          connection.agents,
+          connection.tailing,
+          connection.last?.kept,
+          connection.last?.running,
+          connection.last?.error
+        ])
+      ]);
+    }
+    function refresh(force = false) {
+      const next = key();
+      if (!force && next === signature) return;
+      signature = next;
+      render();
+    }
+    scope.listen(elements.railToggle, "click", () => {
+      state.railCollapsed = !collapsed();
+      applyCollapsed();
+      actions.saveState();
+      actions.collapsedChanged?.();
+    });
+    scope.listen(elements.railStopAll, "click", () => {
+      api.postMessage({ type: "stop" });
+      for (const connection of connections)
+        if (connection.tailing)
+          api.postMessage({
+            type: "connectionTail",
+            connectionId: connection.id,
+            query: actions.query(),
+            enabled: false
+          });
+    });
+    scope.listen(elements.railList, "keydown", (event) => {
+      if (event.key === "Delete") {
+        const id = document.activeElement?.dataset?.sourceId;
+        if (id) removers.get(id)?.();
+        return;
+      }
+      if (event.key !== "ArrowDown" && event.key !== "ArrowUp" && event.key !== "Home" && event.key !== "End") return;
+      const items = [...elements.railList.querySelectorAll(".rail-focusable")];
+      const index = items.indexOf(document.activeElement);
+      if (index < 0) return;
+      event.preventDefault();
+      const next = event.key === "Home" ? 0 : event.key === "End" ? items.length - 1 : (index + (event.key === "ArrowUp" ? -1 : 1) + items.length) % items.length;
+      items[next].focus();
+    });
+    scope.listen(window, "resize", () => {
+      if (state.railCollapsed === void 0) applyCollapsed();
+    });
+    applyCollapsed();
+    return {
+      /** The rail's data from a snapshot; sessions are those of the selected source. */
+      update(next) {
+        if (next.servers) servers = next.servers;
+        if (next.sessions) sessions = next.sessions;
+        if (next.connections) connections = next.connections;
+        refresh();
+      },
+      /** The selection changed: show it, and the runs of the newly selected source. */
+      selectionChanged(nextSessions) {
+        if (nextSessions) sessions = nextSessions;
+        refresh();
+      },
+      servers: () => servers,
+      sessions: () => sessions,
+      collapsed,
+      applyCollapsed
+    };
+  }
+
+  // src/webview/share-panel.ts
+  function agentRows(setup, readers = []) {
+    const rows = [
+      setup?.copilot === false ? {
+        name: "GitHub Copilot",
+        detail: "Install GitHub Copilot Chat to use it",
+        state: { text: "Not installed", tone: "muted" }
+      } : {
+        name: "GitHub Copilot",
+        detail: "Built in \xB7 reads shared logs from agent chat",
+        state: { text: "Ready", tone: "ready" }
+      }
+    ];
+    for (const [name, agent] of [
+      ["Claude Code", "claude"],
+      ["Codex", "codex"]
+    ]) {
+      if (setup && !setup.external)
+        rows.push({
+          name,
+          detail: "Turn on logline.externalAgents to connect it",
+          state: { text: "Off", tone: "muted" }
+        });
+      else if (readers.includes(name))
+        rows.push({
+          name,
+          detail: "Read shared logs in the last few minutes",
+          state: { text: "Reading", tone: "ready" }
+        });
+      else if (setup?.connected.includes(name))
+        rows.push({ name, detail: "Set up \xB7 reads what you share", state: { text: "Connected", tone: "ready" } });
+      else rows.push({ name, detail: "Not set up in this editor yet", connect: agent });
+    }
+    return rows;
+  }
+  function createSharePanel(elements, api, scope, createPopover) {
+    let sharing = false;
+    let scopeAll = true;
+    let signature = "";
+    const popover = createPopover(
+      elements.shareMenuButton.closest(".popover-container"),
+      elements.shareMenuButton,
+      elements.sharePanel
+    );
+    function agentList(rows) {
+      return rows.map((row) => {
+        const item = document.createElement("div");
+        item.className = "share-agent";
+        const text = document.createElement("span");
+        text.className = "share-agent-text";
+        const name = document.createElement("span");
+        name.className = "share-agent-name";
+        name.textContent = row.name;
+        const detail = document.createElement("span");
+        detail.className = "share-hint";
+        detail.textContent = row.detail;
+        text.append(name, detail);
+        item.append(text);
+        if (row.state) {
+          const state = document.createElement("span");
+          state.className = `share-agent-state ${row.state.tone}`;
+          state.textContent = row.state.text;
+          item.append(state);
+        }
+        if (row.connect) {
+          const agent = row.connect;
+          const connect = document.createElement("button");
+          connect.type = "button";
+          connect.className = "share-connect";
+          connect.textContent = "Connect\u2026";
+          connect.title = `Register Logline's MCP server and skills with ${row.name}`;
+          scope.listen(connect, "click", () => {
+            popover.close();
+            api.postMessage({ type: "connectAgent", agent });
+          });
+          item.append(connect);
+        }
+        return item;
+      });
+    }
+    function connectionList(connections) {
+      return connections.map((connection) => {
+        const item = document.createElement("div");
+        item.className = "share-connection";
+        const name = document.createElement("span");
+        name.className = "share-agent-name";
+        name.textContent = connection.label;
+        const toggle = document.createElement("button");
+        toggle.type = "button";
+        toggle.className = "share-allow";
+        toggle.setAttribute("aria-pressed", String(connection.agents));
+        toggle.textContent = connection.agents ? "Allowed" : "Allow";
+        toggle.title = connection.agents ? `Agents may fetch logs from ${connection.label}. Click to stop them.` : `Let agents you share with fetch logs from ${connection.label}`;
+        scope.listen(
+          toggle,
+          "click",
+          () => api.postMessage({ type: "connectionAgents", connectionId: connection.id, enabled: !connection.agents })
+        );
+        item.append(name, toggle);
+        return item;
+      });
+    }
+    const toggleSharing = () => {
+      if (sharing) api.postMessage({ type: "stopSharing" });
+      else if (scopeAll) api.postMessage({ type: "shareWithAgent" });
+      else api.postMessage({ type: "shareWithAgent", chooseRuns: true });
+    };
+    scope.listen(elements.shareAgent, "click", toggleSharing);
+    scope.listen(elements.shareToggle, "click", toggleSharing);
+    scope.listen(elements.shareScopeAll, "change", () => {
+      scopeAll = true;
+      elements.shareSpecificRuns.hidden = true;
+      if (sharing) api.postMessage({ type: "shareWithAgent" });
+    });
+    scope.listen(elements.shareScopeRuns, "change", () => {
+      scopeAll = false;
+      elements.shareSpecificRuns.hidden = false;
+      if (sharing) api.postMessage({ type: "shareWithAgent", chooseRuns: true });
+    });
+    scope.listen(
+      elements.shareSpecificRuns,
+      "click",
+      () => api.postMessage({ type: "shareWithAgent", chooseRuns: true })
+    );
+    scope.listen(elements.statusAction, "click", () => {
+      popover.close();
+      api.postMessage({ type: "showStatus" });
+    });
+    return {
+      open: () => popover.open(),
+      update(data) {
+        const status = data.agentSharing;
+        sharing = Boolean(status?.active);
+        const runs = sharing ? status.sources.reduce((sum, source) => sum + (source.runs?.length ?? source.sessions), 0) : 0;
+        if (sharing) scopeAll = status.scope !== "selected";
+        elements.shareState.textContent = sharing ? scopeAll ? "On \xB7 everything" : `On \xB7 ${runs} run${runs === 1 ? "" : "s"}` : "Off";
+        elements.shareState.classList[sharing ? "add" : "remove"]("on");
+        elements.shareScopeAll.checked = scopeAll;
+        elements.shareScopeRuns.checked = !scopeAll;
+        elements.shareSpecificRuns.hidden = scopeAll;
+        elements.shareRunsHint.textContent = sharing && !scopeAll ? `${runs} run${runs === 1 ? "" : "s"} shared; later commands stay private` : "Choose runs; later commands stay private";
+        elements.shareToggle.textContent = sharing ? "Stop sharing" : "Start sharing";
+        elements.shareToggle.classList[sharing ? "remove" : "add"]("primary");
+        elements.shareMenuButton.classList[sharing ? "add" : "remove"]("sharing");
+        const connections = (data.connections ?? []).filter((connection) => connection.mapped);
+        const next = JSON.stringify([
+          data.agentSetup,
+          data.agentClients,
+          connections.map((connection) => [connection.id, connection.label, connection.agents])
+        ]);
+        if (next === signature) return;
+        signature = next;
+        elements.shareAgentList.replaceChildren(...agentList(agentRows(data.agentSetup, data.agentClients)));
+        elements.shareProduction.hidden = !connections.length;
+        elements.shareConnectionList.replaceChildren(...connectionList(connections));
+      }
+    };
+  }
+
+  // src/webview/tab-rail.ts
+  function createTabRail(elements, state, scope, actions) {
+    const contents = /* @__PURE__ */ new Map();
+    let active = "";
+    let signature = "";
+    const handlers = /* @__PURE__ */ new Map();
+    function collapsed() {
+      return state.railCollapsed ?? window.innerWidth < NARROW_PANEL;
+    }
+    function applyCollapsed() {
+      const value = collapsed();
+      elements.tabRail.classList[value ? "add" : "remove"]("collapsed");
+      elements.tabRailToggle.setAttribute("aria-expanded", String(!value));
+      const label = value ? "Expand filters" : "Collapse filters";
+      elements.tabRailToggle.setAttribute("aria-label", label);
+      elements.tabRailToggle.title = label;
+    }
+    function row(item) {
+      const wrapper = document.createElement("div");
+      wrapper.className = `rail-row${item.selected ? " selected" : ""}`;
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "rail-select rail-focusable";
+      button.dataset.railKey = item.key;
+      button.title = item.title ?? `${item.label}${item.meta ? ` \xB7 ${item.meta}` : ""}`;
+      if (item.checked !== void 0) button.setAttribute("aria-pressed", String(item.checked));
+      else button.setAttribute("aria-current", String(Boolean(item.selected)));
+      const glyph = document.createElement("span");
+      glyph.className = "rail-glyph";
+      if (item.checked !== void 0) {
+        const check = document.createElement("span");
+        check.className = `rail-check${item.checked ? " on" : ""}`;
+        check.setAttribute("aria-hidden", "true");
+        glyph.append(check);
+      } else {
+        const swatch = document.createElement("span");
+        swatch.className = item.color ? "rail-swatch" : "rail-initial";
+        if (item.color) swatch.style.background = item.color;
+        else
+          swatch.textContent = item.label.replace(/[^A-Za-z0-9]/g, "").slice(0, 2).toUpperCase();
+        glyph.append(swatch);
+      }
+      if (item.checked !== void 0 && item.color) {
+        const swatch = document.createElement("span");
+        swatch.className = "rail-swatch";
+        swatch.style.background = item.color;
+        glyph.append(swatch);
+      }
+      const text = document.createElement("span");
+      text.className = "rail-text";
+      const name = document.createElement("span");
+      name.className = "rail-name";
+      name.textContent = item.label;
+      text.append(name);
+      button.append(glyph, text);
+      if (item.meta) {
+        const meta = document.createElement("span");
+        meta.className = "rail-meta";
+        meta.textContent = item.meta;
+        button.append(meta);
+      }
+      handlers.set(item.key, item.onSelect);
+      scope.listen(button, "click", () => handlers.get(item.key)?.());
+      wrapper.append(button);
+      return wrapper;
+    }
+    function render() {
+      const content = contents.get(active);
+      elements.tabRail.hidden = !content;
+      if (!content) return;
+      for (const item of content.items) if (item.kind === "item") handlers.set(item.key, item.onSelect);
+      const next = JSON.stringify([active, content.title, content.items]);
+      if (next === signature) return;
+      signature = next;
+      const focused = document.activeElement?.dataset?.railKey;
+      elements.tabRailTitle.textContent = content.title;
+      elements.tabRailList.replaceChildren(
+        ...content.items.map((item) => {
+          if (item.kind === "item") return row(item);
+          const heading = document.createElement("div");
+          heading.className = "rail-group";
+          const label = document.createElement("span");
+          label.className = "rail-group-label";
+          label.textContent = item.label;
+          heading.append(label);
+          return heading;
+        })
+      );
+      if (focused)
+        [...elements.tabRailList.querySelectorAll(".rail-focusable")].find((node) => node.dataset.railKey === focused)?.focus();
+    }
+    scope.listen(elements.tabRailToggle, "click", () => {
+      state.railCollapsed = !collapsed();
+      applyCollapsed();
+      actions.saveState();
+      actions.collapsedChanged();
+    });
+    scope.listen(elements.tabRailList, "keydown", (event) => {
+      if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
+      const items = [...elements.tabRailList.querySelectorAll(".rail-focusable")];
+      const index = items.indexOf(document.activeElement);
+      if (index < 0) return;
+      event.preventDefault();
+      items[(index + (event.key === "ArrowUp" ? -1 : 1) + items.length) % items.length].focus();
+    });
+    scope.listen(window, "resize", () => {
+      if (state.railCollapsed === void 0) applyCollapsed();
+    });
+    applyCollapsed();
+    return {
+      /** A tab's rail: shown while that tab is. */
+      set(tab, title, items) {
+        contents.set(tab, { title, items });
+        if (tab === active) render();
+      },
+      /** The tab shown changed. */
+      show(tab) {
+        active = tab;
+        render();
+      },
+      applyCollapsed
+    };
+  }
+
+  // src/webview/tour.ts
+  var TOUR_STEPS = [
+    {
+      target: "sourceRail",
+      title: "Your sources",
+      text: "Everything Logline captures, in one list: terminals, tasks, debug sessions, OpenTelemetry, and imports. Click one to see only its logs; point at it to stop or remove it."
+    },
+    {
+      target: "railAddConnection",
+      fallback: "sourceRail",
+      title: "Production, next to local",
+      text: "Press + to add Datadog, Postgres, MySQL or Aurora, MongoDB, or SQLite. Searches run read-only, and each result is a run you can compare with your own."
+    },
+    {
+      target: "searchEditor",
+      title: "Search like you think",
+      text: "Type a filter and press Enter. Filters stack as chips; click one to change it.",
+      example: "level:error service:checkout"
+    },
+    {
+      target: "logsView",
+      title: "Every event, explained",
+      text: "Click a row for its fields, stack trace, the line of code that logged it, and the logs around it."
+    },
+    {
+      target: "viewTabs",
+      title: "Other angles on the same logs",
+      text: "Analyze charts them, Compare lines production up with your runs, Traces follows requests across services, and Metrics charts numbers."
+    },
+    {
+      target: "shareSplit",
+      title: "Bring your agent in",
+      text: "Share with agent lets Copilot, Claude Code, or Codex read what you choose, redacted and read-only. The arrow sets what they read and connects them."
+    },
+    {
+      target: "statusBar",
+      title: "What is running",
+      text: "Turn terminal capture and the OpenTelemetry receiver on or off here, see memory use, and check that everything is working."
+    }
+  ];
+  function shown(element2) {
+    for (let node = element2; node; node = node.parentElement) if (node.hidden) return false;
+    return Boolean(element2);
+  }
+  function createTour(scope, actions, steps = TOUR_STEPS) {
+    let index = -1;
+    let layer;
+    let previousFocus;
+    function button(label, className, onClick) {
+      const element2 = document.createElement("button");
+      element2.type = "button";
+      element2.className = className;
+      element2.textContent = label;
+      scope.listen(element2, "click", onClick);
+      return element2;
+    }
+    function close(finished) {
+      if (!layer) return;
+      layer.remove();
+      layer.replaceChildren();
+      layer = void 0;
+      index = -1;
+      previousFocus?.focus?.();
+      actions.ended(finished);
+    }
+    function finish() {
+      if (!layer) return;
+      const card = document.createElement("div");
+      card.className = "tour-card tour-done";
+      card.setAttribute("role", "dialog");
+      card.setAttribute("aria-modal", "true");
+      card.setAttribute("aria-labelledby", "tourTitle");
+      const title = document.createElement("h2");
+      title.id = "tourTitle";
+      title.textContent = "You\u2019re set";
+      const text = document.createElement("p");
+      text.textContent = "Turn on Capture in the status bar and run your app in a terminal, and its logs show up here. See the tour again from More actions \u2192 Take the tour.";
+      const row = document.createElement("div");
+      row.className = "tour-actions";
+      const done = button("Done", "tour-primary", () => close(true));
+      row.append(
+        button("Replay", "tour-secondary", () => start()),
+        done
+      );
+      card.append(title, text, row);
+      layer.replaceChildren(backdrop(), card);
+      done.focus();
+    }
+    function backdrop() {
+      const element2 = document.createElement("div");
+      element2.className = "tour-backdrop";
+      return element2;
+    }
+    function show(next) {
+      if (!layer) return;
+      if (next >= steps.length) {
+        finish();
+        return;
+      }
+      index = Math.max(0, next);
+      actions.prepare();
+      const step = steps[index];
+      const target = [step.target, step.fallback].map((id) => id ? document.getElementById(id) : null).find(shown);
+      const card = document.createElement("div");
+      card.className = "tour-card";
+      card.setAttribute("role", "dialog");
+      card.setAttribute("aria-modal", "true");
+      card.setAttribute("aria-labelledby", "tourTitle");
+      card.setAttribute("aria-describedby", "tourText");
+      const head = document.createElement("div");
+      head.className = "tour-head";
+      const counter = document.createElement("span");
+      counter.className = "tour-counter";
+      counter.textContent = `${index + 1} of ${steps.length}`;
+      head.append(
+        counter,
+        button("Skip tour", "tour-skip", () => close(false))
+      );
+      const title = document.createElement("h2");
+      title.id = "tourTitle";
+      title.textContent = step.title;
+      const text = document.createElement("p");
+      text.id = "tourText";
+      text.textContent = step.text;
+      card.append(head, title, text);
+      if (step.example) {
+        const example = document.createElement("p");
+        example.className = "tour-example";
+        example.append(document.createTextNode("Try it: "));
+        const code = document.createElement("code");
+        code.textContent = step.example;
+        example.append(code);
+        card.append(example);
+      }
+      const row = document.createElement("div");
+      row.className = "tour-actions";
+      const dots = document.createElement("span");
+      dots.className = "tour-dots";
+      dots.setAttribute("aria-hidden", "true");
+      for (let dot = 0; dot < steps.length; dot++) {
+        const item = document.createElement("span");
+        item.className = dot === index ? "tour-dot current" : dot < index ? "tour-dot seen" : "tour-dot";
+        dots.append(item);
+      }
+      row.append(dots);
+      if (index > 0) row.append(button("Back", "tour-secondary", () => show(index - 1)));
+      const forward = button(index === steps.length - 1 ? "Finish" : "Next", "tour-primary", () => show(index + 1));
+      row.append(forward);
+      card.append(row);
+      const children = [];
+      if (target) {
+        target.scrollIntoView?.({ block: "nearest", inline: "nearest" });
+        const box = target.getBoundingClientRect();
+        const spot = document.createElement("div");
+        spot.className = "tour-spotlight";
+        const pad = 4;
+        spot.style.left = `${Math.max(0, box.left - pad)}px`;
+        spot.style.top = `${Math.max(0, box.top - pad)}px`;
+        spot.style.width = `${box.width + pad * 2}px`;
+        spot.style.height = `${box.height + pad * 2}px`;
+        children.push(spot);
+        const width = 340;
+        const left = Math.min(Math.max(8, box.left), Math.max(8, window.innerWidth - width - 8));
+        card.style.left = `${left}px`;
+        if (box.bottom + 190 < window.innerHeight) card.style.top = `${box.bottom + 12}px`;
+        else if (box.top > 200) card.style.bottom = `${window.innerHeight - box.top + 12}px`;
+        else card.style.top = `${Math.max(8, box.top + 12)}px`;
+      } else children.push(backdrop());
+      children.push(card);
+      layer.replaceChildren(...children);
+      forward.focus();
+    }
+    function start() {
+      previousFocus ??= document.activeElement;
+      if (!layer) {
+        layer = document.createElement("div");
+        layer.className = "tour-layer";
+        document.body.append(layer);
+      }
+      show(0);
+    }
+    scope.listen(document, "keydown", (event) => {
+      if (!layer) return;
+      if (event.key === "Escape") {
+        event.preventDefault();
+        close(false);
+      }
+    });
+    scope.listen(window, "resize", () => {
+      if (layer && index >= 0) show(index);
+    });
+    return {
+      start,
+      active: () => Boolean(layer),
+      step: () => index
     };
   }
 
@@ -3145,8 +4349,17 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
     new: { label: "New", className: "compare-new", title: "Only in the newest local run" },
     localOnly: { label: "Local only", className: "compare-new", title: "In local runs, not in production" }
   };
+  var STATUS_COLORS = {
+    reproduced: "var(--vscode-charts-red, #f14c4c)",
+    fixed: "var(--vscode-charts-green, #89d185)",
+    notSeen: "var(--vscode-descriptionForeground, #9d9d9d)",
+    new: "var(--vscode-charts-orange, #d18616)",
+    localOnly: "var(--vscode-charts-orange, #d18616)"
+  };
   var REFRESH_MS3 = 2e3;
   function createCompare(elements, api, scope, actions) {
+    let status = "all";
+    let changedOnly = false;
     let baselines = [];
     let locals = [];
     let signature = "";
@@ -3231,9 +4444,9 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
       else if (message.view) render(message.view);
     }
     function statusCell(row) {
-      const status = STATUS[row.status];
-      const element2 = cell(status.label, `compare-status ${status.className}`);
-      element2.title = status.title;
+      const status2 = STATUS[row.status];
+      const element2 = cell(status2.label, `compare-status ${status2.className}`);
+      element2.title = status2.title;
       if (row.changed) {
         const changed = document.createElement("span");
         changed.className = "compare-changed";
@@ -3243,8 +4456,55 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
       }
       return element2;
     }
+    function railItems(next) {
+      const rows = next?.rows ?? [];
+      const choose = (value) => () => {
+        status = value;
+        if (view) render(view);
+      };
+      const statuses = Object.keys(STATUS).filter((key) => rows.some((row) => row.status === key));
+      return [
+        {
+          kind: "item",
+          key: "all",
+          label: "All errors",
+          meta: rows.length.toLocaleString(),
+          selected: status === "all",
+          onSelect: choose("all")
+        },
+        ...statuses.length ? [{ kind: "group", label: "By status" }] : [],
+        ...statuses.map((key) => ({
+          kind: "item",
+          key,
+          label: STATUS[key].label,
+          meta: rows.filter((row) => row.status === key).length.toLocaleString(),
+          color: STATUS_COLORS[key],
+          selected: status === key,
+          title: STATUS[key].title,
+          onSelect: choose(key)
+        })),
+        { kind: "group", label: "Only" },
+        {
+          kind: "item",
+          key: "changed",
+          label: "From your changes",
+          meta: rows.filter((row) => row.changed).length.toLocaleString(),
+          checked: changedOnly,
+          title: "Errors thrown from code changed since the last commit",
+          onSelect: () => {
+            changedOnly = !changedOnly;
+            if (view) render(view);
+          }
+        }
+      ];
+    }
     function render(next) {
       view = next;
+      actions.rail?.("Show", railItems(next));
+      if (status !== "all" && !next.rows.some((row2) => row2.status === status)) status = "all";
+      const rows = next.rows.filter(
+        (row2) => (status === "all" || row2.status === status) && (!changedOnly || row2.changed)
+      );
       const header = (text, title = "", className = "") => {
         const element2 = document.createElement("th");
         element2.textContent = text;
@@ -3264,8 +4524,9 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
       );
       const errors = next.rows.length;
       elements.compareStatus.textContent = !errors ? `No errors in ${next.baseline.label} or the newest runs of ${next.local.label}.` : next.runs.length ? `${next.summary} \xB7 ${next.baseline.label} vs ${next.local.label}` : `${errors} production error${errors === 1 ? "" : "s"}. ${next.local.label} has no runs yet: run it to compare.`;
+      if (rows.length < errors) elements.compareStatus.textContent += ` \xB7 ${rows.length} shown`;
       elements.compareRows.replaceChildren(
-        ...next.rows.map((row2) => {
+        ...rows.map((row2) => {
           const element2 = document.createElement("tr");
           element2.className = `compare-row${row2.signature === selected ? " selected" : ""}`;
           element2.tabIndex = 0;
@@ -3364,7 +4625,7 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
   var SVG = "http://www.w3.org/2000/svg";
   var HEIGHT = 220;
   var MARGIN = { left: 64, right: 12, top: 10, bottom: 22 };
-  var COLORS = 6;
+  var COLORS2 = 6;
   var SUGGEST_DELAY_MS = 250;
   function svg(name, attributes) {
     const element2 = document.createElementNS(SVG, name);
@@ -3372,8 +4633,8 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
     return element2;
   }
   function ticks(low, high, count) {
-    const span = high - low || Math.abs(high) || 1;
-    const raw = span / count;
+    const span2 = high - low || Math.abs(high) || 1;
+    const raw = span2 / count;
     const power = 10 ** Math.floor(Math.log10(raw));
     const step = [1, 2, 5, 10].map((factor) => factor * power).find((candidate) => candidate >= raw);
     const values = [Math.floor(low / step) * step];
@@ -3502,7 +4763,7 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
       data.series.forEach((series, index) => {
         root.append(
           svg("polyline", {
-            class: `metric-line metric-color-${index % COLORS}`,
+            class: `metric-line metric-color-${index % COLORS2}`,
             points: series.points.map(([at2, value]) => `${x(at2).toFixed(1)},${y(value).toFixed(1)}`).join(" ")
           })
         );
@@ -3527,7 +4788,7 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
         ...data.series.map((series, index) => {
           const item = document.createElement("li");
           const swatch = document.createElement("span");
-          swatch.className = `metric-swatch metric-color-${index % COLORS}`;
+          swatch.className = `metric-swatch metric-color-${index % COLORS2}`;
           const latest = series.points.at(-1);
           const text = document.createElement("span");
           text.textContent = `${seriesName(series)}${latest ? ` \xB7 ${formatMetric(latest[1], series.unit)}` : ""}`;
@@ -4597,13 +5858,17 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
     function show(view, focus = false) {
       const previous = current;
       current = view;
-      for (const name of Object.keys(panels)) panels[name].hidden = name !== view;
+      for (const name of Object.keys(panels))
+        panels[name].hidden = name !== view && !(view === "trace" && name === "traces");
       const selected = tabOf(view);
       for (const name of TABS) {
         tabs[name].setAttribute("aria-selected", String(name === selected));
         tabs[name].tabIndex = name === selected ? 0 : -1;
       }
-      if (document.body) document.body.dataset.view = selected;
+      if (document.body) {
+        document.body.dataset.view = selected;
+        document.body.dataset.subview = view;
+      }
       if (focus) tabs[selected].focus();
       if (view !== previous) changed(view, previous);
     }
@@ -4627,6 +5892,8 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
 
   // src/webview/viewer.ts
   var HOLD_AFTER_MOVE_MS = 2e3;
+  var STEADY_STATUS = /* @__PURE__ */ new Set(["", "Ready", "Running", "Idle", "Stopped"]);
+  var MIB = 1048576;
   function createViewer(api) {
     const scope = new EventScope();
     const elements = getElements();
@@ -4636,6 +5903,11 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
     const state = new ViewerState(saved);
     elements.search.value = saved.query ?? "";
     const { popovers, createPopover } = createPopovers(scope);
+    const sharePanel = createSharePanel(elements, api, scope, createPopover);
+    const tabRail = createTabRail(elements, state, scope, {
+      saveState: () => saveState(),
+      collapsedChanged: () => rail.applyCollapsed()
+    });
     createTooltips(scope);
     let restoreTab;
     const views = createViews(
@@ -4702,6 +5974,13 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
       saveState,
       (baselineServerId, baselineSessionId) => compareView.open({ baselineServerId, baselineSessionId })
     );
+    const rail = createSourceRail(elements, state, api, scope, {
+      selectSource: (id) => selectSource(id),
+      selectRun,
+      saveState,
+      query: () => search.query(),
+      collapsedChanged: () => tabRail.applyCollapsed()
+    });
     const request = (force = false) => bridge.request(force);
     const traceView = createTraceView(elements, api, scope, {
       showContext: (id) => inspection.showContext(id),
@@ -4720,13 +5999,15 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
       startReceiver: () => api.postMessage({ type: "toggleOtlp", enabled: true }),
       receiver: () => ({ running: otlpRunning, endpoint: otlpEndpoint }),
       reveal: () => views.show("traces"),
-      visible: () => views.active() === "traces"
+      visible: () => views.active() === "traces",
+      rail: (title, items) => tabRail.set("traces", title, items)
     });
     const compareView = createCompare(elements, api, scope, {
       reveal: () => views.show("compare"),
       visible: () => views.active() === "compare",
       formatTime: (ms) => formatTimestamp({ id: 0, level: "", timestampMs: ms }) ?? "",
-      showContext: (id) => inspection.showContext(id)
+      showContext: (id) => inspection.showContext(id),
+      rail: (title, items) => tabRail.set("compare", title, items)
     });
     const metricQuery = createMetricQuery(elements, api, scope, {
       formatTime: (ms) => formatTimestamp({ id: 0, level: "", timestampMs: ms }) ?? "",
@@ -4746,7 +6027,12 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
     });
     const metricList = createMetricList(elements, api, scope, {
       reveal: () => views.show("metrics"),
-      visible: () => views.active() === "metrics"
+      visible: () => views.active() === "metrics",
+      rail: (title, items) => tabRail.set("metrics", title, items),
+      queryConnection: (id) => {
+        elements.metricConnection.value = id;
+        elements.metricInput.focus();
+      }
     });
     const aiCalls = createAiCalls(elements, api, scope, {
       showTrace: (traceId) => traceView.show(traceId),
@@ -4796,13 +6082,10 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
       () => table.currentColumns,
       () => doctor.revision()
     );
-    let serverSignature = "";
-    let sessionSignature = "";
-    let activeScopeTab = "sources";
     let visibleSources = [];
+    let allSessions = [];
     let visibleSessions = [];
     let guideUnread = document.body?.dataset.guideUnread === "true";
-    let agentSharingActive = false;
     elements.helpBadge.hidden = !guideUnread;
     let searchDebounce;
     let autocompleteDebounce;
@@ -4843,7 +6126,6 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
         return;
       }
       if (data.type === "serversChanged") {
-        serverSignature = "";
         request(true);
         return;
       }
@@ -4925,6 +6207,9 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
         search.setQuery(data.applyQuery, true);
       }
       if (data.openTrace) traceView.show(data.openTrace);
+      if (data.startTour) scope.frame(() => startTour());
+      const reveal = data.reveal;
+      if (reveal) scope.frame(() => revealControl(reveal.target, reveal.fallback));
       if (data.applySource && data.servers?.some((server) => server.id === data.applySource) && (data.applySource !== state.selectedServer || (data.applyRun ?? "") !== state.selectedSession)) {
         views.show("logs");
         selectSource(data.applySource, data.applyRun);
@@ -4935,16 +6220,15 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
       otlpRunning = data.otlp?.running === true;
       otlpEndpoint = data.otlp?.endpoint;
       if (otlpRunning !== receiverWasRunning) traceList.receiverChanged();
-      elements.otlpStatus.hidden = !otlpRunning;
-      if (otlpRunning) {
-        elements.otlpStatus.textContent = `OpenTelemetry ${data.otlp?.endpoint?.replace(/^https?:\/\//, "") ?? ""}`.trim();
-        elements.otlpStatus.title = `Receiving OpenTelemetry logs, traces, and metrics on ${data.otlp?.endpoint ?? "localhost"}. Click to see traces.`;
-      }
+      elements.otlpStatus.setAttribute("aria-pressed", String(otlpRunning));
+      elements.otlpStatus.textContent = otlpRunning ? `OpenTelemetry ${data.otlp?.endpoint?.replace(/^https?:\/\//, "") ?? ""}`.trim() : "OpenTelemetry off";
+      elements.otlpStatus.title = otlpRunning ? `Receiving OpenTelemetry logs, traces, and metrics on ${data.otlp?.endpoint ?? "localhost"}${data.otlp?.error ? ` (${data.otlp.error})` : ""}. Click to stop the receiver.` : "Receive OpenTelemetry logs, traces, and metrics from instrumented apps on this machine. Click to start the receiver.";
       doctor.receive(data.doctor);
       changedFiles = data.changes?.files;
       updateChangesControl();
       metricList.update(data.metrics, otlpRunning || !!data.connections?.length);
       metricQuery.update(data.connections);
+      metricList.setConnections(data.connections);
       aiCalls.update(data.aiCalls, otlpRunning);
       if (restoreTab) {
         const tab = restoreTab;
@@ -4955,8 +6239,6 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
       elements.traceCount.hidden = !data.traceCount;
       elements.traceCount.textContent = data.traceCount ? numberFormat.format(data.traceCount) : "";
       elements.traces.title = data.traceCount ? `${numberFormat.format(data.traceCount)} traces received from OpenTelemetry. Show requests across services.` : "Requests across services, from OpenTelemetry spans and logs with a trace id";
-      elements.otlpToggle.textContent = otlpRunning ? "Stop OpenTelemetry receiver" : "Start OpenTelemetry receiver";
-      elements.otlpToggle.title = otlpRunning ? `Receiving OpenTelemetry on ${data.otlp?.endpoint ?? "localhost"}${data.otlp?.error ? ` (${data.otlp.error})` : ""}` : "Receive OpenTelemetry logs, traces, and metrics from instrumented apps on this machine";
       if (data.generation < minimumSnapshotGeneration) {
         bridge.flush();
         return;
@@ -4990,9 +6272,7 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
       state.newest = data.newest;
       if (!state.following && state.before === void 0) state.before = state.newest;
       elements.status.textContent = otlpRunning && data.status.startsWith("OpenTelemetry receiver on") ? "Ready" : data.status;
-      elements.command.textContent = data.command;
-      elements.command.title = data.command;
-      elements.stop.disabled = !data.running;
+      elements.status.hidden = STEADY_STATUS.has(elements.status.textContent);
       setLabel(
         elements.captureToggle,
         data.captureStatus?.state === "capturing" ? "Capturing\u2026" : data.captureStatus?.state === "attention" ? "Capture needs attention" : data.captureTerminals ? "Capture on" : "Capture off"
@@ -5000,7 +6280,7 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
       elements.captureToggle.setAttribute("aria-pressed", String(data.captureTerminals));
       elements.captureToggle.title = data.captureStatus?.detail || (data.captureTerminals ? "Terminal capture is on. Click to turn it off." : "Terminal capture is off. Click to turn it on.");
       const sharing = data.agentSharing?.active;
-      agentSharingActive = Boolean(sharing);
+      sharePanel.update(data);
       const sharedRuns = sharing ? data.agentSharing.sources.reduce((sum, source) => sum + (source.runs?.length ?? source.sessions), 0) : 0;
       const sharingAll = sharing && data.agentSharing.scope === "all";
       setLabel(elements.shareAgent, sharing ? "Sharing \xB7 Stop" : "Share with agent");
@@ -5010,77 +6290,33 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
       const readers = sharing && data.agentClients?.length ? ` \xB7 read by ${data.agentClients.join(", ")}` : "";
       elements.shareScope.textContent = (sharingAll ? "Sharing all runs" : sharing ? `Sharing ${sharedRuns} run${sharedRuns === 1 ? "" : "s"}` : "") + readers;
       elements.shareScope.title = sharingAll ? "Agents can read existing and new runs in this window, redacted, until you stop sharing." : sharing ? `Agents can read ${sharedRuns} selected run${sharedRuns === 1 ? "" : "s"} in this window, redacted, until you stop sharing. Later commands are not included.` : "";
-      elements.stop.setAttribute("aria-label", state.selectedServer ? "Stop server" : "Stop all");
-      elements.stop.title = state.selectedServer ? "Stop the running commands of the selected source" : "Stop running commands that Logline started";
-      const activeSessions = Array.isArray(data.sessions) ? data.sessions.filter((session) => ["running", "stopping"].includes(session.status)) : [];
-      elements.sessions.textContent = activeSessions.length ? `${activeSessions.length} active session${activeSessions.length === 1 ? "" : "s"}` : "No active sessions";
       let selectionChanged = false;
       if (data.servers) {
-        const signature = JSON.stringify(
-          data.servers.map((server) => [
-            server.id,
-            server.label,
-            server.status,
-            server.activeSessions,
-            server.taskName,
-            server.taskType,
-            server.dependencies,
-            server.dependencyState,
-            server.exitReason
-          ])
-        );
-        if (signature !== serverSignature) {
-          serverSignature = signature;
-          visibleSources = data.servers;
-          renderSourceMenu(data.servers);
-          const selectedServer = data.servers.some((server) => server.id === state.selectedServer) ? state.selectedServer : "";
-          if (selectedServer !== state.selectedServer) {
-            state.selectedServer = selectedServer;
-            state.selectedSession = "";
-            sessionSignature = "";
-            selectionChanged = true;
-          }
-          elements.server.value = selectedServer;
-        } else {
-          visibleSources = data.servers;
-          updateSourceSelection();
+        visibleSources = data.servers;
+        const selectedServer = data.servers.some((server) => server.id === state.selectedServer) ? state.selectedServer : "";
+        if (selectedServer !== state.selectedServer) {
+          state.selectedServer = selectedServer;
+          state.selectedSession = "";
+          selectionChanged = true;
         }
       }
       connectionBar.update(data.connections);
       compareView.update(data.sessions, data.servers, data.newest);
       if (data.openCompare) compareView.open(data.openCompare);
       if (data.sessions) {
-        const sessions = data.sessions.filter(
-          (session) => !state.selectedServer || session.serverId === state.selectedServer || state.selectedServer.startsWith(`${session.serverId}::`)
-        );
-        const signature = JSON.stringify(
-          sessions.map((session) => [
-            session.id,
-            session.serverId,
-            session.command,
-            session.status,
-            session.startedAt,
-            session.endedAt,
-            session.captureStatus,
-            session.captureReason,
-            session.canStop
-          ])
-        );
-        if (signature !== sessionSignature) {
-          sessionSignature = signature;
-          visibleSessions = sessions;
-          renderRunMenu(sessions);
-        } else {
-          visibleSessions = sessions;
-          updateRunSelection();
-        }
-        const selectedSession = sessions.some((session) => session.id === state.selectedSession) ? state.selectedSession : "";
+        allSessions = data.sessions;
+        visibleSessions = sessionsFor(state.selectedServer);
+        const selectedSession = visibleSessions.some((session) => session.id === state.selectedSession) ? state.selectedSession : "";
         if (selectedSession !== state.selectedSession) {
           state.selectedSession = selectedSession;
           selectionChanged = true;
-          updateRunSelection();
         }
       }
+      rail.update({
+        servers: data.servers,
+        sessions: data.sessions ? visibleSessions : void 0,
+        connections: data.connections ?? []
+      });
       if (selectionChanged) {
         state.filterChanged();
         saveState();
@@ -5088,11 +6324,7 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
         bridge.refreshRequested = true;
       }
       const number2 = (value) => numberFormat.format(value);
-      const budget = Number.isFinite(data.maxBytes) ? (data.maxBytes / 1048576).toFixed(0) : "?";
-      const memory = `${(data.bytes / 1048576).toFixed(1)} / ${budget} MiB`;
-      const skipped = data.persistDropped ? ` \xB7 ${number2(data.persistDropped)} disk writes skipped` : "";
-      elements.counts.textContent = `${number2(data.retained)} retained \xB7 ${memory}` + (data.discarded ? ` \xB7 ${number2(data.discarded)} discarded` : "") + skipped;
-      elements.counts.title = `${number2(data.total)} received \xB7 ${number2(data.retained)} retained \xB7 ${number2(data.discarded)} discarded \xB7 ${memory} \xB7 ${data.truncated} truncated` + skipped;
+      renderMemory(data, number2);
       updateModeLabel();
       if (Array.isArray(data.columnFields)) state.columnFields = data.columnFields;
       table.updateColumns(data.columns ?? []);
@@ -5107,7 +6339,9 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
         heldEvents = void 0;
         state.page = data.page ?? 0;
         state.pages = data.pages ?? 1;
-        elements.page.textContent = `Page ${state.page + 1} of ${state.pages} \xB7 ${number2(data.matched ?? 0)} matches`;
+        const matched = data.matched ?? 0;
+        elements.page.textContent = matched ? `${number2(matched)} match${matched === 1 ? "" : "es"}` : "No matches";
+        elements.pageNumber.textContent = `${state.page + 1} / ${state.pages}`;
         elements.older.disabled = state.page >= state.pages - 1;
         elements.newer.disabled = state.page === 0;
         if (rows !== table.events || state.lastRows === void 0) {
@@ -5174,10 +6408,15 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
       setLabel(elements.follow, state.following ? "Live" : "Browse");
     }
     function updateModeLabel() {
-      elements.older.textContent = state.selectedSort ? "Next \u2192" : "\u2190 Older";
-      elements.newer.textContent = state.selectedSort ? "\u2190 Previous" : "Newer \u2192";
+      const older = state.selectedSort ? "Next page" : "Older page";
+      const newer = state.selectedSort ? "Previous page" : "Newer page";
+      elements.older.setAttribute("aria-label", older);
+      elements.older.title = older;
+      elements.newer.setAttribute("aria-label", newer);
+      elements.newer.title = newer;
       elements.mode.textContent = state.paused ? "Paused \u2014 collection continues" : state.selectedSort ? `Sorted ${state.selectedSortDirection === "asc" ? "ascending" : "descending"}${state.following ? " \xB7 Live updates" : ""}` : state.following ? heldEvents ? "Live \xB7 new rows held while you point at the table" : "Live \xB7 newest 1,000" : state.newestFirst && state.page === 0 && state.before !== void 0 && state.newest > state.before ? "Browsing \xB7 newer logs arrived \u2014 scroll to the top for Live" : "Browsing retained history";
       elements.mode.className = state.following && !state.paused ? "live-mode" : "";
+      elements.mode.hidden = state.following && !state.paused && !heldEvents && !state.selectedSort;
     }
     function setFollowing(value) {
       state.setFollowing(value);
@@ -5300,44 +6539,6 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
       elements.fieldsButton,
       elements.fieldsPanel
     );
-    const scopePopover = createPopover(
-      elements.server.closest(".popover-container"),
-      elements.server,
-      elements.scopeMenu
-    );
-    setScopeTab("sources");
-    scope.listen(elements.server, "keydown", (event) => {
-      if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
-      event.preventDefault();
-      scopePopover.open();
-      const panel = activeScopeTab === "sources" ? elements.sourceMenu : elements.sessionMenu;
-      const selector = activeScopeTab === "sources" ? ".source-select" : ".run-select";
-      const choices = [...panel.querySelectorAll(selector)];
-      choices[event.key === "ArrowUp" ? choices.length - 1 : 0]?.focus();
-    });
-    scope.listen(elements.sourcesTab, "click", () => setScopeTab("sources", true));
-    scope.listen(elements.runsTab, "click", () => setScopeTab("runs", true));
-    scope.listen(elements.scopeMenu, "keydown", (event) => {
-      const target = event.target;
-      if (target.classList.contains("scope-tab")) {
-        if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
-        event.preventDefault();
-        setScopeTab(event.key === "ArrowLeft" ? "sources" : "runs", true);
-        return;
-      }
-      if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
-      if (!target.classList.contains("source-select") && !target.classList.contains("run-select")) return;
-      const panel = activeScopeTab === "sources" ? elements.sourceMenu : elements.sessionMenu;
-      const selector = activeScopeTab === "sources" ? ".source-select" : ".run-select";
-      const choices = [...panel.querySelectorAll(selector)];
-      const index = choices.indexOf(target);
-      if (index < 0) return;
-      event.preventDefault();
-      choices[(index + (event.key === "ArrowUp" ? -1 : 1) + choices.length) % choices.length]?.focus();
-    });
-    scope.listen(elements.scopeMenu, "focusout", (event) => {
-      if (!elements.scopeMenu.contains(event.relatedTarget)) scopePopover.close();
-    });
     const actionsContainer = elements.moreActions.closest(".popover-container");
     scope.listen(elements.contextDetails, "click", (event) => {
       doctor.handleAction(event);
@@ -5355,18 +6556,15 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
     }
     const actionsMenu = createPopover(actionsContainer, elements.moreActions, elements.actionsMenu);
     const actionItems = [
-      elements.shareSpecificRuns,
-      elements.connectAgent,
       elements.copyResults,
       elements.export,
       elements.import,
       elements.clear,
       elements.breakOnLogs,
-      elements.otlpToggle,
       elements.manage,
-      elements.statusAction,
       elements.config,
-      elements.help
+      elements.help,
+      elements.takeTour
     ];
     const shownActions = () => actionItems.filter((item) => !item.hidden);
     scope.listen(elements.moreActions, "click", () => {
@@ -5409,17 +6607,72 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
       const enabled = elements.captureToggle.getAttribute("aria-pressed") !== "true";
       api.postMessage({ type: "toggleTerminalCapture", enabled });
     });
-    scope.listen(elements.shareAgent, "click", () => {
-      if (agentSharingActive) api.postMessage({ type: "stopSharing" });
-      else api.postMessage({ type: "shareWithAgent" });
+    scope.listen(elements.shareScope, "click", (event) => {
+      event.stopPropagation();
+      sharePanel.open();
     });
+    scope.listen(elements.statusIcon, "click", () => api.postMessage({ type: "showStatus" }));
+    const tour = createTour(scope, {
+      prepare: () => {
+        if (views.active() !== "logs") views.show("logs");
+        for (const popover of popovers) popover.close();
+      },
+      ended: () => void 0
+    });
+    function startTour() {
+      elements.tourHint.hidden = true;
+      if (elements.welcomeDialog.open) elements.welcomeDialog.close();
+      tour.start();
+    }
+    scope.listen(elements.takeTour, "click", () => startTour());
+    scope.listen(elements.tourHintStart, "click", () => startTour());
+    scope.listen(elements.tourHintDismiss, "click", () => elements.tourHint.hidden = true);
+    const welcomeChoice = (then) => () => {
+      elements.welcomeDialog.close();
+      api.postMessage({ type: "onboardingSeen" });
+      then();
+    };
     scope.listen(
-      elements.shareSpecificRuns,
+      elements.welcomeTour,
       "click",
-      () => api.postMessage({ type: "shareWithAgent", chooseRuns: true })
+      welcomeChoice(() => tour.start())
     );
-    scope.listen(elements.connectAgent, "click", () => api.postMessage({ type: "connectAgent" }));
-    scope.listen(elements.statusAction, "click", () => api.postMessage({ type: "showStatus" }));
+    scope.listen(
+      elements.welcomeExplore,
+      "click",
+      welcomeChoice(() => elements.tourHint.hidden = false)
+    );
+    scope.listen(
+      elements.welcomeCapture,
+      "click",
+      welcomeChoice(() => api.postMessage({ type: "toggleTerminalCapture", enabled: true }))
+    );
+    scope.listen(
+      elements.welcomeImport,
+      "click",
+      welcomeChoice(() => api.postMessage({ type: "import" }))
+    );
+    scope.listen(
+      elements.welcomeConnection,
+      "click",
+      welcomeChoice(() => api.postMessage({ type: "addConnection" }))
+    );
+    scope.listen(
+      elements.welcomeOtel,
+      "click",
+      welcomeChoice(() => api.postMessage({ type: "toggleOtlp", enabled: true }))
+    );
+    scope.listen(elements.welcomeDialog, "cancel", () => {
+      api.postMessage({ type: "onboardingSeen" });
+      elements.tourHint.hidden = false;
+    });
+    if (document.body?.dataset.firstRun === "true") elements.welcomeDialog.showModal?.();
+    createPopover(elements.counts.closest(".popover-container"), elements.counts, elements.memoryPanel);
+    scope.listen(
+      elements.memorySettings,
+      "click",
+      () => api.postMessage({ type: "config", setting: "logline.maxMemoryMb" })
+    );
     scope.listen(elements.saveSearch, "click", () => {
       for (const popover of popovers) popover.close();
       elements.saveSearchName.value = search.query() || "";
@@ -5470,6 +6723,7 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
       if (previous === "aiCalls") aiCalls.hide();
       if (previous === "aiCall") aiCalls.close();
       state.view = tabOf(view);
+      tabRail.show(tabOf(view));
       saveState();
     }
     function resumeLive() {
@@ -5520,11 +6774,6 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
       api.postMessage({ type: "clear" });
       requestInteraction();
     });
-    scope.listen(
-      elements.stop,
-      "click",
-      () => api.postMessage({ type: "stop", serverId: state.selectedServer || void 0 })
-    );
     scope.listen(elements.config, "click", () => api.postMessage({ type: "config" }));
     scope.listen(
       elements.help,
@@ -5532,8 +6781,7 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
       () => api.postMessage({ type: "showGuide", section: guideUnread ? "whatsNew" : "guide" })
     );
     scope.listen(elements.manage, "click", () => api.postMessage({ type: "manageServers" }));
-    scope.listen(elements.otlpToggle, "click", () => api.postMessage({ type: "toggleOtlp", enabled: !otlpRunning }));
-    scope.listen(elements.otlpStatus, "click", () => traceList.show());
+    scope.listen(elements.otlpStatus, "click", () => api.postMessage({ type: "toggleOtlp", enabled: !otlpRunning }));
     function exportRequest(type) {
       api.postMessage({
         type,
@@ -5550,10 +6798,6 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
       "click",
       () => api.postMessage({ type: "breakOnQuery", query: search.query(), levels: state.currentLevels() })
     );
-    scope.listen(elements.run, "click", () => {
-      if (!connectionBar.run()) api.postMessage({ type: "run", serverId: state.selectedServer || void 0 });
-    });
-    scope.listen(elements.addConnection, "click", () => api.postMessage({ type: "addConnection" }));
     scope.listen(document, "visibilitychange", () => {
       if (!document.hidden) request();
     });
@@ -5583,182 +6827,94 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
         window.removeEventListener("message", onMessage);
       }
     };
-    function formatSource(server) {
-      const stateText = server.status === "idle" ? "" : ` \xB7 ${server.status}`;
-      const activity = server.activeSessions > 1 ? ` (${server.activeSessions} active)` : "";
-      const task = server.taskName ? `Task: ${server.taskName}` : server.label;
-      const type = server.taskType ? ` (${server.taskType})` : "";
-      const dependency = server.dependencies?.length ? ` \xB7 deps ${server.dependencies.join(", ")} (${server.dependencyState || "unknown"})` : server.dependencyState && server.dependencyState !== "none" ? ` \xB7 deps ${server.dependencyState}` : "";
-      const reason = server.exitReason ? ` \xB7 ${server.exitReason}` : "";
-      return {
-        label: `${task}${type}${stateText}${activity}${dependency}${reason}`,
-        title: [
-          server.lastSession ? `Session ${server.lastSession}` : void 0,
-          server.taskName ? `Task ${server.taskName}${server.taskType ? ` (${server.taskType})` : ""}` : void 0,
-          server.dependencyState ? `Dependencies: ${server.dependencies?.join(", ") || "none"} (${server.dependencyState})` : void 0,
-          server.exitReason ? `Exit: ${server.exitReason}` : void 0
-        ].filter(Boolean).join(" \xB7 ") || server.status
+    function tabForPanel(id) {
+      const tabs = {
+        logsView: "logs",
+        analysisView: "analysis",
+        compareView: "compare",
+        tracesView: "traces",
+        traceView: "traces",
+        metricsView: "metrics",
+        aiCallsView: "aiCalls",
+        aiCallView: "aiCalls",
+        doctorView: "doctor"
       };
+      return tabs[id];
     }
-    function renderSourceMenu(servers) {
-      const focusedSource = document.activeElement?.dataset.sourceId;
-      const all = document.createElement("button");
-      all.type = "button";
-      all.className = "source-select";
-      all.dataset.sourceId = "";
-      const activeCount = servers.reduce((sum, server) => sum + (server.activeSessions || 0), 0);
-      all.textContent = activeCount ? `All sources \xB7 ${activeCount} active` : "All sources";
-      all.title = "Show logs from every source";
-      scope.listen(all, "click", () => selectSource(""));
-      const add = document.createElement("button");
-      add.type = "button";
-      add.className = "source-select source-action";
-      add.textContent = "Add connection\u2026";
-      add.title = "Search and tail the log table of a SQLite or Postgres database";
-      scope.listen(add, "click", () => {
-        scopePopover.close(true);
-        api.postMessage({ type: "addConnection" });
-      });
-      const options = [
-        all,
-        ...servers.map((server) => {
-          const option = document.createElement("button");
-          option.type = "button";
-          option.className = "source-select";
-          option.dataset.sourceId = server.id;
-          const formatted = formatSource(server);
-          option.textContent = formatted.label;
-          option.title = formatted.title;
-          scope.listen(option, "click", () => selectSource(server.id));
-          return option;
-        }),
-        add
-      ];
-      elements.sourceMenu.replaceChildren(...options);
-      updateSourceSelection();
-      if (focusedSource !== void 0) {
-        const focus = [...elements.sourceMenu.querySelectorAll("[data-source-id]")].find(
-          (node) => node.dataset.sourceId === focusedSource
-        );
-        focus?.focus();
+    function shown2(element2) {
+      for (let node = element2; node; node = node.parentElement) if (node.hidden) return false;
+      return Boolean(element2);
+    }
+    function bringIntoView(element2) {
+      if (elements.actionsMenu.contains(element2)) actionsMenu.open();
+      else if (elements.sharePanel.contains(element2)) sharePanel.open();
+      const panel = element2.closest(".view-panel");
+      if (panel?.classList.contains("view-panel")) {
+        const tab = tabForPanel(panel.id);
+        if (!tab || !views.available(tab)) return false;
+        if (tabOf(views.active()) !== tab) openView(tab);
+      } else if ((elements.sourceRail.contains(element2) || element2.closest(".workspace-main")) && views.active() !== "logs" && views.active() !== "analysis")
+        views.show("logs");
+      return shown2(element2);
+    }
+    function revealControl(target, fallback) {
+      for (const id of [target, fallback]) {
+        const element2 = id ? document.getElementById(id) : null;
+        if (!element2 || !bringIntoView(element2)) continue;
+        element2.scrollIntoView?.({ block: "nearest", inline: "nearest" });
+        element2.classList.add("reveal-pulse");
+        setTimeout(() => element2.classList.remove("reveal-pulse"), 1800);
+        if (element2.tabIndex >= 0) element2.focus({ preventScroll: true });
+        return;
       }
     }
-    function updateSourceSelection() {
-      for (const choice of elements.sourceMenu.querySelectorAll(".source-select"))
-        if (choice.dataset.sourceId !== void 0)
-          choice.setAttribute("aria-selected", String(choice.dataset.sourceId === state.selectedServer));
-      updateScopeSelection();
+    function renderMemory(data, number2) {
+      const used = data.bytes / MIB;
+      const budget = Number.isFinite(data.maxBytes) && data.maxBytes > 0 ? data.maxBytes / MIB : void 0;
+      const share = budget ? Math.min(1, used / budget) : 0;
+      elements.memoryFill.style.width = `${Math.round(share * 100)}%`;
+      elements.memoryFill.classList[share >= 0.9 ? "add" : "remove"]("full");
+      const memory = `${used.toFixed(used < 10 ? 1 : 0)} / ${budget ? budget.toFixed(0) : "?"} MiB`;
+      elements.memoryText.textContent = memory;
+      elements.counts.title = `${number2(data.retained)} logs kept, using ${memory}. Click for details.`;
+      elements.memorySummary.textContent = `${memory} of memory for ${number2(data.retained)} logs. The oldest go first when it fills.`;
+      const rows = [
+        ["Received", number2(data.total)],
+        ["Kept", number2(data.retained)],
+        ["Discarded, oldest first", number2(data.discarded)],
+        ["Lines cut short", number2(data.truncated)],
+        ...data.persistDropped ? [["Disk writes skipped", number2(data.persistDropped)]] : []
+      ];
+      elements.memoryDetails.replaceChildren(
+        ...rows.flatMap(([label, value]) => {
+          const term = document.createElement("dt");
+          term.textContent = label;
+          const detail = document.createElement("dd");
+          detail.textContent = value;
+          return [term, detail];
+        })
+      );
+    }
+    function sessionsFor(id) {
+      return allSessions.filter((session) => !id || session.serverId === id || id.startsWith(`${session.serverId}::`));
     }
     function updateScopeSelection() {
-      const selectedSource = visibleSources.find((server) => server.id === state.selectedServer);
-      const activeCount = visibleSources.reduce((sum, server) => sum + (server.activeSessions || 0), 0);
-      const sourceLabel = selectedSource?.label || (state.selectedServer || activeCount ? `All sources${activeCount ? ` \xB7 ${activeCount} active` : ""}` : "All sources");
-      const selectedRun = visibleSessions.find((session) => session.id === state.selectedSession);
-      const runLabel = selectedRun && runName(selectedRun) || (visibleSessions.length ? `All runs \xB7 ${visibleSessions.length}` : "All runs");
-      elements.server.value = state.selectedServer;
-      elements.server.textContent = `${sourceLabel} \xB7 ${runLabel}`;
-      elements.server.title = [
-        selectedSource?.label || "All sources",
-        selectedRun && runName(selectedRun) || "All runs"
-      ].join(" \xB7 ");
-    }
-    function setScopeTab(tab, focus = false) {
-      activeScopeTab = tab;
-      elements.sourcesTab.setAttribute("aria-selected", String(tab === "sources"));
-      elements.runsTab.setAttribute("aria-selected", String(tab === "runs"));
-      elements.sourcesTab.tabIndex = tab === "sources" ? 0 : -1;
-      elements.runsTab.tabIndex = tab === "runs" ? 0 : -1;
-      elements.sourceMenu.hidden = tab !== "sources";
-      elements.sessionMenu.hidden = tab !== "runs";
-      if (focus) (tab === "sources" ? elements.sourcesTab : elements.runsTab).focus();
+      visibleSessions = sessionsFor(state.selectedServer);
+      rail.selectionChanged(visibleSessions);
+      connectionBar.render();
     }
     function selectSource(id, run = "") {
       search.clearAutocomplete();
       state.selectedServer = id;
       state.selectedSession = run;
-      sessionSignature = "";
-      visibleSessions = [];
-      elements.server.value = id;
-      elements.sessionMenu.replaceChildren();
+      visibleSessions = sessionsFor(id);
       state.page = 0;
       state.lastRows = void 0;
       table.resetAutomaticColumns();
-      updateSourceSelection();
-      setScopeTab("sources");
       saveState();
-      scopePopover.close(true);
+      rail.selectionChanged(visibleSessions);
       connectionBar.render();
       requestInteraction();
-    }
-    function runName(session) {
-      return session.command || (session.taskName ? `Task: ${session.taskName}` : "") || session.server || "Run";
-    }
-    function renderRunMenu(sessions) {
-      const focusedRun = document.activeElement?.dataset.runId;
-      const all = document.createElement("button");
-      all.type = "button";
-      all.className = "run-select";
-      all.dataset.runId = "";
-      all.tabIndex = 0;
-      all.textContent = sessions.length ? `All runs \xB7 ${sessions.length}` : "All runs";
-      scope.listen(all, "click", () => selectRun(""));
-      elements.sessionMenu.replaceChildren(all);
-      for (const session of sessions) {
-        const row = document.createElement("div");
-        row.className = "run-option-row";
-        const select = document.createElement("button");
-        select.type = "button";
-        select.className = "run-select";
-        select.dataset.runId = session.id;
-        select.tabIndex = 0;
-        const started = session.startedAt ? new Date(session.startedAt).toLocaleTimeString() : "";
-        const stateText = session.status === "running" ? "running" : session.exitReason || session.status;
-        select.textContent = `${runName(session)} \xB7 ${started} \xB7 ${stateText}`;
-        select.title = [
-          session.cwd,
-          session.captureStatus ? `Capture: ${session.captureStatus}` : void 0,
-          session.captureReason
-        ].filter(Boolean).join(" \xB7 ");
-        scope.listen(select, "click", () => selectRun(session.id));
-        row.append(select);
-        if (session.status === "running" || session.status === "stopping") {
-          if (session.canStop === true) {
-            const stop = document.createElement("button");
-            stop.type = "button";
-            stop.className = "run-stop";
-            stop.dataset.runId = session.id;
-            stop.dataset.serverId = session.serverId;
-            stop.textContent = session.status === "stopping" ? "Stopping\u2026" : "Stop";
-            stop.disabled = session.status !== "running";
-            stop.title = stop.disabled ? "This run is stopping." : session.sourceKind === "file" ? "Stop following this file" : session.sourceKind === "debug" ? "Stop this debug session" : "Stop this command run";
-            scope.listen(stop, "click", (event) => {
-              event.stopPropagation();
-              if (stop.disabled) return;
-              api.postMessage({ type: "stop", serverId: session.serverId, sessionId: session.id });
-            });
-            row.append(stop);
-          } else {
-            const status = document.createElement("span");
-            status.className = "run-stop run-stop-disabled";
-            status.textContent = session.sourceKind === "terminal" || session.sourceKind === "otel" ? "Capture only" : "Unavailable";
-            status.title = session.sourceKind === "terminal" ? "Externally owned terminal commands can be captured but not stopped by Logline." : session.sourceKind === "otel" ? "Telemetry is received from an application Logline does not own." : "This run cannot be stopped from Logline.";
-            row.append(status);
-          }
-        }
-        elements.sessionMenu.append(row);
-      }
-      updateRunSelection();
-      if (focusedRun !== void 0) {
-        const focus = [...elements.sessionMenu.querySelectorAll("[data-run-id]")].find(
-          (node) => node.dataset.runId === focusedRun
-        );
-        focus?.focus();
-      }
-    }
-    function updateRunSelection() {
-      for (const choice of elements.sessionMenu.querySelectorAll(".run-select"))
-        choice.setAttribute("aria-selected", String(choice.dataset.runId === state.selectedSession));
-      updateScopeSelection();
     }
     function selectRun(id) {
       state.selectedSession = id;
@@ -5766,9 +6922,7 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
       state.lastRows = void 0;
       state.filterChanged();
       saveState();
-      updateRunSelection();
-      setScopeTab("runs");
-      scopePopover.close(true);
+      rail.selectionChanged();
       requestInteraction();
     }
   }

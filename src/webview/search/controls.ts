@@ -335,7 +335,6 @@ export function createSearch(
         // previously selected run while restoring one.
         state.selectedSession = '';
         state.checkedLevels = new Set(Array.isArray(item.levels) ? item.levels : LEVELS);
-        elements.server.value = state.selectedServer;
         updateScopeSelection();
         buildLevelMenu();
         updateLevelButtonLabel();

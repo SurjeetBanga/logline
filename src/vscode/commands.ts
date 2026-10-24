@@ -125,6 +125,7 @@ export function registerCommands(
     vscode.commands.registerCommand('logline.captureTask', () => convertTask()),
     vscode.commands.registerCommand('logline.showGuide', () => openGuide?.('guide')),
     vscode.commands.registerCommand('logline.showWhatsNew', () => openGuide?.('whatsNew')),
+    vscode.commands.registerCommand('logline.takeTour', () => controller.startTour()),
     vscode.commands.registerCommand('logline.showLogs', () => vscode.commands.executeCommand('logline.logs.focus')),
     vscode.commands.registerCommand('logline.enableTerminalCapture', async () => {
       await vscode.workspace

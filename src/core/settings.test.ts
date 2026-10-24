@@ -4,8 +4,58 @@ import { readFileSync } from 'node:fs';
 import { normalizeSetting, normalizeServers } from './settings';
 import { withVscode } from '../test/vscode-mock';
 
+interface SettingSchema {
+  type: string;
+  default: unknown;
+  minimum: number;
+  maximum: number;
+  order?: number;
+  description?: string;
+  markdownDescription?: string;
+}
+interface Manifest {
+  contributes: {
+    commands: { command: string }[];
+    configuration: { id: string; title: string; order: number; properties: Record<string, SettingSchema> }[];
+  };
+}
+const manifest = JSON.parse(readFileSync('package.json', 'utf8')) as Manifest;
+const properties: Record<string, SettingSchema> = Object.assign(
+  {},
+  ...manifest.contributes.configuration.map((category) => category.properties),
+);
+
+test('settings are grouped into ordered categories, each setting once and in order', () => {
+  const categories = manifest.contributes.configuration;
+  assert.deepEqual(
+    categories.map((category) => category.order),
+    categories.map((_, index) => index + 1),
+  );
+  const names = categories.flatMap((category) => Object.keys(category.properties));
+  assert.equal(new Set(names).size, names.length, 'a setting is in more than one category');
+  for (const category of categories) {
+    assert.ok(category.title && category.id.startsWith('logline.'));
+    assert.deepEqual(
+      Object.values(category.properties).map((schema) => schema.order),
+      Object.keys(category.properties).map((_, index) => index + 1),
+      `${category.title} settings need an order that matches their position`,
+    );
+  }
+});
+
+test('setting descriptions link only to settings and commands that exist', () => {
+  const commands = new Set(manifest.contributes.commands.map((command) => command.command));
+  for (const [name, schema] of Object.entries(properties)) {
+    const text = schema.markdownDescription ?? schema.description ?? '';
+    assert.ok(text, `${name} has no description`);
+    for (const [, linked] of text.matchAll(/#(logline\.[\w.]+)#/g))
+      assert.ok(linked in properties, `${name} links to unknown setting ${linked}`);
+    for (const [, command] of text.matchAll(/\(command:([\w.]+)\)/g))
+      assert.ok(commands.has(command), `${name} links to unknown command ${command}`);
+  }
+});
+
 test('numeric settings follow manifest bounds and reject values that cannot size a ring or timer', () => {
-  const properties = JSON.parse(readFileSync('package.json', 'utf8')).contributes.configuration.properties;
   for (const key of ['indentation', 'maxEvents', 'maxMemoryMb', 'refreshIntervalMs', 'maxLineLength', 'maxDiskMb']) {
     const schema = properties['logline.' + key];
     assert.equal(normalizeSetting(key, -1, schema.default), schema.minimum);

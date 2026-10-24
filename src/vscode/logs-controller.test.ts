@@ -8,6 +8,7 @@ const settings: { key: string; value: unknown }[] = [];
 let pick: (items: { runId: string }[]) => unknown = () => undefined;
 const mock = {
   ConfigurationTarget: { Workspace: 2 },
+  commands: { executeCommand: async () => undefined },
   extensions: { getExtension: () => undefined },
   workspace: {
     onDidChangeConfiguration: () => ({ dispose() {} }),
@@ -26,11 +27,12 @@ const mock = {
     },
     showWarningMessage: async (message: string) => {
       notices.push(message);
-      return undefined;
+      return warningAnswer;
     },
     showQuickPick: async (items: { runId: string }[]) => pick(items),
   },
 };
+let warningAnswer: string | undefined;
 const { LogsController } = withVscode(mock, () => require('./logs-controller') as typeof import('./logs-controller'));
 
 function setup(t: { after(fn: () => Promise<void>): void }) {
@@ -125,4 +127,118 @@ test('terminal capture is switched in the workspace settings and takes effect at
     { key: 'captureTerminals', value: true },
     { key: 'captureTerminals', value: false },
   ]);
+});
+
+test('removing a source drops its logs, runs, and share, and says so', async (t) => {
+  const controller = setup(t);
+  controller.store.add({ level: 'info', id: 1, serverId: 'api', server: 'API', sessionId: 'a', message: 'one' });
+  controller.store.add({ level: 'info', id: 2, serverId: 'web', server: 'Web', sessionId: 'w', message: 'two' });
+  controller.store.add({ level: 'info', id: 3, serverId: 'api', server: 'API', sessionId: 'a', message: 'three' });
+  controller.registry.records.set('a', {
+    id: 'a',
+    serverId: 'api',
+    server: 'API',
+    status: 'exited',
+    startedAt: 0,
+    events: 2,
+  } as never);
+  controller.registry.records.set('o', {
+    id: 'o',
+    serverId: 'api',
+    server: 'API',
+    status: 'running',
+    startedAt: 0,
+    events: 0,
+  } as never);
+  controller.agentAccess.share(['api', 'web']);
+  // A running source that Logline can stop is stopped only after asking.
+  controller.registry.records.set('p', {
+    id: 'p',
+    serverId: 'web',
+    server: 'Web',
+    status: 'running',
+    canStop: true,
+    startedAt: 0,
+    events: 1,
+  } as never);
+  assert.equal(await controller.removeSource('web'), 0);
+  assert.equal(notices.at(-1), 'Stop Web and remove its logs?');
+  assert.equal(controller.store.all().length, 3, 'declining keeps everything');
+  controller.registry.records.delete('p');
+  const generation = controller.state.generation;
+  assert.equal(await controller.removeSource('api'), 2);
+  assert.deepEqual(
+    controller.store.all().map((event) => event.id),
+    [2],
+  );
+  assert.equal(controller.registry.records.has('a'), false);
+  assert.equal(controller.registry.records.has('o'), true, 'a run that keeps capturing keeps its record');
+  assert.deepEqual(
+    controller.agentAccess.status().sources.map((source) => source.id),
+    ['web'],
+  );
+  assert.equal(controller.state.status, 'Removed API and its 2 logs');
+  assert.ok(controller.state.generation > generation, 'the view starts over from what is retained');
+  assert.equal(await controller.removeSource(''), 0);
+});
+
+test('the guide’s steps stay done once done, and Show me reaches the panel with the next snapshot', async (t) => {
+  const saved = new Map<string, unknown>();
+  const controller = new LogsController({
+    globalState: {
+      get: (key: string, fallback?: unknown) => (saved.has(key) ? saved.get(key) : fallback),
+      update: async (key: string, value: unknown) => {
+        saved.set(key, value);
+      },
+    },
+  } as unknown as import('vscode').ExtensionContext);
+  t.after(() => controller.dispose());
+  assert.deepEqual(controller.guideProgress(), { captured: false, searched: false, shared: false });
+  controller.store.add({ level: 'info', id: 1, serverId: 'api', sessionId: 'a', message: 'one' });
+  controller.snapshot({ type: 'snapshot', query: 'level:error' });
+  controller.agentAccess.shareAll();
+  assert.deepEqual(controller.guideProgress(), { captured: true, searched: true, shared: true });
+  controller.clear();
+  assert.deepEqual(
+    controller.guideProgress(),
+    { captured: true, searched: true, shared: true },
+    'clearing logs or stopping sharing does not undo a step',
+  );
+
+  await controller.reveal('connectionRun', 'sourceRail');
+  assert.deepEqual(controller.snapshot({ type: 'snapshot' }).reveal, {
+    target: 'connectionRun',
+    fallback: 'sourceRail',
+  });
+  assert.equal(controller.snapshot({ type: 'snapshot' }).reveal, undefined, 'applied once');
+});
+
+test('only a fresh install is welcomed, once, and a tour request reaches the panel with the next snapshot', async (t) => {
+  const make = (saved: Map<string, unknown>) => {
+    const controller = new LogsController({
+      globalState: {
+        keys: () => [...saved.keys()],
+        get: (key: string, fallback?: unknown) => (saved.has(key) ? saved.get(key) : fallback),
+        update: async (key: string, value: unknown) => {
+          saved.set(key, value);
+        },
+      },
+    } as unknown as import('vscode').ExtensionContext);
+    t.after(() => controller.dispose());
+    return controller;
+  };
+  const fresh = new Map<string, unknown>();
+  const first = make(fresh);
+  assert.equal(first.firstRun(), true);
+  first.welcomed();
+  assert.equal(first.firstRun(), false, 'answered once, never again');
+  assert.equal(
+    make(new Map<string, unknown>([['logline.guide.lastSeenVersion', '1.15.0']])).firstRun(),
+    false,
+    'an upgrade is not welcomed',
+  );
+
+  await first.startTour();
+  assert.equal(first.snapshot({ type: 'snapshot' }).startTour, true);
+  assert.equal(first.snapshot({ type: 'snapshot' }).startTour, undefined, 'applied once');
 });

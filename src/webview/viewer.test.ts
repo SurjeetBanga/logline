@@ -180,7 +180,7 @@ const bundle = buildSync({
  */
 function viewer(
   saved: Record<string, unknown> = {},
-  options: { hidden?: string[]; snapshot?: Record<string, unknown> } = {},
+  options: { hidden?: string[]; snapshot?: Record<string, unknown>; firstRun?: boolean } = {},
 ) {
   const frames: (() => void)[] = [];
   const elements = new Map<string, Element>();
@@ -200,7 +200,10 @@ function viewer(
   const timers = new Map<number, () => void>();
   let nextTimer = 0;
   const window = Object.assign(new Element(), { innerWidth: 1000, innerHeight: 600 });
+  const body = new Element();
+  if (options.firstRun) body.dataset.firstRun = 'true';
   const document = Object.assign(new Element(), {
+    body,
     activeElement: undefined as Element | undefined,
     getElementById: get,
     querySelector: () => get('viewport'),
@@ -364,7 +367,7 @@ test('plain logs initialize interactive headers and sorting toggles the displaye
   assert.equal(sourceHeader().attributes['aria-sort'], 'ascending');
   app.table.renderRows(app.table.events);
   assert.equal(get('viewport').scrollTop, 0, 'live updates must not scroll a sorted result to the bottom');
-  assert.equal(get('older').textContent, 'Next →');
+  assert.equal(get('older').attributes['aria-label'], 'Next page', 'a sorted result pages forward, not back in time');
 });
 
 test('plain startup output does not lock out columns from later structured logs', () => {
@@ -421,7 +424,7 @@ test('resize updates the actual table column and preserves its width after colum
 });
 
 test('saved searches restore visible filter controls and expose useful empty states', () => {
-  const { get, receive } = viewer();
+  const { get, receive, app } = viewer();
   receive({ type: 'searches', searches: { saved: [] } });
   assert.match(get('savedSearchList').children[0].textContent, /Save a search/);
   receive({
@@ -430,7 +433,7 @@ test('saved searches restore visible filter controls and expose useful empty sta
   });
   get('savedSearchList').children[0].querySelector('.search-item')!.listeners.get('click')!();
   assert.equal(get('search').value, 'slow');
-  assert.equal(get('server').value, 'worker');
+  assert.equal(app.state.selectedServer, 'worker');
   assert.equal(get('levelButton').textContent, 'Warn only');
   assert.equal(get('searchToolsPanel').hidden, true);
 });
@@ -470,23 +473,23 @@ test('More actions supports keyboard navigation and restores focus on dismissal'
   get('moreActions').listeners.get('click')!({ stopPropagation() {} });
   assert.equal(get('actionsMenu').hidden, false);
   assert.equal(get('actionsMenu').style.position, 'fixed');
-  assert.equal(dom.activeElement, get('shareSpecificRuns'));
+  assert.equal(dom.activeElement, get('copyResults'));
   const key = (value: string) => get('actionsMenu').listeners.get('keydown')!({ key: value, preventDefault() {} });
   key('ArrowUp');
-  assert.equal(dom.activeElement, get('help'));
+  assert.equal(dom.activeElement, get('takeTour'));
   key('ArrowDown');
-  assert.equal(dom.activeElement, get('shareSpecificRuns'));
+  assert.equal(dom.activeElement, get('copyResults'));
   key('End');
-  assert.equal(dom.activeElement, get('help'));
+  assert.equal(dom.activeElement, get('takeTour'));
   key('Home');
-  assert.equal(dom.activeElement, get('shareSpecificRuns'));
+  assert.equal(dom.activeElement, get('copyResults'));
   key('ArrowDown');
-  assert.equal(dom.activeElement, get('connectAgent'));
+  assert.equal(dom.activeElement, get('export'));
   key('Tab');
   assert.equal(get('actionsMenu').hidden, true);
   assert.equal(dom.activeElement, get('moreActions'));
   get('moreActions').listeners.get('keydown')!({ key: 'ArrowUp', preventDefault() {} });
-  assert.equal(dom.activeElement, get('help'));
+  assert.equal(dom.activeElement, get('takeTour'));
   dom.listeners.get('keydown')!({ key: 'Escape' });
   assert.equal(get('actionsMenu').hidden, true);
   assert.equal(dom.activeElement, get('moreActions'));
@@ -586,7 +589,7 @@ test('analysis renders patterns, error groups and anomalies with trends', () => 
   const content = get('analysisContent');
   assert.deepEqual(
     content.querySelectorAll('.tile-value').map((tile) => tile.textContent),
-    ['41', '2', '12 ms'],
+    ['41', '2', '12 ms', '1'],
   );
   const texts = content.querySelectorAll('.group-text').map((text) => text.textContent);
   assert.deepEqual(texts, ['Failed to charge card', 'user * logged in']);
@@ -595,6 +598,44 @@ test('analysis renders patterns, error groups and anomalies with trends', () => 
   assert.equal(content.querySelectorAll('.sparkline-bar').length, 4);
   assert.equal(content.querySelectorAll('.anomalous').length, 1);
   assert.equal(content.querySelectorAll('.anomaly-marker').length, 1);
+});
+
+test('volume is stacked by level, and a window dragged across it is offered to Logs', () => {
+  const { get, receive, app } = viewer();
+  const from = Date.parse('2026-10-04T12:00:00Z');
+  get('analyze').listeners.get('click')!();
+  receive({
+    type: 'analysis',
+    analysis: {
+      rate: Array.from({ length: 4 }, (_, bucket) => ({ bucket, count: 10, anomalous: false })),
+      errors: Array.from({ length: 4 }, (_, bucket) => ({ bucket, count: bucket === 2 ? 4 : 0, anomalous: false })),
+      warnings: Array.from({ length: 4 }, (_, bucket) => ({ bucket, count: 3 })),
+      latency: [],
+      statusCodes: [],
+      patterns: [],
+      errorGroups: [],
+      range: { from, to: from + 4 * 60000 },
+      summary: { events: 40, errors: 4, sources: 1, outside: 0 },
+    },
+  });
+  const content = get('analysisContent');
+  assert.equal(content.querySelectorAll('.volume-bar-warn').length, 4);
+  assert.equal(content.querySelectorAll('.volume-bar-error').length, 1);
+  const svg = content.querySelectorAll('.volume-chart')[0];
+  // The test DOM's chart is 140 wide: four buckets of 35.
+  svg.listeners.get('pointerdown')!({ button: 0, clientX: 40 });
+  svg.listeners.get('pointermove')!({ clientX: 110 });
+  svg.listeners.get('pointerup')!({ clientX: 110 });
+  const bar = content.querySelectorAll('.volume-selection-bar')[0];
+  assert.equal(bar.hidden, false);
+  assert.match(bar.children[0].textContent, /selected · 30 logs, 4 errors$/);
+  const showLogs = bar.children[1];
+  assert.equal(
+    showLogs.dataset.term,
+    `timestamp:[${new Date(from + 60000).toISOString()} TO ${new Date(from + 4 * 60000).toISOString()}]`,
+  );
+  content.listeners.get('click')!({ target: showLogs });
+  assert.match(app.search.query(), /timestamp:\[2026-10-04T12:01:00\.000Z TO 2026-10-04T12:04:00\.000Z\]/);
 });
 
 test('analysis rows, values and bars narrow the search to their logs', () => {
@@ -1478,199 +1519,213 @@ test('stale source and run selections reset when their metadata disappears', () 
   assert.equal(messages.at(-1)?.type, 'snapshot', 'a follow-up snapshot removes the stale host-side filters');
 });
 
-test('the run picker renders one-click stop actions and keeps the menu open', () => {
-  const { get, messages, receive, app } = viewer();
-  app.state.selectedServer = '';
-  get('scopeMenu').hidden = true;
-  get('sessionMenu').hidden = true;
-  receive({
-    type: 'snapshot',
-    generation: 1,
-    newest: 100,
-    total: 0,
-    retained: 0,
-    discarded: 0,
-    bytes: 0,
-    maxBytes: 10000,
-    truncated: 0,
-    columns: [],
-    columnFields: [],
-    fields: [],
-    page: 0,
-    pages: 1,
-    matched: 0,
-    sessions: [
-      {
-        id: 'run-a',
-        serverId: 'api',
-        server: 'API',
-        command: 'npm run api',
-        status: 'running',
-        startedAt: 100,
-        canStop: true,
-      },
-      {
-        id: 'run-b',
-        serverId: 'api',
-        server: 'API',
-        command: 'npm run worker',
-        status: 'running',
-        startedAt: 200,
-        canStop: true,
-      },
-      {
-        id: 'terminal-a',
-        serverId: 'terminal-1',
-        server: 'Terminal',
-        command: 'npm test',
-        status: 'running',
-        startedAt: 300,
-        sourceKind: 'terminal',
-        canStop: false,
-      },
-      {
-        id: 'done',
-        serverId: 'api',
-        server: 'API',
-        command: 'npm run done',
-        status: 'exited',
-        startedAt: 400,
-        canStop: true,
-      },
-      {
-        id: '5438c7c6b6d137bd',
-        serverId: 'task-build',
-        server: 'build',
-        taskName: 'build',
-        status: 'exited',
-        startedAt: 500,
-        canStop: true,
-      },
-    ],
-  });
+/** The rail's rows, and the parts of one, as the Sources rail renders them. */
+function rail(get: (id: string) => Element) {
+  const list = get('railList');
+  const row = (id: string) =>
+    list.children.find((child) => child.dataset.sourceId === id && child.classList.contains('rail-row'));
+  const select = (id: string) => row(id)?.children[0];
+  const name = (id: string) => select(id)?.querySelector('.rail-name')?.textContent;
+  const actions = (id: string) => row(id)?.querySelectorAll('.rail-action') ?? [];
+  const runs = () => list.querySelectorAll('.run-select');
+  return { list, row, select, name, actions, runs };
+}
 
-  get('server').listeners.get('click')!({ stopPropagation() {} });
-  get('runsTab').listeners.get('click')!();
-  assert.equal(get('sessionMenu').hidden, false);
-  const rows = get('sessionMenu').children;
-  assert.equal(rows.length, 6);
-  assert.match(
-    rows[5].children[0].textContent,
-    /^Task: build · /,
-    'a run without a command is named by its task, not its id',
+const railSnapshot = {
+  type: 'snapshot',
+  generation: 1,
+  newest: 100,
+  total: 0,
+  retained: 0,
+  discarded: 0,
+  bytes: 0,
+  maxBytes: 10000,
+  truncated: 0,
+  columns: [],
+  columnFields: [],
+  fields: [],
+  page: 0,
+  pages: 1,
+  matched: 0,
+  servers: [
+    { id: 'api', label: 'API', status: 'running', activeSessions: 2, configured: true, canStop: true },
+    { id: 'worker', label: 'Worker', status: 'idle', activeSessions: 0, configured: true },
+    { id: 'terminal-1', label: 'Terminal', status: 'running', activeSessions: 1, kind: 'terminal' },
+    { id: 'task-build', label: 'build', taskName: 'build', status: 'exited', activeSessions: 0, kind: 'task' },
+  ],
+  sessions: [
+    {
+      id: 'run-a',
+      serverId: 'api',
+      server: 'API',
+      command: 'npm run api',
+      status: 'running',
+      startedAt: 100,
+      canStop: true,
+    },
+    {
+      id: 'run-b',
+      serverId: 'api',
+      server: 'API',
+      command: 'npm run worker',
+      status: 'running',
+      startedAt: 200,
+      canStop: true,
+    },
+    {
+      id: 'done',
+      serverId: 'api',
+      server: 'API',
+      command: 'npm run done',
+      status: 'exited',
+      startedAt: 400,
+      canStop: true,
+    },
+    {
+      id: 'terminal-a',
+      serverId: 'terminal-1',
+      server: 'Terminal',
+      command: 'npm test',
+      status: 'running',
+      startedAt: 300,
+      sourceKind: 'terminal',
+      canStop: false,
+    },
+    {
+      id: '5438c7c6b6d137bd',
+      serverId: 'task-build',
+      server: 'build',
+      taskName: 'build',
+      status: 'exited',
+      startedAt: 500,
+    },
+  ],
+};
+
+test('the Sources rail lists each source with its status, and the runs of the selected one', () => {
+  const { get, messages, receive, app } = viewer({ server: '' });
+  const plain = (value: unknown) => JSON.parse(JSON.stringify(value));
+  receive(railSnapshot);
+  const view = rail(get);
+  assert.equal(view.name(''), 'All sources');
+  assert.equal(view.select('')!.attributes['aria-current'], 'true');
+  assert.equal(view.name('task-build'), 'Task: build', 'a task is named by its task');
+  assert.equal(view.select('api')!.querySelector('.rail-dot')!.className, 'rail-dot running');
+  assert.equal(view.runs().length, 0, 'runs show under the selected source only');
+  // A configured command that is not running can run again; a running one that Logline started can stop.
+  view.actions('worker')[0].listeners.get('click')!({ stopPropagation() {} });
+  assert.deepEqual(plain(messages.at(-1)), { type: 'run', serverId: 'worker' });
+  view.actions('api')[0].listeners.get('click')!({ stopPropagation() {} });
+  assert.deepEqual(plain(messages.at(-1)), { type: 'stop', serverId: 'api' });
+  assert.deepEqual(
+    view.actions('terminal-1').map((button) => button.attributes['aria-label']),
+    ['Remove Terminal and its logs'],
+    'a terminal Logline does not own cannot be stopped, only removed',
   );
-  assert.equal(rows[1].children[1].textContent, 'Stop');
-  assert.equal(rows[2].children[1].textContent, 'Stop');
-  assert.equal(rows[3].children[1].textContent, 'Capture only');
-  assert.equal(rows[4].children.length, 1);
+  assert.equal(view.actions('api')[1].attributes['aria-label'], 'Stop and remove API');
+  view.actions('task-build')[0].listeners.get('click')!({ stopPropagation() {} });
+  assert.deepEqual(plain(messages.at(-1)), { type: 'removeSource', serverId: 'task-build' });
+  view.select('worker')!.focus();
+  get('railList').listeners.get('keydown')!({ key: 'Delete', preventDefault() {} });
+  assert.deepEqual(
+    plain(messages.at(-1)),
+    { type: 'removeSource', serverId: 'worker' },
+    'Delete removes the focused source',
+  );
+  assert.equal(get('railStopAll').hidden, false);
+  get('railStopAll').listeners.get('click')!();
+  assert.deepEqual(plain(messages.at(-1)), { type: 'stop' });
 
-  rows[1].children[1].listeners.get('click')!({ stopPropagation() {} });
-  assert.deepEqual(JSON.parse(JSON.stringify(messages.at(-1))), { type: 'stop', serverId: 'api', sessionId: 'run-a' });
-  assert.equal(get('sessionMenu').hidden, false);
-  rows[2].children[1].listeners.get('click')!({ stopPropagation() {} });
-  assert.deepEqual(JSON.parse(JSON.stringify(messages.at(-1))), { type: 'stop', serverId: 'api', sessionId: 'run-b' });
-});
-
-test('the run picker selects a run and supports keyboard navigation', () => {
-  const { get, messages, receive, dom } = viewer();
-  get('scopeMenu').hidden = true;
-  get('sessionMenu').hidden = true;
-  receive({
-    type: 'snapshot',
-    generation: 1,
-    newest: 100,
-    total: 0,
-    retained: 0,
-    discarded: 0,
-    bytes: 0,
-    maxBytes: 10000,
-    truncated: 0,
-    columns: [],
-    columnFields: [],
-    fields: [],
-    page: 0,
-    pages: 1,
-    matched: 0,
-    sessions: [
-      {
-        id: 'run-a',
-        serverId: 'api',
-        server: 'API',
-        command: 'npm run api',
-        status: 'running',
-        startedAt: 100,
-        canStop: true,
-      },
-    ],
-  });
-  get('runsTab').listeners.get('click')!();
-  get('server').listeners.get('keydown')!({ key: 'ArrowDown', preventDefault() {} });
-  assert.equal(get('sessionMenu').hidden, false);
-  assert.equal(dom.activeElement, get('sessionMenu').children[0]);
-
-  get('sessionMenu').children[1].children[0].listeners.get('click')!();
-  assert.equal(get('scopeMenu').hidden, true);
-  assert.match(get('server').textContent, /^All sources · npm run api$/);
-  assert.equal(messages.at(-1)?.type, 'snapshot');
-});
-
-test('the combined scope picker switches between source and run tabs', () => {
-  const { get, receive, app, messages } = viewer();
-  app.state.selectedServer = '';
-  get('scopeMenu').hidden = true;
-  receive({
-    type: 'snapshot',
-    generation: 1,
-    newest: 100,
-    total: 0,
-    retained: 0,
-    discarded: 0,
-    bytes: 0,
-    maxBytes: 10000,
-    truncated: 0,
-    columns: [],
-    columnFields: [],
-    fields: [],
-    page: 0,
-    pages: 1,
-    matched: 0,
-    servers: [
-      { id: 'api', label: 'API', status: 'running', activeSessions: 1 },
-      { id: 'worker', label: 'Worker', status: 'idle', activeSessions: 0 },
-    ],
-    sessions: [
-      {
-        id: 'run-a',
-        serverId: 'api',
-        server: 'API',
-        command: 'npm run api',
-        status: 'running',
-        startedAt: 100,
-        canStop: true,
-      },
-    ],
-  });
-
-  get('server').listeners.get('click')!({ stopPropagation() {} });
-  assert.equal(get('scopeMenu').hidden, false);
-  assert.equal(get('sourcesTab').attributes['aria-selected'], 'true');
-  assert.equal(get('sourceMenu').children.length, 4);
-  const add = get('sourceMenu').children[3];
-  assert.equal(add.textContent, 'Add connection…');
-  add.listeners.get('click')!();
-  assert.deepEqual(JSON.parse(JSON.stringify(messages.at(-1))), { type: 'addConnection' });
-  get('server').listeners.get('click')!({ stopPropagation() {} });
-
-  get('runsTab').listeners.get('click')!();
-  assert.equal(get('sourcesTab').attributes['aria-selected'], 'false');
-  assert.equal(get('sourceMenu').hidden, true);
-  assert.equal(get('sessionMenu').hidden, false);
-
-  get('sourcesTab').listeners.get('click')!();
-  get('sourceMenu').children[1].listeners.get('click')!();
+  view.select('api')!.listeners.get('click')!();
   assert.equal(app.state.selectedServer, 'api');
-  assert.equal(app.state.selectedSession, '');
-  assert.equal(get('scopeMenu').hidden, true);
+  const runs = view.runs();
+  assert.deepEqual(
+    runs.map((run) => run.children[0].textContent),
+    ['All runs · 3', 'npm run api', 'npm run worker', 'npm run done'],
+  );
+  const runRows = view.list.querySelectorAll('.run-option-row');
+  runRows[0].querySelector('.run-stop')!.listeners.get('click')!({ stopPropagation() {} });
+  assert.deepEqual(plain(messages.at(-1)), { type: 'stop', serverId: 'api', sessionId: 'run-a' });
+  assert.equal(runRows[2].querySelector('.run-stop'), undefined, 'a finished run has nothing to stop');
+
+  view.select('task-build')!.listeners.get('click')!();
+  assert.equal(view.runs()[1].children[0].textContent, 'Task: build', 'a run without a command is named by its task');
+});
+
+test('the rail selects a run, moves with the arrow keys, and collapses to a strip of icons', () => {
+  const { get, messages, receive, app, dom, savedStates } = viewer({ server: 'api' });
+  receive(railSnapshot);
+  const view = rail(get);
+  view.runs()[1].listeners.get('click')!();
+  assert.equal(app.state.selectedSession, 'run-a');
+  assert.equal(messages.at(-1)?.type, 'snapshot');
+  assert.equal(rail(get).runs()[1].attributes['aria-current'], 'true');
+
+  rail(get).select('')!.focus();
+  get('railList').listeners.get('keydown')!({ key: 'ArrowDown', preventDefault() {} });
+  assert.equal(dom.activeElement, rail(get).select('api'));
+  get('railList').listeners.get('keydown')!({ key: 'End', preventDefault() {} });
+  assert.equal(dom.activeElement?.classList.contains('rail-focusable'), true);
+
+  assert.equal(get('sourceRail').classList.contains('collapsed'), false);
+  get('railToggle').listeners.get('click')!();
+  assert.equal(get('sourceRail').classList.contains('collapsed'), true);
+  assert.equal(get('railToggle').attributes['aria-expanded'], 'false');
+  assert.equal(get('railToggle').attributes['aria-label'], 'Expand sources');
+  assert.equal(savedStates.at(-1)?.rail, 'collapsed');
+});
+
+test('a rail collapsed or opened by hand stays that way', () => {
+  assert.equal(viewer({ rail: 'collapsed' }).get('sourceRail').classList.contains('collapsed'), true);
+  assert.equal(viewer({ rail: 'open' }).get('sourceRail').classList.contains('collapsed'), false);
+});
+
+test('the rail lists connections with what they are doing, and offers to add one', () => {
+  const { get, messages, receive } = viewer({ server: '' });
+  const plain = (value: unknown) => JSON.parse(JSON.stringify(value));
+  receive({ ...railSnapshot, connections: [] });
+  const empty = get('railList').querySelectorAll('.rail-empty-add')[0];
+  empty.listeners.get('click')!();
+  assert.deepEqual(plain(messages.at(-1)), { type: 'addConnection' });
+  get('railList').querySelectorAll('.rail-add')[0].listeners.get('click')!();
+  assert.deepEqual(plain(messages.at(-1)), { type: 'addConnection' });
+
+  const connection = {
+    id: 'pg',
+    sourceId: 'conn:pg',
+    label: 'Postgres · orders',
+    type: 'postgres',
+    mapped: true,
+    sql: true,
+    watching: [],
+    agents: true,
+    tailing: true,
+    last: { sessionId: 's', kind: 'tail', running: true, fetched: 12, kept: 12, local: [], at: 0 },
+  };
+  receive({
+    ...railSnapshot,
+    servers: [
+      ...railSnapshot.servers,
+      { id: 'conn:pg', label: 'Postgres · orders', status: 'idle', activeSessions: 0 },
+    ],
+    connections: [connection],
+  });
+  const view = rail(get);
+  assert.equal(view.name('conn:pg'), 'Postgres · orders');
+  assert.equal(view.select('conn:pg')!.querySelector('.rail-status')!.textContent, 'Tailing · 12 rows');
+  assert.ok(view.select('conn:pg')!.querySelector('.rail-agents'), 'agents may fetch from it');
+  assert.equal(get('railList').querySelectorAll('.rail-empty').length, 0);
+  view.actions('conn:pg')[0].listeners.get('click')!({ stopPropagation() {} });
+  assert.deepEqual(plain(messages.at(-1)), {
+    type: 'connectionTail',
+    connectionId: 'pg',
+    query: 'timeout',
+    enabled: false,
+  });
+  view.actions('conn:pg')[1].listeners.get('click')!({ stopPropagation() {} });
+  assert.deepEqual(plain(messages.at(-1)), { type: 'removeConnection', connectionId: 'pg' });
+  receive({ ...railSnapshot, connections: [{ ...connection, tailing: false, last: undefined, mapped: false }] });
+  assert.equal(rail(get).select('conn:pg')!.querySelector('.rail-status')!.textContent, 'No log table · SQL only');
 });
 
 test('the terminal capture toggle exposes explicit state labels', () => {
@@ -1941,13 +1996,232 @@ test('the main sharing button ignores view filters and stops active sharing', ()
   assert.equal(get('shareScope').hidden, true);
 });
 
-test('specific run sharing remains available through More actions', () => {
-  const { get, messages } = viewer();
+test('the status bar counts matches, pages compactly, and shows memory with its details', () => {
+  const { get, messages, receive } = viewer();
+  receive({
+    type: 'snapshot',
+    generation: 1,
+    newest: 100,
+    status: 'Imported 19 events',
+    total: 2214,
+    retained: 2214,
+    discarded: 0,
+    bytes: 18 * 1048576,
+    maxBytes: 100 * 1048576,
+    truncated: 3,
+    events: [{ id: 1, message: 'one', level: 'info', timestamp: '12:00' }],
+    columns: [],
+    page: 1,
+    pages: 4,
+    matched: 1204,
+  });
+  assert.equal(get('page').textContent, '1,204 matches');
+  assert.equal(get('pageNumber').textContent, '2 / 4');
+  assert.equal(get('status').hidden, false, 'news is shown');
+  assert.equal(get('status').textContent, 'Imported 19 events');
+  assert.equal(get('memoryText').textContent, '18 / 100 MiB');
+  assert.equal(get('memoryFill').style.width, '18%');
+  const details = get('memoryDetails').children.map((child) => child.textContent);
+  assert.deepEqual(details.slice(0, 4), ['Received', '2,214', 'Kept', '2,214']);
+  assert.ok(details.includes('Lines cut short') && details.includes('3'));
+  get('memorySettings').listeners.get('click')!();
+  assert.deepEqual(JSON.parse(JSON.stringify(messages.at(-1))), { type: 'config', setting: 'logline.maxMemoryMb' });
+  get('statusIcon').listeners.get('click')!();
+  assert.equal(messages.at(-1)?.type, 'showStatus');
+  assert.equal(get('mode').hidden, true, 'plain Live is what the Live button says');
+});
+
+test('the guide points at a control, opening its menu first, or at its fallback while it is hidden', () => {
+  const { get, receive, flushFrames } = viewer();
+  get('actionsMenu').append(get('manage'));
   get('actionsMenu').hidden = true;
-  get('moreActions').listeners.get('click')!({ stopPropagation() {} });
-  get('shareSpecificRuns').listeners.get('click')!();
-  assert.deepEqual(JSON.parse(JSON.stringify(messages.at(-1))), { type: 'shareWithAgent', chooseRuns: true });
-  assert.equal(get('actionsMenu').hidden, true);
+  const snapshot = (reveal: Record<string, string>) =>
+    receive({
+      type: 'snapshot',
+      generation: 1,
+      newest: 100,
+      total: 0,
+      retained: 0,
+      discarded: 0,
+      bytes: 0,
+      maxBytes: 1,
+      truncated: 0,
+      events: [],
+      columns: [],
+      page: 0,
+      pages: 1,
+      matched: 0,
+      reveal,
+    });
+  snapshot({ target: 'manage' });
+  flushFrames();
+  assert.equal(get('actionsMenu').hidden, false, 'the menu holding it opens');
+  assert.ok(get('manage').classList.contains('reveal-pulse'));
+  get('connectionRun').hidden = true;
+  snapshot({ target: 'connectionRun', fallback: 'sourceRail' });
+  flushFrames();
+  assert.equal(get('connectionRun').classList.contains('reveal-pulse'), false);
+  assert.ok(get('sourceRail').classList.contains('reveal-pulse'), 'the rail is shown while no connection is selected');
+});
+
+test('a first run welcomes, and the tour walks the panel with Next, Back, and Skip', () => {
+  const { get, messages, dom, receive, flushFrames } = viewer({}, { firstRun: true });
+  assert.equal(get('welcomeDialog').open, true, 'a fresh install is welcomed');
+  get('welcomeTour').listeners.get('click')!();
+  assert.equal(get('welcomeDialog').open, false);
+  assert.equal(messages.at(-1)?.type, 'onboardingSeen', 'the welcome shows once');
+  const layer = dom.body.children.at(-1)!;
+  const card = () => layer.children.at(-1)!;
+  const title = () => card().children[1].textContent;
+  const buttons = () => card().querySelectorAll('.tour-primary').concat(card().querySelectorAll('.tour-secondary'));
+  assert.equal(title(), 'Your sources');
+  assert.equal(card().children[0].children[0].textContent, '1 of 7');
+  assert.equal(layer.children[0].className, 'tour-spotlight', 'the stop spotlights its control');
+  buttons()[0].listeners.get('click')!();
+  assert.equal(title(), 'Production, next to local');
+  card().querySelectorAll('.tour-secondary')[0].listeners.get('click')!();
+  assert.equal(title(), 'Your sources', 'Back returns to the previous stop');
+  for (let step = 0; step < 7; step++) card().querySelectorAll('.tour-primary')[0].listeners.get('click')!();
+  assert.equal(card().children[0].textContent, 'You’re set');
+  card().querySelectorAll('.tour-primary')[0].listeners.get('click')!();
+  assert.equal(layer.children.length, 0, 'Done ends the tour');
+
+  // The tour starts again from the menu, a snapshot (the Command Palette or the guide), and ends with Escape.
+  get('takeTour').listeners.get('click')!();
+  assert.equal(dom.body.children.at(-1)!.children.at(-1)!.children[1].textContent, 'Your sources');
+  dom.listeners.get('keydown')!({ key: 'Escape', preventDefault() {} });
+  assert.equal(dom.body.children.at(-1)!.children.length, 0);
+  receive({
+    type: 'snapshot',
+    generation: 1,
+    newest: 100,
+    total: 0,
+    retained: 0,
+    discarded: 0,
+    bytes: 0,
+    maxBytes: 1,
+    truncated: 0,
+    events: [],
+    columns: [],
+    page: 0,
+    pages: 1,
+    matched: 0,
+    startTour: true,
+  });
+  flushFrames();
+  assert.equal(dom.body.children.at(-1)!.children.at(-1)!.children[1].textContent, 'Your sources');
+});
+
+test('exploring alone leaves a hint about the tour, and a later window is not welcomed', () => {
+  const first = viewer({}, { firstRun: true });
+  first.get('welcomeExplore').listeners.get('click')!();
+  assert.equal(first.messages.at(-1)?.type, 'onboardingSeen');
+  assert.equal(first.get('tourHint').hidden, false);
+  first.get('tourHintDismiss').listeners.get('click')!();
+  assert.equal(first.get('tourHint').hidden, true);
+  const quick = viewer({}, { firstRun: true });
+  quick.get('welcomeCapture').listeners.get('click')!();
+  assert.deepEqual(JSON.parse(JSON.stringify(quick.messages.at(-1))), { type: 'toggleTerminalCapture', enabled: true });
+  assert.equal(viewer().get('welcomeDialog').open, false);
+});
+
+test('the Share panel sets what agents read, connects an agent, and allows a connection', () => {
+  const { get, messages, receive } = viewer();
+  const plain = (value: unknown) => JSON.parse(JSON.stringify(value));
+  const base = {
+    type: 'snapshot',
+    generation: 100,
+    newest: 100,
+    events: [],
+    columns: [],
+    total: 0,
+    retained: 0,
+    discarded: 0,
+    bytes: 0,
+    maxBytes: 10000,
+    truncated: 0,
+    page: 0,
+    pages: 1,
+    matched: 0,
+  };
+  receive({
+    ...base,
+    agentSharing: { active: false, revision: 1, sources: [] },
+    agentSetup: { external: true, copilot: true, connected: ['Claude Code'] },
+    agentClients: ['Claude Code'],
+    connections: [
+      {
+        id: 'dd',
+        sourceId: 'conn:dd',
+        label: 'Datadog · prod',
+        type: 'datadog',
+        mapped: true,
+        sql: false,
+        watching: [],
+        agents: true,
+        tailing: false,
+      },
+    ],
+  });
+  get('sharePanel').hidden = true;
+  get('shareMenuButton').listeners.get('click')!({ stopPropagation() {} });
+  assert.equal(get('sharePanel').hidden, false);
+  assert.equal(get('shareState').textContent, 'Off');
+  assert.equal(get('shareToggle').textContent, 'Start sharing');
+  const agents = get('shareAgentList').children;
+  const text = (row: Element) =>
+    row.children.map((child) => child.textContent || child.children.map((part) => part.textContent).join(' | '));
+  assert.deepEqual(text(agents[0]), ['GitHub Copilot | Built in · reads shared logs from agent chat', 'Ready']);
+  assert.deepEqual(text(agents[1]), ['Claude Code | Read shared logs in the last few minutes', 'Reading']);
+  assert.deepEqual(text(agents[2]), ['Codex | Not set up in this editor yet', 'Connect…']);
+  agents[2].children[1].listeners.get('click')!();
+  assert.deepEqual(plain(messages.at(-1)), { type: 'connectAgent', agent: 'codex' });
+
+  assert.equal(get('shareProduction').hidden, false);
+  const allow = get('shareConnectionList').children[0].children[1];
+  assert.equal(allow.textContent, 'Allowed');
+  allow.listeners.get('click')!();
+  assert.deepEqual(plain(messages.at(-1)), { type: 'connectionAgents', connectionId: 'dd', enabled: false });
+
+  get('shareToggle').listeners.get('click')!();
+  assert.deepEqual(plain(messages.at(-1)), { type: 'shareWithAgent' });
+  const sent = messages.length;
+  get('shareScopeRuns').listeners.get('change')!();
+  assert.equal(messages.length, sent, 'choosing the scope while not sharing only sets what sharing will share');
+  assert.equal(get('shareSpecificRuns').hidden, false);
+  get('shareAgent').listeners.get('click')!();
+  assert.deepEqual(
+    plain(messages.at(-1)),
+    { type: 'shareWithAgent', chooseRuns: true },
+    'the button shares that scope',
+  );
+
+  receive({
+    ...base,
+    agentSharing: {
+      active: true,
+      scope: 'selected',
+      revision: 2,
+      sources: [{ id: 'api', label: 'API', sessions: 2, events: 9, runs: [{}, {}] }],
+    },
+    agentSetup: { external: false, copilot: false, connected: [] },
+  });
+  assert.equal(get('shareState').textContent, 'On · 2 runs');
+  assert.equal(get('shareToggle').textContent, 'Stop sharing');
+  assert.equal(get('shareScopeRuns').checked, true);
+  assert.deepEqual(text(get('shareAgentList').children[0]), [
+    'GitHub Copilot | Install GitHub Copilot Chat to use it',
+    'Not installed',
+  ]);
+  assert.deepEqual(text(get('shareAgentList').children[1]), [
+    'Claude Code | Turn on logline.externalAgents to connect it',
+    'Off',
+  ]);
+  assert.equal(get('shareProduction').hidden, true, 'nothing to allow without a connection');
+  get('shareToggle').listeners.get('click')!();
+  assert.deepEqual(plain(messages.at(-1)), { type: 'stopSharing' });
+  get('statusAction').listeners.get('click')!();
+  assert.deepEqual(plain(messages.at(-1)), { type: 'showStatus' });
 });
 
 test('More actions holds the data actions, and its keys skip Copy filtered results without a filter', () => {
@@ -1965,7 +2239,7 @@ test('More actions holds the data actions, and its keys skip Copy filtered resul
   get('actionsMenu').listeners.get('keydown')!({ key: 'ArrowDown', preventDefault() {} });
   assert.equal(app.search.query(), '');
   assert.notEqual(get('copyResults').focusCalls.length, 1, 'the hidden item is never focused');
-  assert.equal(get('export').focusCalls.length, 1, 'the third shown item follows Connect');
+  assert.equal(get('export').focusCalls.length, 1, 'Export is the first item shown without a filter');
 });
 
 test('views are tabs: one shows at a time, arrow keys move between visible tabs, and the panel remembers its tab', () => {
@@ -2718,21 +2992,35 @@ test('the Traces list shows recent requests and opens a waterfall that can retur
     ['f1', 'f2', 'f3'],
   );
   assert.equal(get('tracesRows').children[0].className, 'traces-row trace-error');
-  get('tracesErrorsOnly').checked = true;
-  get('tracesErrorsOnly').listeners.get('change')!();
+  // The rail lists each service with its traces, and the filters.
+  const railButton = (key: string) =>
+    get('tabRailList')
+      .children.map((child) => child.children[0])
+      .find((button) => button?.dataset.railKey === key)!;
+  assert.equal(get('tabRailTitle').textContent, 'Services');
+  assert.equal(railButton('service:api').attributes['aria-pressed'], 'true');
+  railButton('service:api').listeners.get('click')!();
+  assert.deepEqual(
+    get('tracesRows').children.map((row) => row.dataset.traceId),
+    ['f1', 'f3'],
+    'a trace through another service stays',
+  );
+  railButton('service:api').listeners.get('click')!();
+  railButton('errors').listeners.get('click')!();
   assert.deepEqual(
     get('tracesRows').children.map((row) => row.dataset.traceId),
     ['f1'],
   );
   const row = get('tracesRows').children[0];
   get('tracesRows').listeners.get('click')!({ target: { closest: () => row } });
-  assert.equal(get('tracesView').hidden, true);
+  assert.equal(get('tracesView').hidden, false, 'the list stays above the waterfall');
   assert.equal(get('traceView').hidden, false);
   assert.equal(get('traces').attributes['aria-selected'], 'true', 'a trace belongs to the Traces tab');
   assert.deepEqual(JSON.parse(JSON.stringify(messages.at(-1))), { type: 'trace', traceId: 'f1' });
   get('traceBack').listeners.get('click')!();
   assert.equal(get('tracesView').hidden, false);
   assert.equal(get('traceView').hidden, true);
+  railButton('errors').listeners.get('click')!();
   app.traceView.show('abc');
   assert.equal(get('traceView').hidden, false, 'a trace opened from a row also opens in the Traces tab');
   get('traceBack').listeners.get('click')!();
@@ -2793,21 +3081,20 @@ test('snapshots apply editor requests once and reflect the OpenTelemetry receive
     status: 'OpenTelemetry receiver on http://127.0.0.1:4318',
   });
   assert.equal(app.search.query(), 'message:/user.*logged\\s+in/');
-  assert.equal(get('otlpStatus').hidden, false);
   assert.equal(get('otlpStatus').textContent, 'OpenTelemetry 127.0.0.1:4318');
+  assert.equal(get('otlpStatus').attributes['aria-pressed'], 'true');
   assert.equal(get('status').textContent, 'Ready', 'the chip replaces the receiver status text');
+  assert.equal(get('status').hidden, true, 'a steady state is not news');
   assert.equal(get('traceCount').textContent, '12');
   get('otlpStatus').listeners.get('click')!();
-  assert.equal(get('tracesView').hidden, false);
-  assert.deepEqual(JSON.parse(JSON.stringify(messages.at(-1))), { type: 'traces' });
-  assert.equal(get('otlpToggle').textContent, 'Stop OpenTelemetry receiver');
-  get('otlpToggle').listeners.get('click')!();
   assert.deepEqual(JSON.parse(JSON.stringify(messages.at(-1))), { type: 'toggleOtlp', enabled: false });
   snapshot({ openTrace: 'abc123', otlp: { running: false } });
   assert.equal(get('traceView').hidden, false);
-  assert.equal(get('otlpStatus').hidden, true);
+  assert.equal(get('otlpStatus').textContent, 'OpenTelemetry off');
+  assert.equal(get('otlpStatus').attributes['aria-pressed'], 'false');
   assert.equal(get('traceCount').hidden, true);
-  assert.equal(get('otlpToggle').textContent, 'Start OpenTelemetry receiver');
+  get('otlpStatus').listeners.get('click')!();
+  assert.deepEqual(JSON.parse(JSON.stringify(messages.at(-1))), { type: 'toggleOtlp', enabled: true });
 });
 
 test('the AI calls tab lists calls with totals and opens a conversation with its tool results', () => {
@@ -3163,17 +3450,15 @@ test('the Metrics tab appears once metrics arrive and lists series with their la
     ],
   });
   assert.match(get('metricsStatus').textContent, /2 series from 2 services/);
-  const rows = get('metricsRows').children;
-  assert.deepEqual(
-    rows.map((row) => row.children[3].textContent),
-    ['p95 180 ms', 'rate 2.5 order/s'],
-  );
+  const cards = () => get('metricsCards').children.map((item) => item.children[0]);
+  const latest = (card: Element) => card.querySelector('.metric-latest')!.textContent;
+  assert.deepEqual(cards().map(latest), ['p95 180 ms', 'rate 2.5 order/s']);
   receive({
     type: 'metrics',
     metrics: [series({ name: 'coarse', kind: 'histogram', measure: 'p95', unit: 's', latest: 0.9, bound: true })],
   });
-  assert.equal(get('metricsRows').children[0].children[3].textContent, 'p95 ≤ 900 ms');
-  assert.match(get('metricsRows').children[0].children[3].title, /buckets are too wide/);
+  assert.equal(latest(cards()[0]), 'p95 ≤ 900 ms');
+  assert.match(cards()[0].title, /buckets are too wide/);
   receive({
     type: 'metrics',
     metrics: [
@@ -3196,11 +3481,26 @@ test('the Metrics tab appears once metrics arrive and lists series with their la
       }),
     ],
   });
-  assert.equal(rows[0].children[2].textContent, 'http.route=/orders');
-  assert.match(rows[1].children[3].title, /Total 120 order/);
+  assert.equal(cards()[0].querySelector('.metric-attributes')!.textContent, 'http.route=/orders');
+  assert.match(cards()[1].title, /Total 120 order/);
+  // The rail filters by service; a card opens its series' chart above the rest.
+  const railButton = (key: string) =>
+    get('tabRailList')
+      .children.map((child) => child.children[0])
+      .find((button) => button?.dataset.railKey === key)!;
+  assert.equal(get('tabRailTitle').textContent, 'Metrics from');
+  railButton('service:checkout').listeners.get('click')!();
+  assert.equal(cards().length, 1);
+  railButton('all').listeners.get('click')!();
+  assert.equal(cards().length, 2);
+  cards()[0].listeners.get('click')!();
+  assert.equal(get('metricDetail').hidden, false);
+  assert.equal(get('metricDetail').querySelector('.metric-detail-value')!.textContent, 'p95 180 ms');
+  cards()[0].listeners.get('click')!();
+  assert.equal(get('metricDetail').hidden, true);
   get('metricsFilter').value = 'checkout';
   get('metricsFilter').listeners.get('input')!();
-  assert.equal(get('metricsRows').children.length, 1);
+  assert.equal(cards().length, 1);
   assert.match(get('metricsStatus').textContent, /1 match/);
   const before = messages.length;
   const refreshes = () => messages.slice(before).filter((message) => message.type === 'metrics').length;
@@ -3366,9 +3666,6 @@ test('a selected connection shows its range, Run, Tail and Run SQL, with the SQL
     query: 'timeout',
     range: '24h',
   });
-  // The toolbar's run button runs the search too.
-  get('run').listeners.get('click')!();
-  assert.deepEqual(plain(messages.at(-1)).type, 'connectionFetch');
   get('connectionTail').listeners.get('click')!();
   assert.deepEqual(plain(messages.at(-1)), {
     type: 'connectionTail',
@@ -3423,21 +3720,21 @@ test('a selected connection shows its range, Run, Tail and Run SQL, with the SQL
   assert.equal(app.state.selectedSession, 'run-2');
   snapshot({ sessions: [run] });
   assert.equal(app.state.selectedSession, 'run-2');
-  assert.match(get('server').textContent, /level:error · last 1h/);
+  assert.ok(
+    rail(get)
+      .runs()
+      .some((button) => button.children[0].textContent === 'level:error · last 1h'),
+  );
   // Without a mapped table, Run asks for SQL.
   snapshot({ connections: [{ ...connection, mapped: false }] });
   assert.equal(get('connectionResult').textContent, 'No log table is mapped. Use Run SQL to query it.');
   assert.equal(get('connectionPreview').textContent, '');
-  get('run').listeners.get('click')!();
+  get('connectionRun').listeners.get('click')!();
   assert.deepEqual(plain(messages.at(-1)), { type: 'connectionSql', connectionId: 'app' });
   // Any other source hides the bar again.
-  get('sourceMenu').children[1].listeners.get('click')!();
+  rail(get).select('api')!.listeners.get('click')!();
   assert.equal(app.state.selectedServer, 'api');
   assert.equal(get('connectionBar').hidden, true);
-  get('run').listeners.get('click')!();
-  assert.deepEqual(plain(messages.at(-1)), { type: 'run', serverId: 'api' });
-  get('addConnection').listeners.get('click')!();
-  assert.deepEqual(plain(messages.at(-1)), { type: 'addConnection' });
 });
 
 test('the Compare tab lines up production errors with local runs and shows both sides of one', () => {

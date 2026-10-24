@@ -85,7 +85,7 @@ test('commands register the complete action surface and honor trust/focus/config
   } as any;
   const guideCalls: string[] = [];
   const registrations = registerCommands(controller, (section) => guideCalls.push(section));
-  assert.equal(handlers.size, 33);
+  assert.equal(handlers.size, 34);
   await handlers.get('logline.runCommand')!();
   for (const name of [
     'logline.stopCommand',

@@ -42,14 +42,19 @@ export function createViews(
   function show(view: ViewName, focus = false) {
     const previous = current;
     current = view;
-    for (const name of Object.keys(panels) as ViewName[]) panels[name].hidden = name !== view;
+    // An open trace's waterfall shows below the list of traces, so another can be chosen from there.
+    for (const name of Object.keys(panels) as ViewName[])
+      panels[name].hidden = name !== view && !(view === 'trace' && name === 'traces');
     const selected = tabOf(view);
     for (const name of TABS) {
       tabs[name].setAttribute('aria-selected', String(name === selected));
       tabs[name].tabIndex = name === selected ? 0 : -1;
     }
     // Lets the stylesheet hide controls that only apply to the table, such as paging.
-    if (document.body) document.body.dataset.view = selected;
+    if (document.body) {
+      document.body.dataset.view = selected;
+      document.body.dataset.subview = view;
+    }
     if (focus) tabs[selected].focus();
     if (view !== previous) changed(view, previous);
   }

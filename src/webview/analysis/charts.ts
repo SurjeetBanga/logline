@@ -114,16 +114,21 @@ export function createAnalysis(elements: Elements, state: ViewerState, actions?:
     }
   }
 
-  // Log volume over time with the error share stacked in red inside each bar - the
-  // standard "log histogram" view from tools like Kibana/Grafana, so a spike or an
-  // error-heavy period is visible at a glance instead of as two separate number lists.
-  function volumeChart(rate: AnalysisResult['rate'], errors: AnalysisResult['errors'], range: AnalysisResult['range']) {
+  // Log volume over time, stacked by level: errors, then warnings, then the rest, so a
+  // spike or an error-heavy period is visible at a glance. Dragging across the bars
+  // selects a window to show in Logs; clicking one bar shows its own.
+  function volumeChart(
+    rate: AnalysisResult['rate'],
+    errors: AnalysisResult['errors'],
+    range: AnalysisResult['range'],
+    warnings: NonNullable<AnalysisResult['warnings']> = [],
+  ) {
     const bucketCount = rate.length;
-    if (!bucketCount || !rate.some((item) => item.count > 0)) return emptySection('Event volume');
+    if (!bucketCount || !rate.some((item) => item.count > 0)) return emptySection('Volume by level');
     const section = document.createElement('section');
     section.className = 'chart-section chart-wide';
     const heading = document.createElement('h3');
-    heading.textContent = 'Event volume';
+    heading.textContent = 'Volume by level';
     section.append(heading);
     const width = 720,
       height = 130,
@@ -144,9 +149,11 @@ export function createAnalysis(elements: Elements, state: ViewerState, actions?:
     svg.append(maxLabel);
     rate.forEach((item, index) => {
       const errorCount = Math.min(item.count, errors[index]?.count ?? 0);
-      const okCount = item.count - errorCount;
+      const warnCount = Math.min(item.count - errorCount, warnings[index]?.count ?? 0);
+      const okCount = item.count - errorCount - warnCount;
       const x = index * (barWidth + barGap);
       const okHeight = (okCount / max) * plotHeight;
+      const warnHeight = (warnCount / max) * plotHeight;
       const errorHeight = (errorCount / max) * plotHeight;
       const anomalous = item.anomalous || errors[index]?.anomalous;
       const group = svgEl('g', { class: anomalous ? 'volume-bar anomalous' : 'volume-bar' });
@@ -166,9 +173,19 @@ export function createAnalysis(elements: Elements, state: ViewerState, actions?:
           svgEl('rect', {
             x,
             width: barWidth,
-            y: padTop + plotHeight - okHeight - errorHeight,
+            y: padTop + plotHeight - okHeight - warnHeight - errorHeight,
             height: okHeight,
             class: 'volume-bar-ok',
+          }),
+        );
+      if (warnHeight > 0)
+        group.append(
+          svgEl('rect', {
+            x,
+            width: barWidth,
+            y: padTop + plotHeight - warnHeight - errorHeight,
+            height: Math.max(1, warnHeight),
+            class: 'volume-bar-warn',
           }),
         );
       if (errorHeight > 0)
@@ -182,7 +199,7 @@ export function createAnalysis(elements: Elements, state: ViewerState, actions?:
           }),
         );
       const title = svgEl('title');
-      title.textContent = `${time !== undefined ? formatClock(time, range) + '\n' : ''}${count(item.count)} event${item.count === 1 ? '' : 's'}${errorCount ? `, ${count(errorCount)} error${errorCount === 1 ? '' : 's'}` : ''}${group.dataset.term ? '\nClick to show these events' : ''}`;
+      title.textContent = `${time !== undefined ? formatClock(time, range) + '\n' : ''}${count(item.count)} event${item.count === 1 ? '' : 's'}${errorCount ? `, ${count(errorCount)} error${errorCount === 1 ? '' : 's'}` : ''}${warnCount ? `, ${count(warnCount)} warning${warnCount === 1 ? '' : 's'}` : ''}${group.dataset.term ? '\nClick to show these events, or drag across bars to choose a window' : ''}`;
       group.append(title);
       if (anomalous) {
         const dot = svgEl('circle', { cx: x + barWidth / 2, cy: padTop - 5, r: 2.5, class: 'anomaly-marker' });
@@ -194,20 +211,110 @@ export function createAnalysis(elements: Elements, state: ViewerState, actions?:
       svg.append(group);
     });
     xAxisTicks(svg, bucketCount, range, (index) => index * (barWidth + barGap) + barWidth / 2, height);
+    const selection = document.createElement('div');
+    selection.className = 'volume-selection-bar';
+    selection.hidden = true;
+    brush(svg, selection, { rate, errors, range, barWidth, barGap, plotBottom: padTop + plotHeight });
     section.append(
       svg,
       chartLegend([
-        { className: 'swatch-ok', label: 'events' },
+        { className: 'swatch-ok', label: 'info and others' },
+        { className: 'swatch-warn', label: 'warnings' },
         { className: 'swatch-error', label: 'errors' },
       ]),
+      selection,
     );
     return section;
+  }
+
+  /** Drag across volume bars to choose a window: it is outlined, and the bar below offers it to Logs. */
+  function brush(
+    svg: SVGElement,
+    bar: HTMLElement,
+    chart: {
+      rate: AnalysisResult['rate'];
+      errors: AnalysisResult['errors'];
+      range: AnalysisResult['range'];
+      barWidth: number;
+      barGap: number;
+      plotBottom: number;
+    },
+  ) {
+    const { rate, range } = chart;
+    const bucketCount = rate.length;
+    if (range.from === undefined || range.to === undefined || !scope) return;
+    const step = chart.barWidth + chart.barGap;
+    const outline = svgEl('rect', { y: 0, height: chart.plotBottom, class: 'volume-selection', visibility: 'hidden' });
+    svg.append(outline);
+    let start: number | undefined;
+    let dragged = false;
+    const bucketAt = (event: PointerEvent) => {
+      const box = svg.getBoundingClientRect();
+      const share = box.width ? (event.clientX - box.left) / box.width : 0;
+      return Math.max(0, Math.min(bucketCount - 1, Math.floor(share * bucketCount)));
+    };
+    const show = (first: number, last: number) => {
+      const low = Math.min(first, last);
+      const high = Math.max(first, last);
+      outline.setAttribute('x', String(low * step));
+      outline.setAttribute('width', String((high - low + 1) * step));
+      outline.setAttribute('visibility', 'visible');
+      return [low, high] as const;
+    };
+    scope.listen(svg, 'pointerdown', (event) => {
+      if (event.button !== 0) return;
+      start = bucketAt(event);
+      dragged = false;
+    });
+    scope.listen(svg, 'pointermove', (event) => {
+      if (start === undefined) return;
+      const here = bucketAt(event);
+      if (here !== start) dragged = true;
+      if (dragged) show(start, here);
+    });
+    scope.listen(svg, 'pointerup', (event) => {
+      if (start === undefined) return;
+      const first = start;
+      start = undefined;
+      if (!dragged) return;
+      const [low, high] = show(first, bucketAt(event));
+      const from = bucketTime(range, bucketCount, low)!;
+      const to = bucketTime(range, bucketCount, high + 1)!;
+      const logs = rate.slice(low, high + 1).reduce((sum, item) => sum + item.count, 0);
+      const errorCount = chart.errors.slice(low, high + 1).reduce((sum, item) => sum + item.count, 0);
+      const text = document.createElement('span');
+      text.textContent = `${formatClock(from, range)} – ${formatClock(to, range)} selected · ${count(logs)} log${logs === 1 ? '' : 's'}${errorCount ? `, ${count(errorCount)} error${errorCount === 1 ? '' : 's'}` : ''}`;
+      const showLogs = document.createElement('button');
+      showLogs.type = 'button';
+      showLogs.textContent = 'Show in Logs';
+      showLogs.dataset.term = `timestamp:[${new Date(from).toISOString()} TO ${new Date(to).toISOString()}]`;
+      const clear = document.createElement('button');
+      clear.type = 'button';
+      clear.textContent = 'Clear';
+      scope.listen(clear, 'click', () => {
+        bar.hidden = true;
+        outline.setAttribute('visibility', 'hidden');
+      });
+      bar.replaceChildren(text, showLogs, clear);
+      bar.hidden = false;
+    });
+    // A drag ends with a click on the bar it ended on, which must not filter to that one bar.
+    scope.listen(
+      svg,
+      'click',
+      (event) => {
+        if (!dragged) return;
+        dragged = false;
+        event.stopPropagation();
+      },
+      { capture: true },
+    );
   }
 
   // Average + p95 latency over the same time axis as the volume chart, rather than two
   // separate bar lists - this is how APM tools (Datadog, Grafana) conventionally pair
   // a mean line with a percentile line so tail latency is visible alongside the average.
-  function latencyChart(latency: AnalysisResult['latency'], range: AnalysisResult['range']) {
+  function latencyChart(latency: AnalysisResult['latency'], range: AnalysisResult['range'], narrow = false) {
     const bucketCount = latency.length;
     if (!bucketCount || !latency.some((item) => item.count > 0)) return emptySection('Latency (ms)');
     const section = document.createElement('section');
@@ -215,8 +322,9 @@ export function createAnalysis(elements: Elements, state: ViewerState, actions?:
     const heading = document.createElement('h3');
     heading.textContent = 'Latency (ms)';
     section.append(heading);
-    const width = 720,
-      height = 110,
+    // Beside the error groups the chart is narrower, so it draws on a narrower, taller canvas to stay readable.
+    const width = narrow ? 400 : 720,
+      height = narrow ? 180 : 110,
       padTop = 10,
       padBottom = 18;
     const plotHeight = height - padTop - padBottom;
@@ -352,23 +460,41 @@ export function createAnalysis(elements: Elements, state: ViewerState, actions?:
     const tiles = document.createElement('div');
     tiles.className = 'analysis-tiles chart-wide';
     if (!summary) return tiles;
-    tiles.append(tile('Events', count(summary.events), span(analysis.range)));
+    tiles.append(tile('Logs', count(summary.events), span(analysis.range)));
     tiles.append(
       tile(
         'Errors',
         count(summary.errors),
-        `${percent(summary.errors, summary.events)} of events`,
+        `${percent(summary.errors, summary.events)} of logs`,
         summary.errors ? 'error' : undefined,
       ),
     );
-    if (summary.latency)
+    if (summary.latency) {
+      // The slowest bucket, so a spike in tail latency has a time to look at.
+      const peak = (analysis.latency ?? []).reduce<AnalysisResult['latency'][number] | undefined>(
+        (worst, item) => (item.count && (!worst || item.p95 > worst.p95) ? item : worst),
+        undefined,
+      );
+      const peakTime = peak && bucketTime(analysis.range, analysis.latency.length, peak.bucket);
       tiles.append(
         tile(
-          'Latency p95',
+          'p95 latency',
           duration(summary.latency.p95),
-          `p50 ${duration(summary.latency.p50)} · p99 ${duration(summary.latency.p99)}`,
+          peak && peakTime !== undefined && peak.p95 > summary.latency.p95
+            ? `peak ${duration(peak.p95)} at ${formatClock(peakTime, analysis.range)}`
+            : `p50 ${duration(summary.latency.p50)} · p99 ${duration(summary.latency.p99)}`,
         ),
       );
+    }
+    const groups = analysis.errorGroups ?? [];
+    const fresh = groups.filter((group) => group.isNew).length;
+    tiles.append(
+      tile(
+        'Error groups',
+        count(groups.length),
+        fresh ? `${count(fresh)} new in this range` : groups.length ? 'none new' : undefined,
+      ),
+    );
     if (summary.sources > 1) tiles.append(tile('Sources', count(summary.sources)));
     return tiles;
   }
@@ -520,23 +646,25 @@ export function createAnalysis(elements: Elements, state: ViewerState, actions?:
       note.classList.add('chart-wide');
       content.append(note);
     }
-    content.append(volumeChart(analysis.rate ?? [], analysis.errors ?? [], analysis.range));
-    content.append(latencyChart(analysis.latency ?? [], analysis.range));
-    const breakdowns = document.createElement('div');
-    breakdowns.className = 'analysis-breakdowns chart-wide';
-    breakdowns.append(statusSection(analysis.statusCodes ?? []), ...(analysis.topValues ?? []).map(facetSection));
-    content.append(breakdowns);
+    content.append(volumeChart(analysis.rate ?? [], analysis.errors ?? [], analysis.range, analysis.warnings));
     const errorGroups = analysis.errorGroups ?? [];
-    const groups = section(
-      `Error groups${errorGroups.length ? ` · ${count(errorGroups.length)}` : ''}`,
-      'chart-section chart-wide',
-    );
+    const groups = section(`Error groups${errorGroups.length ? ` · ${count(errorGroups.length)}` : ''}`);
     const errorTotal = errorGroups.reduce((sum, item) => sum + item.count, 0);
     const errorMax = Math.max(1, ...errorGroups.map((item) => item.count));
     for (const item of errorGroups.slice(0, 20))
       groups.append(groupRow(item, errorTotal, errorMax, { detail: seen(item, analysis.range) }));
     if (!errorGroups.length) groups.append(empty('No errors in these logs.'));
-    content.append(groups);
+    // Errors and latency side by side: what failed, and when it got slow.
+    const pair = document.createElement('div');
+    pair.className = 'analysis-pair chart-wide';
+    const latency = latencyChart(analysis.latency ?? [], analysis.range, true);
+    latency.classList.remove('chart-wide');
+    pair.append(groups, latency);
+    content.append(pair);
+    const breakdowns = document.createElement('div');
+    breakdowns.className = 'analysis-breakdowns chart-wide';
+    breakdowns.append(statusSection(analysis.statusCodes ?? []), ...(analysis.topValues ?? []).map(facetSection));
+    content.append(breakdowns);
     const patterns = section('Log patterns', 'chart-section chart-wide');
     const patternMax = Math.max(1, ...(analysis.patterns ?? []).map((item) => item.count));
     for (const item of analysis.patterns ?? [])

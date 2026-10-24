@@ -1,63 +1,208 @@
 (() => {
   const api = acquireVsCodeApi();
-  const tabs = [...document.querySelectorAll('.tab')];
-  const panels = {
-    guide: document.getElementById('guideSection'),
-    whatsNew: document.getElementById('whatsNewSection'),
+  const data = window.__LOGLINE_GUIDE__ || {};
+  const releases = Array.isArray(data.releases) ? data.releases : [];
+  const sections = Array.isArray(data.sections) ? data.sections : [];
+  const cards = Array.isArray(data.cards) ? data.cards : [];
+  const keys = Array.isArray(data.keys) ? data.keys : [];
+  const unread = Number(data.unreadHighlights) || 0;
+  const $ = (id) => document.getElementById(id);
+  const panels = { guide: $('guideSection'), whatsNew: $('whatsNewSection') };
+  const element = (tag, className, text) => {
+    const node = document.createElement(tag);
+    if (className) node.className = className;
+    if (text !== undefined) node.textContent = text;
+    return node;
   };
-  const releases = Array.isArray(window.__LOGLINE_RELEASES__) ? window.__LOGLINE_RELEASES__ : [];
-  const releaseList = document.getElementById('releaseList');
+  let progress = { captured: false, searched: false, shared: false };
+  let releasesRendered = false;
 
-  function renderReleases() {
-    if (!releaseList) return;
-    releaseList.replaceChildren();
-    if (!releases.length) {
-      const empty = document.createElement('p');
-      empty.textContent = 'Release highlights will appear here.';
-      releaseList.append(empty);
-      return;
-    }
-    releases.forEach((release) => {
-      const article = document.createElement('article');
-      article.className = 'release';
-      const header = document.createElement('div');
-      header.className = 'release-header';
-      const title = document.createElement('h3');
-      title.textContent = `Version ${release.version}`;
-      const date = document.createElement('span');
-      date.className = 'release-date';
-      date.textContent = release.date;
-      header.append(title, date);
-      const highlights = document.createElement('div');
-      highlights.className = 'highlights';
-      (Array.isArray(release.highlights) ? release.highlights : []).forEach((highlight) => {
-        const item = document.createElement('div');
-        item.className = 'highlight';
-        const heading = document.createElement('h4');
-        heading.textContent = highlight.title;
-        const text = document.createElement('p');
-        text.textContent = highlight.text;
-        item.append(heading, text);
-        if (highlight.section) {
-          const link = document.createElement('button');
-          link.type = 'button';
-          link.textContent = 'See it in the guide →';
-          link.dataset.section = 'guide';
-          link.dataset.anchor = highlight.section;
-          item.append(link);
-        }
-        highlights.append(item);
-      });
-      article.append(header, highlights);
-      releaseList.append(article);
-    });
+  $('guideVersion').textContent = releases[0] ? `Version ${releases[0].version}` : '';
+  if (unread) {
+    $('whatsNewCount').hidden = false;
+    $('whatsNewCount').textContent = String(unread);
   }
 
-  function focusGuideAnchor(anchor) {
-    const target = document.getElementById(anchor);
-    const heading = target?.querySelector('h2');
+  /** The action a card offers: show its control in the Logs panel, run its command, or open its setting. */
+  function action(card) {
+    const button = element('button', 'card-action', card.target ? 'Show me' : card.command ? 'Try it' : 'Open setting');
+    button.type = 'button';
+    button.addEventListener('click', () => {
+      if (card.target) api.postMessage({ type: 'reveal', target: card.target, fallback: card.fallback });
+      else if (card.command) api.postMessage({ type: 'runCommand', command: card.command });
+      else api.postMessage({ type: 'openSetting', setting: card.setting });
+    });
+    return button;
+  }
+
+  function renderNav() {
+    const links = [
+      ['start', 'Get started'],
+      ...sections.map((section) => [section.id, section.title, section.isNew]),
+      ['keys', 'Keyboard'],
+    ];
+    $('guideNav').replaceChildren(
+      ...links.map(([id, title, isNew]) => {
+        const link = element('a', 'nav-link');
+        link.href = `#${id}`;
+        link.dataset.anchor = id;
+        link.append(element('span', '', title));
+        if (isNew) link.append(element('span', 'new-badge', 'New'));
+        return link;
+      }),
+    );
+  }
+
+  function renderCards() {
+    $('guideCards').replaceChildren(
+      ...sections.map((section) => {
+        const group = element('div', 'guide-group');
+        group.id = section.id;
+        const heading = element('div', 'group-heading');
+        const title = element('h2', '', section.title);
+        title.tabIndex = -1;
+        heading.append(title);
+        if (section.isNew) heading.append(element('span', 'new-badge', 'New'));
+        const grid = element('div', 'cards');
+        for (const card of cards.filter((item) => item.section === section.id)) {
+          const article = element('article', 'card');
+          article.dataset.search = [card.title, card.text, card.example, ...(card.where || [])]
+            .filter(Boolean)
+            .join(' ')
+            .toLowerCase();
+          article.append(element('h3', '', card.title));
+          const where = element('p', 'where');
+          where.setAttribute('aria-label', `Where: ${(card.where || []).join(', ')}`);
+          (card.where || []).forEach((part, index) => {
+            if (index) where.append(element('span', 'where-arrow', '›'));
+            where.append(element('span', 'chip', part));
+          });
+          article.append(where, element('p', 'text', card.text));
+          if (card.example) article.append(element('code', '', card.example));
+          const footer = element('div', 'card-footer');
+          if (card.target || card.command || card.setting) footer.append(action(card));
+          if (card.docs) {
+            const docs = element('button', 'link', 'Details in the docs');
+            docs.type = 'button';
+            docs.addEventListener('click', () => api.postMessage({ type: 'openDocs', anchor: card.docs }));
+            footer.append(docs);
+          }
+          if (footer.childElementCount) article.append(footer);
+          grid.append(article);
+        }
+        group.append(heading, element('p', 'summary', section.summary), grid);
+        return group;
+      }),
+    );
+    $('keyList').replaceChildren(
+      ...keys.flatMap(([keyText, actionText]) => [element('dt', '', keyText), element('dd', '', actionText)]),
+    );
+  }
+
+  function renderSteps() {
+    const steps = [
+      {
+        done: progress.captured,
+        title: 'Capture a run',
+        text: 'Turn on Capture in the status bar, then run your app in a terminal as usual.',
+        target: 'captureToggle',
+      },
+      {
+        done: progress.searched,
+        title: 'Search it',
+        text: 'Type level:error in the search box and press Enter. Click a row to see its details.',
+        target: 'search',
+      },
+      {
+        done: progress.shared,
+        title: 'Share with an agent',
+        text: 'Let Copilot, Claude Code, or Codex read what you captured, redacted and read-only.',
+        target: 'shareAgent',
+      },
+    ];
+    $('startSteps').replaceChildren(
+      ...steps.map((step, index) => {
+        const item = element('li', `step${step.done ? ' done' : ''}`);
+        const head = element('div', 'step-head');
+        const badge = element('span', 'step-badge', step.done ? '✓' : String(index + 1));
+        badge.setAttribute('aria-hidden', 'true');
+        head.append(badge, element('strong', '', step.title));
+        item.append(head, element('p', 'text', step.text));
+        if (step.done) item.append(element('span', 'step-done', 'Done'));
+        else {
+          const show = element('button', 'card-action primary', 'Show me');
+          show.type = 'button';
+          show.addEventListener('click', () => api.postMessage({ type: 'reveal', target: step.target }));
+          item.append(show);
+        }
+        item.setAttribute('aria-label', `Step ${index + 1}: ${step.title}${step.done ? ', done' : ''}`);
+        return item;
+      }),
+    );
+  }
+
+  function renderReleases() {
+    if (releasesRendered) return;
+    releasesRendered = true;
+    const list = $('releaseList');
+    if (!releases.length) {
+      list.replaceChildren(element('p', 'summary', 'Release highlights will appear here.'));
+      return;
+    }
+    const [latest, ...earlier] = releases;
+    $('whatsNewEyebrow').textContent = unread ? 'New since you last looked' : 'Latest release';
+    $('whatsNewTitle').textContent = `Logline ${latest.version}`;
+    const hero = element('div', 'highlights');
+    for (const highlight of latest.highlights || []) {
+      const item = element('article', 'card highlight');
+      item.append(element('h3', '', highlight.title), element('p', 'text', highlight.text));
+      if (highlight.section) {
+        const link = element('button', 'link', 'In the guide');
+        link.type = 'button';
+        link.dataset.section = 'guide';
+        link.dataset.anchor = highlight.section;
+        item.append(link);
+      }
+      hero.append(item);
+    }
+    const older = element('div', 'earlier');
+    if (earlier.length) older.append(element('h2', '', 'Earlier releases'));
+    for (const release of earlier) {
+      const row = element('section', 'release');
+      const label = element('div', 'release-label');
+      label.append(element('strong', '', release.version), element('span', 'release-date', release.date));
+      const items = element('ul');
+      for (const highlight of release.highlights || []) {
+        const entry = element('li');
+        entry.append(element('strong', '', `${highlight.title}. `), document.createTextNode(highlight.text));
+        items.append(entry);
+      }
+      row.append(label, items);
+      older.append(row);
+    }
+    list.replaceChildren(hero, older);
+  }
+
+  function filter(text) {
+    const words = text.toLowerCase().split(/\s+/).filter(Boolean);
+    let shown = 0;
+    for (const card of document.querySelectorAll('.card[data-search]')) {
+      const match = words.every((word) => card.dataset.search.includes(word));
+      card.hidden = !match;
+      if (match) shown++;
+    }
+    for (const group of document.querySelectorAll('#guideCards .guide-group'))
+      group.hidden = !group.querySelector('.card:not([hidden])');
+    $('start').hidden = words.length > 0;
+    $('keys').hidden = words.length > 0;
+    $('noResults').hidden = !words.length || shown > 0;
+  }
+
+  function focusAnchor(anchor) {
+    const target = $(anchor);
+    const heading = target && target.querySelector('h1, h2');
     if (!target || !heading) return;
-    // Keep the heading in the reading order after a release highlight jump.
+    // Keep the heading in the reading order after a jump.
     setTimeout(() => {
       target.scrollIntoView({ block: 'start' });
       heading.focus({ preventScroll: true });
@@ -66,51 +211,41 @@
 
   function selectSection(section, anchor) {
     const selected = section === 'whatsNew' ? 'whatsNew' : 'guide';
-    tabs.forEach((tab) => {
-      const active = tab.dataset.section === selected;
-      tab.setAttribute('aria-selected', String(active));
-      tab.tabIndex = active ? 0 : -1;
-    });
-    Object.entries(panels).forEach(([name, panel]) => {
-      panel.hidden = name !== selected;
-    });
+    for (const [name, panel] of Object.entries(panels)) panel.hidden = name !== selected;
+    $('whatsNewTab').setAttribute('aria-current', String(selected === 'whatsNew'));
     if (selected === 'whatsNew') {
       renderReleases();
       // The host acknowledges a release only after this section is visible.
       api.postMessage({ type: 'guideRendered', section: 'whatsNew' });
-    } else if (anchor) focusGuideAnchor(anchor);
+    } else if (anchor) focusAnchor(anchor);
   }
 
-  tabs.forEach((tab) =>
-    tab.addEventListener('click', (event) => {
-      event.preventDefault();
-      selectSection(tab.dataset.section);
-    }),
-  );
   document.addEventListener('click', (event) => {
     const source = event.target;
-    const target = source && typeof source.closest === 'function' ? source.closest('[data-anchor]') : null;
+    const target =
+      source && typeof source.closest === 'function' ? source.closest('[data-anchor], [data-section]') : null;
     if (!target) return;
     event.preventDefault();
-    selectSection(target.dataset.section, target.dataset.anchor);
+    if (target.dataset.section === 'whatsNew') selectSection('whatsNew');
+    else selectSection('guide', target.dataset.anchor);
   });
-  tabs.forEach((tab, index) =>
-    tab.addEventListener('keydown', (event) => {
-      if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
-      event.preventDefault();
-      const next =
-        event.key === 'Home'
-          ? 0
-          : event.key === 'End'
-            ? tabs.length - 1
-            : (index + (event.key === 'ArrowRight' ? 1 : -1) + tabs.length) % tabs.length;
-      tabs[next].focus();
-      selectSection(tabs[next].dataset.section);
-    }),
-  );
-  document.getElementById('openChangelog')?.addEventListener('click', () => api.postMessage({ type: 'openChangelog' }));
+  $('guideSearch').addEventListener('input', (event) => {
+    selectSection('guide');
+    filter(event.target.value);
+  });
+  $('openChangelog').addEventListener('click', () => api.postMessage({ type: 'openChangelog' }));
+  $('takeTour').addEventListener('click', () => api.postMessage({ type: 'takeTour' }));
   window.addEventListener('message', (event) => {
-    if (event.data?.type === 'selectSection') selectSection(event.data.section);
+    const message = event.data;
+    if (message?.type === 'selectSection') selectSection(message.section);
+    else if (message?.type === 'guideProgress') {
+      progress = { ...progress, ...message.progress };
+      renderSteps();
+    }
   });
+
+  renderNav();
+  renderCards();
+  renderSteps();
   api.postMessage({ type: 'guideReady' });
 })();

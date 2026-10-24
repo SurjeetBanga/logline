@@ -518,152 +518,346 @@ header {
   gap: 8px;
   flex: none;
 }
-.source-controls {
+/* The tabs, then the Sources rail beside the search row, its controls, and the view. */
+.workspace {
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+.workspace-main {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+}
+.workspace-main > .search-toolbar,
+.workspace-main > .connection-bar,
+.workspace-main > .table-hint {
+  margin-left: 12px;
+  margin-right: 14px;
+}
+.source-rail {
+  display: flex;
+  flex-direction: column;
+  flex: none;
+  width: 236px;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  border-right: 1px solid var(--vscode-panel-border, #444);
+}
+.rail-header {
   display: flex;
   align-items: center;
   gap: 2px;
-  flex: 0 1 360px;
-  min-width: 220px;
-  padding: 2px;
-  border: 1px solid var(--vscode-input-border, var(--vscode-panel-border, #444));
+  padding: 6px 6px 2px 14px;
+}
+.rail-title,
+.rail-group-label {
+  flex: 1;
+  color: var(--vscode-sideBarSectionHeader-foreground, var(--vscode-descriptionForeground, #aaa));
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.rail-icon {
+  width: 22px;
+  height: 22px;
+}
+.rail-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-height: 0;
+  padding: 0 6px 10px;
+  overflow-y: auto;
+}
+.rail-group {
+  display: flex;
+  align-items: center;
+  min-height: 24px;
+  padding: 8px 2px 2px 8px;
+}
+.rail-row {
+  display: flex;
+  align-items: center;
+  min-width: 0;
   border-radius: 4px;
 }
-.scope-picker {
-  position: relative;
-  flex: 1 1 360px;
-  min-width: 0;
+.rail-row:hover {
+  background: var(--vscode-list-hoverBackground, #2a2d2e);
 }
-#server {
+.rail-row.selected {
+  background: var(--vscode-list-inactiveSelectionBackground, #37373d);
+  color: var(--vscode-list-inactiveSelectionForeground, inherit);
+}
+.rail-select,
+.run-select {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  width: 100%;
-  height: 26px;
-  padding: 2px 8px;
-  overflow: hidden;
+  gap: 8px;
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 26px;
+  padding: 3px 6px 3px 8px;
   border: 0;
   background: transparent;
-  color: var(--vscode-descriptionForeground, #aaa);
+  color: inherit;
   text-align: left;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
-#server::after {
-  content: '';
-  flex: 0 0 auto;
-  width: 5px;
-  height: 5px;
-  margin-left: 8px;
-  border-right: 1px solid currentColor;
-  border-bottom: 1px solid currentColor;
-  transform: translateY(-2px) rotate(45deg);
-  opacity: 0.7;
+.rail-select:focus-visible,
+.run-select:focus-visible,
+.rail-action:focus-visible {
+  outline: 1px solid var(--vscode-list-focusOutline, var(--vscode-focusBorder, #007fd4));
+  outline-offset: -1px;
 }
-#server:hover,
-#server[aria-expanded='true'] {
-  background: var(--vscode-list-hoverBackground, #2a2d2e);
+.rail-glyph {
+  display: inline-flex;
+  flex: none;
+  color: var(--vscode-icon-foreground, #c5c5c5);
 }
-.scope-menu {
-  width: min(520px, calc(100vw - 16px));
-  max-width: calc(100vw - 16px);
-  max-height: min(65vh, 420px);
-  overflow-y: auto;
-  padding: 4px;
-}
-.scope-tabs {
+.rail-text {
   display: flex;
-  gap: 2px;
-  margin-bottom: 4px;
-  border-bottom: 1px solid var(--vscode-panel-border, #444);
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-width: 0;
 }
-.scope-tab {
-  flex: 0 0 auto;
-  padding: 5px 10px;
-  border: 0;
-  border-bottom: 2px solid transparent;
-  border-radius: 0;
-  background: transparent;
-  color: var(--vscode-descriptionForeground, #aaa);
-}
-.scope-tab:hover,
-.scope-tab[aria-selected='true'] {
-  background: var(--vscode-list-hoverBackground, #2a2d2e);
-  color: var(--vscode-foreground, #d4d4d4);
-}
-.scope-tab[aria-selected='true'] {
-  border-bottom-color: var(--vscode-focusBorder, #007acc);
-  color: var(--vscode-textLink-foreground, #75beff);
-}
-.source-menu,
-.session-menu {
-  max-height: min(58vh, 380px);
-  overflow-y: auto;
-  padding: 0;
-}
-.source-select {
-  display: block;
-  width: 100%;
+.rail-name,
+.rail-status {
   overflow: hidden;
-  padding: 6px 8px;
-  border-color: transparent;
-  background: transparent;
-  color: var(--vscode-menu-foreground, var(--vscode-foreground, #d4d4d4));
-  text-align: left;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.source-select:hover,
-.source-select[aria-selected='true'] {
-  background: var(--vscode-list-hoverBackground, #2a2d2e);
+.rail-status,
+.rail-meta {
+  color: var(--vscode-descriptionForeground, #aaa);
+  font-size: 11px;
+  line-height: 1.4;
 }
-.source-select[aria-selected='true'] {
-  color: var(--vscode-textLink-foreground, #75beff);
+.rail-status.live {
+  color: var(--vscode-textLink-foreground, #3794ff);
+}
+.rail-status.error {
+  color: var(--vscode-errorForeground, #f48771);
+}
+.rail-meta {
+  flex: none;
+}
+.rail-agents {
+  flex: none;
+  color: var(--vscode-descriptionForeground, #aaa);
+  font-size: 11px;
+}
+.rail-dot {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--vscode-descriptionForeground, #6b6b6b);
+}
+.rail-dot.running {
+  background: var(--vscode-testing-iconPassed, #73c991);
+}
+.rail-dot.stopping {
+  background: var(--vscode-editorWarning-foreground, #cca700);
+}
+.rail-dot.failed {
+  background: var(--vscode-errorForeground, #f14c4c);
+}
+.rail-dot.tailing {
+  background: var(--vscode-textLink-foreground, #3794ff);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--vscode-textLink-foreground, #3794ff) 25%, transparent);
+}
+/* Run and Stop replace a row's count and dot while it is pointed at, focused, or selected,
+   like the terminal list's actions. */
+.rail-actions {
+  display: none;
+  align-items: center;
+  gap: 1px;
+  padding-right: 4px;
+}
+.rail-row.has-actions:hover .rail-actions,
+.rail-row.has-actions:focus-within .rail-actions,
+.rail-row.has-actions.selected .rail-actions {
+  display: flex;
+}
+.rail-row.has-actions:hover .rail-meta,
+.rail-row.has-actions:focus-within .rail-meta,
+.rail-row.has-actions.selected .rail-meta,
+.rail-row.has-actions:hover .rail-dot,
+.rail-row.has-actions:focus-within .rail-dot,
+.rail-row.has-actions.selected .rail-dot {
+  display: none;
+}
+.rail-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  border-radius: 3px;
+  background: transparent;
+  color: var(--vscode-icon-foreground, #c5c5c5);
+}
+.rail-action:hover:not(:disabled) {
+  background: var(--vscode-toolbar-hoverBackground, rgba(90, 93, 94, 0.31));
+}
+.rail-runs {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 1px 0 4px;
 }
 .run-option-row {
   display: flex;
-  align-items: stretch;
+  align-items: center;
   min-width: 0;
+  border-radius: 4px;
 }
-.run-select {
-  flex: 1 1 auto;
-  min-width: 0;
-  overflow: hidden;
-  padding: 6px 8px;
-  border-color: transparent;
-  background: transparent;
-  color: var(--vscode-menu-foreground, var(--vscode-foreground, #d4d4d4));
-  text-align: left;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.run-select:hover,
-.run-select[aria-selected='true'] {
-  background: var(--vscode-list-hoverBackground, #2a2d2e);
-}
-.run-select[aria-selected='true'] {
-  color: var(--vscode-textLink-foreground, #75beff);
-}
-.run-stop {
-  flex: 0 0 auto;
-  align-self: center;
-  margin: 0 4px;
-  padding: 3px 6px;
-  border-color: transparent;
-  background: transparent;
-  color: var(--vscode-textLink-foreground, #75beff);
+.rail-runs .run-select {
+  min-height: 24px;
+  padding-left: 30px;
+  border-radius: 4px;
   font-size: 12px;
 }
-.run-stop:not(:disabled):hover {
+.rail-runs .run-select:hover {
   background: var(--vscode-list-hoverBackground, #2a2d2e);
-  text-decoration: underline;
 }
-.run-stop-disabled {
-  color: var(--vscode-descriptionForeground, #888);
-  cursor: default;
-  white-space: nowrap;
+.run-select[aria-current='true'] {
+  color: var(--vscode-textLink-foreground, #3794ff);
 }
-#server {
-  height: 24px;
+.run-select .rail-name {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.rail-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 4px 2px 0;
+  padding: 10px;
+  border: 1px dashed var(--vscode-panel-border, #444);
+  border-radius: 6px;
+}
+.rail-empty p {
+  margin: 0;
+  color: var(--vscode-descriptionForeground, #aaa);
+  font-size: 12px;
+}
+.rail-empty-add {
+  border-color: transparent;
+  background: var(--vscode-button-background, #0e639c);
+  color: var(--vscode-button-foreground, #fff);
+}
+.rail-empty-add:hover {
+  background: var(--vscode-button-hoverBackground, #1177bb);
+}
+/* Collapsed, the rail is a strip of icons; each row's name, status, and count are in its tooltip. */
+.source-rail.collapsed {
+  width: 40px;
+}
+.source-rail.collapsed .rail-header {
+  justify-content: center;
+  padding: 6px 0 2px;
+}
+.source-rail.collapsed .rail-title,
+.source-rail.collapsed #railStopAll,
+.source-rail.collapsed .rail-group-label,
+.source-rail.collapsed .rail-text,
+.source-rail.collapsed .rail-meta,
+.source-rail.collapsed .rail-agents,
+.source-rail.collapsed .rail-actions,
+.source-rail.collapsed .rail-runs,
+.source-rail.collapsed .rail-empty p {
+  display: none;
+}
+.source-rail.collapsed .rail-toggle svg {
+  transform: scaleX(-1);
+}
+.source-rail.collapsed .rail-list {
+  padding: 0 4px 10px;
+}
+.source-rail.collapsed .rail-group {
+  justify-content: center;
+  padding: 4px 0;
+  border-top: 1px solid var(--vscode-panel-border, #444);
+}
+.source-rail.collapsed .rail-select {
+  position: relative;
+  justify-content: center;
+  padding: 6px 0;
+}
+.source-rail.collapsed .rail-dot {
+  position: absolute;
+  top: 5px;
+  right: 5px;
+  width: 6px;
+  height: 6px;
+}
+.source-rail.collapsed .rail-empty {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  align-items: center;
+}
+.source-rail.collapsed .rail-empty-add {
+  display: none;
+}
+/* Sources apply to the logs and their analysis; Compare, Traces, and Metrics have a rail of their own. */
+body:not([data-view='logs']):not([data-view='analysis']) #sourceRail,
+body:not([data-view='compare']):not([data-view='traces']):not([data-view='metrics']) #tabRail {
+  display: none;
+}
+.rail-swatch {
+  display: inline-block;
+  flex: none;
+  width: 9px;
+  height: 9px;
+  border-radius: 2px;
+}
+.rail-initial {
+  display: none;
+  font-size: 10px;
+  font-weight: 600;
+}
+.rail-check {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 13px;
+  height: 13px;
+  border: 1px solid var(--vscode-checkbox-border, var(--vscode-descriptionForeground, #6b6b6b));
+  border-radius: 3px;
+}
+.rail-check.on {
+  border-color: var(--vscode-focusBorder, #007fd4);
+  background: var(--vscode-button-background, #0e639c);
+}
+.rail-check.on::after {
+  content: '';
+  width: 6px;
+  height: 3px;
+  margin-top: -2px;
+  border-bottom: 1.5px solid var(--vscode-button-foreground, #ffffff);
+  border-left: 1.5px solid var(--vscode-button-foreground, #ffffff);
+  transform: rotate(-45deg);
+}
+.tab-rail .rail-glyph {
+  gap: 6px;
+  align-items: center;
+}
+.source-rail.collapsed .rail-initial {
+  display: inline;
+}
+.source-rail.collapsed .rail-check + .rail-swatch {
+  display: none;
 }
 .more-actions {
   width: 28px;
@@ -918,12 +1112,6 @@ select {
   border-radius: 3px;
   font-size: 11px;
 }
-/* An action at the end of the source list, not a source. */
-.source-select.source-action {
-  margin-top: 4px;
-  border-top: 1px solid var(--vscode-menu-separatorBackground, #454545);
-  color: var(--vscode-textLink-foreground, #3794ff);
-}
 /* Metric query: a connection's time series, charted. */
 .metric-query {
   display: flex;
@@ -1056,9 +1244,24 @@ select {
 .compare-choice {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   min-width: 0;
+  padding: 2px 4px 2px 10px;
+  border: 1px solid var(--vscode-panel-border, #444);
+  border-radius: 6px;
   color: var(--vscode-descriptionForeground, #aaa);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.compare-choice select {
+  border: 0;
+  background: transparent;
+  font-size: 13px;
+  font-weight: 400;
+  letter-spacing: 0;
+  text-transform: none;
 }
 .compare-choice select {
   max-width: 340px;
@@ -1113,24 +1316,73 @@ select {
 .compare-status {
   white-space: nowrap;
 }
-.compare-reproduced,
+/* Each status is a pill in its own color, the same as in the rail. */
+.compare-status.compare-reproduced,
+.compare-status.compare-fixed,
+.compare-status.compare-new,
+.compare-status.compare-muted {
+  display: table-cell;
+}
+.compare-reproduced::before,
+.compare-fixed::before,
+.compare-new::before,
+.compare-muted::before {
+  content: '';
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  margin-right: 6px;
+  border-radius: 50%;
+  vertical-align: 1px;
+  background: currentColor;
+}
+.compare-reproduced {
+  color: var(--vscode-charts-red, #f48771);
+}
 .compare-fixed {
   color: var(--vscode-testing-iconPassed, #89d185);
 }
 .compare-new {
-  color: var(--vscode-editorWarning-foreground, #cca700);
+  color: var(--vscode-charts-orange, #e2a33c);
 }
 .compare-muted,
 .compare-none {
   color: var(--vscode-descriptionForeground, #aaa);
 }
+.compare-none::before {
+  content: none;
+}
+.compare-body {
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+.compare-body > .trace-scroll {
+  flex: 1 1 auto;
+  min-width: 0;
+}
 .compare-detail {
-  margin-top: 10px;
+  flex: 0 0 360px;
+  min-width: 0;
+  padding: 10px 0 10px 12px;
+  overflow-y: auto;
+  border-left: 1px solid var(--vscode-panel-border, #444);
 }
 .compare-sides {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 12px;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 10px;
+}
+@media (max-width: 760px) {
+  .compare-body {
+    flex-direction: column;
+  }
+  .compare-detail {
+    flex-basis: auto;
+    padding: 10px 0 0;
+    border-left: 0;
+    border-top: 1px solid var(--vscode-panel-border, #444);
+  }
 }
 .compare-side {
   min-width: 0;
@@ -1175,6 +1427,10 @@ select {
   gap: 4px;
   margin-top: 6px;
   min-width: 0;
+  padding: 6px 8px;
+  border: 1px solid var(--vscode-panel-border, #444);
+  border-radius: 6px;
+  background: var(--vscode-sideBar-background, transparent);
 }
 .connection-bar[hidden] {
   display: none;
@@ -1588,6 +1844,32 @@ select {
 .volume-bar-error {
   fill: var(--vscode-charts-red, #f14c4c);
 }
+.volume-bar-warn {
+  fill: var(--vscode-charts-yellow, #cca700);
+}
+/* A window dragged across the volume bars, and the bar that offers it to Logs. */
+.volume-selection {
+  fill: color-mix(in srgb, var(--vscode-focusBorder, #007fd4) 14%, transparent);
+  stroke: var(--vscode-focusBorder, #007fd4);
+  stroke-width: 1;
+  pointer-events: none;
+}
+.volume-chart {
+  touch-action: none;
+  user-select: none;
+}
+.volume-selection-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+  font-size: 12px;
+}
+.volume-selection-bar button {
+  padding: 1px 8px;
+  font-size: 12px;
+}
 .volume-bar.anomalous .volume-bar-ok {
   fill: var(--vscode-charts-orange, #d18616);
 }
@@ -1634,6 +1916,9 @@ select {
 }
 .chart-legend-swatch.swatch-error {
   background: var(--vscode-charts-red, #f14c4c);
+}
+.chart-legend-swatch.swatch-warn {
+  background: var(--vscode-charts-yellow, #cca700);
 }
 .chart-legend-swatch.swatch-average {
   background: var(--vscode-charts-blue, #75beff);
@@ -1685,7 +1970,29 @@ select {
 .analysis-breakdowns {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-  gap: 4px 16px;
+  gap: 12px;
+}
+/* Error groups beside latency: what failed, and when it got slow. */
+.analysis-pair {
+  display: grid;
+  grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
+  gap: 12px;
+}
+@media (max-width: 760px) {
+  .analysis-pair {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+/* Each chart and breakdown sits on a quiet card, like the summary tiles. */
+.analysis-content .chart-section {
+  padding: 8px 12px 10px;
+  border: 1px solid var(--vscode-panel-border, #444);
+  border-radius: 6px;
+}
+.analysis-content .chart-section h3 {
+  margin-top: 0;
+  color: var(--vscode-foreground, #d4d4d4);
+  font-weight: 600;
 }
 .volume-hit {
   fill: transparent;
@@ -1855,42 +2162,6 @@ button:disabled {
   outline: 2px solid var(--vscode-focusBorder, #007acc);
   outline-offset: 1px;
 }
-.session {
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 14px;
-  flex: 1 1 auto;
-  min-width: 0;
-  overflow: hidden;
-  color: var(--vscode-descriptionForeground, #aaa);
-  white-space: nowrap;
-}
-.session > * {
-  flex: none;
-}
-#shareScope {
-  color: var(--vscode-textLink-foreground, #3794ff);
-}
-/* The running command is context, not content: one muted line, cut to fit, with the full command in its tooltip. */
-.session > #command {
-  flex: 1 1 auto;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  padding: 0;
-  background: transparent;
-  color: inherit;
-  font-size: 12px;
-}
-#command::before {
-  content: '$ ';
-  opacity: 0.7;
-}
-/* VS Code styles every code element with a background; without a command it is an empty box. */
-#command:empty {
-  display: none;
-}
 /* The virtualized table fully replaces its visible rows on every update,
    giving the browser's scroll-anchoring heuristic no stable node to track;
    disabling it avoids relying on that heuristic across those replacements. */
@@ -1963,6 +2234,8 @@ body:not([data-view='logs']) #rowHint {
 }
 /* Traces, Metrics, and Issues have their own filters; the search row and a connection's
    search controls are for the logs and their analysis. */
+body[data-view='compare'] .search-toolbar,
+body[data-view='compare'] .connection-bar,
 body[data-view='traces'] .search-toolbar,
 body[data-view='metrics'] .search-toolbar,
 body[data-view='aiCalls'] .search-toolbar,
@@ -2179,21 +2452,144 @@ td.time {
   padding: 18px;
   color: var(--vscode-descriptionForeground, #aaa);
 }
+/* What the table shows on the left; what is running, kept, and shared on the right, each one click away. */
 .status-bar {
   display: flex;
   align-items: center;
-  gap: 16px;
+  justify-content: space-between;
+  gap: 12px;
   flex: none;
   min-width: 0;
-  padding: 3px 14px 4px;
+  padding: 2px 10px 3px 14px;
+  border-top: 1px solid var(--vscode-panel-border, #444);
+  color: var(--vscode-descriptionForeground, #aaa);
   font-size: 12px;
   white-space: nowrap;
 }
+.status-left,
+.status-right {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+.status-left {
+  gap: 8px;
+  flex: 1 1 auto;
+  overflow: hidden;
+}
+.status-right {
+  gap: 2px;
+  flex: none;
+}
+.match-count {
+  color: var(--vscode-foreground, #d4d4d4);
+}
+.page-number {
+  font-variant-numeric: tabular-nums;
+}
+.status-bar .pagination {
+  gap: 2px;
+}
+.pager {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 0;
+  border-radius: 3px;
+  background: transparent;
+  color: inherit;
+}
+.pager:hover:not(:disabled) {
+  background: var(--vscode-toolbar-hoverBackground, rgba(90, 93, 94, 0.31));
+}
+.status-notice {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--vscode-foreground, #d4d4d4);
+}
+.status-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 20px;
+  padding: 0 6px;
+  border: 0;
+  border-radius: 3px;
+  background: transparent;
+  color: inherit;
+  font-size: 12px;
+}
+.status-chip[aria-pressed='true'] {
+  border-color: transparent;
+  color: inherit;
+}
+.status-chip:hover,
+.status-chip[aria-expanded='true'] {
+  background: var(--vscode-toolbar-hoverBackground, rgba(90, 93, 94, 0.31));
+}
+.share-chip {
+  color: var(--vscode-textLink-foreground, #3794ff);
+}
+.status-icon {
+  color: var(--vscode-testing-iconPassed, #73c991);
+}
+.memory-meter {
+  display: inline-flex;
+  width: 32px;
+  height: 4px;
+  overflow: hidden;
+  border-radius: 2px;
+  background: var(--vscode-progressBar-background, #3c3c3c);
+  background: color-mix(in srgb, var(--vscode-descriptionForeground, #aaa) 30%, transparent);
+}
+.memory-fill {
+  width: 0;
+  background: var(--vscode-descriptionForeground, #aaa);
+}
+.memory-fill.full {
+  background: var(--vscode-editorWarning-foreground, #cca700);
+}
+.popover.memory-panel {
+  width: 280px;
+  padding: 10px 12px;
+}
+.memory-panel h3 {
+  margin: 0 0 6px;
+  font-size: 13px;
+}
+.memory-summary {
+  margin: 0 0 8px;
+  white-space: normal;
+}
+.memory-details {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 2px 12px;
+  margin: 0 0 8px;
+}
+.memory-details dt {
+  color: var(--vscode-descriptionForeground, #aaa);
+}
+.memory-details dd {
+  margin: 0;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.link-button {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--vscode-textLink-foreground, #3794ff);
+}
+.link-button:hover {
+  text-decoration: underline;
+}
 .status-bar .pagination button {
   padding: 1px 8px;
-}
-#counts {
-  color: var(--vscode-descriptionForeground, #aaa);
 }
 /* Terminal capture, as a status bar item: quiet until hovered, its icon colored while on. */
 .status-toggle {
@@ -2274,29 +2670,16 @@ td[data-column]:focus-visible {
   border-color: var(--vscode-focusBorder, #007fd4);
   background: var(--vscode-toolbar-hoverBackground, rgba(90, 93, 94, 0.31));
 }
-.otlp-chip {
-  padding: 0 8px;
-  border: 1px solid transparent;
-  border-radius: 10px;
-  background: transparent;
-  color: var(--vscode-descriptionForeground, #aaa);
-  font-size: 11px;
-  line-height: 17px;
-}
-.otlp-chip:hover {
-  border-color: var(--vscode-panel-border, #444);
-  background: var(--vscode-list-hoverBackground, #2a2d2e);
-}
 .otlp-chip::before {
-  color: var(--vscode-charts-green, #89d185);
   content: '';
   display: inline-block;
   width: 6px;
   height: 6px;
-  margin-right: 6px;
   border-radius: 50%;
-  background: currentColor;
-  vertical-align: 1px;
+  background: var(--vscode-descriptionForeground, #6b6b6b);
+}
+.otlp-chip[aria-pressed='true']::before {
+  background: var(--vscode-testing-iconPassed, #73c991);
 }
 .otlp-chip[hidden] {
   display: none;
@@ -2537,6 +2920,101 @@ td[data-column]:focus-visible {
   width: 100%;
   height: 24px;
 }
+.metrics-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding-bottom: 12px;
+}
+.metric-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 10px;
+}
+.metric-card {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 100%;
+  min-width: 0;
+  height: 100%;
+  padding: 10px 12px;
+  border: 1px solid var(--vscode-panel-border, #444);
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+}
+.metric-card:hover {
+  background: var(--vscode-list-hoverBackground, #2a2d2e);
+}
+.metric-card.selected {
+  border-color: var(--vscode-focusBorder, #007fd4);
+}
+.metric-card .metric-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: 12px;
+}
+.metric-service,
+.metric-card .metric-attributes {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--vscode-descriptionForeground, #aaa);
+  font-size: 12px;
+}
+.metric-card-bottom {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 4px;
+}
+.metric-card .metric-latest {
+  flex: none;
+  font-size: 18px;
+  font-weight: 600;
+}
+.metric-card .metric-spark {
+  flex: 1 1 auto;
+  max-width: 110px;
+}
+.metric-detail {
+  margin-bottom: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--vscode-panel-border, #444);
+  border-radius: 6px;
+}
+.metric-detail-header {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+}
+.metric-detail-header h3 {
+  flex: 1 1 auto;
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: 13px;
+}
+.metric-detail-value {
+  font-size: 18px;
+  font-variant-numeric: tabular-nums;
+}
+.metric-spark.metric-chart-large {
+  height: 120px;
+  margin: 8px 0;
+}
+.metric-detail-about {
+  margin: 0;
+  color: var(--vscode-descriptionForeground, #aaa);
+  font-size: 12px;
+}
 .metric-spark polyline {
   fill: none;
   stroke: var(--vscode-charts-blue, #3794ff);
@@ -2611,6 +3089,15 @@ td[data-column]:focus-visible {
   overflow: hidden;
   text-overflow: ellipsis;
   vertical-align: middle;
+}
+.service-dot {
+  display: inline-block;
+  flex: none;
+  width: 7px;
+  height: 7px;
+  margin-right: 5px;
+  border-radius: 2px;
+  vertical-align: 0;
 }
 .service-chip {
   display: inline-block;
@@ -2901,6 +3388,146 @@ td[data-column]:focus-visible {
 #follow[data-mode='live'] .tb-icon {
   color: var(--vscode-testing-iconPassed, #73c991);
 }
+/* Share with agent and its arrow read as one control. */
+.share-split {
+  display: inline-flex;
+  align-items: stretch;
+}
+.view-bar-actions .share-split > #shareAgent {
+  padding: 3px 8px;
+  border: 1px solid var(--vscode-button-secondaryBackground, #3a3d41);
+  border-right: 0;
+  border-radius: 4px 0 0 4px;
+  background: transparent;
+  color: var(--vscode-foreground, #d4d4d4);
+}
+.share-chevron {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  padding: 0;
+  border: 1px solid var(--vscode-button-secondaryBackground, #3a3d41);
+  border-radius: 0 4px 4px 0;
+  background: transparent;
+  color: var(--vscode-foreground, #d4d4d4);
+}
+.view-bar-actions .share-split > #shareAgent:hover,
+.share-chevron:hover,
+.share-chevron[aria-expanded='true'] {
+  background: var(--vscode-toolbar-hoverBackground, rgba(90, 93, 94, 0.31));
+}
+.view-bar-actions .share-split > #shareAgent[aria-pressed='true'],
+.share-chevron.sharing {
+  border-color: var(--vscode-focusBorder, #007fd4);
+}
+.popover.share-panel {
+  width: 360px;
+  max-width: calc(100vw - 16px);
+  padding: 0;
+  overflow-y: auto;
+}
+.share-panel-header,
+.share-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 10px 12px;
+}
+.share-panel-header {
+  border-bottom: 1px solid var(--vscode-panel-border, #444);
+}
+.share-panel-header h3 {
+  margin: 0;
+  font-size: 13px;
+}
+.share-state {
+  padding: 0 8px;
+  border-radius: 9px;
+  background: var(--vscode-badge-background, #4d4d4d);
+  color: var(--vscode-badge-foreground, #fff);
+  font-size: 11px;
+  line-height: 18px;
+}
+.share-state.on {
+  background: var(--vscode-button-background, #0e639c);
+  color: var(--vscode-button-foreground, #fff);
+}
+.share-section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--vscode-panel-border, #444);
+}
+.share-section h4 {
+  margin: 0;
+  color: var(--vscode-descriptionForeground, #aaa);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.share-choice {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  cursor: pointer;
+}
+.share-choice input {
+  margin: 3px 0 0;
+}
+.share-choice > span,
+.share-agent-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.share-hint,
+.share-note {
+  color: var(--vscode-descriptionForeground, #aaa);
+  font-size: 12px;
+}
+.share-note {
+  margin: 0;
+}
+.share-choose {
+  align-self: flex-start;
+}
+.share-agent,
+.share-connection {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 32px;
+}
+.share-agent-text,
+.share-connection .share-agent-name {
+  flex: 1 1 auto;
+}
+.share-agent-state {
+  flex: none;
+  font-size: 12px;
+}
+.share-agent-state.ready {
+  color: var(--vscode-testing-iconPassed, #73c991);
+}
+.share-agent-state.muted {
+  color: var(--vscode-descriptionForeground, #aaa);
+}
+.share-allow[aria-pressed='true'] {
+  border-color: var(--vscode-focusBorder, #007fd4);
+  color: var(--vscode-textLink-foreground, #3794ff);
+}
+.share-toggle.primary {
+  border-color: transparent;
+  background: var(--vscode-button-background, #0e639c);
+  color: var(--vscode-button-foreground, #fff);
+}
+.share-toggle.primary:hover {
+  background: var(--vscode-button-hoverBackground, #1177bb);
+}
 #shareAgent[aria-pressed='true'] .tb-icon {
   color: var(--vscode-textLink-foreground, #3794ff);
 }
@@ -2935,7 +3562,6 @@ td[data-column]:focus-visible {
   #shareAgent .tb-icon {
     margin-right: 0;
   }
-  #sessions,
   #status {
     display: none;
   }
@@ -2957,12 +3583,7 @@ td[data-column]:focus-visible {
   .level-button {
     min-width: 0;
   }
-  .source-controls {
-    flex-basis: 200px;
-    min-width: 160px;
-  }
-  #command,
-  #counts,
+  #memoryText,
   #mode {
     display: none;
   }
@@ -2985,4 +3606,247 @@ td[data-column]:focus-visible {
     flex-basis: 100%;
     min-width: 0;
   }
+}
+/* The guide's Show me: the control it points at is outlined, pulsing three times. */
+.reveal-pulse {
+  outline: 2px solid var(--vscode-focusBorder, #007fd4) !important;
+  outline-offset: 2px;
+  animation: reveal-pulse 0.45s ease-in-out 4 alternate;
+}
+@keyframes reveal-pulse {
+  to {
+    outline-color: transparent;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .reveal-pulse {
+    animation: none;
+  }
+}
+
+/* Traces: an open waterfall sits below the list, so another trace can be chosen without going back. */
+body[data-subview='trace'] #tracesView {
+  flex: 0 0 38%;
+  border-bottom: 1px solid var(--vscode-panel-border, #444);
+}
+body[data-subview='trace'] #traceView {
+  flex: 1 1 auto;
+}
+.traces-row.selected {
+  background: var(--vscode-list-inactiveSelectionBackground, #37373d);
+}
+
+/* Rail filters say whether they are on with their check box, not with the pressed-button color. */
+.rail-select[aria-pressed] {
+  border-color: transparent;
+  color: inherit;
+}
+/* The match count describes the table; other tabs say what they show themselves. */
+body:not([data-view='logs']) .match-count {
+  display: none;
+}
+/* First run: a welcome that offers the tour or exploring alone, and quick ways to start. */
+.welcome-dialog {
+  width: min(600px, calc(100vw - 32px));
+  padding: 24px;
+  border: 1px solid var(--vscode-widget-border, #454545);
+  border-radius: 10px;
+  background: var(--vscode-editorWidget-background, #252526);
+  color: var(--vscode-foreground, #cccccc);
+  box-shadow: 0 16px 48px var(--vscode-widget-shadow, rgba(0, 0, 0, 0.6));
+}
+.welcome-dialog::backdrop {
+  background: rgba(0, 0, 0, 0.55);
+}
+.welcome-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+.welcome-head h2 {
+  margin: 0;
+  font-size: 18px;
+}
+.welcome-head p {
+  margin: 2px 0 0;
+  color: var(--vscode-descriptionForeground, #aaa);
+}
+.welcome-mark {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 34px;
+  height: 34px;
+  border-radius: 8px;
+  background: var(--vscode-button-background, #0e639c);
+  color: var(--vscode-button-foreground, #ffffff);
+  font-size: 17px;
+  font-weight: 700;
+}
+.welcome-choices {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 10px;
+  margin: 18px 0 14px;
+}
+.welcome-choice {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 14px;
+  border: 1px solid var(--vscode-panel-border, #444);
+  border-radius: 8px;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+}
+.welcome-choice span {
+  color: var(--vscode-descriptionForeground, #aaa);
+}
+.welcome-choice,
+.welcome-choice span {
+  min-width: 0;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.welcome-choice.primary {
+  border-color: var(--vscode-focusBorder, #007fd4);
+  background: color-mix(in srgb, var(--vscode-button-background, #0e639c) 30%, transparent);
+}
+.welcome-choice:hover {
+  background: var(--vscode-list-hoverBackground, #2a2d2e);
+}
+.welcome-label {
+  margin: 0 0 6px;
+  color: var(--vscode-descriptionForeground, #aaa);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.welcome-starts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.welcome-note {
+  margin: 14px 0 0;
+  color: var(--vscode-descriptionForeground, #aaa);
+  font-size: 12px;
+}
+/* The tour: a dimmed panel with one control cut out, and a card that explains it. */
+.tour-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+}
+.tour-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+}
+.tour-spotlight {
+  position: fixed;
+  border: 2px solid var(--vscode-focusBorder, #007fd4);
+  border-radius: 6px;
+  box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.6);
+  pointer-events: none;
+}
+.tour-card {
+  position: fixed;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 340px;
+  max-width: calc(100vw - 16px);
+  padding: 14px 16px;
+  border: 1px solid var(--vscode-widget-border, #454545);
+  border-radius: 8px;
+  background: var(--vscode-editorWidget-background, #252526);
+  color: var(--vscode-foreground, #cccccc);
+  box-shadow: 0 10px 32px var(--vscode-widget-shadow, rgba(0, 0, 0, 0.6));
+}
+.tour-card.tour-done {
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 420px;
+}
+.tour-card h2 {
+  margin: 0;
+  font-size: 15px;
+}
+.tour-card p {
+  margin: 0;
+}
+.tour-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.tour-counter {
+  color: var(--vscode-textLink-foreground, #3794ff);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.tour-skip {
+  padding: 0 4px;
+  border: 0;
+  background: transparent;
+  color: var(--vscode-descriptionForeground, #aaa);
+  font-size: 12px;
+}
+.tour-example {
+  color: var(--vscode-descriptionForeground, #aaa);
+  font-size: 12px;
+}
+.tour-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 4px;
+}
+.tour-dots {
+  display: flex;
+  flex: 1;
+  gap: 4px;
+}
+.tour-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 3px;
+  background: var(--vscode-panel-border, #3c3c3c);
+}
+.tour-dot.seen {
+  background: color-mix(in srgb, var(--vscode-textLink-foreground, #3794ff) 50%, transparent);
+}
+.tour-dot.current {
+  width: 16px;
+  background: var(--vscode-textLink-foreground, #3794ff);
+}
+.tour-primary {
+  border-color: transparent;
+  background: var(--vscode-button-background, #0e639c);
+  color: var(--vscode-button-foreground, #ffffff);
+}
+.tour-primary:hover {
+  background: var(--vscode-button-hoverBackground, #1177bb);
+}
+.tour-hint {
+  position: fixed;
+  left: 16px;
+  bottom: 36px;
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  max-width: calc(100vw - 32px);
+  padding: 8px 12px;
+  border: 1px solid var(--vscode-widget-border, #454545);
+  border-radius: 8px;
+  background: var(--vscode-editorWidget-background, #252526);
+  box-shadow: 0 6px 24px var(--vscode-widget-shadow, rgba(0, 0, 0, 0.5));
 }
