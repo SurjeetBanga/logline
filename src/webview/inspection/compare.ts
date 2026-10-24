@@ -167,21 +167,22 @@ export function createCompare(
 
   function render(next: CompareView): void {
     view = next;
-    const header = (text: string, title = '') => {
+    const header = (text: string, title = '', className = '') => {
       const element = document.createElement('th');
       element.textContent = text;
       element.title = title;
+      element.className = className;
       return element;
     };
     elements.compareHead.replaceChildren(
       header('Error'),
-      header('Production', next.baseline.label),
-      ...next.runs.map((run, index) =>
-        header(
-          index === next.runs.length - 1 ? 'Latest run' : run.startedAt ? actions.formatTime(run.startedAt) : 'Run',
-          `${run.label}${run.startedAt ? ` · ${actions.formatTime(run.startedAt)}` : ''}`,
-        ),
-      ),
+      header('Production', next.baseline.label, 'compare-count'),
+      ...next.runs.map((run, index) => {
+        const time = run.startedAt ? actions.formatTime(run.startedAt) : '';
+        // An earlier run is named by its time to the second, which fits the column; the title has the rest.
+        const name = index === next.runs.length - 1 ? 'Latest run' : time.replace(/\.\d+$/, '') || 'Run';
+        return header(name, `${run.label}${time ? ` · ${time}` : ''}`, 'compare-count');
+      }),
       header('Status'),
     );
     const errors = next.rows.length;
@@ -264,9 +265,14 @@ export function createCompare(
   function detail(row: Row, next: CompareView): HTMLElement {
     const container = document.createElement('div');
     container.className = 'compare-sides';
+    // The local event may come from an earlier run than the newest, which the source is named after.
+    const run = next.runs.find((candidate) => candidate.id === row.samples.local?.sessionId);
     container.append(
       side(`Production · ${next.baseline.label}`, row.samples.baseline),
-      side(`Local · ${next.local.label}`, row.samples.local),
+      side(
+        `Local · ${run ? `${run.label}${run.startedAt ? ` · ${actions.formatTime(run.startedAt)}` : ''}` : next.local.label}`,
+        row.samples.local,
+      ),
     );
     return container;
   }

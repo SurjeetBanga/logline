@@ -12,6 +12,10 @@ All notable changes to Logline are documented in this file.
 - **Agents and production**: agents can fetch production logs from a connection you allow with **Allow agents**, with `logline_fetch_production` (a search or trace id over up to a day, at most 10 times a minute, into a run you can see), and compare them with your local runs with `logline_compare_with_production`. Connections are listed in `logline_list_shared_sources`. The new `logline-reproduce-prod` skill and MCP prompt reproduce a production failure locally and verify the fix. See [Agents and connections](docs/usage.md#agents-and-connections).
 - **Compare**: a tab that lines up the errors of a production run (fetched from a connection, or an imported file) with the newest runs of a local source, matched by message across machines. Each error is marked **Reproduced**, **Fixed locally**, **Not seen locally**, **New**, or **Local only**, and new errors thrown from code you changed are marked with their line. Choosing an error shows an event from each side with the fields that differ. When a local run finishes, a notification says what it did, such as *1 production error fixed locally*. See [Compare production with local runs](docs/usage.md#compare-production-with-local-runs).
 
+### Fixes
+
+- The automatic columns show a nested field such as `http.status_code` once, rather than again by its short name.
+
 ## 1.15.0 — 2026-10-16
 
 ### Changes

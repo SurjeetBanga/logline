@@ -92,7 +92,7 @@ test('a log becomes a line with its trace id, attributes, and tags, keeping coll
       service: 'checkout',
       host: 'web-1',
       tags: ['env:prod', 'version:1.2'],
-      attributes: { dd: { trace_id: '7f3a' }, message: 'inner', region: 'eu-west', level: 'ERROR' },
+      attributes: { dd: { trace_id: '7f3a', span_id: '91' }, message: 'inner', region: 'eu-west', level: 'ERROR' },
     },
   });
   assert.equal(record.timeMs, Date.parse('2026-10-23T09:12:04.311Z'));
@@ -103,7 +103,7 @@ test('a log becomes a line with its trace id, attributes, and tags, keeping coll
     service: 'checkout',
     host: 'web-1',
     traceId: '7f3a',
-    dd: { trace_id: '7f3a' },
+    dd: { span_id: '91' },
     'attributes.message': 'inner',
     region: 'eu-west',
     'attributes.level': 'ERROR',
@@ -114,6 +114,10 @@ test('a log becomes a line with its trace id, attributes, and tags, keeping coll
   assert.equal(event.level, 'error');
   assert.equal(event.message, 'payment gateway timed out');
   assert.deepEqual(JSON.parse(datadogLine({ attributes: { message: 'bare' } }).line), { message: 'bare' });
+  // A trace id is shown once, as traceId, rather than again under dd.
+  assert.deepEqual(JSON.parse(datadogLine({ attributes: { attributes: { dd: { trace_id: 't' } } } }).line), {
+    traceId: 't',
+  });
   assert.equal(datadogLine(null).timeMs, undefined);
 });
 

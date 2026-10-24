@@ -97,14 +97,15 @@ function setup() {
       store: async (key: string, value: string) => void secrets.set(key, value),
       delete: async (key: string) => void secrets.delete(key),
     },
-    async (sourceId, runId) => void shown.push(runId ? `${sourceId}#${runId}` : sourceId),
+    async (sourceId, runId, query) =>
+      void shown.push(`${runId ? `${sourceId}#${runId}` : sourceId}${query !== undefined ? `?${query}` : ''}`),
     undefined,
     {
       get: <T>(key: string, fallback?: T) => (memento.has(key) ? memento.get(key) : fallback) as T,
       update: async (key: string, value: unknown) => void memento.set(key, value),
     },
   );
-  return { store, registry, remote, manager, secrets, shown, memento };
+  return { store, registry, remote, manager, secrets, shown, memento, settings };
 }
 
 function reset() {
@@ -332,9 +333,9 @@ test(
     ui.picks.push(pick('15m'));
     ui.inputs.push('level:error');
     await manager.query();
-    // The panel switches to the run the search made, not every run of the source.
+    // The panel switches to the run the search made, not every run of the source, with its search.
     assert.equal(shown.length, 1);
-    assert.match(shown[0], /^conn:app#[0-9a-f]{16}$/);
+    assert.match(shown[0], /^conn:app#[0-9a-f]{16}\?level:error$/);
     assert.deepEqual(
       store.all().map((event) => event.message),
       ['payment gateway timed out', 'card declined'],
@@ -343,6 +344,7 @@ test(
     await manager.runSql('raw');
     assert.equal(store.all().at(-1)?.message, 'payment gateway timed out');
     assert.equal(remote.last('raw')?.kind, 'sql');
+    assert.match(shown.at(-1)!, /^conn:raw#[0-9a-f]{16}\?$/, 'the SQL chose the rows, so the search is cleared');
     ui.inputs.push('DELETE FROM app_logs');
     await manager.runSql('raw');
     assert.match(ui.messages.at(-1)!, /^error: SQLite · raw: Only SELECT queries can run here\./);
@@ -481,7 +483,7 @@ test('a Datadog connection is added with its keys, searched, and opened from a l
         .map((event) => event.message),
       ['cart opened', 'payment gateway timed out', 'retrying payment'],
     );
-    assert.equal(shown.at(-1), `conn:prod#${traceRun.id}`);
+    assert.equal(shown.at(-1), `conn:prod#${traceRun.id}?`, 'the link chose the logs, so the search is cleared');
     // A trace id on its own fetches the trace.
     await manager.openLink('prod', 'trace-bbbb');
     assert.equal([...registry.records.values()].at(-1)!.command, 'Trace trace-bbbb');
@@ -521,7 +523,7 @@ test('metric queries, name suggestions, watches, and windowed fetches go through
   });
   try {
     raw.workspace = [{ id: 'prod', label: 'prod', type: 'datadog', site: fake.url }];
-    const { manager, secrets, registry, store } = setup();
+    const { manager, secrets, registry, store, settings } = setup();
     secrets.set(`logline.connection.datadog:${fake.url}`, JSON.stringify({ token: 'tok-metrics' }));
     const answer = await manager.metricQuery('prod', 'avg:latency{*} by {env}', '1h');
     assert.deepEqual(answer.result?.series, [{ name: 'latency', scope: 'env:prod', points: [[now - 60000, 120]] }]);
@@ -530,13 +532,22 @@ test('metric queries, name suggestions, watches, and windowed fetches go through
     assert.deepEqual(await manager.metricQuery('missing', 'x', '1h'), {
       error: 'That connection is no longer in logline.connections.',
     });
-    // A window selected on the chart fetches the logs from exactly that time.
+    // A window selected on the chart fetches the logs from exactly that time, named in the panel's time zone.
     await manager.fetch('prod', '', '1h', { fromMs: now - 120000, toMs: now - 60000 });
+    const local = (ms: number) => new Date(ms).toTimeString().slice(0, 8);
     const run = [...registry.records.values()].at(-1)!;
-    assert.match(run.command ?? '', /^All rows · \d\d:\d\d:\d\d–\d\d:\d\d:\d\d UTC$/);
+    assert.equal(run.command, `All rows · ${local(now - 120000)}–${local(now - 60000)}`);
+    settings.timezone = 'utc';
+    await manager.fetch('prod', '', '1h', { fromMs: now - 120000, toMs: now - 60000 });
+    assert.match(
+      [...registry.records.values()].at(-1)!.command ?? '',
+      /^All rows · \d\d:\d\d:\d\d–\d\d:\d\d:\d\d UTC$/,
+    );
+    delete settings.timezone;
     assert.deepEqual(
       store.all().map((event) => event.message),
-      ['slow'],
+      ['slow', 'slow'],
+      'each window fetch is its own run',
     );
     // Without a place to put watched metrics, Watch does nothing.
     await manager.watchMetric('prod', 'avg:latency{*}', true);

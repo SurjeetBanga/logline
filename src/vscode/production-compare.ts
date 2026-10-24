@@ -20,6 +20,7 @@ function sample(event: LogEvent | undefined, other: LogEvent | undefined): Compa
   );
   return {
     id: event.id,
+    ...(event.sessionId ? { sessionId: event.sessionId } : {}),
     ...(event.timestamp ? { timestamp: event.timestamp } : {}),
     level: event.level,
     ...(event.message ? { message: event.message.slice(0, 500) } : {}),

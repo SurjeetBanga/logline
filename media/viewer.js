@@ -3245,21 +3245,21 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
     }
     function render(next) {
       view = next;
-      const header = (text, title = "") => {
+      const header = (text, title = "", className = "") => {
         const element2 = document.createElement("th");
         element2.textContent = text;
         element2.title = title;
+        element2.className = className;
         return element2;
       };
       elements.compareHead.replaceChildren(
         header("Error"),
-        header("Production", next.baseline.label),
-        ...next.runs.map(
-          (run, index) => header(
-            index === next.runs.length - 1 ? "Latest run" : run.startedAt ? actions.formatTime(run.startedAt) : "Run",
-            `${run.label}${run.startedAt ? ` \xB7 ${actions.formatTime(run.startedAt)}` : ""}`
-          )
-        ),
+        header("Production", next.baseline.label, "compare-count"),
+        ...next.runs.map((run, index) => {
+          const time = run.startedAt ? actions.formatTime(run.startedAt) : "";
+          const name = index === next.runs.length - 1 ? "Latest run" : time.replace(/\.\d+$/, "") || "Run";
+          return header(name, `${run.label}${time ? ` \xB7 ${time}` : ""}`, "compare-count");
+        }),
         header("Status")
       );
       const errors = next.rows.length;
@@ -3336,9 +3336,13 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
     function detail(row, next) {
       const container = document.createElement("div");
       container.className = "compare-sides";
+      const run = next.runs.find((candidate) => candidate.id === row.samples.local?.sessionId);
       container.append(
         side(`Production \xB7 ${next.baseline.label}`, row.samples.baseline),
-        side(`Local \xB7 ${next.local.label}`, row.samples.local)
+        side(
+          `Local \xB7 ${run ? `${run.label}${run.startedAt ? ` \xB7 ${actions.formatTime(run.startedAt)}` : ""}` : next.local.label}`,
+          row.samples.local
+        )
       );
       return container;
     }
@@ -3372,8 +3376,8 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
     const raw = span / count;
     const power = 10 ** Math.floor(Math.log10(raw));
     const step = [1, 2, 5, 10].map((factor) => factor * power).find((candidate) => candidate >= raw);
-    const values = [];
-    for (let value = Math.ceil(low / step) * step; value <= high + step / 1e6; value += step) values.push(value);
+    const values = [Math.floor(low / step) * step];
+    while (values.at(-1) < high - step / 1e6) values.push(values.at(-1) + step);
     return values;
   }
   function createMetricQuery(elements, api, scope, actions) {
@@ -3459,9 +3463,9 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
       const values = data.series.flatMap((series) => series.points.map(([, value]) => value));
       const low = Math.min(0, ...values);
       const high = Math.max(...values, low + 1);
-      const yTicks = ticks(low, high * 1.05, 4);
+      const yTicks = ticks(low, high, 4);
       const top = yTicks.at(-1);
-      const bottom = Math.min(low, yTicks[0]);
+      const bottom = yTicks[0];
       const x = (time2) => MARGIN.left + (time2 - data.fromMs) / Math.max(1, data.toMs - data.fromMs) * (width - MARGIN.left - MARGIN.right);
       const y = (value) => MARGIN.top + (1 - (value - bottom) / Math.max(1e-9, top - bottom)) * (HEIGHT - MARGIN.top - MARGIN.bottom);
       const time = (px) => data.fromMs + (px - MARGIN.left) / Math.max(1, width - MARGIN.left - MARGIN.right) * (data.toMs - data.fromMs);
@@ -3492,7 +3496,7 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
           y: HEIGHT - 6,
           "text-anchor": index === 0 ? "start" : index === 4 ? "end" : "middle"
         });
-        label.textContent = actions.formatTime(at2);
+        label.textContent = actions.formatTime(at2).replace(data.toMs - data.fromMs >= 36e5 ? /:\d\d\.\d+$/ : /\.\d+$/, "");
         root.append(label);
       }
       data.series.forEach((series, index) => {

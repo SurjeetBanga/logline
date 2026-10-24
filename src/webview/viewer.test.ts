@@ -3523,7 +3523,7 @@ test('the Compare tab lines up production errors with local runs and shows both 
           baseline: 312,
           runs: [4, 0],
           status: 'fixed',
-          samples: { baseline: sample(7, 'eu'), local: sample(9, 'local') },
+          samples: { baseline: sample(7, 'eu'), local: { ...sample(9, 'local'), sessionId: 'r0' } },
         },
         {
           signature: 'negative quantity <n>',
@@ -3562,6 +3562,7 @@ test('the Compare tab lines up production errors with local runs and shows both 
   assert.equal(get('compareDetail').hidden, false);
   const sides = get('compareDetail').children[0].children;
   assert.equal(sides.length, 2);
+  assert.match(sides[1].children[0].textContent, /^Local · npm test · /, 'the local side names the run of its event');
   const list = sides[0].children[1];
   const region = list.children.findIndex((child) => child.textContent === 'region');
   assert.equal(list.children[region].className, 'compare-diff');
@@ -3766,7 +3767,21 @@ test('a metric query is charted, and a window dragged across it shows the logs f
   const chart = get('metricChart');
   assert.equal(chart.hidden, false);
   const [svg, tooltip, legend] = chart.children;
-  assert.equal(svg.children.filter((child) => (child.attributes.class ?? '').startsWith('metric-line')).length, 2);
+  const lines = svg.children.filter((child) => (child.attributes.class ?? '').startsWith('metric-line'));
+  assert.equal(lines.length, 2);
+  // The axis reaches above the highest point, so a spike stays inside the chart.
+  const grid = svg.children.filter((child) => child.attributes.class === 'metric-grid');
+  const top = Math.min(...grid.map((line) => Number(line.attributes.y1)));
+  const highest = Math.min(
+    ...lines.flatMap((line) =>
+      String(line.attributes.points)
+        .split(' ')
+        .map((point) => Number(point.split(',')[1])),
+    ),
+  );
+  assert.ok(highest >= top, `the spike at y=${highest} is inside the axis that ends at y=${top}`);
+  const times = svg.children.filter((child) => child.attributes.class === 'metric-axis' && /:/.test(child.textContent));
+  assert.ok(times.length && times.every((label) => !/\./.test(label.textContent)), 'axis times leave out milliseconds');
   assert.deepEqual(
     legend.children.map((item) => item.children[1].textContent),
     ['env:prod · 120 ms', 'env:staging · 95 ms'],

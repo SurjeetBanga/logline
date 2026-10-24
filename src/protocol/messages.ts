@@ -95,6 +95,8 @@ export interface CompareRequest {
 /** An event shown beside its counterpart, with the fields whose values differ. */
 export interface CompareSample {
   id: number;
+  /** The run it was logged in. */
+  sessionId?: string;
   timestamp?: string;
   level: string;
   message?: string;

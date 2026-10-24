@@ -68,7 +68,7 @@ export class ConnectionManager implements vscode.Disposable {
     readonly remote: RemoteSource,
     private readonly secrets: Secrets | undefined,
     /** Select a source, and one of its runs, in the Logs panel. */
-    private readonly showSource: (sourceId: string, runId?: string) => Promise<void>,
+    private readonly showSource: (sourceId: string, runId?: string, query?: string) => Promise<void>,
     /** Watched metric queries, polled into the Metrics list. */
     private readonly watched?: RemoteMetrics,
     /** Remembers which connections agents may query; outside settings, so a workspace cannot grant it. */
@@ -383,15 +383,18 @@ export class ConnectionManager implements vscode.Disposable {
     if (!connection) return;
     const span = rangeMs(range) ?? 3600000;
     const now = Date.now();
-    const time = (ms: number) => new Date(ms).toISOString().slice(11, 19);
+    // A window is named in the time zone the panel shows times in.
+    const utc = this.config.get<string>('timezone', 'local') === 'utc';
+    const time = (ms: number) =>
+      utc ? new Date(ms).toISOString().slice(11, 19) : new Date(ms).toTimeString().slice(0, 8);
     try {
       const info = await this.remote.fetch(await this.target(connection), {
         query,
         fromMs: window?.fromMs ?? now - span,
         toMs: window?.toMs ?? now,
-        title: `${query.trim() || 'All rows'} · ${window ? `${time(window.fromMs)}–${time(window.toMs)} UTC` : `last ${range}`}`,
-        // The panel shows the new run, not every earlier one of the same search.
-        started: (runId) => void this.showSource(connectionSourceId(connection.id), runId),
+        title: `${query.trim() || 'All rows'} · ${window ? `${time(window.fromMs)}–${time(window.toMs)}${utc ? ' UTC' : ''}` : `last ${range}`}`,
+        // The panel shows the new run, not every earlier one of the same search, with that search.
+        started: (runId) => void this.showSource(connectionSourceId(connection.id), runId, query),
       });
       await this.failed(connection, info.error);
     } catch (error) {
@@ -418,7 +421,8 @@ export class ConnectionManager implements vscode.Disposable {
         query: '',
         sql,
         title: `SQL: ${sql.trim().replace(/\s+/g, ' ').slice(0, 80)}`,
-        started: (runId) => void this.showSource(connectionSourceId(connection.id), runId),
+        // The SQL chose the rows, so the panel's search is cleared rather than left to hide some of them.
+        started: (runId) => void this.showSource(connectionSourceId(connection.id), runId, ''),
       });
       await this.failed(connection, info.error);
     } catch (error) {
@@ -736,7 +740,8 @@ export class ConnectionManager implements vscode.Disposable {
     const link = text ? parseDatadogLink(text) : undefined;
     if (!link) return;
     const sourceId = connectionSourceId(connection.id);
-    const started = (runId: string) => void this.showSource(sourceId, runId);
+    // The link chose the logs, so the panel's search is cleared rather than left to hide some of them.
+    const started = (runId: string) => void this.showSource(sourceId, runId, '');
     const target = await this.target(connection);
     const trace = async (traceId: string, aroundMs?: number) => {
       // A trace lasts seconds to minutes; half an hour each side of its log is plenty, and a day without one.

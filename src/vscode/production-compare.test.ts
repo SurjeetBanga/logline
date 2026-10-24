@@ -67,6 +67,7 @@ test('a production run is compared with the newest local runs, with an event of 
   assert.equal(row.samples.baseline?.fields.region, 'eu');
   assert.deepEqual(row.samples.baseline?.differs, ['region']);
   assert.deepEqual(row.samples.local?.differs, ['region']);
+  assert.equal(row.samples.local?.sessionId, 'r4', 'a sample names its run');
   assert.equal(view.summary, '1 production error reproduced');
 });
 

@@ -196,6 +196,14 @@ test('columns prefers known fields in a fixed order and caps at six', () => {
   assert.deepEqual(store.columns(), ['service', 'traceId', 'method', 'path', 'status', 'durationMs']);
 });
 
+test('columns show a nested field once, by its bare alias or its dotted name', () => {
+  const store = new LogStore();
+  store.add(parseLogLine('{"message":"m","http":{"status_code":504},"region":"eu"}', 'stdout', 1, new Date()));
+  const columns = store.columns();
+  assert.equal(columns.filter((column) => column.endsWith('status_code')).length, 1, columns.join());
+  assert.ok(columns.includes('region'));
+});
+
 test('the large-store fast path agrees with the general search path', () => {
   const store = new LogStore();
   for (let id = 1; id <= 20000; id++) {

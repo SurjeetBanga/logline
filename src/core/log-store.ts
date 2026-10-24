@@ -986,6 +986,8 @@ export class LogStore {
       // Bare aliases of nested fields remain searchable, but need not duplicate
       // their dotted column in the small automatic selection.
       if (!key.includes('.') && known.some((other) => other.endsWith('.' + key))) continue;
+      // Nor a dotted field whose bare alias a preferred field already chose.
+      if (key.includes('.') && chosen.includes(key.slice(key.lastIndexOf('.') + 1))) continue;
       chosen.push(key);
       groups.add(canonical);
     }

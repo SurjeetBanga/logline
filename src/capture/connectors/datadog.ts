@@ -33,7 +33,8 @@ export function datadogLine(item: unknown): RemoteRecord {
   const log = object(item);
   const attributes = object(log.attributes);
   const custom = object(attributes.attributes);
-  const traceId = object(custom.dd).trace_id ?? custom.trace_id ?? custom.traceId;
+  const { trace_id: ddTraceId, ...dd } = object(custom.dd);
+  const traceId = ddTraceId ?? custom.trace_id ?? custom.traceId;
   const entries: [string, unknown][] = [
     ['timestamp', attributes.timestamp],
     ['level', attributes.status],
@@ -42,8 +43,14 @@ export function datadogLine(item: unknown): RemoteRecord {
     ['host', attributes.host],
     ...(traceId !== undefined ? ([['traceId', String(traceId)]] as [string, unknown][]) : []),
   ];
-  for (const [name, value] of Object.entries(custom))
+  for (const [name, value] of Object.entries(custom)) {
+    // The trace id is already the event's traceId; keep the rest of `dd`, such as its span id.
+    if (name === 'dd' && ddTraceId !== undefined) {
+      if (Object.keys(dd).length) entries.push(['dd', dd]);
+      continue;
+    }
     entries.push([RESERVED.has(name) ? `attributes.${name}` : name, value]);
+  }
   if (Array.isArray(attributes.tags) && attributes.tags.length) entries.push(['tags', attributes.tags.join(',')]);
   if (typeof log.id === 'string') entries.push(['datadog.id', log.id]);
   const time = typeof attributes.timestamp === 'string' ? Date.parse(attributes.timestamp) : NaN;

@@ -1080,6 +1080,18 @@ select {
   color: var(--vscode-descriptionForeground, #aaa);
   white-space: nowrap;
 }
+/* Tables lay out by their header row: counts and status get what they need, the error the rest. */
+.compare-table th.compare-count {
+  width: 8.5em;
+}
+.compare-table th:last-child {
+  width: 10em;
+}
+.compare-table .compare-count {
+  text-align: right;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 .compare-row {
   cursor: pointer;
   border-top: 1px solid var(--vscode-panel-border, #333);
@@ -1093,11 +1105,8 @@ select {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  max-width: 0;
-  width: 60%;
 }
 .compare-count {
-  text-align: right;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
@@ -1952,11 +1961,16 @@ body:not([data-view='logs']) .columns-control,
 body:not([data-view='logs']) #rowHint {
   display: none;
 }
-/* Traces, Metrics, and Issues have their own filters; the search row is for the logs and their analysis. */
+/* Traces, Metrics, and Issues have their own filters; the search row and a connection's
+   search controls are for the logs and their analysis. */
 body[data-view='traces'] .search-toolbar,
 body[data-view='metrics'] .search-toolbar,
 body[data-view='aiCalls'] .search-toolbar,
-body[data-view='doctor'] .search-toolbar {
+body[data-view='doctor'] .search-toolbar,
+body[data-view='traces'] .connection-bar,
+body[data-view='metrics'] .connection-bar,
+body[data-view='aiCalls'] .connection-bar,
+body[data-view='doctor'] .connection-bar {
   display: none;
 }
 table {

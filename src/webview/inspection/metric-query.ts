@@ -20,14 +20,14 @@ function svg<K extends keyof SVGElementTagNameMap>(name: K, attributes: Record<s
   return element;
 }
 
-/** Tidy axis steps: 1, 2, or 5 times a power of ten. */
+/** Tidy axis steps, 1, 2, or 5 times a power of ten, from at or below `low` to at or above `high`. */
 function ticks(low: number, high: number, count: number): number[] {
   const span = high - low || Math.abs(high) || 1;
   const raw = span / count;
   const power = 10 ** Math.floor(Math.log10(raw));
   const step = [1, 2, 5, 10].map((factor) => factor * power).find((candidate) => candidate >= raw)!;
-  const values: number[] = [];
-  for (let value = Math.ceil(low / step) * step; value <= high + step / 1e6; value += step) values.push(value);
+  const values = [Math.floor(low / step) * step];
+  while (values.at(-1)! < high - step / 1e6) values.push(values.at(-1)! + step);
   return values;
 }
 
@@ -149,9 +149,9 @@ export function createMetricQuery(
     const values = data.series.flatMap((series) => series.points.map(([, value]) => value));
     const low = Math.min(0, ...values);
     const high = Math.max(...values, low + 1);
-    const yTicks = ticks(low, high * 1.05, 4);
+    const yTicks = ticks(low, high, 4);
     const top = yTicks.at(-1)!;
-    const bottom = Math.min(low, yTicks[0]);
+    const bottom = yTicks[0];
     const x = (time: number) =>
       MARGIN.left +
       ((time - data.fromMs) / Math.max(1, data.toMs - data.fromMs)) * (width - MARGIN.left - MARGIN.right);
@@ -186,7 +186,10 @@ export function createMetricQuery(
         y: HEIGHT - 6,
         'text-anchor': index === 0 ? 'start' : index === 4 ? 'end' : 'middle',
       });
-      label.textContent = actions.formatTime(at);
+      // Milliseconds are noise on an axis, and so are seconds over an hour or more.
+      label.textContent = actions
+        .formatTime(at)
+        .replace(data.toMs - data.fromMs >= 3600000 ? /:\d\d\.\d+$/ : /\.\d+$/, '');
       root.append(label);
     }
     data.series.forEach((series, index) => {

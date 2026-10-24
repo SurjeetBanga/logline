@@ -159,7 +159,7 @@ export class LogsController {
       this.config,
       this.remote,
       context.secrets,
-      (sourceId, runId) => this.showSource(sourceId, runId),
+      (sourceId, runId, query) => this.showSource(sourceId, runId, query),
       this.remoteMetrics,
       context.globalState,
     );
@@ -361,10 +361,14 @@ export class LogsController {
     await vscode.commands.executeCommand('logline.logs.focus');
     this.notifications.send({ type: 'update' });
   }
-  /** Select a source, and optionally one of its runs, in the Logs panel, delivered with the next snapshot like showQuery. */
-  async showSource(sourceId: string, runId?: string): Promise<void> {
+  /**
+   * Select a source, and optionally one of its runs and a search, in the Logs
+   * panel, delivered with the next snapshot like showQuery.
+   */
+  async showSource(sourceId: string, runId?: string, query?: string): Promise<void> {
     this.pendingSource = sourceId;
     this.pendingRun = runId;
+    if (query !== undefined) this.pendingQuery = query;
     await vscode.commands.executeCommand('logline.logs.focus');
     this.notifications.send({ type: 'update' });
   }
