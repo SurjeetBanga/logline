@@ -36,7 +36,15 @@ import { buildSnapshot } from './snapshot';
 import { TaskLifecycle } from './tasks/lifecycle';
 import { ViewNotifications } from './view-notifications';
 import { TerminalCapture } from './terminal-capture';
-import { GUIDE_STATE_KEY, guideStatus as getGuideStatus, type GuideProgress } from './guide-content';
+import {
+  GUIDE_SEEN_KEY,
+  GUIDE_STATE_KEY,
+  guideStatus as getGuideStatus,
+  markSectionSeen,
+  unseenNewSections,
+  type GuideProgress,
+  type GuideSeen,
+} from './guide-content';
 
 /** The guide's Get started steps done in this profile. */
 const PROGRESS_KEY = 'logline.onboarding.progress';
@@ -314,6 +322,15 @@ export class LogsController {
   }
   guideStatus() {
     return getGuideStatus(this.globalState.get<string>(GUIDE_STATE_KEY));
+  }
+  /** The guide's sections still marked New: new in this release, and not opened yet. */
+  guideNewSections(): string[] {
+    return unseenNewSections(this.globalState.get<GuideSeen>(GUIDE_SEEN_KEY));
+  }
+  /** A new section of the guide was opened, so it stops being marked New. */
+  async guideSectionSeen(id: string): Promise<void> {
+    const next = markSectionSeen(this.globalState.get<GuideSeen>(GUIDE_SEEN_KEY), id);
+    if (next) await this.globalState.update(GUIDE_SEEN_KEY, next);
   }
   async acknowledgeGuide(): Promise<void> {
     await this.globalState.update(GUIDE_STATE_KEY, this.guideStatus().version);

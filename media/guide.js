@@ -198,6 +198,43 @@
     $('noResults').hidden = !words.length || shown > 0;
   }
 
+  // A section marked New stops being new once it is opened: chosen in the sidebar, or read
+  // for a moment in place. The host remembers it for this release.
+  const seen = new Set();
+  function markSeen(id) {
+    const section = sections.find((item) => item.id === id);
+    if (!section || !section.isNew || seen.has(id)) return;
+    seen.add(id);
+    for (const badge of document.querySelectorAll(`[data-anchor="${id}"] .new-badge, #${id} .group-heading .new-badge`))
+      badge.remove();
+    api.postMessage({ type: 'sectionSeen', section: id });
+  }
+  function watchNewSections() {
+    if (typeof IntersectionObserver !== 'function') return;
+    const timers = new Map();
+    const observer = new IntersectionObserver(
+      (entries) => {
+        for (const entry of entries) {
+          const id = entry.target.id;
+          // Read in place: it fills most of the window, or all of itself when it is shorter.
+          const needed = Math.min(entry.boundingClientRect.height, window.innerHeight) * 0.6;
+          if (entry.isIntersecting && entry.intersectionRect.height >= needed) {
+            if (!timers.has(id))
+              timers.set(
+                id,
+                setTimeout(() => markSeen(id), 1500),
+              );
+          } else {
+            clearTimeout(timers.get(id));
+            timers.delete(id);
+          }
+        }
+      },
+      { threshold: [0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1] },
+    );
+    for (const section of sections) if (section.isNew && $(section.id)) observer.observe($(section.id));
+  }
+
   function focusAnchor(anchor) {
     const target = $(anchor);
     const heading = target && target.querySelector('h1, h2');
@@ -227,7 +264,10 @@
     if (!target) return;
     event.preventDefault();
     if (target.dataset.section === 'whatsNew') selectSection('whatsNew');
-    else selectSection('guide', target.dataset.anchor);
+    else {
+      selectSection('guide', target.dataset.anchor);
+      if (target.dataset.anchor) markSeen(target.dataset.anchor);
+    }
   });
   $('guideSearch').addEventListener('input', (event) => {
     selectSection('guide');
@@ -247,5 +287,6 @@
   renderNav();
   renderCards();
   renderSteps();
+  watchNewSections();
   api.postMessage({ type: 'guideReady' });
 })();

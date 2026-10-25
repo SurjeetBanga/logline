@@ -1,6 +1,13 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { GUIDE_RELEASES, guideStatus, latestGuideRelease } from './guide-content';
+import {
+  GUIDE_RELEASES,
+  GUIDE_SECTIONS,
+  guideStatus,
+  latestGuideRelease,
+  markSectionSeen,
+  unseenNewSections,
+} from './guide-content';
 
 test('guide release status treats the latest curated release as unread until rendered', () => {
   assert.ok(latestGuideRelease.version);
@@ -54,4 +61,19 @@ test('every guide card points at something that exists, so the guide cannot go s
       GUIDE_CARDS.some((card) => card.section === section.id),
       `${section.title} has cards`,
     );
+});
+
+test('a section stays New until it is opened, and new sections of a later release are New again', () => {
+  const fresh = GUIDE_SECTIONS.filter((section) => section.isNew).map((section) => section.id);
+  assert.ok(fresh.length > 0, 'this release marks some sections new');
+  assert.deepEqual(unseenNewSections(undefined), fresh);
+  const opened = markSectionSeen(undefined, fresh[0]);
+  assert.deepEqual(opened, { version: latestGuideRelease.version, sections: [fresh[0]] });
+  assert.deepEqual(unseenNewSections(opened), fresh.slice(1));
+  assert.equal(markSectionSeen(opened, fresh[0]), undefined, 'opening it again stores nothing');
+  const plain = GUIDE_SECTIONS.find((section) => !section.isNew)!.id;
+  assert.equal(markSectionSeen(opened, plain), undefined, 'a section that is not new is never stored');
+  assert.equal(markSectionSeen(opened, 'made-up'), undefined);
+  // Sections opened under an earlier release do not hide this one's.
+  assert.deepEqual(unseenNewSections({ version: 'older-version', sections: fresh }), fresh);
 });
