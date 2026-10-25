@@ -12,7 +12,7 @@ Run your app the way you already do: in a terminal, with F5, as a task, in Docke
 ![Logline in VS Code: live logs from a checkout service, a spike in Analyze, a search for errors, the failing event with its trace and log statement, and Claude Code reading the shared logs](media/readme/demo.webp)
 
 <!-- When the tour video is published, add its thumbnail here, linked to the video:
-[![Watch the 2-minute tour](media/readme/video.webp)](VIDEO_URL) -->
+[![Watch the 1-minute tour](media/readme/video.webp)](VIDEO_URL) -->
 
 ## See what your app is doing
 
