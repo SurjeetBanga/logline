@@ -25,6 +25,8 @@ export function activate(context: vscode.ExtensionContext): { provider: LogsProv
     reveal: (target, fallback) => void controller!.reveal(target, fallback),
     takeTour: () => void controller!.startTour(),
     unreadHighlights: () => (controller!.guideStatus().unread ? (latestGuideRelease.highlights.length ?? 0) : 0),
+    newSections: () => controller!.guideNewSections(),
+    sectionSeen: (id) => void controller!.guideSectionSeen(id),
   });
   controller.setGuideOpener((section) => guide.open(section));
   const provider = new LogsProvider(context, controller);

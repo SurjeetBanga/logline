@@ -138,3 +138,30 @@ test('the guide sends progress, shows controls, and only runs what its cards nam
   assert.deepEqual(executed, [['logline.runCommand'], ['workbench.action.openSettings', 'logline.persistLogs']]);
   guide.dispose();
 });
+
+test('the guide marks only unopened sections New, and tells the host when one is opened', () => {
+  const seen: string[] = [];
+  const guide = new GuidePanel(
+    { extensionUri: { fsPath: process.cwd() } as unknown as import('vscode').Uri },
+    async () => undefined,
+    {
+      progress: () => ({ captured: false, searched: false, shared: false }),
+      reveal: () => undefined,
+      newSections: () => ['connections'],
+      sectionSeen: (id) => seen.push(id),
+    },
+  );
+  guide.open();
+  const data = JSON.parse(/window\.__LOGLINE_GUIDE__ = (\{.*?\});/s.exec(lastPanel!.webview.html)![1]) as {
+    sections: { id: string; isNew?: boolean }[];
+  };
+  assert.deepEqual(
+    data.sections.filter((section) => section.isNew).map((section) => section.id),
+    ['connections'],
+    'a new section already opened is not marked',
+  );
+  lastPanel!.receive({ type: 'sectionSeen', section: 'connections' });
+  lastPanel!.receive({ type: 'sectionSeen', section: 42 });
+  assert.deepEqual(seen, ['connections']);
+  guide.dispose();
+});

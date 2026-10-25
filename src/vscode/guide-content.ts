@@ -658,3 +658,24 @@ export const GUIDE_STATE_KEY = 'logline.guide.lastSeenVersion';
 export function guideStatus(lastSeenVersion: string | undefined): GuideStatus {
   return { version: latestGuideRelease.version, unread: lastSeenVersion !== latestGuideRelease.version };
 }
+
+/** The guide's new sections someone has opened, for the release that marked them new. */
+export const GUIDE_SEEN_KEY = 'logline.guide.seenSections';
+export interface GuideSeen {
+  version: string;
+  sections: string[];
+}
+
+/** The sections still to show as New: new in this release, and not opened since it came out. */
+export function unseenNewSections(seen: Partial<GuideSeen> | undefined): string[] {
+  const opened = seen?.version === latestGuideRelease.version && Array.isArray(seen.sections) ? seen.sections : [];
+  return GUIDE_SECTIONS.filter((section) => section.isNew && !opened.includes(section.id)).map((section) => section.id);
+}
+
+/** What to store once a section is opened; a section not new in this release changes nothing. */
+export function markSectionSeen(seen: Partial<GuideSeen> | undefined, id: string): GuideSeen | undefined {
+  if (!GUIDE_SECTIONS.some((section) => section.isNew && section.id === id)) return undefined;
+  const current = seen?.version === latestGuideRelease.version && Array.isArray(seen.sections) ? seen.sections : [];
+  if (current.includes(id)) return undefined;
+  return { version: latestGuideRelease.version, sections: [...current, id] };
+}

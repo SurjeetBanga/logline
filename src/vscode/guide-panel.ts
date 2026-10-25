@@ -12,7 +12,8 @@ type GuideMessage =
   | { type: 'runCommand'; command: string }
   | { type: 'openSetting'; setting: string }
   | { type: 'openDocs'; anchor: string }
-  | { type: 'takeTour' };
+  | { type: 'takeTour' }
+  | { type: 'sectionSeen'; section: string };
 
 /** What the guide needs from the rest of the extension. */
 export interface GuideHost {
@@ -24,6 +25,9 @@ export interface GuideHost {
   unreadHighlights?(): number;
   /** Start the Logs panel tour. */
   takeTour?(): void;
+  /** The sections still marked New, and telling the host one was opened. */
+  newSections?(): string[];
+  sectionSeen?(id: string): void;
 }
 
 // The guide can only ask for what its own cards name.
@@ -64,7 +68,12 @@ export class GuidePanel implements vscode.Disposable {
     const media = vscode.Uri.joinPath(this.context.extensionUri, 'media');
     const guide = {
       releases: GUIDE_RELEASES,
-      sections: GUIDE_SECTIONS,
+      // A section stays New until it is opened; without a host every new section is.
+      sections: GUIDE_SECTIONS.map((section) =>
+        section.isNew && this.host?.newSections && !this.host.newSections().includes(section.id)
+          ? { ...section, isNew: false }
+          : section,
+      ),
       cards: GUIDE_CARDS,
       keys: GUIDE_KEYS,
       unreadHighlights: this.host?.unreadHighlights?.() ?? 0,
@@ -113,6 +122,8 @@ export class GuidePanel implements vscode.Disposable {
       void vscode.commands.executeCommand(value.command);
     } else if (value.type === 'openSetting' && typeof value.setting === 'string' && SETTINGS.has(value.setting)) {
       void vscode.commands.executeCommand('workbench.action.openSettings', value.setting);
+    } else if (value.type === 'sectionSeen' && typeof value.section === 'string') {
+      this.host?.sectionSeen?.(value.section);
     } else if (value.type === 'takeTour') {
       this.host?.takeTour?.();
     } else if (value.type === 'openDocs' && typeof value.anchor === 'string' && DOCS.has(value.anchor)) {
