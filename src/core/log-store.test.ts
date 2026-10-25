@@ -723,7 +723,7 @@ test('repeated sorted pages reuse comparisons until data changes; relative filte
   assert.equal(reads, initial, 'an unchanged page does not repeat string comparisons');
   store.add({ id: 6, level: 'info', fields: { requestId: 'req-0' } });
   assert.equal(store.page(options).events[0].id, 6);
-  assert.ok(reads > initial);
+  assert.equal(reads, initial, 'a new event is merged in without reading the retained events again');
   t.mock.method(Date, 'now', () => 100000);
   assert.equal(store.page({ ...options, query: 'last:1s' }).matched, 5);
   t.mock.method(Date, 'now', () => 102000);
@@ -956,4 +956,59 @@ test('removing a source drops its events and container sources, keeps the rest i
   for (let id = 6; id <= 20; id++) add(id, 'worker', 'w1');
   assert.equal(store.size, 10, 'the compacted ring keeps its size limit');
   assert.equal(store.all().at(-1)?.id, 20);
+});
+
+test('field names stay known while any retained event of a source has them, however its shapes vary', () => {
+  const store = new LogStore(8);
+  let id = 0;
+  const add = (serverId: string | undefined, fields: Record<string, string | number>) =>
+    store.add({ id: ++id, raw: 'x', message: 'x', level: 'info', serverId, fields } as LogEvent);
+  // More shapes than a source keeps as recent, in turn, so shapes are found again by name.
+  for (let round = 0; round < 2; round++)
+    for (const name of ['a', 'b', 'c', 'd', 'e', 'f']) add('api', { [name]: round, common: 1 });
+  assert.equal(store.size, 8);
+  // The newest 8 are e and f of the first round and all six of the second.
+  assert.deepEqual(store.columnFields('api'), ['a', 'b', 'c', 'common', 'd', 'e', 'f']);
+  // The same keys in another order are another shape, and a source named '' is not "no source".
+  add('', { common: 2, a: 3 });
+  add(undefined, { loose: 1 });
+  assert.deepEqual(store.columnFields(''), ['a', 'common']);
+  assert.ok(store.fieldNames().includes('loose'));
+  // Once the last event with a field is evicted, the field is forgotten, for the store and the source.
+  for (let i = 0; i < 8; i++) add('web', { other: i });
+  assert.deepEqual(store.columnFields('api'), []);
+  assert.deepEqual(store.columnFields('web'), ['other']);
+  assert.ok(!store.fieldNames().includes('loose'));
+  assert.ok(!store.fieldNames().includes('common'));
+  // Removing a source rebuilds what is known from the rest.
+  add('api', { back: 1 });
+  store.removeSource('web');
+  assert.deepEqual(store.columnFields('api'), ['back']);
+  assert.deepEqual(store.columnFields(), ['back']);
+});
+
+test('value suggestions are the 20 most frequent matches, ties in the order first seen', () => {
+  const store = new LogStore(1000);
+  let id = 0;
+  const add = (route: string, times = 1) => {
+    for (let i = 0; i < times; i++) store.add({ id: ++id, level: 'info', raw: 'x', fields: { route } } as LogEvent);
+  };
+  for (let n = 0; n < 30; n++) add(`/r${n}`);
+  add('/R7', 3);
+  add('/r3', 2);
+  add('/other', 9);
+  const values = store.fieldSuggestions('route:/r').values;
+  assert.equal(values.length, 20);
+  assert.deepEqual(
+    values.slice(0, 5).map((value) => [value.value, value.count]),
+    [
+      ['/r3', 3],
+      ['/R7', 3],
+      ['/r0', 1],
+      ['/r1', 1],
+      ['/r2', 1],
+    ],
+  );
+  assert.equal(values.at(-1)!.value, '/r18', 'equal counts keep the order they were first seen');
+  assert.ok(!values.some((value) => value.value === '/other'));
 });

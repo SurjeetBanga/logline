@@ -22,6 +22,8 @@ All notable changes to Logline are documented in this file.
 - **Logline Guide**: a sidebar with a search box and the guide's sections, and a **Get started** section whose three steps tick off as you capture a run, search it, and share it. Every card is written for the current panel, with new sections for connections and comparing with production; **Show me** points at the control in the Logs panel, opening its tab or menu first, and cards can run their command or open their setting. **What's new** leads with the newest release's highlights, then earlier releases in brief.
 - **Settings** are grouped into Capture, Display, Memory and disk, Connections, Agents and privacy, OpenTelemetry, and Code insights, with the most-used first in each, instead of one alphabetical list. Descriptions link to related settings and commands, and describe the current panel and every connection type.
 
+- Logs are parsed and kept about a third faster, so a large import finishes sooner: a million-line JSON file takes about 2 seconds instead of 2.7. Analyze, sorting while logs stream in, value autocomplete, and removing a source are also faster.
+
 ### Fixes
 
 - The automatic columns show a nested field such as `http.status_code` once, rather than again by its short name.

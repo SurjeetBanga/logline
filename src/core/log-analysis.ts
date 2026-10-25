@@ -74,13 +74,14 @@ const TREND_BUCKETS = 10;
 // alone account for most of the span.
 function timeRange(events: LogEvent[], options: AnalysisOptions): { from?: number; to?: number } {
   if (options.from !== undefined && options.to !== undefined) return { from: options.from, to: options.to };
-  const times: number[] = [];
+  const finite: number[] = [];
   for (const event of events) {
     const time = event.timestampMs;
-    if (time !== undefined && Number.isFinite(time)) times.push(time);
+    if (time !== undefined && Number.isFinite(time)) finite.push(time);
   }
-  if (!times.length) return { from: options.from, to: options.to };
-  times.sort((a, b) => a - b);
+  if (!finite.length) return { from: options.from, to: options.to };
+  // A typed array sorts numbers natively, without calling a comparator per comparison.
+  const times = Float64Array.from(finite).sort();
   let low = times[0];
   let high = times[times.length - 1];
   const trim = Math.floor(times.length * 0.005);
@@ -102,7 +103,21 @@ function timeRange(events: LogEvent[], options: AnalysisOptions): { from?: numbe
 // Strips volatile substrings (ids, numbers, paths) so structurally identical log lines
 // collapse to the same template regardless of the specific values they carry.
 export function normalizeMessage(message: string): string {
-  return maskVariables(message, '<id>', '<n>', '<path>').toLowerCase();
+  let normalized = normalizedMessages.get(message);
+  if (normalized === undefined) {
+    normalized = maskVariables(message, '<id>', '<n>', '<path>').toLowerCase();
+    // Analysis runs again on every refresh over mostly the same messages, and logs repeat their messages.
+    if (normalizedMessages.size >= NORMALIZED_LIMIT) normalizedMessages.clear();
+    normalizedMessages.set(message, normalized);
+  }
+  return normalized;
+}
+const normalizedMessages = new Map<string, string>();
+const NORMALIZED_LIMIT = 65536;
+
+/** A message's first line, without copying a message that has only one. */
+function firstLine(message: string): string {
+  return message.includes('\n') ? message.split(/\r?\n/, 1)[0] : message;
 }
 
 /** A pattern as people read it, `POST * completed`: the message with its variable parts starred. */
@@ -165,7 +180,10 @@ function flagAnomalies(values: number[]): boolean[] {
   return values.map((value) => value >= 3 && value > threshold);
 }
 
-function numericField(event: LogEvent, names: string[]): number | undefined {
+const STATUS_FIELDS = ['statusCode', 'status'];
+const DURATION_FIELDS = ['durationMs', 'duration'];
+
+function numericField(event: LogEvent, names: readonly string[]): number | undefined {
   for (const name of names) {
     const value = getField(event, name);
     if (value === undefined || value === null || value === '') continue;
@@ -177,7 +195,7 @@ function numericField(event: LogEvent, names: string[]): number | undefined {
 
 function isErrorEvent(event: LogEvent, status?: number): boolean {
   if (['error', 'fatal'].includes(String(event.level).toLowerCase())) return true;
-  status ??= numericField(event, ['statusCode', 'status']);
+  status ??= numericField(event, STATUS_FIELDS);
   return status !== undefined && status >= 500;
 }
 
@@ -217,7 +235,7 @@ export function groupErrors(events: LogEvent[], options: AnalysisOptions = {}): 
   // occurrences join the stack group with the same message when exactly one exists.
   const byMessage = new Map<string, Set<string>>();
   for (const event of events) {
-    const message = String(event.message ?? event.raw ?? '').split(/\r?\n/, 1)[0];
+    const message = firstLine(String(event.message ?? event.raw ?? ''));
     if (!message || !isErrorEvent(event)) continue;
     const { key, location } = errorFingerprint(event, message);
     const group = groups.get(key) ?? {
@@ -274,7 +292,7 @@ export function findPatterns(
   const { from, to } = timeRange(events, options);
   const groups = new Map<string, LogPattern>();
   for (const event of events) {
-    const message = String(event.message ?? event.raw ?? '').split(/\r?\n/, 1)[0];
+    const message = firstLine(String(event.message ?? event.raw ?? ''));
     if (!message) continue;
     const key = normalizeMessage(message);
     const pattern: LogPattern = groups.get(key) ?? {
@@ -415,7 +433,7 @@ function topValues(events: LogEvent[]): FieldValues[] {
   return facets;
 }
 
-function percentile(sorted: number[], share: number): number {
+function percentile(sorted: ArrayLike<number>, share: number): number {
   return sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * share))];
 }
 
@@ -431,9 +449,9 @@ export function analyzeEvents(events: LogEvent[], options: AnalysisOptions = {})
   let errorCount = 0;
   let outside = 0;
   for (const event of events) {
-    const code = numericField(event, ['statusCode', 'status']);
+    const code = numericField(event, STATUS_FIELDS);
     const error = isErrorEvent(event, code);
-    const latency = numericField(event, ['durationMs', 'duration']);
+    const latency = numericField(event, DURATION_FIELDS);
     if (error) errorCount++;
     if (latency !== undefined) latencies.push(latency);
     if (code !== undefined) {
@@ -451,12 +469,12 @@ export function analyzeEvents(events: LogEvent[], options: AnalysisOptions = {})
     else if (event.level === 'warn' || event.level === 'warning') warnings[index].count++;
     if (latency !== undefined) latencyBuckets[index].push(latency);
   }
-  const latency = latencyBuckets.map((values, bucket) => {
-    values.sort((a, b) => a - b);
+  const latency = latencyBuckets.map((bucketValues, bucket) => {
+    const values = Float64Array.from(bucketValues).sort();
     const average = values.length ? values.reduce((a, b) => a + b, 0) / values.length : 0;
     return { bucket, average, p95: values.length ? percentile(values, 0.95) : 0, count: values.length };
   });
-  latencies.sort((a, b) => a - b);
+  const sortedLatencies = Float64Array.from(latencies).sort();
   const rateAnomalies = flagAnomalies(rate.map((item) => item.count));
   const errorAnomalies = flagAnomalies(errors.map((item) => item.count));
   const latencyAnomalies = flagAnomalies(latency.map((item) => item.average));
@@ -477,9 +495,9 @@ export function analyzeEvents(events: LogEvent[], options: AnalysisOptions = {})
       ...(latencies.length
         ? {
             latency: {
-              p50: percentile(latencies, 0.5),
-              p95: percentile(latencies, 0.95),
-              p99: percentile(latencies, 0.99),
+              p50: percentile(sortedLatencies, 0.5),
+              p95: percentile(sortedLatencies, 0.95),
+              p99: percentile(sortedLatencies, 0.99),
               count: latencies.length,
             },
           }

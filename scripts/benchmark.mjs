@@ -409,6 +409,20 @@ timed('suggest', 'Autocomplete four keystrokes of a field value', async () => {
     for (const value of ['r', 're', 'req', 'req-']) store.fieldSuggestions(`requestId:${value}`);
   };
 });
+timed('suggest-live', 'Autocomplete a field value while logs stream in', async () => {
+  const { LogStore } = await load('core/log-store.js');
+  const { parseLogLine } = await load('core/log-event.js');
+  // New events change the retained set before every keystroke, so each one counts the values again.
+  const store = new LogStore(RETAINED, 100 * 1024 * 1024);
+  let next = 0;
+  for (; next < RETAINED; next++) store.add(parseLogLine(line(next), 'stdout', next + 1, receivedAt));
+  return () => {
+    for (const value of ['r', 're', 'req', 'req-']) {
+      store.add(parseLogLine(line(next), 'stdout', ++next, receivedAt));
+      store.fieldSuggestions(`requestId:${value}`);
+    }
+  };
+});
 timed('copy', 'Copy the newest 1,000 matching events, redacted', async () => {
   const { store } = await retained();
   const { redactEvent } = await load('core/redaction.js');

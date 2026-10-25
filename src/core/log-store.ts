@@ -1,4 +1,4 @@
-import { fieldValue, mergeSortedEvents, sortEvents } from './event-order';
+import { fieldValue, mergeSortedKeys, sortEvents, sortedKeys, type SortKey } from './event-order';
 import {
   analyzeEvents,
   findPatterns,
@@ -18,6 +18,34 @@ const PAGE_SIZE = 1000;
 interface Slot {
   event: LogEvent;
   bytes: number;
+  /** The field names of the event, shared by the events of its source that have the same ones. */
+  shape?: Shape;
+}
+
+/**
+ * The field names an event has, in order. A source's events nearly always
+ * share a few shapes, so each event counts toward its shape, and field names
+ * are counted once per live shape instead of once per event.
+ */
+interface Shape {
+  keys: string[];
+  /** Retained events with this shape. */
+  count: number;
+  /** The source the shape belongs to; undefined for events without one. */
+  index?: ServerIndex;
+  /** Its name in the store's registry: the source and the field names. */
+  id: string;
+}
+
+// The shapes a source used most recently, checked before the registry.
+const RECENT_SHAPES = 4;
+
+/** Whether an event's field names are exactly a shape's, in order. */
+function hasShape(fields: Record<string, unknown>, shape: Shape): boolean {
+  const keys = shape.keys;
+  let i = 0;
+  for (const key in fields) if (keys[i++] !== key) return false;
+  return i === keys.length;
 }
 
 const pickFields = ({
@@ -72,8 +100,11 @@ const identity = <T>(value: T): T => value;
 class ServerIndex {
   items: (Slot | undefined)[] = [];
   start = 0;
-  // Reference counts let eviction release field names without scanning the ring.
+  // How many of the source's live shapes have each field, so eviction can release
+  // field names without scanning the ring.
   fields = new Map<string, number>();
+  /** The source's most recently used shapes, newest first. */
+  recent: Shape[] = [];
   // Session counts make agent sharing/status lookups constant time as well.
   sessions = new Map<string, number>();
   push(item: Slot) {
@@ -175,7 +206,8 @@ interface PageCache {
 // lazily, and the cache is dropped if they would pin too many released events.
 interface SortedCache {
   key: string;
-  events: LogEvent[];
+  /** The matches in order, each with the value it is sorted by, read once. */
+  keys: SortKey[];
   lastId: number;
   stale: number;
 }
@@ -230,12 +262,18 @@ export class LogStore {
   discarded!: number;
   truncated!: number;
   columnCache!: Set<string>;
+  /** How many live shapes, across sources, have each field. */
   private fieldCounts!: Map<string, number>;
+  /** Live shapes by source and field names. */
+  private shapes!: Map<string, Shape>;
+  /** Recent shapes of events without a source. */
+  private unsourcedShapes!: Shape[];
   private fieldNamesCache?: string[];
   serverIndex!: Map<string, ServerIndex>;
   private pageCache: PageCache | undefined;
   private sortedCache?: SortedCache;
-  private suggestionCache?: { key: string; counts: Map<string, number> };
+  /** A field's distinct values in the order first seen, with their counts and lowercase text for prefix matching. */
+  private suggestionCache?: { key: string; values: { text: string; lower: string; count: number }[] };
   /** JSON error id to the id of the crash attached to it, while both are retained. */
   private attached!: Map<number, number>;
   /** Which events came from changed code; without one, none did. */
@@ -257,6 +295,8 @@ export class LogStore {
     this.truncated = 0;
     this.columnCache = new Set();
     this.fieldCounts = new Map();
+    this.shapes = new Map();
+    this.unsourcedShapes = [];
     this.fieldNamesCache = undefined;
     this.serverIndex = new Map();
     this.pageCache = undefined;
@@ -270,26 +310,14 @@ export class LogStore {
     this.bytes -= evicted.bytes;
     const serverId = evicted.event.serverId;
     const index = serverId === undefined ? undefined : this.serverIndex.get(serverId);
-    for (const key in evicted.event.fields) {
-      const count = this.fieldCounts.get(key)! - 1;
-      if (count) this.fieldCounts.set(key, count);
-      else {
-        this.fieldCounts.delete(key);
-        this.columnCache.delete(key);
-        this.fieldNamesCache = undefined;
-      }
-      if (index) {
-        const serverCount = index.fields.get(key)! - 1;
-        if (serverCount) index.fields.set(key, serverCount);
-        else index.fields.delete(key);
-      }
-    }
+    const shape = evicted.shape;
+    if (shape && --shape.count === 0) this.releaseShape(shape);
     // Release cached event references immediately, even while the viewer is hidden.
     const cache = this.pageCache;
     if (cache?.matches[cache.start]?.id === evicted.event.id) cache.matches[cache.start++] = undefined;
     if (evicted.event.attachedTo !== undefined) this.attached.delete(evicted.event.attachedTo);
     const sorted = this.sortedCache;
-    if (sorted && ++sorted.stale * 4 > sorted.events.length) this.sortedCache = undefined;
+    if (sorted && ++sorted.stale * 4 > sorted.keys.length) this.sortedCache = undefined;
     if (serverId !== undefined) {
       const sessionKey = evicted.event.sessionId ?? '*';
       const sessionCount = index?.sessions.get(sessionKey);
@@ -320,21 +348,74 @@ export class LogStore {
       const sessionKey = slot.event.sessionId ?? '*';
       index.sessions.set(sessionKey, (index.sessions.get(sessionKey) ?? 0) + 1);
     }
-    // A plain for-in avoids allocating a key array per ingested line, which at
-    // flood rates is the difference between steady state and constant GC.
-    const fields = slot.event.fields;
-    if (fields)
-      for (const key in fields) {
-        if (!this.fieldCounts.has(key)) {
-          this.columnCache.add(key);
-          this.fieldNamesCache = undefined;
-        }
-        this.fieldCounts.set(key, (this.fieldCounts.get(key) ?? 0) + 1);
-        if (index) index.fields.set(key, (index.fields.get(key) ?? 0) + 1);
-      }
+    const shape = this.shapeOf(slot.event.fields, index, serverId);
+    slot.shape = shape;
+    if (shape && shape.count++ === 0) this.holdShape(shape);
     if (slot.event.attachedTo !== undefined) this.attached.set(slot.event.attachedTo, slot.event.id);
     this.size++;
     this.bytes += slot.bytes;
+  }
+
+  /** The shape of an event's fields: one of its source's recent ones, a known one, or a new one. */
+  private shapeOf(
+    fields: Record<string, unknown> | undefined,
+    index: ServerIndex | undefined,
+    serverId: string | undefined,
+  ): Shape | undefined {
+    if (!fields) return undefined;
+    const recent = index ? index.recent : this.unsourcedShapes;
+    for (let i = 0; i < recent.length; i++) {
+      const shape = recent[i];
+      if (!hasShape(fields, shape)) continue;
+      if (i) {
+        recent.splice(i, 1);
+        recent.unshift(shape);
+      }
+      return shape;
+    }
+    const keys: string[] = [];
+    for (const key in fields) keys.push(key);
+    if (!keys.length) return undefined;
+    // Sources and events without one are named apart, so a source named '' is not mistaken for none.
+    const id = `${serverId === undefined ? '-' : `+${serverId}`}\u0000${keys.join('\u0000')}`;
+    let shape = this.shapes.get(id);
+    if (!shape) shape = { keys, count: 0, index, id };
+    recent.unshift(shape);
+    if (recent.length > RECENT_SHAPES) recent.pop();
+    return shape;
+  }
+
+  /** A shape's first retained event: its fields become known for the store and its source. */
+  private holdShape(shape: Shape): void {
+    if (!this.shapes.has(shape.id)) this.shapes.set(shape.id, shape);
+    for (const key of shape.keys) {
+      const count = this.fieldCounts.get(key);
+      if (count === undefined) {
+        this.columnCache.add(key);
+        this.fieldNamesCache = undefined;
+      }
+      this.fieldCounts.set(key, (count ?? 0) + 1);
+      if (shape.index) shape.index.fields.set(key, (shape.index.fields.get(key) ?? 0) + 1);
+    }
+  }
+
+  /** A shape's last retained event left: release the fields no other live shape has. */
+  private releaseShape(shape: Shape): void {
+    if (this.shapes.get(shape.id) === shape) this.shapes.delete(shape.id);
+    for (const key of shape.keys) {
+      const count = this.fieldCounts.get(key)! - 1;
+      if (count) this.fieldCounts.set(key, count);
+      else {
+        this.fieldCounts.delete(key);
+        this.columnCache.delete(key);
+        this.fieldNamesCache = undefined;
+      }
+      if (shape.index) {
+        const serverCount = shape.index.fields.get(key)! - 1;
+        if (serverCount) shape.index.fields.set(key, serverCount);
+        else shape.index.fields.delete(key);
+      }
+    }
   }
 
   add(event: LogEvent): void {
@@ -358,7 +439,8 @@ export class LogStore {
       return;
     }
     while (this.size && (this.size === this.maxRows || this.bytes + bytes > this.maxBytes)) this.evictOldest();
-    this.insertSlot({ event, bytes });
+    // Created with every property it will have, so V8 keeps them in the object itself.
+    this.insertSlot({ event, bytes, shape: undefined });
   }
 
   // Ids increase monotonically along the ring, so the newest page can be found
@@ -565,25 +647,26 @@ export class LogStore {
     if (sort) {
       const sortKey = JSON.stringify([key, sort, sortDirection]);
       const cached = !relative && this.sortedCache?.key === sortKey ? this.sortedCache : undefined;
-      let sorted: LogEvent[];
+      let sorted: SortKey[];
       if (cached) {
         // Evictions only ever remove the oldest ids, and new matches only ever
         // append to the end of `matches`, so both ends are cheap to reconcile.
         const oldestId = this.size ? this.slots[this.head]!.event.id : Infinity;
-        const retained = cached.stale ? cached.events.filter((event) => event.id >= oldestId) : cached.events;
+        const retained = cached.stale ? cached.keys.filter((entry) => entry.event.id >= oldestId) : cached.keys;
         let first = matches.length;
         while (first > start && matches[first - 1]!.id > cached.lastId) first--;
         sorted =
           first < matches.length
-            ? mergeSortedEvents(retained, matches.slice(first) as LogEvent[], sort, sortDirection)
+            ? mergeSortedKeys(retained, matches.slice(first) as LogEvent[], sort, sortDirection)
             : retained;
-      } else sorted = sortEvents(matches.slice(start) as LogEvent[], sort, sortDirection);
+      } else sorted = sortedKeys(matches.slice(start) as LogEvent[], sort, sortDirection);
       const lastId = matches.length > start ? matches[matches.length - 1]!.id : -1;
-      this.sortedCache = relative ? undefined : { key: sortKey, events: sorted, lastId, stale: 0 };
+      this.sortedCache = relative ? undefined : { key: sortKey, keys: sorted, lastId, stale: 0 };
       const sortedPages = Math.max(1, Math.ceil(sorted.length / PAGE_SIZE));
       page = Math.max(0, Math.min(sortedPages - 1, Number.isInteger(page) ? page : 0));
+      const pick = full ? identity : pickFields;
       return {
-        events: sorted.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE).map(full ? identity : pickFields),
+        events: sorted.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE).map((entry) => pick(entry.event)),
         page,
         pages: sortedPages,
         matched: sorted.length,
@@ -859,9 +942,9 @@ export class LogStore {
       // `total` and `discarded` change on every add and eviction, and events
       // are never mutated after insertion, so together they version the ring.
       const key = JSON.stringify([target.field, wantedServer ?? null, this.total, this.discarded]);
-      let counts = this.suggestionCache?.key === key ? this.suggestionCache.counts : undefined;
-      if (!counts) {
-        const tally = (counts = new Map<string, number>());
+      let seen = this.suggestionCache?.key === key ? this.suggestionCache.values : undefined;
+      if (!seen) {
+        const tally = new Map<string, number>();
         const count = (event: LogEvent) => {
           const value = fieldValue(event, target.field!);
           if (value !== undefined) {
@@ -876,9 +959,20 @@ export class LogStore {
             if (id.toLowerCase() !== wantedServer) continue;
             for (let i = index.start; i < index.items.length; i++) count(index.items[i]!.event);
           }
-        this.suggestionCache = { key, counts };
+        seen = [...tally].map(([text, count]) => ({ text, lower: text.toLowerCase(), count }));
+        this.suggestionCache = { key, values: seen };
       }
-      for (const [text, total] of counts) if (text.toLowerCase().startsWith(valuePrefix)) values.set(text, total);
+      // The 20 most frequent matches, kept in order while scanning; equal counts keep the order first seen.
+      const top: { text: string; count: number }[] = [];
+      for (const entry of seen) {
+        if (!entry.lower.startsWith(valuePrefix)) continue;
+        if (top.length === 20 && entry.count <= top[19].count) continue;
+        let at = top.length;
+        while (at > 0 && top[at - 1].count < entry.count) at--;
+        top.splice(at, 0, entry);
+        if (top.length > 20) top.pop();
+      }
+      for (const entry of top) values.set(entry.text, entry.count);
     }
     return {
       fields: [...fields]

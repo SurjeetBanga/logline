@@ -10,7 +10,7 @@ const valueCollator = new Intl.Collator(undefined, { numeric: true, sensitivity:
 
 // A sort key read once per event. Comparators otherwise resolve the field (and
 // its aliases) and coerce it to a number twice per comparison, n log n times.
-interface SortKey {
+export interface SortKey {
   event: LogEvent;
   empty: boolean;
   number: number;
@@ -40,33 +40,32 @@ export function sortEvents(events: LogEvent[], field: string, direction: 'asc' |
   return events;
 }
 
+/** Sort events, returning each with its key, so later merges need not read the field again. */
+export function sortedKeys(events: readonly LogEvent[], field: string, direction: 'asc' | 'desc' = 'asc'): SortKey[] {
+  const sign = direction === 'desc' ? -1 : 1;
+  return events.map((event) => sortKey(event, field)).sort((a, b) => compareKeys(a, b, sign));
+}
+
 /**
- * Merge newly arrived events into an already sorted array without re-sorting
- * the retained ones. `sorted` must have come from sortEvents with the same
- * field and direction; `fresh` is sorted here. Returns a new array.
+ * Merge new events into keys from sortedKeys with the same field and direction,
+ * reading the field only for the new events. Returns a new array.
  */
-export function mergeSortedEvents(
-  sorted: readonly LogEvent[],
-  fresh: LogEvent[],
+export function mergeSortedKeys(
+  sorted: readonly SortKey[],
+  fresh: readonly LogEvent[],
   field: string,
   direction: 'asc' | 'desc' = 'asc',
-): LogEvent[] {
+): SortKey[] {
   if (!fresh.length) return sorted.slice();
   const sign = direction === 'desc' ? -1 : 1;
-  const incoming = fresh.map((event) => sortKey(event, field)).sort((a, b) => compareKeys(a, b, sign));
-  const merged: LogEvent[] = new Array(sorted.length + incoming.length);
+  const incoming = sortedKeys(fresh, field, direction);
+  const merged: SortKey[] = new Array(sorted.length + incoming.length);
   let i = 0,
     j = 0,
     k = 0;
-  // Each retained event's key is only computed when the cursor reaches it.
-  let current = sorted.length ? sortKey(sorted[0], field) : undefined;
-  while (current && j < incoming.length) {
-    if (compareKeys(current, incoming[j], sign) <= 0) {
-      merged[k++] = current.event;
-      current = ++i < sorted.length ? sortKey(sorted[i], field) : undefined;
-    } else merged[k++] = incoming[j++].event;
-  }
+  while (i < sorted.length && j < incoming.length)
+    merged[k++] = compareKeys(sorted[i], incoming[j], sign) <= 0 ? sorted[i++] : incoming[j++];
   while (i < sorted.length) merged[k++] = sorted[i++];
-  while (j < incoming.length) merged[k++] = incoming[j++].event;
+  while (j < incoming.length) merged[k++] = incoming[j++];
   return merged;
 }
