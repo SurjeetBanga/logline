@@ -2,6 +2,15 @@
 
 All notable changes to Logline are documented in this file.
 
+## Unreleased
+
+### Fixes
+
+- On Windows, Claude Code, Codex, and other MCP clients find the VS Code window of their project again. VS Code names folders with a lowercase drive letter (`c:\`) and agents start in `C:\`, so no window seemed to contain the agent's folder; folders now match whatever their case.
+- When Logline cannot edit the MCP settings of Cursor, Windsurf, or Kiro and copies the server entry instead, the entry names the open folder (`--workspace ${workspaceFolder}`), as the one it writes does, so the editor's agent reads this window's logs.
+- Redaction hides `passwd` values and the `Pwd` of connection strings, such as `Server=db;Uid=sa;Pwd=…`, from agents, exports, and copies.
+- Stopping a run, or closing the window, no longer waits for a background process the run started in a process group of its own, such as a daemon or a `setsid` command, which kept its output open. The run ends a second after its own process exits, and shutdown saves the logs kept for disk.
+
 ## 1.16.0 — 2026-10-24
 
 ### Changes

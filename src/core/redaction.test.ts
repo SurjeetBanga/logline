@@ -50,6 +50,13 @@ test('redacts camelCase secret keys embedded in messages', () => {
   );
 });
 
+test('redacts passwd and the Pwd of connection strings', () => {
+  assert.equal(redactText('passwd=test-password'), 'passwd=[REDACTED]');
+  assert.equal(redactText('Server=db;Uid=sa;Pwd=test-password;'), 'Server=db;Uid=sa;Pwd=[REDACTED];');
+  assert.equal(redactText('db_pwd: test-password'), 'db_pwd: [REDACTED]');
+  assert.equal(redactText('OLDPWD=/home/dev cwd=/home/dev'), 'OLDPWD=/home/dev cwd=/home/dev');
+});
+
 test('redacts snake_case secret keys and leaves unrelated word:value pairs alone', () => {
   assert.equal(
     redactText('client_secret=test-secret api_key: "test-key"'),

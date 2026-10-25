@@ -7,8 +7,9 @@ export interface RedactionOptions {
 }
 
 const DEFAULT_REPLACEMENT = '[REDACTED]';
+// `pwd` alone or as the last part of a key, as in `Pwd=` of a connection string or `db_pwd`; `oldpwd` is a folder.
 const SENSITIVE_KEY =
-  /(?:password|passphrase|secret|token|api[-_ ]?key|authorization|cookie|private[-_ ]?key|access[-_ ]?key|credential)/i;
+  /(?:password|passwd|passphrase|secret|token|api[-_ ]?key|authorization|cookie|private[-_ ]?key|access[-_ ]?key|credential|(?:^|[-_. ])pwd$)/i;
 // Counts that only share a word with a sensitive key, such as `max_tokens`
 // or `gen_ai.usage.input_tokens`.
 const NOT_SENSITIVE_KEY =

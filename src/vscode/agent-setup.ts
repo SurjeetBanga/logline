@@ -200,8 +200,17 @@ export function withLoglineServer(text: string | undefined, launch: AgentLaunch)
   return `${JSON.stringify({ ...config, mcpServers: { ...servers, logline: { command: launch.command, args: launch.args, env: launch.env } } }, null, 2)}\n`;
 }
 
+/**
+ * How the editor's own agent starts Logline. The editor starts its MCP servers
+ * for every project, so the open folder is named for the server to pick this window's logs.
+ */
+export function hostLaunch(launch: AgentLaunch): AgentLaunch {
+  return { ...launch, args: [...launch.args, '--workspace', '${workspaceFolder}'] };
+}
+
 /** Add Logline to the editor's own agent by editing its MCP configuration file. */
-async function connectHost(host: HostAgent, launch: AgentLaunch, after: string): Promise<void> {
+async function connectHost(host: HostAgent, base: AgentLaunch, after: string): Promise<void> {
+  const launch = hostLaunch(base);
   const choice = await vscode.window.showInformationMessage(
     `Add Logline to ${host.name}'s agent?`,
     {
@@ -218,11 +227,7 @@ async function connectHost(host: HostAgent, launch: AgentLaunch, after: string):
     /* not created yet */
   }
   try {
-    // The editor starts its MCP servers for every project, so name the open folder for the server to pick this window's logs.
-    const text = withLoglineServer(existing, {
-      ...launch,
-      args: [...launch.args, '--workspace', '${workspaceFolder}'],
-    });
+    const text = withLoglineServer(existing, launch);
     mkdirSync(dirname(host.file), { recursive: true });
     writeFileSync(host.file, text);
   } catch (error) {

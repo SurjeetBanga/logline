@@ -1,6 +1,6 @@
 import { readdirSync, readFileSync } from 'node:fs';
 import { connect } from 'node:net';
-import { join, resolve, sep } from 'node:path';
+import { join, posix, win32 } from 'node:path';
 import { createInterface } from 'node:readline';
 import { BRIDGE_VERSION, isAlive, type BridgeResponse, type BridgeWindow } from '../protocol/agent-bridge';
 import type { AgentWorkflow } from '../protocol/agent-workflows';
@@ -97,12 +97,17 @@ export function pickWindow(
   windows: BridgeWindow[],
   cwd: string,
   workspace?: string,
+  platform: NodeJS.Platform = process.platform,
 ): { window?: BridgeWindow; error?: string } {
   if (!windows.length) return { error: NOT_RUNNING };
-  const target = resolve(workspace || cwd);
+  const paths = platform === 'win32' ? win32 : posix;
+  // Windows paths ignore case, and VS Code writes drive letters in lower case (`c:\`) where a shell has `C:\`.
+  const key = (path: string) => (platform === 'win32' ? paths.resolve(path).toLowerCase() : paths.resolve(path));
+  const target = paths.resolve(workspace || cwd);
+  const targetKey = key(target);
   const contains = (folder: string) => {
-    const root = resolve(folder);
-    return target === root || target.startsWith(root.endsWith(sep) ? root : root + sep);
+    const root = key(folder);
+    return targetKey === root || targetKey.startsWith(root.endsWith(paths.sep) ? root : root + paths.sep);
   };
   let best: { window: BridgeWindow; length: number } | undefined;
   for (const window of windows)

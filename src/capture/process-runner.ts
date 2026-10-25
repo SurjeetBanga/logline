@@ -10,6 +10,9 @@ import type { RuntimeState } from './runtime-state';
 import type { SessionRegistry } from './session-registry';
 import type { Session } from './types';
 
+/** How long a stopped process's output pipes are read after it exits, for output still on its way. */
+const PIPE_GRACE_MS = 1000;
+
 export class ProcessRunner {
   readonly sessions = new Set<Session>();
   private readonly timers = new Set<ReturnType<typeof setTimeout>>();
@@ -158,6 +161,10 @@ export class ProcessRunner {
       if (this.sessions.has(session)) this.state.status = `Failed: ${error.message}`;
       this.state.notify();
     });
+    child.on('exit', () => {
+      session.processExited = true;
+      if (session.stopping) this.releasePipes(session);
+    });
     child.on('close', (code, signal) => {
       session.exited = true;
       for (const reader of readers) reader.end();
@@ -215,10 +222,26 @@ export class ProcessRunner {
       });
     };
     kill('SIGTERM');
+    if (session.processExited) this.releasePipes(session);
     const timer = setTimeout(() => {
       kill('SIGKILL', true);
       this.timers.delete(timer);
     }, 2000);
+    timer.unref();
+    this.timers.add(timer);
+  }
+
+  /**
+   * A descendant that left the process group, such as one started with
+   * `setsid` or a daemon, can keep a stopped process's output pipes open, and
+   * `close` waits for them: the run would stay stopping and shutdown would
+   * never reach the disk flush. Shortly after the process exits, stop reading them.
+   */
+  private releasePipes(session: Session): void {
+    const timer = setTimeout(() => {
+      this.timers.delete(timer);
+      if (!session.exited) for (const stream of [session.child.stdout, session.child.stderr]) stream.destroy();
+    }, PIPE_GRACE_MS);
     timer.unref();
     this.timers.add(timer);
   }

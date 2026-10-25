@@ -156,6 +156,19 @@ test('an agent reaches the window whose workspace contains its working directory
   assert.match(pickWindow([], '/work/api').error!, /No VS Code window with Logline is running/);
 });
 
+test('on Windows, a window is found whatever the case of its drive letter and folders', () => {
+  // VS Code reports `c:\…`; a terminal or agent starts in `C:\…`.
+  const app = window(1, ['c:\\Users\\dev\\App'], 'app');
+  assert.equal(pickWindow([app], 'C:\\Users\\dev\\App\\src', undefined, 'win32').window, app);
+  assert.equal(pickWindow([app], 'C:\\USERS\\DEV\\APP', undefined, 'win32').window, app);
+  assert.equal(pickWindow([app], 'C:\\Users\\dev\\Apps', undefined, 'win32').window, undefined);
+  assert.equal(
+    pickWindow([window(1, ['/work/App'])], '/work/app', undefined, 'linux').window,
+    undefined,
+    'other platforms keep case',
+  );
+});
+
 test('the workspace comes from --workspace, unless the editor left its variable unexpanded', () => {
   assert.equal(
     workspaceArgument(['node', 'mcp.js', '--workspace', '/work/api'], { LOGLINE_WORKSPACE: '/work/web' }),
@@ -312,7 +325,7 @@ test('agents are named for people, and setup commands quote paths for the shell'
     'cursorscript',
     'an MCP client',
   ]);
-  const { agentLaunch, setupCommand, shellKind, mcpConfiguration } = withVscode(
+  const { agentLaunch, setupCommand, shellKind, mcpConfiguration, hostLaunch, withLoglineServer } = withVscode(
     {},
     () => require('./agent-setup') as typeof import('./agent-setup'),
   );
@@ -348,6 +361,11 @@ test('agents are named for people, and setup commands quote paths for the shell'
     true,
   );
   assert.deepEqual(JSON.parse(mcpConfiguration(launch)).mcpServers.logline.args, ['/Users/me/.logline/mcp.js']);
+  // The editor's own agent names the open folder, in the file Logline writes and in the entry it copies instead.
+  const host = ['/Users/me/.logline/mcp.js', '--workspace', '${workspaceFolder}'];
+  assert.deepEqual(JSON.parse(mcpConfiguration(hostLaunch(launch))).mcpServers.logline.args, host);
+  assert.deepEqual(JSON.parse(withLoglineServer(undefined, hostLaunch(launch))).mcpServers.logline.args, host);
+  assert.deepEqual(launch.args, ['/Users/me/.logline/mcp.js'], 'the launch itself is unchanged');
 
   // The Claude Code and Codex extensions bring their own CLI, which is often not on PATH.
   const { agentCli } = withVscode({}, () => require('./agent-setup') as typeof import('./agent-setup'));
