@@ -20,7 +20,10 @@ export interface SessionServer {
 export interface Session {
   child: ChildProcessWithoutNullStreams;
   stopping: boolean;
+  /** The process and its output pipes have closed. */
   exited: boolean;
+  /** The process itself has exited; a descendant can still hold its output pipes open. */
+  processExited?: boolean;
   server: SessionServer;
   record: SessionSummary;
 }

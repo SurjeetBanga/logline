@@ -73,6 +73,47 @@ test('process disposal captures the final partial line before flushing disk writ
   }
 });
 
+test(
+  'shutdown does not wait for a descendant outside the process group that holds the output pipe',
+  { timeout: 10000, skip: process.platform === 'win32' && 'Windows has no process groups' },
+  async () => {
+    const store = new LogStore(100);
+    const runner = new ProcessRunner(
+      { get: (_key, fallback) => fallback },
+      new SessionRegistry(),
+      new Ingestion(store, () => {}),
+      new RuntimeState(() => {}),
+    );
+    // The grandchild starts a process group of its own, so stopping the run does not reach it.
+    runner.run(process.execPath, undefined, { id: 'daemon', label: 'Daemon' }, undefined, undefined, [
+      '-e',
+      `const child = require('node:child_process').spawn(process.execPath, ['-e', 'setTimeout(() => {}, 30000)'], { detached: true, stdio: ['ignore', 'inherit', 'inherit'] });
+       child.unref();
+       console.log('daemon ' + child.pid);
+       setInterval(() => {}, 1000);`,
+    ]);
+    const session = [...runner.sessions][0];
+    const [chunk] = (await once(session.child.stdout, 'data')) as [Buffer];
+    const daemon = Number(/daemon (\d+)/.exec(chunk.toString())?.[1]);
+    try {
+      const started = Date.now();
+      await runner.dispose();
+      assert.ok(Date.now() - started < 5000, `dispose took ${Date.now() - started} ms`);
+      assert.equal(runner.sessions.size, 0);
+      assert.equal(session.record.status, 'exited');
+      assert.match(store.all()[0]?.message ?? '', /^daemon \d+$/);
+    } finally {
+      if (daemon) {
+        try {
+          process.kill(daemon, 'SIGKILL');
+        } catch {
+          /* already gone */
+        }
+      }
+    }
+  },
+);
+
 test('stopping an old session ID leaves a later run alone', { timeout: 10000 }, async () => {
   const store = new LogStore(100);
   const runner = new ProcessRunner(
