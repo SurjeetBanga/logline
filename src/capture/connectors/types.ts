@@ -6,6 +6,8 @@ export type Row = Record<string, unknown>;
 export interface QueryOptions {
   timeoutMs: number;
   signal?: AbortSignal;
+  /** At most this many rows, for a query that is run as typed rather than wrapped in a LIMIT. */
+  maxRows?: number;
 }
 
 /** Runs read-only SQL against one database. */

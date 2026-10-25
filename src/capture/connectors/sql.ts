@@ -45,8 +45,28 @@ export class SqlConnector implements Connector {
     return this.connection.logs;
   }
 
-  private query(sql: string, params: (string | number | null)[] = [], signal?: AbortSignal): Promise<Row[]> {
-    return this.driver.query(sql, params, { timeoutMs: this.timeoutMs(), signal });
+  private query(
+    sql: string,
+    params: (string | number | null)[] = [],
+    signal?: AbortSignal,
+    maxRows?: number,
+  ): Promise<Row[]> {
+    return this.driver.query(sql, params, {
+      timeoutMs: this.timeoutMs(),
+      signal,
+      ...(maxRows !== undefined ? { maxRows } : {}),
+    });
+  }
+
+  /**
+   * A typed query, returning at most `limit` rows. MySQL refuses a derived table
+   * with two columns of one name, as a join of two tables with an `id` has, so
+   * there the query runs as typed with the server's row limit instead of wrapped.
+   */
+  private limited(sql: string, limit: number, signal?: AbortSignal): Promise<Row[]> {
+    if (this.driver.dialect === 'mysql') return this.query(sql, [], signal, limit);
+    const statement = limitedSql(sql, this.driver.dialect, limit);
+    return this.query(statement.sql, statement.params, signal);
   }
 
   /** The database's version and how many tables it has, to confirm the connection works. */
@@ -209,8 +229,7 @@ export class SqlConnector implements Connector {
     const started = Date.now();
     const checked = checkReadOnlySql(sql, this.driver.dialect);
     if ('error' in checked) throw new Error(checked.error);
-    const statement = limitedSql(checked.sql, this.driver.dialect, limit);
-    const rows = await this.query(statement.sql, statement.params, signal);
+    const rows = await this.limited(checked.sql, limit, signal);
     const roles = rowRoles(Object.keys(rows[0] ?? {}), this.mapping);
     return {
       records: rows.map((row) => rowToLine(row, roles, 'auto')),
@@ -231,10 +250,11 @@ export class SqlConnector implements Connector {
     const checked = checkReadOnlySql(sql, this.driver.dialect);
     if ('error' in checked) throw new Error(checked.error);
     const time = await this.metricTime(checked.sql, signal);
-    const statement = time
-      ? rangedSql(checked.sql, this.driver.dialect, time, fromMs, toMs, METRIC_ROWS)
-      : limitedSql(checked.sql, this.driver.dialect, METRIC_ROWS);
-    const rows = await this.query(statement.sql, statement.params, signal);
+    let rows: Row[];
+    if (time) {
+      const statement = rangedSql(checked.sql, this.driver.dialect, time, fromMs, toMs, METRIC_ROWS);
+      rows = await this.query(statement.sql, statement.params, signal);
+    } else rows = await this.limited(checked.sql, METRIC_ROWS, signal);
     const series = rowsToSeries(rows, metricName(checked.sql))
       .map((one) => ({ ...one, points: one.points.filter(([time]) => time >= fromMs && time <= toMs) }))
       .filter((one) => one.points.length);
@@ -248,8 +268,7 @@ export class SqlConnector implements Connector {
   ): Promise<{ column: string; encoding: TimeEncoding } | undefined> {
     const known = this.metricTimes.get(sql);
     if (known !== undefined) return known ?? undefined;
-    const sample = limitedSql(sql, this.driver.dialect, 1);
-    const [row] = await this.query(sample.sql, sample.params, signal);
+    const [row] = await this.limited(sql, 1, signal);
     // A query with no rows yet is read again next time.
     if (!row) return undefined;
     const columns = Object.keys(row);

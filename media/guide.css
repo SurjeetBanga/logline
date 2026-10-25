@@ -211,6 +211,17 @@ h2:focus {
   grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
   gap: 12px;
 }
+/* Three steps, or three highlights, sit in one row rather than two and one left alone. */
+.steps,
+.highlights:has(> :nth-child(3):last-child) {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+@media (max-width: 720px) {
+  .steps,
+  .highlights:has(> :nth-child(3):last-child) {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
 .steps {
   margin: 0;
   padding: 0;

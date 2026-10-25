@@ -56,7 +56,7 @@ test('MySQL queries run read-only, in UTC, with a time limit, on one connection'
     "SET time_zone = '+00:00'",
     'SET SESSION max_execution_time = 2500',
     'START TRANSACTION READ ONLY',
-    'SELECT ? ["x"]',
+    "SELECT 'x'",
     'ROLLBACK',
     // The session keeps its limit until the setting changes.
     'START TRANSACTION READ ONLY',
@@ -131,4 +131,18 @@ test('MariaDB’s time limit is used when MySQL’s is missing, and timeouts and
   await driver.query('SELECT 1', [], { timeoutMs: 2000 });
   assert.ok(fake.connections() >= 2, 'a broken connection is opened again');
   await assert.rejects(driver.query('SELECT 1', [], { timeoutMs: 1000, signal: AbortSignal.abort() }), /cancelled/);
+});
+
+test('typed MySQL runs as written, capped by the server row limit, which is reset afterwards', async () => {
+  const fake = fakeMysql();
+  const driver = new MysqlDriver(mysql, 'secret', fake.load);
+  await driver.query('SELECT a.id, b.id FROM a JOIN b ON a.id = b.id', [], { timeoutMs: 1000, maxRows: 5 });
+  assert.deepEqual(fake.log.slice(-5), [
+    'SET SESSION sql_select_limit = 5',
+    'START TRANSACTION READ ONLY',
+    'SELECT a.id, b.id FROM a JOIN b ON a.id = b.id',
+    'ROLLBACK',
+    'SET SESSION sql_select_limit = DEFAULT',
+  ]);
+  await driver.close();
 });

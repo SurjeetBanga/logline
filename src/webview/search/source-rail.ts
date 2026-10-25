@@ -28,7 +28,7 @@ const ICONS: Record<string, string> = {
   remove: 'M3 4.5h10M6.5 4.5V3h3v1.5M4.5 4.5l.6 8.5h5.8l.6-8.5M7 7v4M9 7v4',
 };
 
-function icon(name: string, size = 14): SVGElement {
+export function icon(name: string, size = 14): SVGElement {
   const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
   svg.setAttribute('viewBox', '0 0 16 16');
   svg.setAttribute('width', String(size));
@@ -294,12 +294,26 @@ export function createSourceRail(
     group.setAttribute('aria-label', 'Runs');
     const all = runButton('', sessions.length ? `All runs · ${sessions.length}` : 'All runs', '');
     group.append(all);
+    // Runs of one command, the usual case, are told apart by when they started; the
+    // source's row above already names the command. Different commands keep their names,
+    // and so do a connection's or an import's runs, which are named by what they fetched.
+    const byTime =
+      new Set(sessions.map(runName)).size <= 1 &&
+      !sessions.some((session) => session.sourceKind === 'remote' || session.sourceKind === 'import');
     for (const session of sessions) {
       const wrapper = document.createElement('div');
       wrapper.className = 'run-option-row';
-      const started = session.startedAt ? new Date(session.startedAt).toLocaleTimeString() : '';
+      const started = session.startedAt
+        ? new Date(session.startedAt).toLocaleTimeString([], {
+            hour: 'numeric',
+            minute: '2-digit',
+            ...(byTime ? { second: '2-digit' } : {}),
+          })
+        : '';
       const stateText = session.status === 'running' ? 'running' : session.exitReason || session.status;
-      const button = runButton(session.id, runName(session), [started, stateText].filter(Boolean).join(' · '));
+      const button = byTime
+        ? runButton(session.id, started || runName(session), stateText)
+        : runButton(session.id, runName(session), [started, stateText].filter(Boolean).join(' · '));
       button.title = [
         runName(session),
         session.cwd,

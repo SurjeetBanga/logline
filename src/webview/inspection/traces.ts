@@ -162,18 +162,25 @@ export function createTraceList(
         nameText.textContent = `${trace.errors ? '⚠ ' : ''}${trace.name || trace.traceId}`;
         name.append(nameText);
         name.title = `${trace.name || trace.traceId}\nTrace ${trace.traceId}`;
+        // The service that starts the trace, and how many others it reaches; the title names them all.
         const services = cell('', 'traces-services');
-        for (const service of trace.services.slice(0, 4)) {
+        const [first, ...others] = trace.services;
+        if (first) {
           const chip = document.createElement('span');
           chip.className = 'service-chip';
           const dot = document.createElement('span');
           dot.className = 'service-dot';
-          dot.style.background = serviceColor(service);
-          chip.append(dot, document.createTextNode(service));
-          chip.title = service;
+          dot.style.background = serviceColor(first);
+          chip.append(dot, document.createTextNode(first));
           services.append(chip);
+          if (others.length) {
+            const more = document.createElement('span');
+            more.className = 'traces-more-services';
+            more.textContent = `+${others.length}`;
+            services.append(more);
+          }
+          services.title = trace.services.join(', ');
         }
-        if (trace.services.length > 4) services.append(document.createTextNode(` +${trace.services.length - 4}`));
         const duration = cell('', 'traces-duration');
         // Flex layout goes inside the cell; a flex table cell stops lining up with its row.
         const durationContent = document.createElement('div');

@@ -296,3 +296,25 @@ test('time kept as seconds, milliseconds, or ISO text, even in a nested field, i
     if (field === 'meta.at') assert.equal(result.records[0].timeMs, from, 'a nested time is read for the line');
   }
 });
+
+test('a time field holding ObjectIds other than _id is the one ranges, sorting, and lines use', async () => {
+  const fake = fakeMongo([
+    {
+      _id: new FakeObjectId('000000010000000000000001'),
+      eventId: new FakeObjectId('671a1b2c0000000000000002'),
+      msg: 'a',
+    },
+  ]);
+  const connector = new MongoConnector(
+    connection({ table: 'logs', timestamp: 'eventId', message: 'msg' }),
+    undefined,
+    () => 5000,
+    () => fake.module,
+  );
+  const from = Date.parse('2026-10-24T09:00:00Z');
+  const result = await connector.fetchLogs({ query: '', fromMs: from, limit: 10, order: 'desc' });
+  const find = fake.calls.find((call) => call.op === 'find') as unknown as { args: [string, Doc]; sort: Doc };
+  assert.deepEqual(Object.keys(find.args[1]), ['eventId']);
+  assert.deepEqual(find.sort, { eventId: -1 });
+  assert.match(result.records[0].line, /^{"timestamp":"2024-10-24T10:02:20\.000Z"/);
+});

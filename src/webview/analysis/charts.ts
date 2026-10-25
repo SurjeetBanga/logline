@@ -97,21 +97,42 @@ export function createAnalysis(elements: Elements, state: ViewerState, actions?:
     return section;
   }
 
+  /**
+   * Times under a chart. They are HTML placed by share of the width, not SVG text,
+   * which would grow and shrink with the chart and be unreadable in a narrow panel.
+   */
   function xAxisTicks(
-    svg: SVGElement,
     bucketCount: number,
     range: AnalysisResult['range'],
     xFor: (index: number) => number,
-    height: number,
-  ) {
+    width: number,
+  ): HTMLElement {
+    const axis = document.createElement('div');
+    axis.className = 'chart-axis';
+    axis.setAttribute('aria-hidden', 'true');
     const tickEvery = Math.max(1, Math.round(bucketCount / 6));
     for (let index = 0; index < bucketCount; index += tickEvery) {
       const time = bucketTime(range, bucketCount, index);
       if (time === undefined) continue;
-      const label = svgEl('text', { x: xFor(index), y: height - 4, class: 'chart-axis-label' });
+      const label = document.createElement('span');
+      label.className = 'chart-axis-label';
+      label.style.left = `${((xFor(index) / width) * 100).toFixed(2)}%`;
       label.textContent = formatClock(time, range);
-      svg.append(label);
+      axis.append(label);
     }
+    return axis;
+  }
+
+  /** A chart's title, with its scale beside it in quieter text. */
+  function chartHeading(title: string, scale: string): HTMLElement {
+    const heading = document.createElement('h3');
+    heading.className = 'chart-heading';
+    heading.textContent = title;
+    const note = document.createElement('span');
+    note.className = 'chart-scale';
+    note.textContent = scale;
+    heading.append(note);
+    return heading;
   }
 
   // Log volume over time, stacked by level: errors, then warnings, then the rest, so a
@@ -127,15 +148,13 @@ export function createAnalysis(elements: Elements, state: ViewerState, actions?:
     if (!bucketCount || !rate.some((item) => item.count > 0)) return emptySection('Volume by level');
     const section = document.createElement('section');
     section.className = 'chart-section chart-wide';
-    const heading = document.createElement('h3');
-    heading.textContent = 'Volume by level';
-    section.append(heading);
-    const width = 720,
-      height = 130,
-      padTop = 10,
-      padBottom = 18;
-    const plotHeight = height - padTop - padBottom;
     const max = Math.max(1, ...rate.map((item) => item.count));
+    section.append(chartHeading('Volume by level', `up to ${count(max)} a bar`));
+    const width = 720,
+      height = 116,
+      padTop = 10,
+      padBottom = 0;
+    const plotHeight = height - padTop - padBottom;
     const barGap = 2;
     const barWidth = Math.max(1, width / bucketCount - barGap);
     const svg = svgEl('svg', {
@@ -144,9 +163,6 @@ export function createAnalysis(elements: Elements, state: ViewerState, actions?:
       role: 'img',
       'aria-label': 'Event volume over time, with errors highlighted',
     });
-    const maxLabel = svgEl('text', { x: 2, y: padTop, class: 'chart-axis-label' });
-    maxLabel.textContent = String(max);
-    svg.append(maxLabel);
     rate.forEach((item, index) => {
       const errorCount = Math.min(item.count, errors[index]?.count ?? 0);
       const warnCount = Math.min(item.count - errorCount, warnings[index]?.count ?? 0);
@@ -210,13 +226,14 @@ export function createAnalysis(elements: Elements, state: ViewerState, actions?:
       }
       svg.append(group);
     });
-    xAxisTicks(svg, bucketCount, range, (index) => index * (barWidth + barGap) + barWidth / 2, height);
+    const axis = xAxisTicks(bucketCount, range, (index) => index * (barWidth + barGap) + barWidth / 2, width);
     const selection = document.createElement('div');
     selection.className = 'volume-selection-bar';
     selection.hidden = true;
     brush(svg, selection, { rate, errors, range, barWidth, barGap, plotBottom: padTop + plotHeight });
     section.append(
       svg,
+      axis,
       chartLegend([
         { className: 'swatch-ok', label: 'info and others' },
         { className: 'swatch-warn', label: 'warnings' },
@@ -265,6 +282,13 @@ export function createAnalysis(elements: Elements, state: ViewerState, actions?:
       if (event.button !== 0) return;
       start = bucketAt(event);
       dragged = false;
+      // The release then reaches the chart even past its edge, ending the drag there.
+      svg.setPointerCapture?.(event.pointerId);
+    });
+    scope.listen(svg, 'pointercancel', () => {
+      if (start === undefined) return;
+      start = undefined;
+      if (dragged && bar.hidden) outline.setAttribute('visibility', 'hidden');
     });
     scope.listen(svg, 'pointermove', (event) => {
       if (start === undefined) return;
@@ -314,21 +338,19 @@ export function createAnalysis(elements: Elements, state: ViewerState, actions?:
   // Average + p95 latency over the same time axis as the volume chart, rather than two
   // separate bar lists - this is how APM tools (Datadog, Grafana) conventionally pair
   // a mean line with a percentile line so tail latency is visible alongside the average.
-  function latencyChart(latency: AnalysisResult['latency'], range: AnalysisResult['range'], narrow = false) {
+  function latencyChart(latency: AnalysisResult['latency'], range: AnalysisResult['range']) {
     const bucketCount = latency.length;
-    if (!bucketCount || !latency.some((item) => item.count > 0)) return emptySection('Latency (ms)');
+    if (!bucketCount || !latency.some((item) => item.count > 0)) return emptySection('Latency');
     const section = document.createElement('section');
     section.className = 'chart-section chart-wide';
-    const heading = document.createElement('h3');
-    heading.textContent = 'Latency (ms)';
-    section.append(heading);
-    // Beside the error groups the chart is narrower, so it draws on a narrower, taller canvas to stay readable.
-    const width = narrow ? 400 : 720,
-      height = narrow ? 180 : 110,
-      padTop = 10,
-      padBottom = 18;
-    const plotHeight = height - padTop - padBottom;
     const max = Math.max(1, ...latency.map((item) => Math.max(item.average, item.p95)));
+    section.append(chartHeading('Latency', `up to ${count(Math.round(max))} ms`));
+    // As wide as the volume chart above it, so the two share their time axis.
+    const width = 720,
+      height = 96,
+      padTop = 6,
+      padBottom = 4;
+    const plotHeight = height - padTop - padBottom;
     const step = bucketCount > 1 ? width / (bucketCount - 1) : 0;
     const svg = svgEl('svg', {
       viewBox: `0 0 ${width} ${height}`,
@@ -336,9 +358,6 @@ export function createAnalysis(elements: Elements, state: ViewerState, actions?:
       role: 'img',
       'aria-label': 'Average and p95 latency over time',
     });
-    const maxLabel = svgEl('text', { x: 2, y: padTop, class: 'chart-axis-label' });
-    maxLabel.textContent = `${Math.round(max)}ms`;
-    svg.append(maxLabel);
     const pathFor = (key: 'average' | 'p95') => {
       let d = '';
       let drawing = false;
@@ -368,13 +387,14 @@ export function createAnalysis(elements: Elements, state: ViewerState, actions?:
       });
       const time = bucketTime(range, bucketCount, index);
       const title = svgEl('title');
-      title.textContent = `${time !== undefined ? formatClock(time, range) + '\n' : ''}average ${Math.round(item.average)}ms, p95 ${Math.round(item.p95)}ms`;
+      title.textContent = `${time !== undefined ? formatClock(time, range) + '\n' : ''}average ${count(Math.round(item.average))} ms, p95 ${count(Math.round(item.p95))} ms`;
       dot.append(title);
       svg.append(dot);
     });
-    xAxisTicks(svg, bucketCount, range, (index) => index * step, height);
+    const axis = xAxisTicks(bucketCount, range, (index) => index * step, width);
     section.append(
       svg,
+      axis,
       chartLegend([
         { className: 'swatch-average', label: 'average' },
         { className: 'swatch-p95', label: 'p95' },
@@ -439,7 +459,7 @@ export function createAnalysis(elements: Elements, state: ViewerState, actions?:
   }
 
   function duration(ms: number) {
-    return ms >= 10000 ? `${(ms / 1000).toFixed(ms >= 100000 ? 0 : 1)} s` : `${Math.round(ms)} ms`;
+    return ms >= 10000 ? `${(ms / 1000).toFixed(ms >= 100000 ? 0 : 1)} s` : `${count(Math.round(ms))} ms`;
   }
 
   function span(range: AnalysisResult['range']) {
@@ -646,21 +666,22 @@ export function createAnalysis(elements: Elements, state: ViewerState, actions?:
       note.classList.add('chart-wide');
       content.append(note);
     }
-    content.append(volumeChart(analysis.rate ?? [], analysis.errors ?? [], analysis.range, analysis.warnings));
+    // Volume and latency share one time axis, one under the other, so a spike lines up in both.
+    content.append(
+      volumeChart(analysis.rate ?? [], analysis.errors ?? [], analysis.range, analysis.warnings),
+      latencyChart(analysis.latency ?? [], analysis.range),
+    );
     const errorGroups = analysis.errorGroups ?? [];
-    const groups = section(`Error groups${errorGroups.length ? ` · ${count(errorGroups.length)}` : ''}`);
+    const groups = section(
+      `Error groups${errorGroups.length ? ` · ${count(errorGroups.length)}` : ''}`,
+      'chart-section chart-wide',
+    );
     const errorTotal = errorGroups.reduce((sum, item) => sum + item.count, 0);
     const errorMax = Math.max(1, ...errorGroups.map((item) => item.count));
     for (const item of errorGroups.slice(0, 20))
       groups.append(groupRow(item, errorTotal, errorMax, { detail: seen(item, analysis.range) }));
     if (!errorGroups.length) groups.append(empty('No errors in these logs.'));
-    // Errors and latency side by side: what failed, and when it got slow.
-    const pair = document.createElement('div');
-    pair.className = 'analysis-pair chart-wide';
-    const latency = latencyChart(analysis.latency ?? [], analysis.range, true);
-    latency.classList.remove('chart-wide');
-    pair.append(groups, latency);
-    content.append(pair);
+    content.append(groups);
     const breakdowns = document.createElement('div');
     breakdowns.className = 'analysis-breakdowns chart-wide';
     breakdowns.append(statusSection(analysis.statusCodes ?? []), ...(analysis.topValues ?? []).map(facetSection));

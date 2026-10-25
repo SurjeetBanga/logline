@@ -10,7 +10,12 @@ export function layoutColumnWidths(
   if (!columnElements.size) return;
   const defaults: Record<string, number> = { 'base:time': 140, 'base:level': 110, 'base:source': 110 };
   const messageFloor = 300;
+  // In a narrow panel the message gives way first, down to this, so times and levels stay whole.
+  const messageMin = 140;
   const minWidth = 72;
+  // The width a time (12 characters of the editor font) and a level need, with the cell padding.
+  const floors: Record<string, number> = { 'base:time': 124, 'base:level': 80 };
+  const floorFor = (key: string) => floors[key] ?? minWidth;
   const isExplicit = (key: string) => Number.isFinite(Number(columnWidths[key]));
   const widthFor = (key: string) => {
     const savedWidth = Number(columnWidths[key]);
@@ -23,8 +28,24 @@ export function layoutColumnWidths(
   // column (Source) instead of forcing horizontal scrolling.
   const sourceElement = columnElements.get('base:source');
   const collapseSource = Boolean(sourceElement) && available > 0 && fullOtherWidth + messageFloor > available;
-  if (sourceElement) sourceElement.style.visibility = collapseSource ? 'collapse' : '';
-  const columns = displayedColumns.filter((column) => !(collapseSource && column.key === 'base:source'));
+  const collapsed = new Set(collapseSource ? ['base:source'] : []);
+  // Then field columns, from the right, until the time, level, and a readable message fit.
+  if (available > 0) {
+    const fields = displayedColumns.filter((column) => !column.key.startsWith('base:')).reverse();
+    const needed = () =>
+      displayedColumns
+        .filter((column) => column.key !== 'base:message' && !collapsed.has(column.key))
+        .reduce((sum, column) => sum + (isExplicit(column.key) ? widthFor(column.key) : floorFor(column.key)), 0) +
+      messageMin;
+    for (const field of fields) {
+      if (needed() <= available) break;
+      collapsed.add(field.key);
+    }
+  }
+  for (const [key, element] of columnElements)
+    if (key === 'base:source' || !key.startsWith('base:'))
+      element.style.visibility = collapsed.has(key) ? 'collapse' : '';
+  const columns = displayedColumns.filter((column) => !collapsed.has(column.key));
   const explicitWidth = columns
     .filter((column) => isExplicit(column.key))
     .reduce((sum, column) => sum + widthFor(column.key), 0);
@@ -42,9 +63,9 @@ export function layoutColumnWidths(
   } else if (remaining >= messageFloor + autoOthersNatural) {
     messageWidth = remaining - autoOthersNatural;
   } else {
-    messageWidth = messageFloor;
-    const minTotal = autoOthers.length * minWidth;
-    const remainingForOthers = remaining - messageFloor;
+    const minTotal = autoOthers.reduce((sum, column) => sum + floorFor(column.key), 0);
+    messageWidth = Math.max(messageMin, Math.min(messageFloor, remaining - minTotal));
+    const remainingForOthers = remaining - messageWidth;
     shrinkRatio =
       remainingForOthers > minTotal && autoOthersNatural > minTotal
         ? (remainingForOthers - minTotal) / (autoOthersNatural - minTotal)
@@ -58,7 +79,7 @@ export function layoutColumnWidths(
         ? messageWidth
         : isExplicit(key)
           ? widthFor(key)
-          : Math.round(minWidth + (widthFor(key) - minWidth) * shrinkRatio);
+          : Math.round(floorFor(key) + Math.max(0, widthFor(key) - floorFor(key)) * shrinkRatio);
     widths.set(key, width);
     total += width;
   }

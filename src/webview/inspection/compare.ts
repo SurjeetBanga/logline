@@ -165,17 +165,17 @@ export function createCompare(
     else if (message.view) render(message.view);
   }
 
+  /** A run's start, as `20:01`, or `20:01:35` when another run started in the same minute. */
+  function runTime(time: string, minutes: string[]): string {
+    const minute = time.slice(0, 5);
+    const shared = minutes.filter((value) => value === minute).length > 1;
+    return shared ? time.replace(/\.\d+$/, '') : minute;
+  }
+
   function statusCell(row: Row): HTMLTableCellElement {
     const status = STATUS[row.status];
     const element = cell(status.label, `compare-status ${status.className}`);
     element.title = status.title;
-    if (row.changed) {
-      const changed = document.createElement('span');
-      changed.className = 'compare-changed';
-      changed.textContent = ` · changed${row.location ? `: ${row.location}` : ''}`;
-      changed.title = 'Thrown from code changed since the last commit, so most likely from your change';
-      element.append(changed);
-    }
     return element;
   }
 
@@ -192,6 +192,7 @@ export function createCompare(
         kind: 'item',
         key: 'all',
         label: 'All errors',
+        icon: 'all',
         meta: rows.length.toLocaleString(),
         selected: status === 'all',
         onSelect: choose('all'),
@@ -225,9 +226,10 @@ export function createCompare(
 
   function render(next: CompareView): void {
     view = next;
-    actions.rail?.('Show', railItems(next));
-    // A status chosen in the rail that no error has any more falls back to all of them.
+    // A status chosen in the rail that no error has any more falls back to all of them,
+    // before the rail is drawn, so it marks what the table shows.
     if (status !== 'all' && !next.rows.some((row) => row.status === status)) status = 'all';
+    actions.rail?.('Show', railItems(next));
     const rows = next.rows.filter(
       (row) => (status === 'all' || row.status === status) && (!changedOnly || row.changed),
     );
@@ -238,13 +240,14 @@ export function createCompare(
       element.className = className;
       return element;
     };
+    const minutes = next.runs.map((run) => (run.startedAt ? actions.formatTime(run.startedAt).slice(0, 5) : ''));
     elements.compareHead.replaceChildren(
       header('Error'),
       header('Production', next.baseline.label, 'compare-count'),
       ...next.runs.map((run, index) => {
         const time = run.startedAt ? actions.formatTime(run.startedAt) : '';
-        // An earlier run is named by its time to the second, which fits the column; the title has the rest.
-        const name = index === next.runs.length - 1 ? 'Latest run' : time.replace(/\.\d+$/, '') || 'Run';
+        // An earlier run is named by when it started, to the minute unless two share one; the title has the rest.
+        const name = index === next.runs.length - 1 ? 'Latest' : runTime(time, minutes) || 'Run';
         return header(name, `${run.label}${time ? ` · ${time}` : ''}`, 'compare-count');
       }),
       header('Status'),
@@ -264,6 +267,14 @@ export function createCompare(
         element.dataset.signature = row.signature;
         const message = cell(row.pattern, 'compare-message');
         message.title = row.message;
+        // From changed code: a tag by the error, where it is read, rather than more text in Status.
+        if (row.changed) {
+          const changed = document.createElement('span');
+          changed.className = 'compare-changed';
+          changed.textContent = 'changed';
+          changed.title = `Thrown from code changed since the last commit${row.location ? `, at ${row.location}` : ''}, so most likely from your change`;
+          message.prepend(changed);
+        }
         element.append(
           message,
           cell(row.baseline || '–', 'compare-count'),
