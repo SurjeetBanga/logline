@@ -958,7 +958,9 @@ body:not([data-view='compare']):not([data-view='traces']):not([data-view='metric
   overflow-x: auto;
   scrollbar-width: thin;
   overscroll-behavior-x: contain;
-  margin-top: 6px;
+  /* Each row above the views (toolbar, connection bar, hint) keeps 8px below it and none above,
+     so the table never meets the search box, whichever rows are showing. */
+  margin: 6px 0 8px;
 }
 .search-toolbar > .popover-container:not(.search-group),
 .search-toolbar > button {
@@ -1462,7 +1464,7 @@ select {
   display: flex;
   flex-direction: column;
   gap: 4px;
-  margin-top: 6px;
+  margin: 0 0 8px;
   min-width: 0;
   padding: 6px 8px;
   border: 1px solid var(--vscode-panel-border, #444);
@@ -2263,6 +2265,10 @@ button:disabled {
 }
 .view-header .view-status {
   margin: 0;
+}
+/* Analyze's line sits under the search toolbar, which already keeps its space. */
+#analysisStatus {
+  margin-top: 0;
 }
 .back-button {
   padding: 2px 6px;
@@ -3313,7 +3319,7 @@ th[data-column='base:message'] .column-label {
   color: var(--vscode-debugIcon-breakpointForeground, #e51400);
 }
 .table-hint {
-  margin: 2px 0 6px;
+  margin: 0 0 8px;
 }
 /* Log doctor: toolbar chip, its list, and the banner on expanded events. */
 .doctor-chip.has-warnings svg {
