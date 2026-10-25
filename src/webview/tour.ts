@@ -5,6 +5,8 @@ export interface TourStep {
   target: string;
   /** Spotlighted instead while the target is hidden, such as the rail's add button when the rail is collapsed. */
   fallback?: string;
+  /** A narrower part of the target to spotlight when there is one, such as the first row of the table. */
+  select?: string;
   title: string;
   text: string;
   /** Something to type or click to try it. */
@@ -30,6 +32,9 @@ export const TOUR_STEPS: TourStep[] = [
     example: 'level:error service:checkout',
   },
   {
+    // The first row's message, which is what you click, not the whole table: the card then
+    // has room beside it rather than over it, even in a short panel.
+    select: '#logs > tr.event-row .message-content',
     target: 'logsView',
     title: 'Every event, explained',
     text: 'Click a row for its fields, stack trace, the line of code that logged it, and the logs around it.',
@@ -138,7 +143,10 @@ export function createTour(
     index = Math.max(0, next);
     actions.prepare();
     const step = steps[index];
-    const target = [step.target, step.fallback].map((id) => (id ? document.getElementById(id) : null)).find(shown);
+    const target = [
+      step.select ? document.querySelector<HTMLElement>(step.select) : null,
+      ...[step.target, step.fallback].map((id) => (id ? document.getElementById(id) : null)),
+    ].find(shown);
     const card = document.createElement('div');
     card.className = 'tour-card';
     card.setAttribute('role', 'dialog');
@@ -197,17 +205,38 @@ export function createTour(
       spot.style.width = `${box.width + pad * 2}px`;
       spot.style.height = `${box.height + pad * 2}px`;
       children.push(spot);
-      // The card sits beside the spotlight where there is room: below, else above, else inside it.
-      const width = 340;
-      const left = Math.min(Math.max(8, box.left), Math.max(8, window.innerWidth - width - 8));
-      card.style.left = `${left}px`;
-      if (box.bottom + 190 < window.innerHeight) card.style.top = `${box.bottom + 12}px`;
-      else if (box.top > 200) card.style.bottom = `${window.innerHeight - box.top + 12}px`;
-      else card.style.top = `${Math.max(8, box.top + 12)}px`;
     } else children.push(backdrop());
     children.push(card);
     layer.replaceChildren(...children);
+    if (target) placeCard(card, target.getBoundingClientRect());
     forward.focus();
+  }
+
+  /**
+   * Put the card next to the spotlight, never over it: below, above, to the right, or to the
+   * left, the first side with room for the card as drawn. A target filling the panel, such as
+   * the Sources rail, usually leaves room only beside it. Inside it is the last resort.
+   */
+  function placeCard(card: HTMLElement, box: DOMRect): void {
+    const gap = 12;
+    const margin = 8;
+    const width = card.offsetWidth || 340;
+    const height = card.offsetHeight || 200;
+    const viewWidth = window.innerWidth;
+    const viewHeight = window.innerHeight;
+    const clamp = (value: number, low: number, high: number) => Math.min(Math.max(value, low), Math.max(low, high));
+    const alongX = clamp(box.left, margin, viewWidth - width - margin);
+    const alongY = clamp(box.top, margin, viewHeight - height - margin);
+    let left: number;
+    let top: number;
+    if (box.bottom + gap + height <= viewHeight - margin) [left, top] = [alongX, box.bottom + gap];
+    else if (box.top - gap - height >= margin) [left, top] = [alongX, box.top - gap - height];
+    else if (box.right + gap + width <= viewWidth - margin) [left, top] = [box.right + gap, alongY];
+    else if (box.left - gap - width >= margin) [left, top] = [box.left - gap - width, alongY];
+    else [left, top] = [alongX, clamp(box.top + gap, margin, viewHeight - height - margin)];
+    card.style.left = `${Math.round(left)}px`;
+    card.style.top = `${Math.round(top)}px`;
+    card.style.bottom = '';
   }
 
   function start(): void {
