@@ -4,6 +4,14 @@ All notable changes to Logline are documented in this file.
 
 ## Unreleased
 
+### Changes
+
+- **Add Connection is a form** in a **Connection** tab of the Logs panel, in place of a chain of quick picks; the tab shows while you add or edit a connection. Four steps open in turn: what you are connecting, a log service (Datadog) or a database to query (Postgres, MySQL, MongoDB, or SQLite), the connection details with **Test connection**, an optional log table and its columns, and a name. A database starts with no log table, to run the SQL or queries you type; choosing one also lets you search and tail it like logs. Postgres and MySQL take a URL or **Fields**, and a password in a pasted URL moves to the **Password** field; a failed test keeps what you typed, and the log table step shows each column's type, a sample value, and a preview of the first 5 rows with the mapped columns marked. The footer says what is left to do, and nothing is saved until **Add connection**. The tab's rail lists every connection, with **Edit** and **Remove** on each and **+** to add another; removing the connection being edited closes the form.
+- **Edit connections**: **Edit** on a connection's row in the Sources rail, or **Logline: Edit Connection…**, opens the same form filled in, tests the connection, and selects its table and columns. Passwords and keys read *Saved · leave empty to keep*, and are kept only while the connection points at the same server or site; **Forget the saved password** drops one. **Save changes** replaces the connection in the settings it came from and keeps its id, so its runs stay with it.
+- The Sources rail can be resized: drag its right edge, or focus it and press Left or Right; double-click resets it. The width is remembered and shared with the rail of Compare, Traces, and Metrics.
+- The source of a connection that was removed, or is not in this workspace's settings, stays under **Connections** as *Not connected · fetched logs kept*, with **Remove**, instead of appearing under **Local**.
+- Runs fetched from a connection or imported show their time and row count on a second line, so their names are not cut short.
+
 ### Fixes
 
 - On Windows, Claude Code, Codex, and other MCP clients find the VS Code window of their project again. VS Code names folders with a lowercase drive letter (`c:\`) and agents start in `C:\`, so no window seemed to contain the agent's folder; folders now match whatever their case.

@@ -246,8 +246,8 @@
         const to = bucketTime(range, bucketCount, high + 1);
         const logs = rate.slice(low, high + 1).reduce((sum, item) => sum + item.count, 0);
         const errorCount = chart.errors.slice(low, high + 1).reduce((sum, item) => sum + item.count, 0);
-        const text = document.createElement("span");
-        text.textContent = `${formatClock(from, range)} \u2013 ${formatClock(to, range)} selected \xB7 ${count(logs)} log${logs === 1 ? "" : "s"}${errorCount ? `, ${count(errorCount)} error${errorCount === 1 ? "" : "s"}` : ""}`;
+        const text2 = document.createElement("span");
+        text2.textContent = `${formatClock(from, range)} \u2013 ${formatClock(to, range)} selected \xB7 ${count(logs)} log${logs === 1 ? "" : "s"}${errorCount ? `, ${count(errorCount)} error${errorCount === 1 ? "" : "s"}` : ""}`;
         const showLogs = document.createElement("button");
         showLogs.type = "button";
         showLogs.textContent = "Show in Logs";
@@ -259,7 +259,7 @@
           bar.hidden = true;
           outline.setAttribute("visibility", "hidden");
         });
-        bar.replaceChildren(text, showLogs, clear);
+        bar.replaceChildren(text2, showLogs, clear);
         bar.hidden = false;
       });
       scope.listen(
@@ -354,10 +354,10 @@
       element2.append(heading);
       return element2;
     }
-    function empty(text) {
+    function empty(text2) {
       const element2 = document.createElement("p");
       element2.className = "analysis-empty";
-      element2.textContent = text;
+      element2.textContent = text2;
       return element2;
     }
     function tile2(label, value, detail, tone) {
@@ -518,10 +518,10 @@
       share.append(shareBar);
       const body = document.createElement("span");
       body.className = "group-body";
-      const text = document.createElement("span");
-      text.className = "group-text";
-      text.textContent = item.pattern ?? item.message;
-      body.append(text);
+      const text2 = document.createElement("span");
+      text2.className = "group-text";
+      text2.textContent = item.pattern ?? item.message;
+      body.append(text2);
       if (extra.detail) {
         const detail = document.createElement("span");
         detail.className = "group-detail";
@@ -854,6 +854,8 @@
       tabRailTitle: element("tabRailTitle"),
       tabRailList: element("tabRailList"),
       tabRailToggle: element("tabRailToggle"),
+      railResizer: element("railResizer"),
+      tabRailResizer: element("tabRailResizer"),
       follow: element("follow"),
       moreActions: element("moreActions"),
       actionsMenu: element("actionsMenu"),
@@ -964,26 +966,29 @@
       doctor: element("doctor"),
       doctorCount: element("doctorCount"),
       doctorView: element("doctorView"),
+      connectionTab: element("connectionTab"),
+      connectionTabLabel: element("connectionTabLabel"),
+      connectionView: element("connectionView"),
       doctorList: element("doctorList"),
       rowHint: element("rowHint"),
       rowHintDismiss: element("rowHintDismiss")
     };
   }
-  function setLabel(button, text) {
+  function setLabel(button, text2) {
     const label = button.querySelector?.(".button-label");
-    if (label) label.textContent = text;
-    else button.textContent = text;
+    if (label) label.textContent = text2;
+    else button.textContent = text2;
   }
-  function cell(text, className) {
+  function cell(text2, className) {
     const element2 = document.createElement("td");
-    element2.textContent = String(text ?? "");
+    element2.textContent = String(text2 ?? "");
     if (className) element2.className = className;
     return element2;
   }
-  function emptyMessage(text) {
+  function emptyMessage(text2) {
     const message = document.createElement("p");
     message.className = "popover-empty";
-    message.textContent = text;
+    message.textContent = text2;
     return message;
   }
 
@@ -1023,9 +1028,9 @@
     }
     function show(element2) {
       if (!element2.isConnected || target !== element2) return;
-      const text = element2.dataset.tip;
-      if (!text) return;
-      tip.textContent = text.length > MAX_TEXT ? `${text.slice(0, MAX_TEXT - 1)}\u2026` : text;
+      const text2 = element2.dataset.tip;
+      if (!text2) return;
+      tip.textContent = text2.length > MAX_TEXT ? `${text2.slice(0, MAX_TEXT - 1)}\u2026` : text2;
       tip.hidden = false;
       const anchor = element2.getBoundingClientRect();
       const box = tip.getBoundingClientRect();
@@ -1324,10 +1329,10 @@
     const button = document.createElement("button");
     button.type = "button";
     button.className = `event-action ${className}`;
-    const text = document.createElement("span");
-    text.className = "event-action-label";
-    text.textContent = label;
-    button.append(icon(iconName), text);
+    const text2 = document.createElement("span");
+    text2.className = "event-action-label";
+    text2.textContent = label;
+    button.append(icon(iconName), text2);
     button.title = unavailable ?? title;
     if (unavailable) {
       button.dataset.unavailable = unavailable;
@@ -1339,13 +1344,13 @@
     const note = document.createElement("div");
     note.className = "event-attachment";
     note.setAttribute("role", "note");
-    const text = document.createElement("p");
+    const text2 = document.createElement("p");
     const strong = document.createElement("strong");
     strong.textContent = label;
-    text.append(strong, document.createTextNode(message));
+    text2.append(strong, document.createTextNode(message));
     const show = eventAction("context-button", "context", action, title);
     show.dataset.id = String(id);
-    note.append(icon("attached"), text, show);
+    note.append(icon("attached"), text2, show);
     return note;
   }
   function exceptionSection(id, exception, blockIndex) {
@@ -1370,7 +1375,7 @@
     section.append(title, stack);
     return section;
   }
-  function buildEventDetails(id, text, exceptions, links = {}, leadingActions = []) {
+  function buildEventDetails(id, text2, exceptions, links = {}, leadingActions = []) {
     const container = document.createElement("div");
     container.className = "event-details";
     const actions = document.createElement("div");
@@ -1385,7 +1390,7 @@
     output.setAttribute("aria-label", "Copy or share this event");
     actions.append(investigate, output);
     container.append(actions);
-    const loading = text === void 0 ? "Checking this event\u2026" : void 0;
+    const loading = text2 === void 0 ? "Checking this event\u2026" : void 0;
     const trace = eventAction(
       "trace-button",
       "trace",
@@ -1464,7 +1469,7 @@
       );
     }
     const pre2 = document.createElement("pre");
-    pre2.textContent = text ?? "Loading\u2026";
+    pre2.textContent = text2 ?? "Loading\u2026";
     if (exceptions.length || links.crash) {
       const raw = document.createElement("details");
       const summary2 = document.createElement("summary");
@@ -1775,10 +1780,10 @@
         tokenUsage(modelCalls ?? span2.genAi)
       ].filter((fact) => !!fact);
       const facts = [...span2.name.includes(subject) ? [] : [subjectLabel], ...details2];
-      const text = document.createElement("span");
-      text.className = "trace-genai-text";
-      text.textContent = facts.join(" \xB7 ");
-      chip.append(icon("aiCall"), ...facts.length ? [text] : []);
+      const text2 = document.createElement("span");
+      text2.className = "trace-genai-text";
+      text2.textContent = facts.join(" \xB7 ");
+      chip.append(icon("aiCall"), ...facts.length ? [text2] : []);
       if (!facts.length) chip.classList.add("icon-only");
       chip.setAttribute("aria-label", `Open ${subjectLabel} in AI calls`);
       chip.title = `${[subjectLabel, ...details2].join(", ")}. Open this call in AI calls.`;
@@ -2257,8 +2262,8 @@ Trace ${trace.traceId}`;
       const shown2 = metrics.filter((series) => {
         if (service !== void 0 && series.service !== service) return false;
         if (!terms.length) return true;
-        const text = `${series.name} ${series.service} ${series.attributes.map(([key, value]) => `${key}=${value}`).join(" ")}`.toLowerCase();
-        return terms.every((term) => text.includes(term));
+        const text2 = `${series.name} ${series.service} ${series.attributes.map(([key, value]) => `${key}=${value}`).join(" ")}`.toLowerCase();
+        return terms.every((term) => text2.includes(term));
       });
       if (!metrics.length) {
         elements.metricsStatus.textContent = "No metrics yet. Apps started while the OpenTelemetry receiver runs send metrics every 5 seconds.";
@@ -2445,8 +2450,8 @@ Trace ${trace.traceId}`;
         if (kind && call.kind !== kind) return false;
         if (errorsOnly && !call.error) return false;
         if (!terms.length) return true;
-        const text = [call.name, call.model, call.tool, call.agent, call.provider, call.service, call.operation].filter(Boolean).join(" ").toLowerCase();
-        return terms.every((term) => text.includes(term));
+        const text2 = [call.name, call.model, call.tool, call.agent, call.provider, call.service, call.operation].filter(Boolean).join(" ").toLowerCase();
+        return terms.every((term) => text2.includes(term));
       });
     }
     function render() {
@@ -2609,10 +2614,10 @@ Span ${call.spanId}`;
     details2.append(heading, ...body);
     return details2;
   }
-  function pre(text) {
+  function pre(text2) {
     const element2 = document.createElement("pre");
     element2.className = "ai-code";
-    element2.textContent = text;
+    element2.textContent = text2;
     return element2;
   }
   function cutNote() {
@@ -2626,12 +2631,12 @@ Span ${call.spanId}`;
     const open = length < OPEN_BELOW_CHARACTERS;
     const cut = part.truncated ? [cutNote()] : [];
     if (part.kind === "text") {
-      const text = document.createElement("div");
-      text.className = "ai-text";
-      text.textContent = part.text ?? "";
-      if (!cut.length) return text;
+      const text2 = document.createElement("div");
+      text2.className = "ai-text";
+      text2.textContent = part.text ?? "";
+      if (!cut.length) return text2;
       const wrapper = document.createElement("div");
-      wrapper.append(text, ...cut);
+      wrapper.append(text2, ...cut);
       return wrapper;
     }
     if (part.kind === "reasoning") return block("Reasoning", [pre(part.text ?? ""), ...cut], open);
@@ -2764,8 +2769,8 @@ Span ${call.spanId}`;
   function completionTarget(input) {
     const tokens2 = [...input.matchAll(/(?:[^\s"]+|"(?:\\.|[^"\\])*"?)+/g)];
     const last = /\s$/.test(input) ? void 0 : tokens2.at(-1);
-    const text = last?.[0] ?? "";
-    const match = text.match(/^(-?)(@?([A-Za-z_][A-Za-z0-9_.]*):)?(.*)$/);
+    const text2 = last?.[0] ?? "";
+    const match = text2.match(/^(-?)(@?([A-Za-z_][A-Za-z0-9_.]*):)?(.*)$/);
     let value = match[4];
     try {
       if (value.startsWith('"')) value = JSON.parse(value);
@@ -2811,6 +2816,178 @@ Span ${call.spanId}`;
   }
 
   // src/core/connections.ts
+  var DATADOG_SITES = [
+    "datadoghq.com",
+    "us3.datadoghq.com",
+    "us5.datadoghq.com",
+    "datadoghq.eu",
+    "ap1.datadoghq.com",
+    "ap2.datadoghq.com",
+    "ddog-gov.com"
+  ];
+  function datadogApiBase(site) {
+    if (DATADOG_SITES.includes(site)) return `https://api.${site}`;
+    let url;
+    try {
+      url = new URL(site);
+    } catch {
+      return void 0;
+    }
+    const loopback = ["127.0.0.1", "localhost", "[::1]"].includes(url.hostname);
+    if (url.protocol !== "https:" && !(url.protocol === "http:" && loopback)) return void 0;
+    if (url.username || url.password || url.search || url.hash) return void 0;
+    return `${url.origin}${url.pathname.replace(/\/+$/, "")}`;
+  }
+  var MAPPED_FIELDS = ["timestamp", "level", "message", "service", "traceId"];
+  var SOURCE_PREFIX = "conn:";
+  function connectionIdOf(sourceId) {
+    return sourceId?.startsWith(SOURCE_PREFIX) ? sourceId.slice(SOURCE_PREFIX.length) : void 0;
+  }
+  function secretKey(connection) {
+    if (connection.type === "datadog")
+      return `logline.connection.datadog:${datadogApiBase(connection.site) ?? connection.site}`;
+    if (connection.type === "mongodb") {
+      const url = mongoUrl(connection.url);
+      return `logline.connection.mongodb://${url ? `${url.user ? `${encodeURIComponent(url.user)}@` : ""}${url.hosts}` : connection.url}/${encodeURIComponent(connection.database)}`;
+    }
+    return `logline.connection.${connection.type}://${encodeURIComponent(connection.user)}@${connection.host}:${connection.port}/${encodeURIComponent(connection.database)}`;
+  }
+  function decodePart(value) {
+    try {
+      return decodeURIComponent(value);
+    } catch {
+      return value;
+    }
+  }
+  function isRdsHost(host) {
+    return /\.rds\.amazonaws\.com(?:\.cn)?$/i.test(host);
+  }
+  function mongoUrl(value) {
+    const match = /^mongodb(\+srv)?:\/\/(?:([^:@/?#]+)@)?([^/?#@]+)(?:\/([^?#]*))?(?:\?([^#]*))?$/.exec(value.trim());
+    if (!match) return void 0;
+    const [, srv, user, hosts, database, options] = match;
+    if (!hosts || /\s/.test(hosts)) return void 0;
+    return {
+      srv: Boolean(srv),
+      hosts,
+      ...user ? { user: decodePart(user) } : {},
+      ...database ? { database: decodePart(database) } : {},
+      options: options ?? ""
+    };
+  }
+  function normalizeAuth(value) {
+    if (!value || typeof value !== "object" || value.kind !== "iam") return void 0;
+    const item = value;
+    const profile = text(item.profile, 128);
+    const region = text(item.region, 32);
+    return {
+      kind: "iam",
+      ...profile ? { profile } : {},
+      ...region && /^[a-z]{2}(?:-gov)?-[a-z]+-\d+$/.test(region) ? { region } : {}
+    };
+  }
+  var text = (value, max = 512) => typeof value === "string" && value.trim() && value.length <= max && !value.includes("\0") ? value.trim() : void 0;
+  function normalizeMapping(value) {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return void 0;
+    const item = value;
+    const table = text(item.table, 256);
+    const timestamp = text(item.timestamp, 128);
+    if (!table || !timestamp) return void 0;
+    const mapping = { table, timestamp };
+    for (const field of ["level", "message", "service", "traceId"]) {
+      const column = text(item[field], 128);
+      if (column) mapping[field] = column;
+    }
+    if (item.timestampFormat === "iso" || item.timestampFormat === "epoch_s" || item.timestampFormat === "epoch_ms")
+      mapping.timestampFormat = item.timestampFormat;
+    return mapping;
+  }
+  function normalizeConnections(value) {
+    if (!Array.isArray(value)) return [];
+    const seen = /* @__PURE__ */ new Set();
+    return value.flatMap((item) => {
+      if (!item || typeof item !== "object" || Array.isArray(item)) return [];
+      const id = text(item.id, 128);
+      if (!id || seen.has(id)) return [];
+      const label = text(item.label, 128) ?? id;
+      const logs = normalizeMapping(item.logs);
+      let connection;
+      if (item.type === "sqlite") {
+        const path = text(item.path, 4096);
+        if (path) connection = { id, label, type: "sqlite", path };
+      } else if (item.type === "postgres" || item.type === "mysql") {
+        const database = text(item.database, 256);
+        const user = text(item.user, 256);
+        const fallback = item.type === "mysql" ? 3306 : 5432;
+        const port = Number.isSafeInteger(item.port) && item.port > 0 && item.port < 65536 ? item.port : fallback;
+        const auth = normalizeAuth(item.auth);
+        if (database && user)
+          connection = {
+            id,
+            label,
+            type: item.type,
+            host: text(item.host, 256) ?? "localhost",
+            port,
+            database,
+            user,
+            // IAM tokens are only accepted over TLS.
+            ...item.ssl === true || auth ? { ssl: true } : {},
+            ...auth ? { auth } : {}
+          };
+      } else if (item.type === "mongodb") {
+        const url = text(item.url, 2048);
+        const database = text(item.database, 256) ?? (url ? mongoUrl(url)?.database : void 0);
+        if (url && mongoUrl(url) && database) connection = { id, label, type: "mongodb", url, database };
+      } else if (item.type === "datadog") {
+        const site = text(item.site, 512);
+        if (site && datadogApiBase(site)) {
+          const indexes = Array.isArray(item.indexes) ? item.indexes.filter((index) => typeof index === "string" && !!index.trim()) : [];
+          connection = { id, label, type: "datadog", site, ...indexes.length ? { indexes } : {} };
+        }
+      }
+      if (!connection) return [];
+      seen.add(id);
+      if (logs && connection.type !== "datadog") connection.logs = logs;
+      return [connection];
+    });
+  }
+  function parseServerUrl(value, type) {
+    let url;
+    try {
+      url = new URL(value.trim());
+    } catch {
+      return void 0;
+    }
+    const protocols = type === "mysql" ? ["mysql:", "mariadb:"] : ["postgres:", "postgresql:"];
+    if (!protocols.includes(url.protocol)) return void 0;
+    const database = decodePart(url.pathname.replace(/^\//, ""));
+    const user = decodePart(url.username);
+    if (!database || !user || !url.hostname) return void 0;
+    const ssl = ["require", "verify-ca", "verify-full", "REQUIRED", "VERIFY_CA", "VERIFY_IDENTITY"].includes(
+      url.searchParams.get(type === "mysql" ? "ssl-mode" : "sslmode") ?? ""
+    ) || ["true", "1"].includes(url.searchParams.get("ssl") ?? "");
+    const [connection] = normalizeConnections([
+      {
+        id: "draft",
+        label: database,
+        type,
+        host: url.hostname,
+        port: url.port ? Number(url.port) : type === "mysql" ? 3306 : 5432,
+        database,
+        user,
+        ssl
+      }
+    ]);
+    return connection?.type === type ? {
+      connection,
+      ...url.password ? { password: decodePart(url.password) } : {}
+    } : void 0;
+  }
+  function formatServerUrl(connection) {
+    const port = connection.port === (connection.type === "mysql" ? 3306 : 5432) ? "" : `:${connection.port}`;
+    const tls = connection.ssl ? connection.type === "mysql" ? "?ssl-mode=REQUIRED" : "?sslmode=require" : "";
+    return `${connection.type}://${encodeURIComponent(connection.user)}@${connection.host}${port}/${encodeURIComponent(connection.database)}${tls}`;
+  }
   var RANGES = { "15m": 15, "1h": 60, "4h": 240, "24h": 1440, "7d": 10080 };
   var RANGE_CHOICES = Object.keys(RANGES);
 
@@ -2851,8 +3028,12 @@ Span ${call.spanId}`;
     connectionRange;
     /** The Sources rail's state when set by hand; undefined follows the panel's width. */
     railCollapsed;
+    /** The rails' width when resized by hand; undefined keeps the default. */
+    railWidth;
     constructor(saved = {}) {
       if (saved.rail === "collapsed" || saved.rail === "open") this.railCollapsed = saved.rail === "collapsed";
+      if (typeof saved.railWidth === "number" && Number.isFinite(saved.railWidth) && saved.railWidth > 0)
+        this.railWidth = saved.railWidth;
       this.view = typeof saved.view === "string" ? saved.view : "logs";
       this.connectionRange = typeof saved.range === "string" && RANGE_CHOICES.includes(saved.range) ? saved.range : "1h";
       this.following = !saved.sort;
@@ -2936,7 +3117,8 @@ Span ${call.spanId}`;
         ...this.rowHintDismissed ? { rowHintDismissed: true } : {},
         ...this.view !== "logs" ? { view: this.view } : {},
         ...this.connectionRange !== "1h" ? { range: this.connectionRange } : {},
-        ...this.railCollapsed !== void 0 ? { rail: this.railCollapsed ? "collapsed" : "open" } : {}
+        ...this.railCollapsed !== void 0 ? { rail: this.railCollapsed ? "collapsed" : "open" } : {},
+        ...this.railWidth !== void 0 ? { railWidth: this.railWidth } : {}
       };
     }
   };
@@ -3467,6 +3649,7 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
     run: "M5 3l7 5-7 5z",
     stop: "M4.5 4.5h7v7h-7z",
     add: "M8 3v10M3 8h10",
+    edit: "M10.5 2.5l3 3-8 8h-3v-3zM9 4l3 3",
     remove: "M3 4.5h10M6.5 4.5V3h3v1.5M4.5 4.5l.6 8.5h5.8l.6-8.5M7 7v4M9 7v4"
   };
   function icon2(name, size = 14) {
@@ -3485,10 +3668,10 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
     svg2.append(path);
     return svg2;
   }
-  function span(className, text = "") {
+  function span(className, text2 = "") {
     const element2 = document.createElement("span");
     element2.className = className;
-    element2.textContent = text;
+    element2.textContent = text2;
     return element2;
   }
   function iconFor(server) {
@@ -3570,11 +3753,11 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
       const glyph = span("rail-glyph");
       glyph.append(icon2(options.icon));
       select.append(glyph);
-      const text = span("rail-text");
-      text.append(span("rail-name", options.name));
+      const text2 = span("rail-text");
+      text2.append(span("rail-name", options.name));
       if (options.status)
-        text.append(span(`rail-status${options.statusClass ? ` ${options.statusClass}` : ""}`, options.status));
-      select.append(text);
+        text2.append(span(`rail-status${options.statusClass ? ` ${options.statusClass}` : ""}`, options.status));
+      select.append(text2);
       if (options.agents) {
         const badge = span("rail-agents", "\u2726");
         badge.title = "Agents may fetch from this connection";
@@ -3645,6 +3828,13 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
             })
           )
         );
+      rowActions.push(
+        actionButton(
+          "edit",
+          `Edit connection ${connection.label}\u2026`,
+          () => api.postMessage({ type: "editConnection", connectionId: connection.id })
+        )
+      );
       const remove = () => api.postMessage({ type: "removeConnection", connectionId: connection.id });
       removers.set(connection.sourceId, remove);
       rowActions.push(actionButton("remove", `Remove connection ${connection.label}\u2026`, remove));
@@ -3659,6 +3849,20 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
         dot: connection.tailing ? "tailing" : void 0,
         agents: connection.agents,
         actions: rowActions
+      });
+    }
+    function detachedRow(server) {
+      const remove = () => api.postMessage({ type: "removeSource", serverId: server.id });
+      removers.set(server.id, remove);
+      const status = "Not connected \xB7 fetched logs kept";
+      return row({
+        id: server.id,
+        name: server.label,
+        icon: server.label.startsWith("Datadog") ? "cloud" : "database",
+        title: `${server.label} \xB7 not in this workspace's logline.connections. Its fetched logs stay until you remove them.`,
+        status,
+        statusClass: "muted",
+        actions: [actionButton("remove", `Remove ${server.label} and its fetched logs`, remove)]
       });
     }
     function runRows() {
@@ -3678,7 +3882,12 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
           ...byTime ? { second: "2-digit" } : {}
         }) : "";
         const stateText = session.status === "running" ? "running" : session.exitReason || session.status;
-        const button = byTime ? runButton(session.id, started || runName(session), stateText) : runButton(session.id, runName(session), [started, stateText].filter(Boolean).join(" \xB7 "));
+        const button = byTime ? runButton(session.id, started || runName(session), stateText) : runButton(
+          session.id,
+          runName(session),
+          [started, stateText].filter(Boolean).join(" \xB7 "),
+          session.sourceKind === "remote" || session.sourceKind === "import"
+        );
         button.title = [
           runName(session),
           session.cwd,
@@ -3701,16 +3910,23 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
       }
       return group2;
     }
-    function runButton(id, label, meta) {
+    function runButton(id, label, meta, stacked = false) {
       const selected = id === state.selectedSession;
       const button = document.createElement("button");
       button.type = "button";
-      button.className = "run-select rail-focusable";
+      button.className = `run-select rail-focusable${stacked ? " stacked" : ""}`;
       button.dataset.runId = id;
       button.tabIndex = -1;
       button.setAttribute("aria-current", String(selected));
-      button.append(span("rail-name", label));
-      if (meta) button.append(span("rail-meta", meta));
+      if (stacked) {
+        const text2 = span("rail-text");
+        text2.append(span("rail-name", label));
+        if (meta) text2.append(span("rail-status", meta));
+        button.append(text2);
+      } else {
+        button.append(span("rail-name", label));
+        if (meta) button.append(span("rail-meta", meta));
+      }
       scope.listen(button, "click", () => actions.selectRun(id));
       return button;
     }
@@ -3737,7 +3953,9 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
       const focusedSource = document.activeElement?.dataset?.sourceId;
       const focusedRun = document.activeElement?.dataset?.runId;
       const connectionIds = new Set(connections.map((connection) => connection.sourceId));
-      const local = servers.filter((server) => !connectionIds.has(server.id));
+      const unlisted = servers.filter((server) => !connectionIds.has(server.id));
+      const detached = unlisted.filter((server) => connectionIdOf(server.id) !== void 0);
+      const local = unlisted.filter((server) => connectionIdOf(server.id) === void 0);
       const active = servers.reduce((sum, server) => sum + (server.activeSessions || 0), 0);
       const children = [
         row({
@@ -3756,19 +3974,19 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
       for (const server of local) withRuns(serverRow(server), server.id);
       const add = addButton();
       children.push(group("Connections", add));
-      if (connections.length)
-        for (const connection of connections) withRuns(connectionRow(connection), connection.sourceId);
-      else {
+      for (const connection of connections) withRuns(connectionRow(connection), connection.sourceId);
+      for (const server of detached) withRuns(detachedRow(server), server.id);
+      if (!connections.length && !detached.length) {
         const empty = document.createElement("div");
         empty.className = "rail-empty";
-        const text = document.createElement("p");
-        text.textContent = "Search Datadog, Postgres, MySQL, MongoDB, or SQLite logs next to your local runs.";
+        const text2 = document.createElement("p");
+        text2.textContent = "Search Datadog, Postgres, MySQL, MongoDB, or SQLite logs next to your local runs.";
         const button = document.createElement("button");
         button.type = "button";
         button.className = "rail-empty-add";
         button.textContent = "Add connection";
         scope.listen(button, "click", () => api.postMessage({ type: "addConnection" }));
-        empty.append(text, button);
+        empty.append(text2, button);
         children.push(empty);
       }
       elements.railList.replaceChildren(...children);
@@ -3928,16 +4146,16 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
       return rows.map((row) => {
         const item = document.createElement("div");
         item.className = "share-agent";
-        const text = document.createElement("span");
-        text.className = "share-agent-text";
+        const text2 = document.createElement("span");
+        text2.className = "share-agent-text";
         const name = document.createElement("span");
         name.className = "share-agent-name";
         name.textContent = row.name;
         const detail = document.createElement("span");
         detail.className = "share-hint";
         detail.textContent = row.detail;
-        text.append(name, detail);
-        item.append(text);
+        text2.append(name, detail);
+        item.append(text2);
         if (row.state) {
           const state = document.createElement("span");
           state.className = `share-agent-state ${row.state.tone}`;
@@ -4039,12 +4257,1286 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
     };
   }
 
+  // src/core/connection-form.ts
+  var CONNECTION_TYPES = [
+    { type: "datadog", kind: "logs", label: "Datadog", description: "Search the logs of a Datadog organization" },
+    { type: "postgres", kind: "database", label: "Postgres", description: "Also Aurora PostgreSQL, RDS, Cloud SQL" },
+    { type: "mysql", kind: "database", label: "MySQL", description: "Also Aurora MySQL, MariaDB, RDS" },
+    { type: "mongodb", kind: "database", label: "MongoDB", description: "Also Atlas, DocumentDB" },
+    { type: "sqlite", kind: "database", label: "SQLite", description: "A database file on this machine" }
+  ];
+  var ROLE_LABELS = {
+    timestamp: "Time",
+    level: "Level",
+    message: "Message",
+    service: "Service",
+    traceId: "Trace id"
+  };
+  function emptyDraft(type = "postgres") {
+    return {
+      type,
+      label: "",
+      host: "localhost",
+      port: type === "mysql" ? "3306" : "5432",
+      user: "",
+      database: "",
+      ssl: false,
+      auth: "password",
+      profile: "",
+      url: "",
+      path: "",
+      site: DATADOG_SITES[0],
+      keyKind: "keys",
+      password: "",
+      apiKey: "",
+      appKey: "",
+      token: "",
+      forgetSecret: false
+    };
+  }
+  function suggestedLabel(draft) {
+    if (draft.type === "datadog") return "prod";
+    if (draft.type === "sqlite")
+      return draft.path.split(/[\\/]/).pop()?.replace(/\.(?:db|sqlite3?|db3)$/i, "") ?? "";
+    if (draft.type === "mongodb") return draft.database.trim() || (mongoUrl(draft.url)?.database ?? "");
+    return draft.database.trim();
+  }
+  function draftUrl(draft) {
+    const port = Number(draft.port);
+    if (!draft.host.trim() || !draft.user.trim() || !draft.database.trim()) return "";
+    return formatServerUrl({
+      type: draft.type === "mysql" ? "mysql" : "postgres",
+      host: draft.host.trim(),
+      port: Number.isInteger(port) && port > 0 ? port : draft.type === "mysql" ? 3306 : 5432,
+      user: draft.user.trim(),
+      database: draft.database.trim(),
+      ssl: draft.ssl || draft.auth === "iam"
+    });
+  }
+  function applyUrl(draft, value) {
+    if (draft.type === "mongodb") {
+      const password = /^\s*mongodb(?:\+srv)?:\/\/[^:@/?#]+:([^@/?#]*)@/i.exec(value)?.[1];
+      const url = withoutPassword(value).trim();
+      if (!mongoUrl(url)) return void 0;
+      return { ...draft, url, ...password ? { password: decodePart(password) } : {} };
+    }
+    if (draft.type !== "postgres" && draft.type !== "mysql") return void 0;
+    const parsed = parseServerUrl(value, draft.type);
+    if (!parsed) return void 0;
+    const connection = parsed.connection;
+    return {
+      ...draft,
+      host: connection.host,
+      port: String(connection.port),
+      user: connection.user,
+      database: connection.database,
+      ssl: connection.ssl === true,
+      ...parsed.password ? { password: parsed.password } : {}
+    };
+  }
+  function withoutPassword(url) {
+    return url.replace(/^(\s*[a-z][\w+.-]*:\/\/[^:@/?#]+):[^@/?#]*@/i, "$1@");
+  }
+  function suggestsIam(draft) {
+    return (draft.type === "postgres" || draft.type === "mysql") && isRdsHost(draft.host.trim());
+  }
+  function draftSecretKey(draft) {
+    const { connection } = readDraft(draft, { secret: true });
+    return connection && connection.type !== "sqlite" ? secretKey(connection) : void 0;
+  }
+  function readDraft(draft, saved = {}) {
+    const errors = {};
+    const required = (field, message) => {
+      const value = draft[field];
+      if (typeof value === "string" && !value.trim()) errors[field] = message;
+    };
+    const password = draft.password || void 0;
+    let item;
+    let keys;
+    switch (draft.type) {
+      case "postgres":
+      case "mysql": {
+        required("host", "Enter the server\u2019s host name");
+        required("user", "Enter the user to sign in as");
+        required("database", "Enter the database");
+        const port = Number(draft.port);
+        if (!Number.isInteger(port) || port < 1 || port > 65535) errors.port = "A port from 1 to 65535";
+        item = {
+          type: draft.type,
+          host: draft.host.trim(),
+          port,
+          user: draft.user.trim(),
+          database: draft.database.trim(),
+          ssl: draft.ssl || draft.auth === "iam",
+          ...draft.auth === "iam" ? { auth: { kind: "iam", ...draft.profile ? { profile: draft.profile } : {} } } : {}
+        };
+        break;
+      }
+      case "mongodb": {
+        const url = mongoUrl(draft.url);
+        const database = draft.database.trim() || url?.database;
+        if (!draft.url.trim()) errors.url = "Enter a mongodb:// or mongodb+srv:// URL";
+        else if (!url) errors.url = "Enter mongodb://user@host/database or mongodb+srv://\u2026, without a password";
+        else if (!database) errors.database = "Enter the database, here or at the end of the URL, such as \u2026/app";
+        item = { type: "mongodb", url: draft.url.trim(), ...database ? { database } : {} };
+        break;
+      }
+      case "sqlite":
+        required("path", "Choose the database file");
+        item = { type: "sqlite", path: draft.path.trim() };
+        break;
+      case "datadog":
+        if (!datadogApiBase(draft.site.trim())) errors.site = "Choose a site, or enter an https API URL";
+        item = { type: "datadog", site: draft.site.trim() };
+        if (draft.keyKind === "token") {
+          if (draft.token.trim()) keys = { token: draft.token.trim() };
+          else if (!saved.secret) errors.token = "Enter an access token";
+        } else if (draft.apiKey.trim() || draft.appKey.trim() || !saved.secret) {
+          if (!draft.apiKey.trim()) errors.apiKey = "Enter an API key";
+          if (!draft.appKey.trim()) errors.appKey = "Enter an application key";
+          if (draft.apiKey.trim() && draft.appKey.trim())
+            keys = { apiKey: draft.apiKey.trim(), appKey: draft.appKey.trim() };
+        }
+        break;
+    }
+    const [connection] = Object.keys(errors).length ? [] : (
+      // The name is not part of what a test opens, so renaming after a test needs no new one.
+      normalizeConnections([{ id: "draft", label: "draft", ...item }])
+    );
+    return {
+      ...connection ? { connection } : {},
+      errors,
+      ...password !== void 0 && draft.type !== "sqlite" && draft.type !== "datadog" ? { password } : {},
+      ...keys ? { keys } : {}
+    };
+  }
+
+  // src/webview/connection-form/form.ts
+  function h(tag, props = {}, ...children) {
+    const element2 = document.createElement(tag);
+    for (const [key, value] of Object.entries(props)) {
+      if (value === void 0 || value === false) continue;
+      if (key.startsWith("on") && typeof value === "function")
+        element2.addEventListener(key.slice(2), value);
+      else if (key === "className") element2.className = String(value);
+      else if (key === "value" || key === "checked" || key === "disabled" || key === "hidden")
+        element2[key] = value;
+      else element2.setAttribute(key, value === true ? "" : String(value));
+    }
+    for (const child of children)
+      if (child !== void 0 && child !== null && child !== false)
+        element2.append(typeof child === "string" ? document.createTextNode(child) : child);
+    return element2;
+  }
+  var SERVER_TYPES = ["postgres", "mysql"];
+  function createConnectionForm(api, root) {
+    let mode = "add";
+    let draft = emptyDraft();
+    let secretSaved = false;
+    let secretFor;
+    let profiles = [];
+    let sites = [];
+    let entry = "url";
+    let urlText = "";
+    let urlInvalid = false;
+    let labelEdited = false;
+    let showErrors = false;
+    const touched = /* @__PURE__ */ new Set();
+    let test = { state: "idle" };
+    let table;
+    let columns = [];
+    let rows = [];
+    let columnsState = "idle";
+    let columnsError = "";
+    let previewError = "";
+    let mapping = {};
+    let savedMapping;
+    let saving = false;
+    let saveError = "";
+    let testing = "";
+    const tested = () => JSON.stringify({ ...draft, label: "" });
+    const title = h("h1", {}, "Add connection");
+    const lead = h(
+      "p",
+      { className: "lead" },
+      "Search a log service next to your local runs, or query a database. Every connection is read-only, and passwords and keys stay in VS Code secret storage."
+    );
+    const types = h("div", { className: "type-groups", role: "radiogroup", "aria-label": "What to connect" });
+    const details2 = h("div", { className: "details" });
+    const testButton = h(
+      "button",
+      { type: "button", className: "secondary", onclick: () => runTest() },
+      "Test connection"
+    );
+    const testStatus = h("div", { className: "test-status", role: "status", "aria-live": "polite" });
+    const logs = h("div", { className: "logs" });
+    const labelInput = h("input", {
+      id: "field-label",
+      type: "text",
+      spellcheck: "false",
+      autocomplete: "off",
+      oninput: () => {
+        draft.label = labelInput.value;
+        labelEdited = true;
+        updateFooter();
+      }
+    });
+    const saveButton = h("button", { type: "button", onclick: () => save() }, "Add connection");
+    const cancelButton = h(
+      "button",
+      { type: "button", className: "secondary", onclick: () => api.postMessage({ type: "cancel" }) },
+      "Cancel"
+    );
+    const footerNote = h("span", { className: "footer-note", role: "status", "aria-live": "polite" });
+    const step = (number2, heading, ...children) => h(
+      "section",
+      { className: "step" },
+      h("h2", {}, h("span", { className: "step-number", "aria-hidden": "true" }, String(number2)), heading),
+      ...children
+    );
+    const logsHeading = h("span", {}, "Logs");
+    const typeStep = step(1, "What are you connecting?", types);
+    const connectStep = step(2, "Connect", details2, h("div", { className: "test-row" }, testButton, testStatus));
+    const logsStep = step(3, logsHeading, logs);
+    const nameStep = step(
+      4,
+      "Name",
+      h("div", { className: "field" }, h("label", { for: "field-label" }, "Shown in the Sources list"), labelInput)
+    );
+    root.replaceChildren(
+      h(
+        "main",
+        { className: "form" },
+        h("header", {}, title, lead),
+        typeStep,
+        connectStep,
+        logsStep,
+        nameStep,
+        h("footer", {}, footerNote, h("div", { className: "buttons" }, cancelButton, saveButton))
+      )
+    );
+    function result() {
+      return readDraft(draft, { secret: keepsSecret() });
+    }
+    function keepsSecret() {
+      return secretSaved && !draft.forgetSecret && draftSecretKey(draft) === secretFor;
+    }
+    function secretPlaceholder() {
+      return keepsSecret() ? "Saved \xB7 leave empty to keep" : "";
+    }
+    function changed(field2) {
+      if (field2) touched.add(field2);
+      if (test.state === "ok" || test.state === "failed") test = { state: "stale" };
+      if (!labelEdited) {
+        draft.label = suggestedLabel(draft);
+        labelInput.value = draft.label;
+      }
+      saveError = "";
+      const placeholder = secretPlaceholder();
+      for (const name of ["password", "apiKey", "appKey", "token"])
+        details2.querySelector(`#field-${name}`)?.setAttribute("placeholder", placeholder);
+      updateErrors();
+      updateTest();
+      renderLogs();
+      updateFooter();
+    }
+    function updateErrors() {
+      const { errors } = result();
+      for (const node of details2.querySelectorAll("[data-error-for]")) {
+        const field2 = node.dataset.errorFor;
+        const message = showErrors || touched.has(field2) ? errors[field2] : void 0;
+        node.textContent = message ?? "";
+        node.hidden = !message;
+        const input = details2.querySelector(`#field-${node.dataset.errorFor}`);
+        input?.setAttribute("aria-invalid", String(Boolean(message)));
+      }
+    }
+    function field(name, label, options = {}) {
+      const input = h("input", {
+        id: `field-${name}`,
+        type: options.type ?? "text",
+        value: String(draft[name] ?? ""),
+        placeholder: options.placeholder,
+        spellcheck: "false",
+        autocomplete: options.type === "password" ? "new-password" : "off",
+        inputmode: options.inputMode,
+        "aria-describedby": `error-${name}`,
+        oninput: () => {
+          if (options.onInput) options.onInput(input.value);
+          else draft[name] = input.value;
+          changed();
+        },
+        onblur: () => {
+          touched.add(name);
+          updateErrors();
+        },
+        onkeydown: (event) => {
+          if (event.key === "Enter") runTest();
+        }
+      });
+      return h(
+        "div",
+        { className: `field${options.wide ? " wide" : ""}` },
+        h("label", { for: `field-${name}` }, label),
+        input,
+        options.hint ? h("div", { className: "hint" }, options.hint) : void 0,
+        h("div", { className: "error", id: `error-${name}`, "data-error-for": name, hidden: true })
+      );
+    }
+    function secretField(name, label, hint) {
+      const element2 = field(name, label, {
+        type: "password",
+        placeholder: secretPlaceholder() || void 0,
+        hint: hint ?? "Kept in VS Code secret storage, never in settings."
+      });
+      if (name === "password" && mode === "edit" && secretSaved)
+        element2.append(
+          h(
+            "label",
+            { className: "check" },
+            h("input", {
+              type: "checkbox",
+              id: "field-forgetSecret",
+              checked: draft.forgetSecret,
+              onchange: (event) => {
+                draft.forgetSecret = event.target.checked;
+                changed();
+              }
+            }),
+            "Forget the saved password"
+          )
+        );
+      return element2;
+    }
+    function choice(name, label, value, options, onChange) {
+      return h(
+        "fieldset",
+        { className: "choice" },
+        h("legend", {}, label),
+        h(
+          "div",
+          { className: "segmented" },
+          ...options.map(
+            (option) => h(
+              "label",
+              { className: `segment${option.value === value ? " selected" : ""}`, title: option.hint },
+              h("input", {
+                type: "radio",
+                name,
+                value: option.value,
+                checked: option.value === value,
+                onchange: () => onChange(option.value)
+              }),
+              option.label
+            )
+          )
+        )
+      );
+    }
+    function renderTypes() {
+      const group = (kind, caption) => h(
+        "div",
+        { className: `type-group ${kind === "logs" ? "service" : "database"}` },
+        h("div", { className: "type-caption" }, caption),
+        h("div", { className: "type-grid" }, ...cards(kind))
+      );
+      types.replaceChildren(group("logs", "Log service"), group("database", "Database to query"));
+    }
+    function cards(kind) {
+      return CONNECTION_TYPES.filter((entryType) => entryType.kind === kind).map((entryType) => {
+        const selected = entryType.type === draft.type;
+        return h(
+          "label",
+          {
+            className: `type-card${selected ? " selected" : ""}${mode === "edit" && !selected ? " disabled" : ""}`
+          },
+          h("input", {
+            type: "radio",
+            name: "type",
+            value: entryType.type,
+            checked: selected,
+            disabled: mode === "edit" && !selected,
+            onchange: () => chooseType(entryType.type)
+          }),
+          h("span", { className: "type-name" }, entryType.label),
+          h("span", { className: "type-description" }, entryType.description)
+        );
+      });
+    }
+    function chooseType(type) {
+      if (type === draft.type) return;
+      const keep = SERVER_TYPES.includes(type) && SERVER_TYPES.includes(draft.type);
+      const next = emptyDraft(type);
+      draft = keep ? {
+        ...draft,
+        type,
+        port: draft.port === emptyDraft(draft.type).port ? next.port : draft.port
+      } : { ...next, label: labelEdited ? draft.label : "" };
+      urlText = keep && entry === "url" ? draftUrl(draft) : "";
+      urlInvalid = false;
+      touched.clear();
+      showErrors = false;
+      test = { state: "idle" };
+      table = void 0;
+      renderTypes();
+      renderDetails();
+      changed();
+    }
+    function renderDetails() {
+      const children = [];
+      switch (draft.type) {
+        case "postgres":
+        case "mysql":
+          children.push(...serverDetails());
+          break;
+        case "mongodb":
+          children.push(...mongoDetails());
+          break;
+        case "sqlite":
+          children.push(...sqliteDetails());
+          break;
+        case "datadog":
+          children.push(...datadogDetails());
+          break;
+      }
+      details2.replaceChildren(...children.filter((child) => !!child));
+      updateErrors();
+    }
+    function serverDetails() {
+      const name = draft.type === "mysql" ? "MySQL" : "Postgres";
+      const example = draft.type === "mysql" ? "mysql://user@db.example.com:3306/app" : "postgres://user@db.example.com:5432/app";
+      const urlPreview = h("code", { className: "url-preview" }, draftUrl(draft) || "\u2014");
+      const iamHint = h(
+        "div",
+        { className: "hint callout", hidden: !(suggestsIam(draft) && draft.auth === "password") },
+        "This is an Amazon RDS or Aurora host: it can sign in with an AWS IAM token instead of a password."
+      );
+      const refresh = () => {
+        urlPreview.textContent = draftUrl(draft) || "\u2014";
+        iamHint.hidden = !(suggestsIam(draft) && draft.auth === "password");
+      };
+      const urlError = h("div", { className: "error", id: "error-url-entry", hidden: true });
+      const urlInput = h("input", {
+        id: "field-url-entry",
+        type: "text",
+        value: urlText || draftUrl(draft),
+        placeholder: example,
+        spellcheck: "false",
+        autocomplete: "off",
+        "aria-describedby": "error-url-entry",
+        oninput: () => {
+          urlText = urlInput.value;
+          const next = applyUrl(draft, urlInput.value);
+          urlInvalid = !next;
+          urlError.hidden = !!next || !urlInput.value.trim();
+          urlError.textContent = next ? "" : `Enter a URL such as ${example}`;
+          if (next) {
+            const movedPassword = next.password !== draft.password;
+            draft = next;
+            if (movedPassword) {
+              const password = details2.querySelector("#field-password");
+              if (password) password.value = draft.password;
+              urlInput.value = urlText = withoutPassword(urlInput.value);
+            }
+          }
+          refresh();
+          changed();
+        },
+        onkeydown: (event) => {
+          if (event.key === "Enter") runTest();
+        }
+      });
+      const connection = entry === "url" ? h(
+        "div",
+        { className: "field wide" },
+        h("label", { for: "field-url-entry" }, `${name} URL`),
+        urlInput,
+        h("div", { className: "hint" }, "A password in the URL moves to the password field below."),
+        urlError
+      ) : h(
+        "div",
+        { className: "grid server" },
+        field("host", "Host", { placeholder: "db.example.com", onInput: (value) => set("host", value) }),
+        field("port", "Port", { inputMode: "numeric", onInput: (value) => set("port", value) }),
+        field("database", "Database", { onInput: (value) => set("database", value) }),
+        field("user", "User", { onInput: (value) => set("user", value) }),
+        h(
+          "label",
+          { className: "check wide" },
+          h("input", {
+            type: "checkbox",
+            checked: draft.ssl || draft.auth === "iam",
+            disabled: draft.auth === "iam",
+            onchange: (event) => {
+              draft.ssl = event.target.checked;
+              refresh();
+              changed();
+            }
+          }),
+          "Require TLS, checking the server\u2019s certificate"
+        ),
+        h("div", { className: "wide hint" }, "URL: ", urlPreview)
+      );
+      function set(key, value) {
+        draft[key] = value;
+        refresh();
+      }
+      const auth = draft.auth === "iam" ? h(
+        "div",
+        { className: "field" },
+        h("label", { for: "field-profile" }, "AWS profile that signs the token"),
+        h(
+          "select",
+          {
+            id: "field-profile",
+            onchange: (event) => {
+              draft.profile = event.target.value;
+              changed();
+            }
+          },
+          h("option", { value: "" }, "Default credentials (environment, AWS_PROFILE, or default)"),
+          ...profiles.map(
+            (profile) => h(
+              "option",
+              { value: profile.name, ...profile.name === draft.profile ? { selected: true } : {} },
+              profile.description ? `${profile.name} \xB7 ${profile.description}` : profile.name
+            )
+          )
+        ),
+        h(
+          "div",
+          { className: "hint" },
+          "A 15-minute token is made for each connection, so no password is stored. TLS is required."
+        )
+      ) : secretField(
+        "password",
+        "Password",
+        "Leave empty if the server needs none. Kept in VS Code secret storage, never in settings."
+      );
+      return [
+        choice(
+          "entry",
+          "Enter the server as",
+          entry,
+          [
+            { value: "url", label: "URL" },
+            { value: "fields", label: "Fields" }
+          ],
+          (value) => {
+            entry = value;
+            urlText = "";
+            urlInvalid = false;
+            renderDetails();
+          }
+        ),
+        connection,
+        iamHint,
+        choice(
+          "auth",
+          "Sign in with",
+          draft.auth,
+          [
+            { value: "password", label: "Password" },
+            { value: "iam", label: "AWS IAM token", hint: "For Amazon RDS and Aurora" }
+          ],
+          (value) => {
+            draft.auth = value;
+            renderDetails();
+            changed();
+          }
+        ),
+        auth
+      ];
+    }
+    function mongoDetails() {
+      const password = secretField("password", "Password");
+      const database = field("database", "Database", {
+        hint: "The database the logs are in. The URL does not name one, or only names where to sign in."
+      });
+      const refresh = () => {
+        password.hidden = !mongoUrl(draft.url)?.user;
+        database.hidden = !!mongoUrl(draft.url)?.database && !draft.database.trim();
+      };
+      refresh();
+      return [
+        field("url", "MongoDB URL", {
+          placeholder: "mongodb+srv://reader@cluster0.example.net/app",
+          wide: true,
+          hint: "A password in the URL moves to the password field, so the saved URL never holds one.",
+          onInput: (value) => {
+            const next = applyUrl(draft, value);
+            if (next) {
+              const movedPassword = next.password !== draft.password;
+              draft = next;
+              const input = details2.querySelector("#field-url");
+              if (input && movedPassword) input.value = draft.url;
+              const passwordInput = details2.querySelector("#field-password");
+              if (passwordInput && movedPassword) passwordInput.value = draft.password;
+            } else draft.url = value;
+            refresh();
+          }
+        }),
+        database,
+        password
+      ];
+    }
+    let outsideWorkspace = false;
+    function sqliteDetails() {
+      return [
+        h(
+          "div",
+          { className: "field wide" },
+          h("label", { for: "field-path" }, "Database file"),
+          h(
+            "div",
+            { className: "inline" },
+            h("input", {
+              id: "field-path",
+              type: "text",
+              value: draft.path,
+              placeholder: "logs/app.db",
+              spellcheck: "false",
+              "aria-describedby": "error-path",
+              oninput: (event) => {
+                draft.path = event.target.value;
+                outsideWorkspace = false;
+                changed("path");
+              },
+              onkeydown: (event) => {
+                if (event.key === "Enter") runTest();
+              }
+            }),
+            h(
+              "button",
+              { type: "button", className: "secondary", onclick: () => api.postMessage({ type: "browse" }) },
+              "Browse\u2026"
+            )
+          ),
+          h(
+            "div",
+            { className: "hint" },
+            outsideWorkspace ? "This file is outside the workspace, so its full path is saved and the setting only works on this machine." : "A file inside the workspace is saved relative to it, so the setting works on every clone. It is opened read-only."
+          ),
+          h("div", { className: "error", id: "error-path", "data-error-for": "path", hidden: true })
+        )
+      ];
+    }
+    function datadogDetails() {
+      const other = !sites.includes(draft.site);
+      const siteSelect = h(
+        "select",
+        {
+          id: "field-site-choice",
+          onchange: () => {
+            draft.site = siteSelect.value === "other" ? "" : siteSelect.value;
+            renderDetails();
+            changed();
+          }
+        },
+        ...sites.map(
+          (site) => h(
+            "option",
+            { value: site, ...site === draft.site ? { selected: true } : {} },
+            site === "datadoghq.com" ? `${site} (US1)` : site
+          )
+        ),
+        h("option", { value: "other", ...other ? { selected: true } : {} }, "Other: an API URL, such as a proxy")
+      );
+      return [
+        h(
+          "div",
+          { className: "grid" },
+          h(
+            "div",
+            { className: "field" },
+            h("label", { for: "field-site-choice" }, "Site"),
+            siteSelect,
+            h("div", { className: "hint" }, "The domain of your Datadog web app.")
+          ),
+          other ? field("site", "API URL", { placeholder: "https://datadog-proxy.example.com" }) : void 0
+        ),
+        choice(
+          "keyKind",
+          "Sign in with",
+          draft.keyKind,
+          [
+            { value: "keys", label: "API and application keys" },
+            { value: "token", label: "Access token" }
+          ],
+          (value) => {
+            draft.keyKind = value;
+            renderDetails();
+            changed();
+          }
+        ),
+        draft.keyKind === "token" ? h("div", { className: "grid" }, secretField("token", "Access token")) : h(
+          "div",
+          { className: "grid" },
+          secretField("apiKey", "API key", "Organization Settings \u203A API Keys."),
+          secretField("appKey", "Application key", "Organization Settings \u203A Application Keys.")
+        ),
+        h(
+          "div",
+          { className: "hint" },
+          "They need the logs_read_data permission, and are kept in VS Code secret storage, never in settings."
+        )
+      ];
+    }
+    function runTest() {
+      if (test.state === "running") return;
+      showErrors = true;
+      updateErrors();
+      if (entry === "url" && urlInvalid && SERVER_TYPES.includes(draft.type)) {
+        details2.querySelector("#field-url-entry")?.focus();
+        test = { state: "failed", error: "Enter a URL Logline can read, or use Fields." };
+        updateTest();
+        return;
+      }
+      const { connection, errors } = result();
+      if (!connection) {
+        const first = Object.keys(errors)[0];
+        details2.querySelector(`#field-${first}`)?.focus();
+        test = { state: "failed", error: Object.values(errors)[0] ?? "Fill in the connection first." };
+        updateTest();
+        return;
+      }
+      test = { state: "running" };
+      testing = tested();
+      updateTest();
+      updateFooter();
+      api.postMessage({ type: "test", draft });
+    }
+    function updateTest() {
+      testButton.disabled = test.state === "running";
+      testButton.textContent = test.state === "running" ? "Testing\u2026" : test.state === "ok" ? "Test again" : "Test connection";
+      testStatus.className = `test-status ${test.state}`;
+      testStatus.textContent = test.state === "running" ? "Connecting\u2026" : test.state === "ok" ? `\u2713 Connected \xB7 ${test.detail}` : test.state === "failed" ? test.error : test.state === "stale" ? "Changed since the last test. Test again to continue." : "";
+    }
+    function renderLogs() {
+      const isDatadog = draft.type === "datadog";
+      const ready = test.state === "ok";
+      logsStep.classList.toggle("locked", !ready);
+      nameStep.classList.toggle("locked", !ready);
+      labelInput.disabled = !ready;
+      const word = draft.type === "mongodb" ? "collection" : "table";
+      logsHeading.textContent = isDatadog ? "Logs" : `Log ${word}`;
+      if (isDatadog) {
+        logs.replaceChildren(
+          h(
+            "p",
+            { className: "hint" },
+            ready ? "Datadog logs need no table. Searches use Datadog\u2019s own fields: service, host, status, and @attributes." : "Test the connection first."
+          )
+        );
+        return;
+      }
+      if (!ready || test.state !== "ok") {
+        logs.replaceChildren(h("p", { className: "hint" }, "Test the connection to list its tables."));
+        return;
+      }
+      const query = draft.type === "mongodb" ? "queries" : "SQL";
+      const tables = test.tables ?? [];
+      const select = h(
+        "select",
+        {
+          id: "field-table",
+          onchange: () => chooseTable(select.value === "\0none" ? null : select.value || void 0)
+        },
+        table === void 0 ? h("option", { value: "", selected: true }, `Choose a ${word}\u2026`) : void 0,
+        h(
+          "option",
+          { value: "\0none", ...table === null ? { selected: true } : {} },
+          `None: only run ${query} you type`
+        ),
+        ...tables.map((name) => h("option", { value: name, ...name === table ? { selected: true } : {} }, name))
+      );
+      const children = [
+        h(
+          "div",
+          { className: "field" },
+          h(
+            "label",
+            { for: "field-table" },
+            h("span", {}, `Log ${word}`),
+            h("span", { className: "required" }, " optional")
+          ),
+          select,
+          h(
+            "div",
+            { className: "hint" },
+            tables.length ? `The connection runs the ${query} you type. If a ${word} holds one ${draft.type === "mongodb" ? "document" : "row"} per log event, choose it to also search and tail it like logs.` : `This database has no ${word}s Logline can read; it can still run the ${query} you type.`
+          )
+        )
+      ];
+      if (table) {
+        if (columnsState === "loading") children.push(h("p", { className: "hint" }, `Reading ${table}\u2026`));
+        else if (columnsState === "failed") children.push(h("p", { className: "error" }, columnsError));
+        else if (columnsState === "ready") children.push(mappingGrid(), preview());
+      }
+      logs.replaceChildren(...children.filter((child) => !!child && typeof child !== "string"));
+    }
+    function chooseTable(next) {
+      table = next;
+      columns = [];
+      rows = [];
+      previewError = "";
+      mapping = {};
+      columnsState = next ? "loading" : "idle";
+      if (next) api.postMessage({ type: "table", table: next });
+      renderLogs();
+      updateFooter();
+    }
+    function sampleOf(column) {
+      if (!column) return "";
+      return rows.find((row) => row[column])?.[column] ?? "";
+    }
+    function mappingGrid() {
+      return h(
+        "div",
+        { className: "mapping", role: "group", "aria-label": "Which column holds what" },
+        h(
+          "p",
+          { className: "hint" },
+          "Logline guessed these from the column names. Every other column becomes a searchable field."
+        ),
+        ...MAPPED_FIELDS.map((role) => {
+          const id = `map-${role}`;
+          const select = h(
+            "select",
+            {
+              id,
+              onchange: () => {
+                if (select.value) mapping[role] = select.value;
+                else delete mapping[role];
+                renderLogs();
+                updateFooter();
+                document.getElementById(id)?.focus();
+              }
+            },
+            h(
+              "option",
+              { value: "", ...!mapping[role] ? { selected: true } : {} },
+              role === "timestamp" ? "Choose the time column\u2026" : "None"
+            ),
+            ...columns.map(
+              (column) => h(
+                "option",
+                { value: column.name, ...column.name === mapping[role] ? { selected: true } : {} },
+                column.type ? `${column.name}  (${column.type})` : column.name
+              )
+            )
+          );
+          return h(
+            "div",
+            { className: `mapping-row${role === "timestamp" && !mapping.timestamp ? " missing" : ""}` },
+            h(
+              "label",
+              { for: id },
+              ROLE_LABELS[role],
+              role === "timestamp" ? h("span", { className: "required" }, " required") : ""
+            ),
+            select,
+            h("span", { className: "sample", title: sampleOf(mapping[role]) }, sampleOf(mapping[role]))
+          );
+        })
+      );
+    }
+    function preview() {
+      if (previewError) return h("p", { className: "hint" }, `Could not preview ${table}: ${previewError}`);
+      if (!rows.length) return h("p", { className: "hint" }, `${table} is empty, so there is nothing to preview yet.`);
+      const roleOf = new Map(Object.entries(mapping).map(([role, column]) => [column, role]));
+      const names = columns.length ? columns.map((column) => column.name) : Object.keys(rows[0]);
+      return h(
+        "div",
+        { className: "preview" },
+        h(
+          "div",
+          { className: "preview-title" },
+          `First ${rows.length} ${rows.length === 1 ? "row" : "rows"} of ${table}`
+        ),
+        h(
+          "div",
+          { className: "preview-scroll", tabindex: "0" },
+          h(
+            "table",
+            {},
+            h(
+              "thead",
+              {},
+              h(
+                "tr",
+                {},
+                ...names.map((name) => {
+                  const role = roleOf.get(name);
+                  return h(
+                    "th",
+                    { className: role ? "mapped" : void 0 },
+                    name,
+                    role ? h("span", { className: "role" }, ROLE_LABELS[role]) : void 0
+                  );
+                })
+              )
+            ),
+            h(
+              "tbody",
+              {},
+              ...rows.map(
+                (row) => h(
+                  "tr",
+                  {},
+                  ...names.map(
+                    (name) => h(
+                      "td",
+                      { className: roleOf.has(name) ? "mapped" : void 0, title: row[name] ?? "" },
+                      row[name] ?? ""
+                    )
+                  )
+                )
+              )
+            )
+          )
+        )
+      );
+    }
+    function missing() {
+      if (test.state === "running") return "Testing the connection\u2026";
+      if (test.state !== "ok") return "Test the connection to continue.";
+      if (draft.type !== "datadog") {
+        const word = draft.type === "mongodb" ? "collection" : "table";
+        if (table === void 0) return `Choose the log ${word}, or None.`;
+        if (table && columnsState !== "ready") return `Reading ${table}\u2026`;
+        if (table && !mapping.timestamp) return "Choose the time column.";
+      }
+      if (!draft.label.trim()) return "Give the connection a name.";
+      return void 0;
+    }
+    function updateFooter() {
+      const blocked = missing();
+      saveButton.disabled = saving || !!blocked;
+      saveButton.textContent = saving ? "Saving\u2026" : mode === "edit" ? "Save changes" : "Add connection";
+      footerNote.className = `footer-note${saveError ? " error" : ""}`;
+      footerNote.textContent = saveError || blocked || "";
+    }
+    function save() {
+      if (missing() || saving) return;
+      saving = true;
+      saveError = "";
+      updateFooter();
+      const chosen = draft.type === "datadog" || !table ? null : { table, ...mapping };
+      api.postMessage({ type: "save", draft, mapping: chosen });
+    }
+    function receive(update) {
+      switch (update.type) {
+        case "init":
+          mode = update.mode;
+          draft = update.draft;
+          secretSaved = update.secret;
+          secretFor = update.secretKey;
+          profiles = update.profiles;
+          sites = update.sites;
+          savedMapping = update.mapping;
+          entry = mode === "edit" ? "fields" : "url";
+          labelEdited = mode === "edit" || !!draft.label && draft.label !== suggestedLabel(draft);
+          if (!labelEdited) draft.label = suggestedLabel(draft);
+          labelInput.value = draft.label;
+          title.textContent = mode === "edit" ? `Edit ${draft.label}` : "Add connection";
+          typeStep.hidden = false;
+          renderTypes();
+          renderDetails();
+          updateTest();
+          renderLogs();
+          updateFooter();
+          if (mode === "edit" && result().connection) runTest();
+          else details2.querySelector("input")?.focus();
+          return;
+        case "tested":
+          test = tested() !== testing ? { state: "stale" } : update.ok ? { state: "ok", detail: update.detail, tables: update.tables } : { state: "failed", error: update.error };
+          updateTest();
+          if (test.state === "ok") {
+            const tables = test.tables ?? [];
+            if (table && mapping.timestamp) savedMapping = { ...mapping, table, timestamp: mapping.timestamp };
+            const again = table === null ? void 0 : table ?? savedMapping?.table;
+            if (again && tables.includes(again)) chooseTable(again);
+            else if (table && !tables.includes(table)) chooseTable(void 0);
+            else if (table === void 0 && !savedMapping && draft.type !== "datadog") table = null;
+          }
+          renderLogs();
+          updateFooter();
+          return;
+        case "columns":
+          if (update.table !== table) return;
+          if ("error" in update) {
+            columnsState = "failed";
+            columnsError = `Could not read ${update.table}: ${update.error}`;
+          } else {
+            columns = update.columns;
+            rows = update.rows;
+            previewError = update.previewError ?? "";
+            const saved = savedMapping?.table === update.table ? savedMapping : void 0;
+            mapping = {};
+            for (const role of MAPPED_FIELDS) {
+              const column = saved ? saved[role] : update.suggested[role];
+              if (column && columns.some((info) => info.name === column)) mapping[role] = column;
+            }
+            if (saved) savedMapping = void 0;
+            columnsState = "ready";
+          }
+          renderLogs();
+          updateFooter();
+          return;
+        case "file":
+          draft.path = update.path;
+          outsideWorkspace = update.outside;
+          renderDetails();
+          changed("path");
+          return;
+        case "saveFailed":
+          saving = false;
+          saveError = update.error;
+          updateFooter();
+          return;
+      }
+    }
+    typeStep.hidden = true;
+    updateFooter();
+    return { receive };
+  }
+
+  // src/webview/views.ts
+  var TABS = [
+    "logs",
+    "analysis",
+    "compare",
+    "traces",
+    "aiCalls",
+    "metrics",
+    "doctor",
+    "connection"
+  ];
+  function isTabName(value) {
+    return typeof value === "string" && TABS.includes(value);
+  }
+  function tabOf(view) {
+    return view === "trace" ? "traces" : view === "aiCall" ? "aiCalls" : view;
+  }
+  function createViews(tabs, panels, scope, activate, changed) {
+    let current = "logs";
+    function show(view, focus = false) {
+      const previous = current;
+      current = view;
+      for (const name of Object.keys(panels))
+        panels[name].hidden = name !== view && !(view === "trace" && name === "traces");
+      const selected = tabOf(view);
+      for (const name of TABS) {
+        tabs[name].setAttribute("aria-selected", String(name === selected));
+        tabs[name].tabIndex = name === selected ? 0 : -1;
+      }
+      if (document.body) {
+        document.body.dataset.view = selected;
+        document.body.dataset.subview = view;
+      }
+      if (focus) tabs[selected].focus();
+      if (view !== previous) changed(view, previous);
+    }
+    function ensureVisible() {
+      if (tabs[tabOf(current)].hidden) show("logs");
+    }
+    for (const name of TABS) {
+      scope.listen(tabs[name], "click", () => activate(name));
+      scope.listen(tabs[name], "keydown", (event) => {
+        const visible = TABS.filter((tab) => !tabs[tab].hidden);
+        const index = visible.indexOf(name);
+        const next = event.key === "ArrowRight" ? visible[(index + 1) % visible.length] : event.key === "ArrowLeft" ? visible[(index - 1 + visible.length) % visible.length] : event.key === "Home" ? visible[0] : event.key === "End" ? visible[visible.length - 1] : void 0;
+        if (!next) return;
+        event.preventDefault();
+        activate(next);
+        tabs[next].focus();
+      });
+    }
+    return { show, ensureVisible, active: () => current, available: (tab) => !tabs[tab].hidden };
+  }
+
+  // src/webview/connection-tab.ts
+  function createConnectionTab(elements, api, views, rail) {
+    const numbers = new Intl.NumberFormat();
+    let connections = [];
+    let editing;
+    let session = 0;
+    let form;
+    let previous = "logs";
+    elements.connectionTab.hidden = true;
+    function open(next) {
+      if (next.session !== session || !form) {
+        session = next.session;
+        const root = document.createElement("div");
+        elements.connectionView.replaceChildren(root);
+        form = createConnectionForm(
+          { postMessage: (request) => api.postMessage({ type: "connectionForm", session: next.session, request }) },
+          root
+        );
+        api.postMessage({ type: "connectionForm", session, request: { type: "ready" } });
+      }
+      elements.connectionTabLabel.textContent = next.title;
+      elements.connectionTab.hidden = false;
+      editing = next.connectionId;
+      renderRail();
+      const current = tabOf(views.active());
+      if (current !== "connection") previous = current;
+      views.show("connection");
+    }
+    function renderRail() {
+      const add = {
+        icon: "add",
+        label: "Add connection",
+        onSelect: () => api.postMessage({ type: "addConnection" })
+      };
+      const items = [{ kind: "group", label: "Connections", action: add }];
+      if (session && !editing)
+        items.push({ kind: "item", key: "", label: "New connection", icon: "add", selected: true, onSelect: () => {
+        } });
+      for (const connection of connections) {
+        const edit = () => api.postMessage({ type: "editConnection", connectionId: connection.id });
+        items.push({
+          kind: "item",
+          key: connection.id,
+          label: connection.label,
+          status: connectionStatus(connection, (value) => numbers.format(value)),
+          icon: connection.type === "datadog" ? "cloud" : "database",
+          selected: connection.id === editing,
+          title: `Edit ${connection.label}`,
+          actions: [
+            { icon: "edit", label: `Edit connection ${connection.label}\u2026`, onSelect: edit },
+            {
+              icon: "remove",
+              label: `Remove connection ${connection.label}\u2026`,
+              onSelect: () => api.postMessage({ type: "removeConnection", connectionId: connection.id })
+            }
+          ],
+          onSelect: edit
+        });
+      }
+      rail("Connections", items);
+    }
+    function close() {
+      session = 0;
+      editing = void 0;
+      form = void 0;
+      elements.connectionView.replaceChildren();
+      elements.connectionTab.hidden = true;
+      if (views.active() === "connection") views.back(previous);
+      renderRail();
+    }
+    return {
+      open,
+      /** The saved connections, from each snapshot, for the rail. */
+      setConnections(next) {
+        connections = next;
+        renderRail();
+      },
+      /** Ask for a form left open before this view started, which then comes back as its tab. */
+      resume() {
+        api.postMessage({ type: "connectionForm", session: 0, request: { type: "resume" } });
+      },
+      /** An answer for the form; one meant for an earlier form is dropped. */
+      receive(message) {
+        if (message.session !== session || !form) return;
+        if (message.update.type === "close") close();
+        else form.receive(message.update);
+      }
+    };
+  }
+
+  // src/webview/rail-resize.ts
+  var RAIL_WIDTH = { min: 160, max: 560, default: 236 };
+  var STEP = 16;
+  function widest() {
+    return Math.max(RAIL_WIDTH.min, Math.min(RAIL_WIDTH.max, (window.innerWidth || 0) - 240));
+  }
+  function clampRailWidth(width) {
+    return Math.round(Math.max(RAIL_WIDTH.min, Math.min(widest(), width)));
+  }
+  function createRailResize(handles, state, scope, actions) {
+    function apply() {
+      const width = state.railWidth === void 0 ? RAIL_WIDTH.default : clampRailWidth(state.railWidth);
+      if (state.railWidth === void 0) document.body.style.removeProperty("--rail-width");
+      else document.body.style.setProperty("--rail-width", `${width}px`);
+      for (const handle of handles) {
+        handle.setAttribute("aria-valuenow", String(width));
+        handle.setAttribute("aria-valuemin", String(RAIL_WIDTH.min));
+        handle.setAttribute("aria-valuemax", String(widest()));
+      }
+    }
+    function set(width) {
+      state.railWidth = width === void 0 ? void 0 : clampRailWidth(width);
+      apply();
+    }
+    for (const handle of handles) {
+      scope.listen(handle, "pointerdown", (event) => {
+        if (event.button !== void 0 && event.button !== 0) return;
+        handle.setPointerCapture?.(event.pointerId);
+        const startX = event.clientX;
+        const startWidth = state.railWidth ?? RAIL_WIDTH.default;
+        handle.classList.add("dragging");
+        const move = (pointer) => set(startWidth + pointer.clientX - startX);
+        const finish = () => {
+          document.removeEventListener?.("pointermove", move);
+          document.removeEventListener?.("pointerup", finish);
+          document.removeEventListener?.("pointercancel", finish);
+          handle.classList.remove("dragging");
+          actions.saveState();
+        };
+        scope.listen(document, "pointermove", move);
+        scope.listen(document, "pointerup", finish, { once: true });
+        scope.listen(document, "pointercancel", finish, { once: true });
+        event.preventDefault?.();
+      });
+      scope.listen(handle, "dblclick", () => {
+        set(void 0);
+        actions.saveState();
+      });
+      scope.listen(handle, "keydown", (event) => {
+        if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+        event.preventDefault();
+        const step = event.shiftKey ? STEP * 3 : STEP;
+        set((state.railWidth ?? RAIL_WIDTH.default) + (event.key === "ArrowLeft" ? -step : step));
+        actions.saveState();
+      });
+    }
+    scope.listen(window, "resize", apply);
+    apply();
+    return { apply };
+  }
+
   // src/webview/tab-rail.ts
   function createTabRail(elements, state, scope, actions) {
     const contents = /* @__PURE__ */ new Map();
     let active = "";
     let signature = "";
     const handlers = /* @__PURE__ */ new Map();
+    function actionButton(key, action) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = `rail-action rail-${action.icon}`;
+      button.setAttribute("aria-label", action.label);
+      button.title = action.label;
+      button.append(icon2(action.icon, 13));
+      handlers.set(key, action.onSelect);
+      scope.listen(button, "click", (event) => {
+        event.stopPropagation();
+        handlers.get(key)?.();
+      });
+      return button;
+    }
+    function setHandlers(items) {
+      for (const item of items) {
+        if (item.kind === "group") {
+          if (item.action) handlers.set(`group:${item.label}`, item.action.onSelect);
+          continue;
+        }
+        handlers.set(item.key, item.onSelect);
+        for (const action of item.actions ?? []) handlers.set(`${item.key}:${action.icon}`, action.onSelect);
+      }
+    }
     function collapsed() {
       return state.railCollapsed ?? window.innerWidth < NARROW_PANEL;
     }
@@ -4091,13 +5583,19 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
         swatch.style.background = item.color;
         glyph.append(swatch);
       }
-      const text = document.createElement("span");
-      text.className = "rail-text";
+      const text2 = document.createElement("span");
+      text2.className = "rail-text";
       const name = document.createElement("span");
       name.className = "rail-name";
       name.textContent = item.label;
-      text.append(name);
-      button.append(glyph, text);
+      text2.append(name);
+      if (item.status) {
+        const status = document.createElement("span");
+        status.className = "rail-status";
+        status.textContent = item.status;
+        text2.append(status);
+      }
+      button.append(glyph, text2);
       if (item.meta) {
         const meta = document.createElement("span");
         meta.className = "rail-meta";
@@ -4107,13 +5605,20 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
       handlers.set(item.key, item.onSelect);
       scope.listen(button, "click", () => handlers.get(item.key)?.());
       wrapper.append(button);
+      if (item.actions?.length) {
+        wrapper.classList.add("has-actions");
+        const group = document.createElement("span");
+        group.className = "rail-actions";
+        group.append(...item.actions.map((action) => actionButton(`${item.key}:${action.icon}`, action)));
+        wrapper.append(group);
+      }
       return wrapper;
     }
     function render() {
       const content = contents.get(active);
       elements.tabRail.hidden = !content;
       if (!content) return;
-      for (const item of content.items) if (item.kind === "item") handlers.set(item.key, item.onSelect);
+      setHandlers(content.items);
       const next = JSON.stringify([active, content.title, content.items]);
       if (next === signature) return;
       signature = next;
@@ -4128,6 +5633,7 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
           label.className = "rail-group-label";
           label.textContent = item.label;
           heading.append(label);
+          if (item.action) heading.append(actionButton(`group:${item.label}`, item.action));
           return heading;
         })
       );
@@ -4247,8 +5753,8 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
       const title = document.createElement("h2");
       title.id = "tourTitle";
       title.textContent = "You\u2019re set";
-      const text = document.createElement("p");
-      text.textContent = "Turn on Capture in the status bar and run your app in a terminal, and its logs show up here. See the tour again from More actions \u2192 Take the tour.";
+      const text2 = document.createElement("p");
+      text2.textContent = "Turn on Capture in the status bar and run your app in a terminal, and its logs show up here. See the tour again from More actions \u2192 Take the tour.";
       const row = document.createElement("div");
       row.className = "tour-actions";
       const done = button("Done", "tour-primary", () => close(true));
@@ -4256,7 +5762,7 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
         button("Replay", "tour-secondary", () => start()),
         done
       );
-      card.append(title, text, row);
+      card.append(title, text2, row);
       layer.replaceChildren(backdrop(), card);
       done.focus();
     }
@@ -4296,10 +5802,10 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
       const title = document.createElement("h2");
       title.id = "tourTitle";
       title.textContent = step.title;
-      const text = document.createElement("p");
-      text.id = "tourText";
-      text.textContent = step.text;
-      card.append(head, title, text);
+      const text2 = document.createElement("p");
+      text2.id = "tourText";
+      text2.textContent = step.text;
+      card.append(head, title, text2);
       if (step.example) {
         const example = document.createElement("p");
         example.className = "tour-example";
@@ -4560,9 +6066,9 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
       const rows = next.rows.filter(
         (row2) => (status === "all" || row2.status === status) && (!changedOnly || row2.changed)
       );
-      const header = (text, title = "", className = "") => {
+      const header = (text2, title = "", className = "") => {
         const element2 = document.createElement("th");
-        element2.textContent = text;
+        element2.textContent = text2;
         element2.title = title;
         element2.className = className;
         return element2;
@@ -4853,9 +6359,9 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
           const swatch = document.createElement("span");
           swatch.className = `metric-swatch metric-color-${index % COLORS2}`;
           const latest = series.points.at(-1);
-          const text = document.createElement("span");
-          text.textContent = `${seriesName(series)}${latest ? ` \xB7 ${formatMetric(latest[1], series.unit)}` : ""}`;
-          item.append(swatch, text);
+          const text2 = document.createElement("span");
+          text2.textContent = `${seriesName(series)}${latest ? ` \xB7 ${formatMetric(latest[1], series.unit)}` : ""}`;
+          item.append(swatch, text2);
           return item;
         })
       );
@@ -5923,51 +7429,6 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
     return formatTimestamp;
   }
 
-  // src/webview/views.ts
-  var TABS = ["logs", "analysis", "compare", "traces", "aiCalls", "metrics", "doctor"];
-  function isTabName(value) {
-    return typeof value === "string" && TABS.includes(value);
-  }
-  function tabOf(view) {
-    return view === "trace" ? "traces" : view === "aiCall" ? "aiCalls" : view;
-  }
-  function createViews(tabs, panels, scope, activate, changed) {
-    let current = "logs";
-    function show(view, focus = false) {
-      const previous = current;
-      current = view;
-      for (const name of Object.keys(panels))
-        panels[name].hidden = name !== view && !(view === "trace" && name === "traces");
-      const selected = tabOf(view);
-      for (const name of TABS) {
-        tabs[name].setAttribute("aria-selected", String(name === selected));
-        tabs[name].tabIndex = name === selected ? 0 : -1;
-      }
-      if (document.body) {
-        document.body.dataset.view = selected;
-        document.body.dataset.subview = view;
-      }
-      if (focus) tabs[selected].focus();
-      if (view !== previous) changed(view, previous);
-    }
-    function ensureVisible() {
-      if (tabs[tabOf(current)].hidden) show("logs");
-    }
-    for (const name of TABS) {
-      scope.listen(tabs[name], "click", () => activate(name));
-      scope.listen(tabs[name], "keydown", (event) => {
-        const visible = TABS.filter((tab) => !tabs[tab].hidden);
-        const index = visible.indexOf(name);
-        const next = event.key === "ArrowRight" ? visible[(index + 1) % visible.length] : event.key === "ArrowLeft" ? visible[(index - 1 + visible.length) % visible.length] : event.key === "Home" ? visible[0] : event.key === "End" ? visible[visible.length - 1] : void 0;
-        if (!next) return;
-        event.preventDefault();
-        activate(next);
-        tabs[next].focus();
-      });
-    }
-    return { show, ensureVisible, active: () => current, available: (tab) => !tabs[tab].hidden };
-  }
-
   // src/webview/viewer.ts
   var HOLD_AFTER_MOVE_MS = 2e3;
   var STEADY_STATUS = /* @__PURE__ */ new Set(["", "Ready", "Running", "Idle", "Stopped"]);
@@ -5986,6 +7447,7 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
       saveState: () => saveState(),
       collapsedChanged: () => rail.applyCollapsed()
     });
+    createRailResize([elements.railResizer, elements.tabRailResizer], state, scope, { saveState: () => saveState() });
     createTooltips(scope);
     let restoreTab;
     const views = createViews(
@@ -5996,7 +7458,8 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
         traces: elements.traces,
         metrics: elements.metrics,
         aiCalls: elements.aiCalls,
-        doctor: elements.doctor
+        doctor: elements.doctor,
+        connection: elements.connectionTab
       },
       {
         logs: elements.logsView,
@@ -6007,11 +7470,22 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
         metrics: elements.metricsView,
         aiCalls: elements.aiCallsView,
         aiCall: elements.aiCallView,
-        doctor: elements.doctorView
+        doctor: elements.doctorView,
+        connection: elements.connectionView
       },
       scope,
       openView,
       viewChanged
+    );
+    const connectionTab = createConnectionTab(
+      elements,
+      api,
+      {
+        show: (view) => views.show(view),
+        active: () => views.active(),
+        back: (tab) => openView(views.available(tab) ? tab : "logs")
+      },
+      (title, items) => tabRail.set("connection", title, items)
     );
     const formatTimestamp = createTimestampFormatter(state);
     const analysis = createAnalysis(
@@ -6200,6 +7674,10 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
     };
     scope.listen(window, "message", onMessage);
     function receive(data) {
+      if (data.type === "connectionForm") {
+        connectionTab.receive(data);
+        return;
+      }
       if (data.type === "guideStatus") {
         updateGuideStatus(data);
         return;
@@ -6294,9 +7772,11 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
       if (data.applySource && data.servers?.some((server) => server.id === data.applySource) && (data.applySource !== state.selectedServer || (data.applyRun ?? "") !== state.selectedSession)) {
         views.show("logs");
         selectSource(data.applySource, data.applyRun);
+        if (data.openConnectionForm) connectionTab.open(data.openConnectionForm);
         bridge.flush();
         return;
       }
+      if (data.openConnectionForm) connectionTab.open(data.openConnectionForm);
       const receiverWasRunning = otlpRunning;
       otlpRunning = data.otlp?.running === true;
       otlpEndpoint = data.otlp?.endpoint;
@@ -6399,6 +7879,7 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
         sessions: data.sessions ? visibleSessions : void 0,
         connections: data.connections ?? []
       });
+      connectionTab.setConnections(data.connections ?? []);
       if (selectionChanged) {
         state.filterChanged();
         saveState();
@@ -6890,6 +8371,7 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
       else restoreTab = state.view;
     }
     request();
+    connectionTab.resume();
     return {
       state,
       views,
@@ -6919,7 +8401,8 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
         metricsView: "metrics",
         aiCallsView: "aiCalls",
         aiCallView: "aiCalls",
-        doctorView: "doctor"
+        doctorView: "doctor",
+        connectionView: "connection"
       };
       return tabs[id];
     }

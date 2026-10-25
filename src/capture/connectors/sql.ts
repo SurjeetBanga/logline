@@ -1,4 +1,10 @@
-import type { ColumnInfo, ConnectionConfig, LogTableMapping, TimeEncoding } from '../../core/connections';
+import {
+  sampleLimit,
+  type ColumnInfo,
+  type ConnectionConfig,
+  type LogTableMapping,
+  type TimeEncoding,
+} from '../../core/connections';
 import { boundSeries, rowsToSeries } from '../../core/metric-query';
 import {
   buildSqlLogQuery,
@@ -149,6 +155,16 @@ export class SqlConnector implements Connector {
     const column = columns.find((candidate) => candidate.name === mapping.timestamp);
     if (!column) throw new Error(`Column ${mapping.timestamp} is not in ${mapping.table}.`);
     return { columns, time: mapping.timestampFormat ?? (await this.timeEncoding(mapping, column)) };
+  }
+
+  /** The first rows of a table, to preview its columns before it is chosen as the log table. */
+  async sample(table: string, limit = 5): Promise<Row[]> {
+    const dialect = this.driver.dialect;
+    const quote = (name: string) => quoteIdentifier(name, dialect);
+    const parts = tableParts(table);
+    const from = parts.schema ? `${quote(parts.schema)}.${quote(parts.name)}` : quote(parts.name);
+    const count = sampleLimit(limit);
+    return this.query(`SELECT * FROM ${from} LIMIT ${count}`);
   }
 
   private async timeEncoding(mapping: LogTableMapping, column: ColumnInfo): Promise<TimeEncoding> {

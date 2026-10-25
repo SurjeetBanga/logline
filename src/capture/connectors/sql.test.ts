@@ -402,3 +402,30 @@ test('Postgres on RDS signs in with a token made for each connection, over TLS w
   assert.ok(config.ssl.ca.length > 10);
   await driver.close();
 });
+
+test('a sample selects the first rows of a table, quoted for its dialect, with the limit clamped to 1 to 50', async () => {
+  const sampled = async (dialect: SqlDriver['dialect'], table: string, limit?: number) => {
+    const statements: string[] = [];
+    const driver: SqlDriver = {
+      dialect,
+      query: async (sql, params) => {
+        assert.deepEqual(params, []);
+        statements.push(sql);
+        return [{ id: 1 }];
+      },
+      close: async () => {},
+    };
+    const connector = new SqlConnector({ id: 'x', label: 'x', type: 'sqlite', path: 'x.db' }, driver, () => 5000);
+    assert.deepEqual(await connector.sample(table, limit), [{ id: 1 }]);
+    return statements[0];
+  };
+  assert.equal(await sampled('sqlite', 'app_logs'), 'SELECT * FROM "app_logs" LIMIT 5');
+  assert.equal(await sampled('postgres', 'audit.events', 10), 'SELECT * FROM "audit"."events" LIMIT 10');
+  assert.equal(await sampled('postgres', 'we"ird'), 'SELECT * FROM "we""ird" LIMIT 5');
+  assert.equal(await sampled('mysql', 'app.logs'), 'SELECT * FROM `app`.`logs` LIMIT 5');
+  assert.equal(await sampled('mysql', 'logs', 999), 'SELECT * FROM `logs` LIMIT 50');
+  assert.equal(await sampled('sqlite', 'logs', 0), 'SELECT * FROM "logs" LIMIT 1');
+  assert.equal(await sampled('sqlite', 'logs', -3), 'SELECT * FROM "logs" LIMIT 1');
+  assert.equal(await sampled('sqlite', 'logs', 7.8), 'SELECT * FROM "logs" LIMIT 7');
+  assert.equal(await sampled('sqlite', 'logs', Number.NaN), 'SELECT * FROM "logs" LIMIT 1');
+});

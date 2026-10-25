@@ -157,6 +157,11 @@
         "category": "Logline"
       },
       {
+        "command": "logline.editConnection",
+        "title": "Edit Connection\u2026",
+        "category": "Logline"
+      },
+      {
         "command": "logline.removeConnection",
         "title": "Remove Connection\u2026",
         "category": "Logline"

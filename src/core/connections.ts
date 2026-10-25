@@ -142,6 +142,20 @@ export function secretKey(connection: Exclude<ConnectionConfig, SqliteConnection
   return `logline.connection.${connection.type}://${encodeURIComponent(connection.user)}@${connection.host}:${connection.port}/${encodeURIComponent(connection.database)}`;
 }
 
+/** A URL part decoded, or as typed while a stray `%` makes it unreadable, such as a password typed in a URL. */
+export function decodePart(value: string): string {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
+}
+
+/** How many rows a preview reads: 1 to 50. */
+export function sampleLimit(limit: unknown): number {
+  return Math.min(50, Math.max(1, Math.trunc(Number(limit)) || 1));
+}
+
 /** Whether a host is an Amazon RDS or Aurora endpoint, which can sign in with AWS IAM. */
 export function isRdsHost(host: string): boolean {
   return /\.rds\.amazonaws\.com(?:\.cn)?$/i.test(host);
@@ -167,8 +181,8 @@ export function mongoUrl(
   return {
     srv: Boolean(srv),
     hosts,
-    ...(user ? { user: decodeURIComponent(user) } : {}),
-    ...(database ? { database: decodeURIComponent(database) } : {}),
+    ...(user ? { user: decodePart(user) } : {}),
+    ...(database ? { database: decodePart(database) } : {}),
     options: options ?? '',
   };
 }
@@ -257,6 +271,82 @@ export function normalizeConnections(value: unknown): ConnectionConfig[] {
     if (logs && connection.type !== 'datadog') connection.logs = logs;
     return [connection];
   });
+}
+
+/**
+ * Read `postgres://user:password@host:port/database?sslmode=require`, or
+ * `mysql://user:password@host:port/database?ssl=true`, into a connection.
+ */
+export function parseServerUrl<T extends 'postgres' | 'mysql'>(
+  value: string,
+  type: T,
+): { connection: Extract<ConnectionConfig, { type: T }>; password?: string } | undefined {
+  let url: URL;
+  try {
+    url = new URL(value.trim());
+  } catch {
+    return undefined;
+  }
+  const protocols = type === 'mysql' ? ['mysql:', 'mariadb:'] : ['postgres:', 'postgresql:'];
+  if (!protocols.includes(url.protocol)) return undefined;
+  const database = decodePart(url.pathname.replace(/^\//, ''));
+  const user = decodePart(url.username);
+  if (!database || !user || !url.hostname) return undefined;
+  const ssl =
+    ['require', 'verify-ca', 'verify-full', 'REQUIRED', 'VERIFY_CA', 'VERIFY_IDENTITY'].includes(
+      url.searchParams.get(type === 'mysql' ? 'ssl-mode' : 'sslmode') ?? '',
+    ) || ['true', '1'].includes(url.searchParams.get('ssl') ?? '');
+  const [connection] = normalizeConnections([
+    {
+      id: 'draft',
+      label: database,
+      type,
+      host: url.hostname,
+      port: url.port ? Number(url.port) : type === 'mysql' ? 3306 : 5432,
+      database,
+      user,
+      ssl,
+    },
+  ]);
+  return connection?.type === type
+    ? {
+        connection: connection as Extract<ConnectionConfig, { type: T }>,
+        ...(url.password ? { password: decodePart(url.password) } : {}),
+      }
+    : undefined;
+}
+
+/** Read `postgres://user:password@host:port/database?sslmode=require` into a connection. */
+export function parsePostgresUrl(value: string): { connection: PostgresConnection; password?: string } | undefined {
+  return parseServerUrl(value, 'postgres');
+}
+
+/**
+ * Read a mongodb:// or mongodb+srv:// URL with its database into a connection.
+ * A password in it is returned apart, so the saved URL never holds one.
+ */
+export function parseMongoUrl(value: string): { connection: MongoConnection; password?: string } | undefined {
+  const match = /^(mongodb(?:\+srv)?:\/\/)(?:([^:@/?#]+)(?::([^@/?#]*))?@)?([^/?#@]+)(\/[^?#]*)?(\?[^#]*)?$/.exec(
+    value.trim(),
+  );
+  if (!match) return undefined;
+  const [, scheme, user, password, hosts, pathPart, options] = match;
+  const url = `${scheme}${user ? `${user}@` : ''}${hosts}${pathPart ?? ''}${options ?? ''}`;
+  const database = mongoUrl(url)?.database;
+  if (!database) return undefined;
+  const [connection] = normalizeConnections([{ id: 'draft', label: database, type: 'mongodb', url, database }]);
+  return connection?.type === 'mongodb'
+    ? { connection, ...(password ? { password: decodePart(password) } : {}) }
+    : undefined;
+}
+
+/** The URL of a Postgres or MySQL connection, without a password: the reverse of `parseServerUrl`. */
+export function formatServerUrl(
+  connection: Pick<PostgresConnection | MysqlConnection, 'type' | 'host' | 'port' | 'user' | 'database' | 'ssl'>,
+): string {
+  const port = connection.port === (connection.type === 'mysql' ? 3306 : 5432) ? '' : `:${connection.port}`;
+  const tls = connection.ssl ? (connection.type === 'mysql' ? '?ssl-mode=REQUIRED' : '?sslmode=require') : '';
+  return `${connection.type}://${encodeURIComponent(connection.user)}@${connection.host}${port}/${encodeURIComponent(connection.database)}${tls}`;
 }
 
 /** A column as a database describes it. */

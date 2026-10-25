@@ -1,7 +1,6 @@
-import { randomBytes } from 'node:crypto';
-import { readFileSync } from 'node:fs';
 import * as vscode from 'vscode';
 import type { LogsController } from './logs-controller';
+import { webviewHtml } from './webview-html';
 
 export class LogsProvider implements vscode.WebviewViewProvider {
   constructor(
@@ -25,17 +24,14 @@ export class LogsProvider implements vscode.WebviewViewProvider {
       subscription.dispose();
       messages.dispose();
     });
-    const replacements: Record<string, string> = {
-      '{{CSP_SOURCE}}': view.webview.cspSource,
-      '{{NONCE}}': randomBytes(16).toString('hex'),
-      '{{STYLE_URI}}': String(view.webview.asWebviewUri(vscode.Uri.joinPath(media, 'viewer.css'))),
-      '{{SCRIPT_URI}}': String(view.webview.asWebviewUri(vscode.Uri.joinPath(media, 'viewer.js'))),
-      '{{GUIDE_UNREAD}}': String(this.controller.guideStatus().unread),
-      '{{FIRST_RUN}}': String(this.controller.firstRun()),
-    };
-    view.webview.html = readFileSync(vscode.Uri.joinPath(media, 'viewer.html').fsPath, 'utf8').replace(
-      /\{\{[A-Z_]+\}\}/g,
-      (key) => replacements[key] ?? '',
+    view.webview.html = webviewHtml(
+      view.webview,
+      media,
+      { html: 'viewer.html', style: 'viewer.css', script: 'viewer.js' },
+      {
+        GUIDE_UNREAD: String(this.controller.guideStatus().unread),
+        FIRST_RUN: String(this.controller.firstRun()),
+      },
     );
     void view.webview.postMessage({ type: 'guideStatus', ...this.controller.guideStatus() });
     // Hiding or disposing the view does not stop the server or retain a UI queue.

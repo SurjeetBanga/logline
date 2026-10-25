@@ -35,6 +35,7 @@ import { handleMessage } from './message-router';
 import { buildSnapshot } from './snapshot';
 import { TaskLifecycle } from './tasks/lifecycle';
 import { ViewNotifications } from './view-notifications';
+import type { FormOpen } from './connection-session';
 import { TerminalCapture } from './terminal-capture';
 import {
   GUIDE_SEEN_KEY,
@@ -160,6 +161,7 @@ export class LogsController {
   private pendingSource?: string;
   private pendingRun?: string;
   private pendingReveal?: { target: string; fallback?: string };
+  private pendingForm?: FormOpen;
   private pendingTour = false;
   readonly transfer = new LogTransfer(this.store, this.config, this.ingestion, this.state);
   readonly searches: SavedSearches;
@@ -184,6 +186,7 @@ export class LogsController {
       (sourceId, runId, query) => this.showSource(sourceId, runId, query),
       this.remoteMetrics,
       context.globalState,
+      (open, focus) => this.showConnectionForm(open, focus),
     );
     this.compare = new ProductionCompare(this.store, this.registry, (view) => void this.comparisonFinished(view));
     // Agents fetch from connections the user allowed, and compare with production, through the sharing boundary.
@@ -270,15 +273,17 @@ export class LogsController {
       pendingCompare: openCompare,
       pendingReveal: reveal,
       pendingTour: startTour,
+      pendingForm: openConnectionForm,
     } = this;
     this.pendingTour = false;
     this.pendingQuery = this.pendingTrace = this.pendingSource = this.pendingRun = this.pendingCompare = undefined;
-    this.pendingReveal = undefined;
+    this.pendingReveal = this.pendingForm = undefined;
     // The guide's first steps tick off from what was done; a search is remembered once it happens.
     if (request.query?.trim()) this.markProgress('searched');
     return {
       ...(openCompare ? { openCompare } : {}),
       ...(reveal ? { reveal } : {}),
+      ...(openConnectionForm ? { openConnectionForm } : {}),
       ...(startTour ? { startTour } : {}),
       ...this.buildSnapshot(request),
       ...(applyQuery !== undefined ? { applyQuery } : {}),
@@ -412,6 +417,12 @@ export class LogsController {
     this.pendingRun = runId;
     if (query !== undefined) this.pendingQuery = query;
     await vscode.commands.executeCommand('logline.logs.focus');
+    this.notifications.send({ type: 'update' });
+  }
+  /** Show the Connection form as a tab of the Logs panel, delivered with the next snapshot like reveal. */
+  private async showConnectionForm(open: FormOpen, focus: boolean): Promise<void> {
+    this.pendingForm = open;
+    if (focus) await vscode.commands.executeCommand('logline.logs.focus');
     this.notifications.send({ type: 'update' });
   }
   /** Point at a control in the Logs panel for the guide's Show me, delivered with the next snapshot like showQuery. */
