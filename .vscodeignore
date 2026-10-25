@@ -11,8 +11,7 @@ out/**/*.test.js
 out/**/*.js.map
 out/core/types.js
 *.vsix
-media/screenshot.png
-media/demo.gif
+media/readme/**
 media/icon.svg
 samples/**
 out-tests/**

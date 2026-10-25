@@ -1,162 +1,76 @@
 # Logline
 
-**Your app's logs and traces, live inside VS Code.** Capture any terminal, debug session, Docker Compose service or OpenTelemetry app. Search and trace requests, see every LLM call your app makes with its tokens and conversation, catch secrets leaking from log statements, and let your AI agent debug from the same logs.
+[![VS Code Marketplace](https://img.shields.io/visual-studio-marketplace/v/surjeetbanga.logline?label=VS%20Code%20Marketplace&color=4f46e5)](https://marketplace.visualstudio.com/items?itemName=surjeetbanga.logline)
+[![Installs](https://img.shields.io/visual-studio-marketplace/i/surjeetbanga.logline?color=4f46e5)](https://marketplace.visualstudio.com/items?itemName=surjeetbanga.logline)
+[![Rating](https://img.shields.io/visual-studio-marketplace/r/surjeetbanga.logline?color=4f46e5)](https://marketplace.visualstudio.com/items?itemName=surjeetbanga.logline&ssr=false#review-details)
+[![Open VSX](https://img.shields.io/open-vsx/v/surjeetbanga/logline?label=Open%20VSX&color=4f46e5)](https://open-vsx.org/extension/surjeetbanga/logline)
 
-![Logline demo: the checkout sample streams logs and traces into the Logs panel, the AI calls tab totals model calls, tokens, cache share, and p95 latency per model, a call opens to its conversation with the tool call and its result, a response cut short by the token limit stands out, a declined order's trace waterfall shows the agent run it started with token chips that open each call, Metrics shows rates and p95, log doctor flags a leaked token, and Share with agent shares the logs and AI calls with an AI agent.](media/demo.gif)
+**Your app's logs, traces, and LLM calls, live inside VS Code, and ready for your AI agent.**
 
-*Logline running in VS Code with the [checkout sample](samples/README.md#checkout-demo), whose support assistant records its LLM calls with OpenTelemetry.*
+Run your app the way you already do: in a terminal, with F5, as a task, in Docker Compose, or instrumented with OpenTelemetry. Logline puts everything it says in one searchable panel next to your code, lines production logs up with your local run, and lets Copilot, Claude Code, or Codex read it all, redacted.
 
-- Capture anything: terminals, F5 debug sessions, tasks, files, Docker Compose and Kubernetes
-- AI calls from OpenTelemetry GenAI spans: models, tokens, latency, and each conversation with its tool calls and results
-- OpenTelemetry logs, traces and metrics with waterfalls and trends, no collector needed
-- Live hit counts above log statements, and break the debugger when a log fires
-- Log doctor catches secrets, personal data, swallowed exceptions, and spans that break OpenTelemetry conventions
-- Share redacted logs with Copilot, Claude Code, Codex, or the agent in Cursor, Windsurf or Kiro, with skills to verify a change, triage errors and explain slow requests
-- Works with JSON, logfmt, plain text, Pino, Winston, Log4j2, ECS
+![Logline in VS Code: live logs from a checkout service, a spike in Analyze, a search for errors, the failing event with its trace and log statement, and Claude Code reading the shared logs](media/readme/demo.webp)
+
+<!-- When the tour video is published, add its thumbnail here, linked to the video:
+[![Watch the 2-minute tour](media/readme/video.webp)](VIDEO_URL) -->
+
+## See what your app is doing
+
+![The Logs panel with a failing request expanded: its JSON, a link to its trace, the log statement that wrote it, and Break here](media/readme/logs.webp)
+
+- **Capture anything**: terminals, F5 debug sessions in any language, tasks, log files, Docker Compose and Kubernetes services, and OpenTelemetry logs, traces, and metrics, with no collector.
+- **Search like you think**: `level:error service:api`, `status:5xx`, `durationMs:>200`, `last:15m`, or `changed:true` for logs from code you changed since the last commit.
+- **Read any format**: JSON, logfmt, plain text, Pino, Winston, Log4j2, and ECS, with stack traces kept together.
+- **Back to the code**: every log statement shows live hit counts, errors, and p95 durations above it, and **Break here** stops the debugger the next time it logs.
+
+## Find the problem
+
+![Analyze: logs, errors, p95 latency, and error groups, above volume stacked by level with the spike marked](media/readme/analyze.webp)
+
+- **Analyze** shows error rate and latency over time, error groups, status codes, and the patterns behind the noise. Click anything to see its logs.
+- **Traces** follow one request across services in a waterfall, with its logs on the spans.
+- **AI calls** list every LLM call your app makes, from OpenTelemetry GenAI spans: model, tokens, cache share, latency, and the full conversation with each tool call.
+- **Log doctor** flags statements that log secrets or personal data, swallow exceptions, or are too noisy, with quick fixes.
+
+## Debug production next to local
+
+![Compare: production errors from Datadog lined up with local runs, marked Reproduced, Fixed locally, Not seen locally, or New, with both sides of one error shown](media/readme/compare.webp)
+
+- **Connections** search and tail Datadog, Postgres, MySQL and Aurora (with AWS IAM sign-in), MongoDB, and SQLite logs, read-only, beside your local runs.
+- **Compare** lines production errors up with your newest local runs: is it reproduced, and is your fix working? Errors from code you changed are tagged.
+- **Metrics** chart a connection's queries; drag across a spike to fetch the logs from that window.
+
+## Hand it to your agent
+
+![The Share panel: everything captured is shared, Copilot is ready, and Claude Code is reading](media/readme/share.webp)
+
+**Share with agent** gives Copilot, Claude Code, Codex, or the agent in Cursor, Windsurf, or Kiro read-only access to what you choose: everything, or specific runs. Logs are always redacted, agents can't run anything, and **Stop sharing** cuts them off at once. Allow an agent to fetch from a connection, and it can pull production logs and compare them with your run, then verify its own fix.
 
 ## Get started
 
-1. Open your project in **VS Code 1.99+** with Logline installed. Logline requires a trusted workspace and does not support virtual workspaces. In Cursor, Windsurf, or Kiro, install the VSIX from the [latest release](https://github.com/SurjeetBanga/logline/releases/latest) with **Extensions: Install from VSIX…** ([details](docs/usage.md#editors-other-than-vs-code)).
-2. Open the Command Palette (`Cmd+Shift+P` on macOS, `Ctrl+Shift+P` on Windows/Linux) and run **Logline: Run Command**.
-3. Enter your server command, such as `npm run dev`. Its stdout and stderr appear in the **Logs** panel.
-4. Type `level:error` in the search box and press **Enter**. Click an event's message to inspect it; choose **Resume** to follow live output again.
+1. Install Logline in **VS Code 1.99+** from the [Marketplace](https://marketplace.visualstudio.com/items?itemName=surjeetbanga.logline). In Cursor, Windsurf, or Kiro, install it from [Open VSX](https://open-vsx.org/extension/surjeetbanga/logline).
+2. Open the **Logs** panel. Click **Capture off** in its status bar so it reads **Capture on**, then run your app in a terminal as usual. Or press F5: debug output appears automatically.
+3. Type `level:error` in the search box and press **Enter**. Click an event to see everything about it.
 
-**Debugging with F5?** Whatever the Debug Console shows appears in Logs automatically, for every debugger. For launch configurations that print to the integrated terminal (the Python and Java default), turn on terminal capture.
+New to it? Logline offers a one-minute tour the first time, and **More actions → Help** opens the guide. To try it without your own app, import [samples/demo-logs.jsonl](samples/demo-logs.jsonl) with **Logline: Import Logs**, or run the [checkout sample](samples/README.md#checkout-demo).
 
-**Using OpenTelemetry?** Click **OpenTelemetry off** in the Logs panel's status bar to start the receiver. Instrumented apps you start from Logline, a debug session, or a new terminal send their logs, traces, and metrics to Logline with no collector and no code changes. The **Traces** tab shows recent requests, and the trace button on any row shows that request across services. The **Metrics** tab shows each series' latest value and trend. Apps that call an LLM and follow the GenAI conventions get an **AI calls** tab with each call's model, tokens, and conversation.
+## Everything else
 
-**Running Docker Compose?** Run **Logline: Follow Docker Compose Project**, or run `docker compose up` with **Run Command** or in a captured terminal. Each service becomes its own source, and its JSON or logfmt lines keep their level and fields.
-
-**Found a bug through a log line?** Expand the event and choose **Break here**. The debugger stops on that log statement the next time it runs.
-
-**Try it with a file:** run **Logline: Import Logs** and select [samples/demo-logs.jsonl](samples/demo-logs.jsonl) from this repository. You can also import JSON, JSONL/NDJSON, CSV, and plain-text logs.
-
-Open **More actions → Help** for the offline visual guide, or run **Logline: What’s New** for release highlights. If something isn't working, run **Logline: Show Status** to see the receiver, agent connections, sharing, and capture, with a fix for anything off. See [Development](#development) to build and install from source.
-
-## Terminal capture and agent sharing
-
-Logline turns structured logs into a searchable table in the bottom **Logs** panel and keeps plain-text output alongside them.
-
-Logline can also capture commands you run in supported VS Code terminals. Click **Capture off** in the Logs panel's status bar so it reads **Capture on**, run the next command normally, and its output becomes searchable without wrapping the command. Commands already in progress cannot be backfilled. Completed terminal runs remain available while their logs are retained; empty stale terminal metadata is removed automatically. Point at a source in the **Sources** rail to stop it, or at one of its runs to stop just that run; externally captured terminal commands remain observe-only. Choose **Share with agent** to make retained Logline sources and new runs in this VS Code window available to Copilot and any agent you connected. The first use asks for confirmation and explains that redaction may not remove every sensitive value; later uses enable sharing immediately. The button then reads **Stop sharing**, and the status bar shows the sharing scope and the agents that read the logs. Continue in your existing agent chat and ask it to check the logs. Use the arrow beside the button to share only specific runs, or click **Stop sharing** to revoke access. Sharing is held in memory and ends when logs are cleared or the window or workspace changes.
-
-## What you can do
-
-| Workflow | Features |
+| | |
 | --- | --- |
-| **Capture** | Capture supported terminal commands and debug sessions, run several servers at once, follow log files on disk like `tail -F`, search and tail logs in Datadog and the log table of a SQLite or Postgres database, split Docker Compose and Kubernetes output into one source per service, receive OpenTelemetry logs, traces, and metrics, save commands with **Manage servers**, filter by source or run, and capture VS Code tasks. |
-| **Search** | Field/value autocomplete, editable filter chips, right-click **Include value** / **Exclude value**, any combination of log levels, **My changes** for logs from code changed since the last commit, and up to 50 saved searches. |
-| **Inspect** | Expand JSON, read structured exceptions and nested causes, see multi-line plain-text stack traces as one event, open stack-frame source locations, share an event’s exact run, view up to 25 surrounding events on each side from the same run, browse recent traces, follow a request across services in a trace waterfall with each span's self time and the operations that took longest, see an uncaught crash linked to the JSON error before it, and see OpenTelemetry metrics as rates, p95s, and trends. |
-| **AI calls** | List LLM calls, tool executions, and agent runs from OpenTelemetry GenAI spans with totals for calls, tokens, cache share, and p95 latency per model, read a call's conversation with each tool call and its result, spot failures and responses cut short by a token limit, and open a call from its trace. |
-| **Code** | See a CodeLens with live hit counts, errors, p50 and p95 durations, and recent values above the log statements in your editor, jump from any event to the statement that logged it, and find statements that never fired. |
-| **Debug** | Stop the debugger on the statement that logged an event with **Break here** on an expanded event, or pause a debug session right after it logs anything that matches a search. |
-| **Fix** | **Log doctor** shows statements that logged secrets or personal data, failures logged at info, errors without their exception or request id, and noisy or oversized statements in the Problems panel, with masked evidence and quick fixes. It also finds secrets and personal data in output from libraries, imports, and terminals, and checks OpenTelemetry spans and metrics for unnamed services, ids in span names, unmarked 5xx errors, missing routes, and outdated attribute names. |
-| **Arrange** | Auto-detected fields, custom and nested columns, sorting, drag-to-reorder, and resizable column widths. |
-| **Analyze** | Error rate and p95 latency at a glance, volume and latency over time, status codes, top values of fields like service and path, error groups, and log patterns for the current filter. Click any bar, value, pattern, or group to filter to its logs. |
-| **Share** | Export filtered JSONL, JSON, CSV, or Markdown context for AI tools, or share retained sources (including new runs) or specific command runs with Copilot, Claude Code, Codex, or another MCP client for read-only live investigation. Exports and **Copy filtered results** redact common credentials by default; agent tools always redact them. |
+| **Save and run servers** | Save commands with **Manage servers**, start them with the workspace, and convert VS Code tasks to captured ones. |
+| **Search tools** | Field and value autocomplete, include or exclude a value from any cell, saved searches, and surrounding logs from the same run. |
+| **Export** | JSONL, JSON, CSV, or Markdown for AI tools, redacted by default. |
+| **Retention** | Keeps the newest logs within a memory budget you set, optionally written to disk. |
+| **Troubleshooting** | **Logline: Show Status** shows what is on, off, or broken, with the fix. |
 
-**Live** follows the newest events, which appear at the top. Scroll down to read and Live pauses so rows stay put; scroll back to the top to resume. Turn it off to browse retained history in pages of up to 1,000 rows. Expanding an event holds your place while collection continues; changing filters, sorting, paging, or columns returns inspection to **Browse**. Choose **Live** or **Resume** to return to the newest rows.
+Logline keeps everything on your machine. Nothing leaves it unless you share it with an agent or query a connection you added.
 
-**New in 1.15.0:** the **AI calls** tab shows the LLM calls, tool executions, and agent runs your app records with OpenTelemetry: tokens and cache share, p50 and p95 latency per model, and each call's conversation with its tool calls and results. GenAI spans in the trace waterfall open their call, and agents read the same calls with `logline_get_ai_calls`. The Logs panel puts every view in a tab, in a two-row toolbar. Try it with the [checkout sample](samples/README.md#checkout-demo) or [samples/genai-trace.json](samples/genai-trace.json). See the [changelog](CHANGELOG.md) for the full release history.
+## Learn more
 
-## Find the logs you need
-
-Type a term and press **Enter** to apply it. Click a chip to edit it, or its **×** to remove it. Terms combine with AND unless you use `OR`.
-
-| Find | Query |
-| --- | --- |
-| Errors from one service | `level:error service:api` |
-| An exact phrase, excluding a service | `"database timeout" -service:web` |
-| Either of two services | `service:web OR service:api` |
-| HTTP server errors | `status:5xx` or `status:[500 TO 599]` |
-| Slow requests | `durationMs:>200` |
-| Events with a request ID | `exists:requestId` |
-| Messages matching a regex | `message:/time.?out/i` |
-| Recent events | `last:15m` |
-| Errors from code you changed since the last commit | `level:error changed:true` |
-| An absolute time range | `timestamp:[2026-09-14 TO 2026-09-15]` |
-
-Right-click a cell to include or exclude its value without typing a query. Keyboard users can focus a cell and press **Shift+F10**. Server and level selections stay active.
-
-Plain-text [logfmt](https://brandur.org/logfmt) lines (`level=warn msg="slow query" durationMs=212`) are parsed into searchable fields too. Common aliases work across log formats, including `level`/`severity`, `message`/`msg`, `status`/`statusCode`, and `durationMs`/`duration`. Plain-text terminal lines without an explicit leading severity are **Unclassified**. Logline recognizes Log4j2 JSON with MDC fields, ECS, Pino HTTP, and individual OpenTelemetry log records. Click **Syntax** in the search box for a quick reference.
-
-## Save a server or capture a task
-
-Use **Manage servers** to save a command, or add it to your workspace settings:
-
-```json
-{
-  "logline.servers": [
-    {
-      "id": "api",
-      "label": "API",
-      "command": "npm run dev",
-      "cwd": "${workspaceFolder}",
-      "autoStart": false,
-      "jsonOnly": false
-    }
-  ]
-}
-```
-
-Set `autoStart` to `true` to start when Logline activates. Set `jsonOnly` to `true` to discard non-JSON output, such as build-tool chatter. Each saved server can also specify environment variables through `env`.
-
-**Already using VS Code tasks?** Run **Logline: Convert VS Code Task to Logline** to create a captured wrapper, including supported dependencies. Logline observes ordinary task lifecycle events automatically; retaining their stdout/stderr requires a captured wrapper. You can also define a task with `"type": "logline"` directly—see [task configuration](docs/usage.md#tasks).
-
-**Working with an agent?** Share all retained Logline sources, choose specific runs, or share the exact run behind an expanded event. Sharing grants read-only access to redacted results in the current VS Code window; it does not execute commands or send logs into chat automatically. Copilot sees the Logline tools in this window. For **Claude Code**, **Codex**, or the agent built into **Cursor**, **Windsurf**, or **Kiro**, run **Logline: Connect Claude Code or Codex** once; the agent then reads the same shared logs through Logline's MCP server, from the terminal or its own extension. Agents can also read the AI calls of shared OpenTelemetry services, with their tokens and, on request, the start of each conversation. With a Datadog, Postgres, or SQLite connection you allow, agents can also fetch production logs and compare them with your local runs. Claude Code and Codex also get four skills: `logline-verify` checks a change in fresh logs, `logline-triage` ranks what is failing, `logline-slow-request` explains where a request spends its time, and `logline-reproduce-prod` reproduces a production failure locally and verifies the fix. See [agents](docs/usage.md#claude-code-codex-and-other-mcp-clients).
-
-## Settings and retention
-
-Open **More actions → Settings** for all options. A few useful defaults:
-
-| Setting | Default | Purpose |
-| --- | --- | --- |
-| `logline.source` | `both` | Capture stdout, stderr, or both. |
-| `logline.captureTerminals` | `false` | Capture the next commands from supported VS Code terminals; output from commands already in progress cannot be recovered. |
-| `logline.captureDebugSessions` | `true` | Capture program output from debug sessions. |
-| `logline.otlp.enabled` | `false` | Start the local OpenTelemetry receiver on `127.0.0.1:4318` automatically. |
-| `logline.logLenses` | `codelens` | Show log statement activity in the editor (`off`, `codelens`, `codelens+gutter`). |
-| `logline.logDoctor` | `all` | Report problems with log statements in the Problems panel (`off`, `security`, `all`). |
-| `logline.containerPrefixes` | `auto` | Split Docker Compose and `kubectl logs --prefix` output into one source per service. |
-| `logline.columns` | `[]` | Auto-detect columns, or specify preferred fields. |
-| `logline.timezone` | `local` | Show local or UTC timestamps. |
-| `logline.maxEvents` | `50000` | Maximum retained events. |
-| `logline.maxMemoryMb` | `100` | Estimated event-storage budget in MiB. |
-| `logline.persistLogs` | `false` | Write original logs to `.logline/latest.log`. |
-| `logline.redactExports` | `true` | Redact exports and **Copy filtered results**. Agent sharing is always redacted. |
-| `logline.externalAgents` | `true` | Let Claude Code, Codex, and other MCP clients reach this window. They still read only what you share. |
-
-Older events are discarded when either retention limit is reached. Search, context, and analysis cover retained events only; the memory budget estimates event storage, not total VS Code memory. With persistence on, Logline adds a `.gitignore` to `.logline/` and makes `latest.log` readable only by you, since it is not redacted.
-
-**Copy** on an expanded event and disk persistence keep original content. **Copy filtered results** and AI Markdown exports include the latest 1,000 matching events; full JSON/JSONL/CSV exports cover all matches in the retained snapshot. Use CSV when you want to export and re-import the original raw records—JSON/JSONL exports contain Logline event envelopes.
-
-See the [usage reference](docs/usage.md) for all settings, query details, import/export behavior, task examples, and retention limits.
-
-## Development
-
-```sh
-npm ci
-npm run check       # compile, type-check host and webview, and run tests
-npm run watch       # rebuild host and browser sources as you edit
-npm run package     # build an installable .vsix
-```
-
-Press **F5** to launch an Extension Development Host. To install a packaged build, run **Extensions: Install from VSIX…** in VS Code and select the generated `.vsix` file.
-
-Host code lives in `src/` and compiles to `out/`. The webview entry point is `src/webview/main.ts`; `npm run compile` generates `media/viewer.js`. Run `npm run smoke` for the isolated VS Code activation/task smoke test, `npm run benchmark` to measure performance, or `npm run perf:compare` to compare it with another build (see [Contributing](CONTRIBUTING.md)).
-
-- [Contributing](CONTRIBUTING.md): setup, checks, tests, and pull requests.
-- [Architecture](ARCHITECTURE.md): modules, state ownership, and testing.
-- [Usage reference](docs/usage.md): detailed feature behavior and configuration.
-- [Changelog](CHANGELOG.md): complete release history.
-
-To release, open a pull request that sets the new version in `package.json` (`npm version <version> --no-git-tag-version`), renames `## Unreleased` in `CHANGELOG.md` to `## <version> — <date>`, and updates the affected cards in `media/guide.html`, the user-facing highlights in `src/vscode/guide-content.ts` (keep their section IDs aligned with the guide), and `media/demo.gif`. After it merges, tag the merge commit and push the tag:
-
-```sh
-git tag v<version> origin/main
-git push origin v<version>
-```
-
-The Release workflow checks the tag against `package.json` and `CHANGELOG.md`, runs CI on the commit, and waits for approval in the `release` environment. It then publishes the VSIX that CI built and tested to the VS Code Marketplace and Open VSX, and creates the GitHub release with that version's changelog and the VSIX attached. Nothing is published from a laptop.
+- [Usage reference](docs/usage.md): every feature, setting, and query.
+- [Changelog](CHANGELOG.md): what changed in each release.
+- [Contributing](CONTRIBUTING.md) and [architecture](ARCHITECTURE.md): build, test, and send a pull request.
 
 ## License
 

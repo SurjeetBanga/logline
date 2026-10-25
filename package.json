@@ -1,7 +1,7 @@
 {
   "name": "logline",
   "displayName": "Logline \u2014 Logs, Traces & AI Debugging",
-  "description": "Capture logs from terminals, debug sessions, Docker and OpenTelemetry in one searchable live view. Trace requests, catch leaked secrets, and debug with Copilot, Claude Code or Codex.",
+  "description": "Capture logs from terminals, debug sessions, Docker, OpenTelemetry and production in one searchable live view. Trace requests, catch leaked secrets, and debug with Copilot, Claude Code or Codex.",
   "version": "1.15.0",
   "publisher": "surjeetbanga",
   "license": "MIT",
@@ -17,6 +17,10 @@
     "url": "https://github.com/sponsors/SurjeetBanga"
   },
   "icon": "media/icon.png",
+  "galleryBanner": {
+    "color": "#0b1020",
+    "theme": "dark"
+  },
   "engines": {
     "vscode": "^1.99.0"
   },
@@ -33,7 +37,7 @@
     "otel",
     "traces",
     "debug console",
-    "codelens",
+    "llm",
     "structured logs",
     "metrics",
     "Copilot",
@@ -42,7 +46,7 @@
     "MCP",
     "logs",
     "cursor",
-    "jsonl",
+    "datadog",
     "windsurf",
     "pino",
     "winston",
@@ -55,7 +59,7 @@
     "observability",
     "log analysis",
     "secrets",
-    "breakpoint"
+    "sql"
   ],
   "activationEvents": [
     "onStartupFinished"

@@ -68,8 +68,8 @@ button {
   width: 28px;
   height: 28px;
   border-radius: 7px;
-  background: var(--vscode-button-background, #0e639c);
-  color: var(--vscode-button-foreground, #ffffff);
+  /* The extension icon itself, inline. */
+  overflow: hidden;
   font-weight: 700;
 }
 .brand-text {
