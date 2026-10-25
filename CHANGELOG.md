@@ -29,6 +29,7 @@ All notable changes to Logline are documented in this file.
 
 ### Fixes
 
+- The table no longer touches the search box once the row hint is dismissed: the toolbar, a connection's controls, and the hint each keep the same space below them.
 - Column headers line up with their columns; an invisible drag handle had pushed each label to the right.
 - In a narrow panel, times and levels stay whole: the message gives up width first, then extra columns are hidden, instead of times being cut to `20:5…`.
 - The automatic columns show a nested field such as `http.status_code` once, rather than again by its short name.
