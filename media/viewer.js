@@ -75,27 +75,41 @@
       section2.append(empty2);
       return section2;
     }
-    function xAxisTicks(svg2, bucketCount, range, xFor, height) {
+    function xAxisTicks(bucketCount, range, xFor, width) {
+      const axis = document.createElement("div");
+      axis.className = "chart-axis";
+      axis.setAttribute("aria-hidden", "true");
       const tickEvery = Math.max(1, Math.round(bucketCount / 6));
       for (let index = 0; index < bucketCount; index += tickEvery) {
         const time = bucketTime(range, bucketCount, index);
         if (time === void 0) continue;
-        const label = svgEl("text", { x: xFor(index), y: height - 4, class: "chart-axis-label" });
+        const label = document.createElement("span");
+        label.className = "chart-axis-label";
+        label.style.left = `${(xFor(index) / width * 100).toFixed(2)}%`;
         label.textContent = formatClock(time, range);
-        svg2.append(label);
+        axis.append(label);
       }
+      return axis;
+    }
+    function chartHeading(title, scale) {
+      const heading = document.createElement("h3");
+      heading.className = "chart-heading";
+      heading.textContent = title;
+      const note = document.createElement("span");
+      note.className = "chart-scale";
+      note.textContent = scale;
+      heading.append(note);
+      return heading;
     }
     function volumeChart(rate, errors, range, warnings = []) {
       const bucketCount = rate.length;
       if (!bucketCount || !rate.some((item) => item.count > 0)) return emptySection("Volume by level");
       const section2 = document.createElement("section");
       section2.className = "chart-section chart-wide";
-      const heading = document.createElement("h3");
-      heading.textContent = "Volume by level";
-      section2.append(heading);
-      const width = 720, height = 130, padTop = 10, padBottom = 18;
-      const plotHeight = height - padTop - padBottom;
       const max = Math.max(1, ...rate.map((item) => item.count));
+      section2.append(chartHeading("Volume by level", `up to ${count(max)} a bar`));
+      const width = 720, height = 116, padTop = 10, padBottom = 0;
+      const plotHeight = height - padTop - padBottom;
       const barGap = 2;
       const barWidth = Math.max(1, width / bucketCount - barGap);
       const svg2 = svgEl("svg", {
@@ -104,9 +118,6 @@
         role: "img",
         "aria-label": "Event volume over time, with errors highlighted"
       });
-      const maxLabel = svgEl("text", { x: 2, y: padTop, class: "chart-axis-label" });
-      maxLabel.textContent = String(max);
-      svg2.append(maxLabel);
       rate.forEach((item, index) => {
         const errorCount = Math.min(item.count, errors[index]?.count ?? 0);
         const warnCount = Math.min(item.count - errorCount, warnings[index]?.count ?? 0);
@@ -169,13 +180,14 @@
         }
         svg2.append(group);
       });
-      xAxisTicks(svg2, bucketCount, range, (index) => index * (barWidth + barGap) + barWidth / 2, height);
+      const axis = xAxisTicks(bucketCount, range, (index) => index * (barWidth + barGap) + barWidth / 2, width);
       const selection = document.createElement("div");
       selection.className = "volume-selection-bar";
       selection.hidden = true;
       brush(svg2, selection, { rate, errors, range, barWidth, barGap, plotBottom: padTop + plotHeight });
       section2.append(
         svg2,
+        axis,
         chartLegend([
           { className: "swatch-ok", label: "info and others" },
           { className: "swatch-warn", label: "warnings" },
@@ -211,6 +223,12 @@
         if (event.button !== 0) return;
         start = bucketAt(event);
         dragged = false;
+        svg2.setPointerCapture?.(event.pointerId);
+      });
+      scope.listen(svg2, "pointercancel", () => {
+        if (start === void 0) return;
+        start = void 0;
+        if (dragged && bar.hidden) outline.setAttribute("visibility", "hidden");
       });
       scope.listen(svg2, "pointermove", (event) => {
         if (start === void 0) return;
@@ -255,17 +273,15 @@
         { capture: true }
       );
     }
-    function latencyChart(latency, range, narrow = false) {
+    function latencyChart(latency, range) {
       const bucketCount = latency.length;
-      if (!bucketCount || !latency.some((item) => item.count > 0)) return emptySection("Latency (ms)");
+      if (!bucketCount || !latency.some((item) => item.count > 0)) return emptySection("Latency");
       const section2 = document.createElement("section");
       section2.className = "chart-section chart-wide";
-      const heading = document.createElement("h3");
-      heading.textContent = "Latency (ms)";
-      section2.append(heading);
-      const width = narrow ? 400 : 720, height = narrow ? 180 : 110, padTop = 10, padBottom = 18;
-      const plotHeight = height - padTop - padBottom;
       const max = Math.max(1, ...latency.map((item) => Math.max(item.average, item.p95)));
+      section2.append(chartHeading("Latency", `up to ${count(Math.round(max))} ms`));
+      const width = 720, height = 96, padTop = 6, padBottom = 4;
+      const plotHeight = height - padTop - padBottom;
       const step = bucketCount > 1 ? width / (bucketCount - 1) : 0;
       const svg2 = svgEl("svg", {
         viewBox: `0 0 ${width} ${height}`,
@@ -273,9 +289,6 @@
         role: "img",
         "aria-label": "Average and p95 latency over time"
       });
-      const maxLabel = svgEl("text", { x: 2, y: padTop, class: "chart-axis-label" });
-      maxLabel.textContent = `${Math.round(max)}ms`;
-      svg2.append(maxLabel);
       const pathFor = (key) => {
         let d = "";
         let drawing = false;
@@ -305,13 +318,14 @@
         });
         const time = bucketTime(range, bucketCount, index);
         const title = svgEl("title");
-        title.textContent = `${time !== void 0 ? formatClock(time, range) + "\n" : ""}average ${Math.round(item.average)}ms, p95 ${Math.round(item.p95)}ms`;
+        title.textContent = `${time !== void 0 ? formatClock(time, range) + "\n" : ""}average ${count(Math.round(item.average))} ms, p95 ${count(Math.round(item.p95))} ms`;
         dot.append(title);
         svg2.append(dot);
       });
-      xAxisTicks(svg2, bucketCount, range, (index) => index * step, height);
+      const axis = xAxisTicks(bucketCount, range, (index) => index * step, width);
       section2.append(
         svg2,
+        axis,
         chartLegend([
           { className: "swatch-average", label: "average" },
           { className: "swatch-p95", label: "p95" }
@@ -370,7 +384,7 @@
       return share < 0.1 ? "<0.1%" : share < 10 ? `${share.toFixed(1)}%` : `${Math.round(share)}%`;
     }
     function duration(ms) {
-      return ms >= 1e4 ? `${(ms / 1e3).toFixed(ms >= 1e5 ? 0 : 1)} s` : `${Math.round(ms)} ms`;
+      return ms >= 1e4 ? `${(ms / 1e3).toFixed(ms >= 1e5 ? 0 : 1)} s` : `${count(Math.round(ms))} ms`;
     }
     function span2(range) {
       if (range.from === void 0 || range.to === void 0) return void 0;
@@ -539,20 +553,21 @@
         note.classList.add("chart-wide");
         content.append(note);
       }
-      content.append(volumeChart(analysis.rate ?? [], analysis.errors ?? [], analysis.range, analysis.warnings));
+      content.append(
+        volumeChart(analysis.rate ?? [], analysis.errors ?? [], analysis.range, analysis.warnings),
+        latencyChart(analysis.latency ?? [], analysis.range)
+      );
       const errorGroups = analysis.errorGroups ?? [];
-      const groups2 = section(`Error groups${errorGroups.length ? ` \xB7 ${count(errorGroups.length)}` : ""}`);
+      const groups2 = section(
+        `Error groups${errorGroups.length ? ` \xB7 ${count(errorGroups.length)}` : ""}`,
+        "chart-section chart-wide"
+      );
       const errorTotal = errorGroups.reduce((sum, item) => sum + item.count, 0);
       const errorMax = Math.max(1, ...errorGroups.map((item) => item.count));
       for (const item of errorGroups.slice(0, 20))
         groups2.append(groupRow(item, errorTotal, errorMax, { detail: seen(item, analysis.range) }));
       if (!errorGroups.length) groups2.append(empty("No errors in these logs."));
-      const pair = document.createElement("div");
-      pair.className = "analysis-pair chart-wide";
-      const latency = latencyChart(analysis.latency ?? [], analysis.range, true);
-      latency.classList.remove("chart-wide");
-      pair.append(groups2, latency);
-      content.append(pair);
+      content.append(groups2);
       const breakdowns = document.createElement("div");
       breakdowns.className = "analysis-breakdowns chart-wide";
       breakdowns.append(statusSection(analysis.statusCodes ?? []), ...(analysis.topValues ?? []).map(facetSection));
@@ -1956,17 +1971,23 @@
           name.title = `${trace.name || trace.traceId}
 Trace ${trace.traceId}`;
           const services = cell("", "traces-services");
-          for (const service of trace.services.slice(0, 4)) {
+          const [first, ...others] = trace.services;
+          if (first) {
             const chip = document.createElement("span");
             chip.className = "service-chip";
             const dot = document.createElement("span");
             dot.className = "service-dot";
-            dot.style.background = serviceColor(service);
-            chip.append(dot, document.createTextNode(service));
-            chip.title = service;
+            dot.style.background = serviceColor(first);
+            chip.append(dot, document.createTextNode(first));
             services.append(chip);
+            if (others.length) {
+              const more = document.createElement("span");
+              more.className = "traces-more-services";
+              more.textContent = `+${others.length}`;
+              services.append(more);
+            }
+            services.title = trace.services.join(", ");
           }
-          if (trace.services.length > 4) services.append(document.createTextNode(` +${trace.services.length - 4}`));
           const duration = cell("", "traces-duration");
           const durationContent = document.createElement("div");
           durationContent.className = "traces-duration-content";
@@ -2132,6 +2153,7 @@ Trace ${trace.traceId}`;
           kind: "item",
           key: "all",
           label: "Everything",
+          icon: "all",
           meta: metrics.length.toLocaleString(),
           selected: service === void 0,
           onSelect: choose(void 0)
@@ -2151,6 +2173,7 @@ Trace ${trace.traceId}`;
           kind: "item",
           key: `connection:${connection.id}`,
           label: connection.label,
+          icon: connection.type === "datadog" ? "cloud" : "database",
           meta: connection.watching.length ? `${connection.watching.length} watched` : void 0,
           title: `Query metrics from ${connection.label}`,
           onSelect: () => actions.queryConnection?.(connection.id)
@@ -3645,12 +3668,17 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
       group2.setAttribute("aria-label", "Runs");
       const all = runButton("", sessions.length ? `All runs \xB7 ${sessions.length}` : "All runs", "");
       group2.append(all);
+      const byTime = new Set(sessions.map(runName)).size <= 1 && !sessions.some((session) => session.sourceKind === "remote" || session.sourceKind === "import");
       for (const session of sessions) {
         const wrapper = document.createElement("div");
         wrapper.className = "run-option-row";
-        const started = session.startedAt ? new Date(session.startedAt).toLocaleTimeString() : "";
+        const started = session.startedAt ? new Date(session.startedAt).toLocaleTimeString([], {
+          hour: "numeric",
+          minute: "2-digit",
+          ...byTime ? { second: "2-digit" } : {}
+        }) : "";
         const stateText = session.status === "running" ? "running" : session.exitReason || session.status;
-        const button = runButton(session.id, runName(session), [started, stateText].filter(Boolean).join(" \xB7 "));
+        const button = byTime ? runButton(session.id, started || runName(session), stateText) : runButton(session.id, runName(session), [started, stateText].filter(Boolean).join(" \xB7 "));
         button.title = [
           runName(session),
           session.cwd,
@@ -4045,6 +4073,10 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
         check.className = `rail-check${item.checked ? " on" : ""}`;
         check.setAttribute("aria-hidden", "true");
         glyph.append(check);
+      } else if (item.icon && !item.color) {
+        const symbol = icon2(item.icon, 13);
+        symbol.classList.add("rail-item-icon");
+        glyph.append(symbol);
       } else {
         const swatch = document.createElement("span");
         swatch.className = item.color ? "rail-swatch" : "rail-initial";
@@ -4198,10 +4230,12 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
       layer = void 0;
       index = -1;
       previousFocus?.focus?.();
+      previousFocus = void 0;
       actions.ended(finished);
     }
     function finish() {
       if (!layer) return;
+      index = steps.length;
       const card = document.createElement("div");
       card.className = "tour-card tour-done";
       card.setAttribute("role", "dialog");
@@ -4443,17 +4477,15 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
       if (message.error) elements.compareStatus.textContent = `Could not compare: ${message.error}`;
       else if (message.view) render(message.view);
     }
+    function runTime(time, minutes) {
+      const minute = time.slice(0, 5);
+      const shared = minutes.filter((value) => value === minute).length > 1;
+      return shared ? time.replace(/\.\d+$/, "") : minute;
+    }
     function statusCell(row) {
       const status2 = STATUS[row.status];
       const element2 = cell(status2.label, `compare-status ${status2.className}`);
       element2.title = status2.title;
-      if (row.changed) {
-        const changed = document.createElement("span");
-        changed.className = "compare-changed";
-        changed.textContent = ` \xB7 changed${row.location ? `: ${row.location}` : ""}`;
-        changed.title = "Thrown from code changed since the last commit, so most likely from your change";
-        element2.append(changed);
-      }
       return element2;
     }
     function railItems(next) {
@@ -4468,6 +4500,7 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
           kind: "item",
           key: "all",
           label: "All errors",
+          icon: "all",
           meta: rows.length.toLocaleString(),
           selected: status === "all",
           onSelect: choose("all")
@@ -4500,8 +4533,8 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
     }
     function render(next) {
       view = next;
-      actions.rail?.("Show", railItems(next));
       if (status !== "all" && !next.rows.some((row2) => row2.status === status)) status = "all";
+      actions.rail?.("Show", railItems(next));
       const rows = next.rows.filter(
         (row2) => (status === "all" || row2.status === status) && (!changedOnly || row2.changed)
       );
@@ -4512,12 +4545,13 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
         element2.className = className;
         return element2;
       };
+      const minutes = next.runs.map((run) => run.startedAt ? actions.formatTime(run.startedAt).slice(0, 5) : "");
       elements.compareHead.replaceChildren(
         header("Error"),
         header("Production", next.baseline.label, "compare-count"),
         ...next.runs.map((run, index) => {
           const time = run.startedAt ? actions.formatTime(run.startedAt) : "";
-          const name = index === next.runs.length - 1 ? "Latest run" : time.replace(/\.\d+$/, "") || "Run";
+          const name = index === next.runs.length - 1 ? "Latest" : runTime(time, minutes) || "Run";
           return header(name, `${run.label}${time ? ` \xB7 ${time}` : ""}`, "compare-count");
         }),
         header("Status")
@@ -4533,6 +4567,13 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
           element2.dataset.signature = row2.signature;
           const message = cell(row2.pattern, "compare-message");
           message.title = row2.message;
+          if (row2.changed) {
+            const changed = document.createElement("span");
+            changed.className = "compare-changed";
+            changed.textContent = "changed";
+            changed.title = `Thrown from code changed since the last commit${row2.location ? `, at ${row2.location}` : ""}, so most likely from your change`;
+            message.prepend(changed);
+          }
           element2.append(
             message,
             cell(row2.baseline || "\u2013", "compare-count"),
@@ -4904,7 +4945,10 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
     if (!columnElements.size) return;
     const defaults = { "base:time": 140, "base:level": 110, "base:source": 110 };
     const messageFloor = 300;
+    const messageMin = 140;
     const minWidth = 72;
+    const floors = { "base:time": 124, "base:level": 80 };
+    const floorFor = (key) => floors[key] ?? minWidth;
     const isExplicit = (key) => Number.isFinite(Number(columnWidths[key]));
     const widthFor = (key) => {
       const savedWidth = Number(columnWidths[key]);
@@ -4913,8 +4957,19 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
     const fullOtherWidth = displayedColumns.filter((column) => column.key !== "base:message").reduce((sum, column) => sum + widthFor(column.key), 0);
     const sourceElement = columnElements.get("base:source");
     const collapseSource = Boolean(sourceElement) && available > 0 && fullOtherWidth + messageFloor > available;
-    if (sourceElement) sourceElement.style.visibility = collapseSource ? "collapse" : "";
-    const columns = displayedColumns.filter((column) => !(collapseSource && column.key === "base:source"));
+    const collapsed = new Set(collapseSource ? ["base:source"] : []);
+    if (available > 0) {
+      const fields = displayedColumns.filter((column) => !column.key.startsWith("base:")).reverse();
+      const needed = () => displayedColumns.filter((column) => column.key !== "base:message" && !collapsed.has(column.key)).reduce((sum, column) => sum + (isExplicit(column.key) ? widthFor(column.key) : floorFor(column.key)), 0) + messageMin;
+      for (const field of fields) {
+        if (needed() <= available) break;
+        collapsed.add(field.key);
+      }
+    }
+    for (const [key, element2] of columnElements)
+      if (key === "base:source" || !key.startsWith("base:"))
+        element2.style.visibility = collapsed.has(key) ? "collapse" : "";
+    const columns = displayedColumns.filter((column) => !collapsed.has(column.key));
     const explicitWidth = columns.filter((column) => isExplicit(column.key)).reduce((sum, column) => sum + widthFor(column.key), 0);
     const autoOthers = columns.filter((column) => column.key !== "base:message" && !isExplicit(column.key));
     const autoOthersNatural = autoOthers.reduce((sum, column) => sum + widthFor(column.key), 0);
@@ -4926,15 +4981,15 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
     } else if (remaining >= messageFloor + autoOthersNatural) {
       messageWidth = remaining - autoOthersNatural;
     } else {
-      messageWidth = messageFloor;
-      const minTotal = autoOthers.length * minWidth;
-      const remainingForOthers = remaining - messageFloor;
+      const minTotal = autoOthers.reduce((sum, column) => sum + floorFor(column.key), 0);
+      messageWidth = Math.max(messageMin, Math.min(messageFloor, remaining - minTotal));
+      const remainingForOthers = remaining - messageWidth;
       shrinkRatio = remainingForOthers > minTotal && autoOthersNatural > minTotal ? (remainingForOthers - minTotal) / (autoOthersNatural - minTotal) : 0;
     }
     const widths = /* @__PURE__ */ new Map();
     let total = 0;
     for (const { key } of columns) {
-      const width = key === "base:message" ? messageWidth : isExplicit(key) ? widthFor(key) : Math.round(minWidth + (widthFor(key) - minWidth) * shrinkRatio);
+      const width = key === "base:message" ? messageWidth : isExplicit(key) ? widthFor(key) : Math.round(floorFor(key) + Math.max(0, widthFor(key) - floorFor(key)) * shrinkRatio);
       widths.set(key, width);
       total += width;
     }
@@ -5353,6 +5408,7 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
         ...displayedColumns.map((column) => {
           const { key, label } = column;
           const th = document.createElement("th");
+          th.dataset.column = key;
           const grip = document.createElement("span");
           grip.className = "column-grip";
           grip.textContent = "\u283F";
@@ -6083,6 +6139,11 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
       () => doctor.revision()
     );
     let visibleSources = [];
+    function analysisContext() {
+      const filter = search.query();
+      const source = state.selectedServer ? visibleSources.find((server) => server.id === state.selectedServer)?.label ?? state.selectedServer : "";
+      elements.analysisStatus.textContent = `${filter ? `Logs matching ${filter}` : "All retained logs"}${source ? ` from ${source}` : ""}${state.currentLevels() ? " at the selected levels" : ""}. Click a bar, value, pattern or error group to show its logs.`;
+    }
     let allSessions = [];
     let visibleSessions = [];
     let guideUnread = document.body?.dataset.guideUnread === "true";
@@ -6181,9 +6242,7 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
         return;
       }
       if (data.type === "analysis") {
-        const filter = search.query();
-        const source = state.selectedServer ? visibleSources.find((server) => server.id === state.selectedServer)?.label ?? state.selectedServer : "";
-        elements.analysisStatus.textContent = `${filter ? `Logs matching ${filter}` : "All retained logs"}${source ? ` from ${source}` : ""}${state.currentLevels() ? " at the selected levels" : ""}. Click a bar, value, pattern or error group to show its logs.`;
+        analysisContext();
         analysis.renderAnalysis(data.analysis);
         return;
       }
@@ -6230,11 +6289,6 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
       metricQuery.update(data.connections);
       metricList.setConnections(data.connections);
       aiCalls.update(data.aiCalls, otlpRunning);
-      if (restoreTab) {
-        const tab = restoreTab;
-        restoreTab = void 0;
-        if (views.available(tab)) openView(tab);
-      }
       views.ensureVisible();
       elements.traceCount.hidden = !data.traceCount;
       elements.traceCount.textContent = data.traceCount ? numberFormat.format(data.traceCount) : "";
@@ -6283,7 +6337,7 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
       sharePanel.update(data);
       const sharedRuns = sharing ? data.agentSharing.sources.reduce((sum, source) => sum + (source.runs?.length ?? source.sessions), 0) : 0;
       const sharingAll = sharing && data.agentSharing.scope === "all";
-      setLabel(elements.shareAgent, sharing ? "Sharing \xB7 Stop" : "Share with agent");
+      setLabel(elements.shareAgent, sharing ? "Stop sharing" : "Share with agent");
       elements.shareAgent.setAttribute("aria-pressed", String(Boolean(sharing)));
       elements.shareAgent.title = sharing ? sharingAll ? "Existing and new captured logs are available to agents in this window: Copilot, and Claude Code or Codex if connected. Click to stop sharing." : `${sharedRuns} selected command run${sharedRuns === 1 ? "" : "s"} available to agents in this window. Click to stop sharing.` : "Share existing and new captured logs with Copilot, Claude Code, Codex, or other connected agents until stopped";
       elements.shareScope.hidden = !sharing;
@@ -6293,6 +6347,7 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
       let selectionChanged = false;
       if (data.servers) {
         visibleSources = data.servers;
+        if (elements.analysisStatus.textContent) analysisContext();
         const selectedServer = data.servers.some((server) => server.id === state.selectedServer) ? state.selectedServer : "";
         if (selectedServer !== state.selectedServer) {
           state.selectedServer = selectedServer;
@@ -6302,6 +6357,11 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
       }
       connectionBar.update(data.connections);
       compareView.update(data.sessions, data.servers, data.newest);
+      if (restoreTab) {
+        const tab = restoreTab;
+        restoreTab = void 0;
+        if (views.available(tab)) openView(tab);
+      }
       if (data.openCompare) compareView.open(data.openCompare);
       if (data.sessions) {
         allSessions = data.sessions;

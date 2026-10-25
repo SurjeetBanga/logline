@@ -92,7 +92,9 @@ export class PostgresDriver implements SqlDriver {
   }
 
   private connect(timeoutMs: number): Promise<Client> {
-    this.client ??= (async () => {
+    if (this.client) return this.client;
+    // A late error from a connection already replaced must not close its replacement.
+    const opening: Promise<Client> = (async () => {
       const pg = this.load();
       const password = typeof this.password === 'function' ? await this.password(timeoutMs) : this.password;
       // RDS and Aurora present certificates from Amazon's own authorities, which Node does not trust by default.
@@ -114,15 +116,16 @@ export class PostgresDriver implements SqlDriver {
         types: parsers(pg),
       });
       client.on('error', () => {
-        void this.close();
+        if (this.client === opening) void this.close();
       });
       await client.connect();
       return client;
     })().catch((error: unknown) => {
-      this.client = undefined;
+      if (this.client === opening) this.client = undefined;
       throw error;
     });
-    return this.client;
+    this.client = opening;
+    return opening;
   }
 
   async close(): Promise<void> {

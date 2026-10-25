@@ -320,6 +320,62 @@ export function checkReadOnlySql(input: string, dialect: SqlDialect): { sql: str
   return { sql: input.trim().replace(/;\s*$/, '') };
 }
 
+/** A value as a MySQL literal, escaped as mysql2 escapes it. */
+function mysqlLiteral(value: SqlValue): string {
+  if (value === null) return 'NULL';
+  if (typeof value === 'number') return Number.isFinite(value) ? String(value) : 'NULL';
+  const escapes: Record<string, string> = {
+    '\0': '\\0',
+    '\b': '\\b',
+    '\t': '\\t',
+    '\n': '\\n',
+    '\r': '\\r',
+    '\x1a': '\\Z',
+    '"': '\\"',
+    "'": "\\'",
+    '\\': '\\\\',
+  };
+  return `'${value.replace(/[\0\b\t\n\r\x1a"'\\]/g, (character) => escapes[character])}'`;
+}
+
+/**
+ * Put parameters into MySQL text in place of its `?` placeholders. Only a `?`
+ * outside strings, quoted names, and comments is a placeholder, which mysql2's
+ * own formatting does not check, so a `?` typed inside a string stays as it is.
+ */
+export function inlineMysqlParams(sql: string, params: readonly SqlValue[]): string {
+  if (!params.length) return sql;
+  let out = '';
+  let next = 0;
+  for (let index = 0; index < sql.length;) {
+    const character = sql[index];
+    const following = sql[index + 1];
+    let end = index + 1;
+    if (character === "'" || character === '"' || character === '`') {
+      while (end < sql.length && sql[end] !== character) end += sql[end] === '\\' && character !== '`' ? 2 : 1;
+      // A doubled quote continues the same string.
+      while (sql[end] === character && sql[end + 1] === character) {
+        end += 2;
+        while (end < sql.length && sql[end] !== character) end += sql[end] === '\\' && character !== '`' ? 2 : 1;
+      }
+      end++;
+    } else if (character === '#' || (character === '-' && following === '-' && !/\S/.test(sql[index + 2] ?? ' '))) {
+      const newline = sql.indexOf('\n', index);
+      end = newline === -1 ? sql.length : newline;
+    } else if (character === '/' && following === '*') {
+      const close = sql.indexOf('*/', index + 2);
+      end = close === -1 ? sql.length : close + 2;
+    } else if (character === '?' && next < params.length) {
+      out += mysqlLiteral(params[next++]);
+      index++;
+      continue;
+    }
+    out += sql.slice(index, end);
+    index = end;
+  }
+  return out;
+}
+
 /** Wrap a checked query so the database returns at most `limit` rows. */
 export function limitedSql(sql: string, dialect: SqlDialect, limit: number): SqlStatement {
   // The query sits on its own lines so a trailing -- comment cannot swallow the wrapper.

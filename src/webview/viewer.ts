@@ -222,6 +222,14 @@ export function createViewer(api: WebviewApi) {
     () => doctor.revision(),
   );
   let visibleSources: Snapshot['servers'] = [];
+  /** The line above Analyze: what it covers, with the source by name once the snapshot has named it. */
+  function analysisContext(): void {
+    const filter = search.query();
+    const source = state.selectedServer
+      ? (visibleSources.find((server) => server.id === state.selectedServer)?.label ?? state.selectedServer)
+      : '';
+    elements.analysisStatus.textContent = `${filter ? `Logs matching ${filter}` : 'All retained logs'}${source ? ` from ${source}` : ''}${state.currentLevels() ? ' at the selected levels' : ''}. Click a bar, value, pattern or error group to show its logs.`;
+  }
   // Every run in the latest snapshot, and those of the selected source.
   let allSessions: Snapshot['sessions'] = [];
   let visibleSessions: Snapshot['sessions'] = [];
@@ -329,11 +337,7 @@ export function createViewer(api: WebviewApi) {
       return;
     }
     if (data.type === 'analysis') {
-      const filter = search.query();
-      const source = state.selectedServer
-        ? (visibleSources.find((server) => server.id === state.selectedServer)?.label ?? state.selectedServer)
-        : '';
-      elements.analysisStatus.textContent = `${filter ? `Logs matching ${filter}` : 'All retained logs'}${source ? ` from ${source}` : ''}${state.currentLevels() ? ' at the selected levels' : ''}. Click a bar, value, pattern or error group to show its logs.`;
+      analysisContext();
       analysis.renderAnalysis(data.analysis);
       return;
     }
@@ -394,12 +398,6 @@ export function createViewer(api: WebviewApi) {
     metricQuery.update(data.connections);
     metricList.setConnections(data.connections);
     aiCalls.update(data.aiCalls, otlpRunning);
-    // Tabs such as Metrics appear only once the snapshot says they have data.
-    if (restoreTab) {
-      const tab = restoreTab;
-      restoreTab = undefined;
-      if (views.available(tab)) openView(tab);
-    }
     views.ensureVisible();
     elements.traceCount.hidden = !data.traceCount;
     elements.traceCount.textContent = data.traceCount ? numberFormat.format(data.traceCount) : '';
@@ -467,7 +465,8 @@ export function createViewer(api: WebviewApi) {
       ? data.agentSharing.sources.reduce((sum, source) => sum + (source.runs?.length ?? source.sessions), 0)
       : 0;
     const sharingAll = sharing && data.agentSharing.scope === 'all';
-    setLabel(elements.shareAgent, sharing ? 'Sharing · Stop' : 'Share with agent');
+    // While sharing, the button says what pressing it does; the status bar says what is shared.
+    setLabel(elements.shareAgent, sharing ? 'Stop sharing' : 'Share with agent');
     elements.shareAgent.setAttribute('aria-pressed', String(Boolean(sharing)));
     elements.shareAgent.title = sharing
       ? sharingAll
@@ -488,6 +487,7 @@ export function createViewer(api: WebviewApi) {
     let selectionChanged = false;
     if (data.servers) {
       visibleSources = data.servers;
+      if (elements.analysisStatus.textContent) analysisContext();
       const selectedServer = data.servers.some((server) => server.id === state.selectedServer)
         ? state.selectedServer
         : '';
@@ -499,6 +499,12 @@ export function createViewer(api: WebviewApi) {
     }
     connectionBar.update(data.connections);
     compareView.update(data.sessions, data.servers, data.newest);
+    // Tabs such as Metrics and Compare appear only once the snapshot says they have data.
+    if (restoreTab) {
+      const tab = restoreTab;
+      restoreTab = undefined;
+      if (views.available(tab)) openView(tab);
+    }
     if (data.openCompare) compareView.open(data.openCompare);
     if (data.sessions) {
       allSessions = data.sessions;

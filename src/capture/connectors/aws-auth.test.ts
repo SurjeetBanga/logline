@@ -178,6 +178,7 @@ test('a credential_process runs as a command line, and its failures say which pr
   writeFileSync(
     script,
     `const keys = { works: { Version: 1, AccessKeyId: ${JSON.stringify(keyId)}, SecretAccessKey: ${JSON.stringify(secret)} }, empty: { Version: 1 } };
+if (process.argv[2] === 'noisy') { process.stdout.write('Warning: token refreshed\\n{}'); process.exit(0); }
 if (!keys[process.argv[2]]) process.exit(3);
 process.stdout.write(JSON.stringify(keys[process.argv[2]]));`,
   );
@@ -187,6 +188,7 @@ process.stdout.write(JSON.stringify(keys[process.argv[2]]));`,
     [
       `[profile works]\ncredential_process = ${command('works')}`,
       `[profile empty]\ncredential_process = ${command('empty')}`,
+      `[profile noisy]\ncredential_process = ${command('noisy')}`,
       `[profile broken]\ncredential_process = ${command('broken')}`,
       '[profile bare]\nregion = us-east-1',
     ].join('\n'),
@@ -198,6 +200,10 @@ process.stdout.write(JSON.stringify(keys[process.argv[2]]));`,
     /credential_process of AWS profile empty printed no AccessKeyId/,
   );
   await assert.rejects(resolveCredentials('broken', real), /credential_process of AWS profile broken failed/);
+  await assert.rejects(
+    resolveCredentials('noisy', real),
+    /credential_process of AWS profile noisy printed no AccessKeyId/,
+  );
   await assert.rejects(resolveCredentials('bare', real), /AWS profile bare has no keys, credential_process, or SSO/);
   assert.equal(real.readFile(join(home, 'missing')), undefined);
 });

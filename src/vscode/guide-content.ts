@@ -85,7 +85,7 @@ export const GUIDE_RELEASES: GuideRelease[] = [
     highlights: [
       {
         title: 'Share with Claude Code and Codex',
-        text: "Run Logline: Connect Claude Code or Codex once. The agent then reads the logs you share through Logline's MCP server, with the same read-only tools, redaction, and Sharing · Stop as Copilot.",
+        text: "Run Logline: Connect Claude Code or Codex once. The agent then reads the logs you share through Logline's MCP server, with the same read-only tools and redaction as Copilot, and Stop sharing cuts it off too.",
         section: 'inspect',
       },
       {
@@ -179,7 +179,7 @@ export const GUIDE_RELEASES: GuideRelease[] = [
       },
       {
         title: 'Keep using your existing agent chat',
-        text: 'Sharing · Stop makes your sharing state visible. Ask Copilot to check the logs through read-only Logline tools, share an expanded event’s exact run, and click the sharing button again to stop.',
+        text: 'While sharing, the button reads Stop sharing and the status bar says what is shared. Ask Copilot to check the logs through read-only Logline tools, share an expanded event’s exact run, and press Stop sharing when done.',
         section: 'share',
       },
     ],

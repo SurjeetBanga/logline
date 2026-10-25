@@ -248,7 +248,7 @@ export class MongoConnector implements Connector {
   /** The filter on the time field for a range, in the form the field stores time. */
   private timeFilter(time: MongoTime, fromMs?: number, toMs?: number): MongoFilter {
     if (fromMs === undefined && toMs === undefined) return {};
-    const field = time === 'objectId' ? '_id' : this.mapping!.timestamp;
+    const field = this.mapping!.timestamp;
     const at = (ms: number): unknown =>
       time === 'native'
         ? new Date(ms)
@@ -274,7 +274,7 @@ export class MongoConnector implements Connector {
     const range = this.timeFilter(time, Number.isFinite(from) ? from : undefined, Number.isFinite(to) ? to : undefined);
     const parts = [range, built.filter].filter((part) => Object.keys(part).length);
     const filter = parts.length > 1 ? { $and: parts } : (parts[0] ?? {});
-    const sortField = time === 'objectId' ? '_id' : this.mapping!.timestamp;
+    const sortField = this.mapping!.timestamp;
     return { built, filter, sortField };
   }
 
@@ -285,15 +285,19 @@ export class MongoConnector implements Connector {
         fields.map((field) => field.name),
         mapping,
       ),
-      timestamp: time === 'objectId' ? '_id time' : mapping.timestamp,
+      // An ObjectId holds when it was made; the line reads that time from a field of its own.
+      timestamp: time === 'objectId' ? `${mapping.timestamp} time` : mapping.timestamp,
     };
   }
 
   /** A document as a JSON log line, with its mapped fields where Logline reads them, nested ones too. */
   private record(document: Record<string, unknown>, roles: RowRoles, time: MongoTime) {
     const row = plainDocument(document) as Record<string, unknown>;
-    if (time === 'objectId' && typeof row._id === 'string' && /^[0-9a-f]{24}$/i.test(row._id))
-      row['_id time'] = new Date(parseInt(row._id.slice(0, 8), 16) * 1000).toISOString();
+    if (time === 'objectId') {
+      const id = valueAt(row, this.mapping!.timestamp);
+      if (typeof id === 'string' && /^[0-9a-f]{24}$/i.test(id))
+        row[`${this.mapping!.timestamp} time`] = new Date(parseInt(id.slice(0, 8), 16) * 1000).toISOString();
+    }
     for (const field of Object.values(roles))
       if (field && field.includes('.') && !Object.hasOwn(row, field)) row[field] = valueAt(row, field);
     return rowToLine(row, roles, time === 'native' || time === 'objectId' ? 'iso' : time);

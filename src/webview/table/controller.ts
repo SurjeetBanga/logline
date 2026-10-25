@@ -379,6 +379,7 @@ export function createTable(
       ...displayedColumns.map((column) => {
         const { key, label } = column;
         const th = document.createElement('th');
+        th.dataset.column = key;
         const grip = document.createElement('span');
         grip.className = 'column-grip';
         grip.textContent = '⠿';

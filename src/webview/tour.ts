@@ -90,12 +90,16 @@ export function createTour(
     layer = undefined;
     index = -1;
     previousFocus?.focus?.();
+    // The next tour returns focus to wherever it is started from.
+    previousFocus = undefined;
     actions.ended(finished);
   }
 
   /** The last card: where to go next, and how to see the tour again. */
   function finish(): void {
     if (!layer) return;
+    // Past the last stop, so a resize shows this card again rather than the last stop.
+    index = steps.length;
     const card = document.createElement('div');
     card.className = 'tour-card tour-done';
     card.setAttribute('role', 'dialog');

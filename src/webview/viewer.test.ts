@@ -57,6 +57,10 @@ class Element {
     for (const child of children) child.parent = this;
     this.children.push(...children);
   }
+  prepend(...children: Element[]) {
+    for (const child of children) child.parent = this;
+    this.children.unshift(...children);
+  }
   replaceChildren(...children: Element[]) {
     this.children = [];
     this.append(...children);
@@ -1649,7 +1653,8 @@ test('the Sources rail lists each source with its status, and the runs of the se
   assert.equal(runRows[2].querySelector('.run-stop'), undefined, 'a finished run has nothing to stop');
 
   view.select('task-build')!.listeners.get('click')!();
-  assert.equal(view.runs()[1].children[0].textContent, 'Task: build', 'a run without a command is named by its task');
+  // One command's runs are named by when they started; the command, here its task, is in the title.
+  assert.match(view.runs()[1].title, /^Task: build/, 'a run without a command is named by its task');
 });
 
 test('the rail selects a run, moves with the arrow keys, and collapses to a strip of icons', () => {
@@ -1949,7 +1954,7 @@ test('the main sharing button ignores view filters and stops active sharing', ()
     matched: 0,
     agentSharing: { active: true, scope: 'all', revision: 1, sources: [] },
   });
-  assert.equal(get('shareAgent').textContent, 'Sharing · Stop');
+  assert.equal(get('shareAgent').textContent, 'Stop sharing');
   assert.equal(get('shareAgent').attributes['aria-pressed'], 'true');
   assert.equal(get('shareScope').hidden, false);
   assert.equal(get('shareScope').textContent, 'Sharing all runs');
@@ -3715,6 +3720,7 @@ test('a selected connection shows its range, Run, Tail and Run SQL, with the SQL
     command: 'level:error · last 1h',
     status: 'exited',
     startedAt: 1,
+    sourceKind: 'remote',
   };
   snapshot({ applySource: 'conn:app', applyRun: 'run-2', sessions: [run] });
   assert.equal(app.state.selectedSession, 'run-2');
@@ -3845,7 +3851,7 @@ test('the Compare tab lines up production errors with local runs and shows both 
     get('compareHead')
       .children.map((th) => th.textContent)
       .slice(-2),
-    ['Latest run', 'Status'],
+    ['Latest', 'Status'],
   );
   const rows = get('compareRows').children;
   assert.deepEqual(
@@ -3853,7 +3859,9 @@ test('the Compare tab lines up production errors with local runs and shows both 
     ['timed out after * ms', '312', '4', '–', 'Fixed locally'],
   );
   assert.equal(rows[1].children.at(-1)!.textContent, 'New');
-  assert.equal(rows[1].children.at(-1)!.children[0].textContent, ' · changed: cart.ts:42');
+  const changed = rows[1].children[0].children[0];
+  assert.equal(changed.textContent, 'changed');
+  assert.match(changed.title, /at cart\.ts:42/);
   // Choosing a row shows an event from each side, with the differing field marked.
   rows[0].listeners.get('click')!();
   assert.equal(get('compareDetail').hidden, false);

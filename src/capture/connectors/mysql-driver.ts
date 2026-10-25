@@ -1,7 +1,7 @@
 import { existsSync } from 'node:fs';
 import * as path from 'node:path';
 import { isRdsHost, type MysqlConnection } from '../../core/connections';
-import type { SqlValue } from '../../core/remote-query';
+import { inlineMysqlParams, type SqlValue } from '../../core/remote-query';
 import { rdsCertificates } from './aws-auth';
 import { timedOut, type QueryOptions, type Row, type SqlDriver } from './types';
 
@@ -77,8 +77,10 @@ export class MysqlDriver implements SqlDriver {
   }
 
   private send(connection: Connection, sql: string, values: SqlValue[] = [], timeout?: number): Promise<unknown> {
+    // Parameters are put in here: mysql2 would also replace a `?` inside a string or a quoted name.
+    const text = inlineMysqlParams(sql, values);
     return new Promise((resolve, reject) =>
-      connection.query({ sql, values, ...(timeout ? { timeout } : {}) }, (error, rows) =>
+      connection.query({ sql: text, ...(timeout ? { timeout } : {}) }, (error, rows) =>
         error ? reject(error) : resolve(rows),
       ),
     );
@@ -113,13 +115,20 @@ export class MysqlDriver implements SqlDriver {
     const connection = await this.connect(options.timeoutMs);
     try {
       await this.limit(connection, options.timeoutMs);
+      // The server stops a SELECT without its own LIMIT at this many rows.
+      if (options.maxRows !== undefined)
+        await this.send(connection, `SET SESSION sql_select_limit = ${Math.max(0, Math.floor(options.maxRows))}`);
       await this.send(connection, 'START TRANSACTION READ ONLY');
       try {
         // A little longer than the server's own limit, so the server says why it stopped.
         const rows = await this.send(connection, sql, params, options.timeoutMs + 1000);
-        return (Array.isArray(rows) ? rows : []) as Row[];
+        const list = (Array.isArray(rows) ? rows : []) as Row[];
+        // A query with a larger LIMIT of its own still returns no more than asked.
+        return options.maxRows !== undefined ? list.slice(0, options.maxRows) : list;
       } finally {
         await this.send(connection, 'ROLLBACK').catch(() => undefined);
+        if (options.maxRows !== undefined)
+          await this.send(connection, 'SET SESSION sql_select_limit = DEFAULT').catch(() => undefined);
       }
     } catch (error) {
       const failure = error as { code?: string; errno?: number; fatal?: boolean };
@@ -134,7 +143,9 @@ export class MysqlDriver implements SqlDriver {
   }
 
   private connect(timeoutMs: number): Promise<Connection> {
-    this.connection ??= (async () => {
+    if (this.connection) return this.connection;
+    // A late error from a connection already replaced must not close its replacement.
+    const opening: Promise<Connection> = (async () => {
       const mysql = this.load();
       const password = typeof this.password === 'function' ? await this.password(timeoutMs) : this.password;
       const iam = this.settings.auth !== undefined;
@@ -159,15 +170,16 @@ export class MysqlDriver implements SqlDriver {
         ...(iam ? { authPlugins: { mysql_clear_password: () => () => Buffer.from(`${password ?? ''}\0`) } } : {}),
       });
       connection.on('error', () => {
-        void this.close();
+        if (this.connection === opening) void this.close();
       });
       await this.send(connection, "SET time_zone = '+00:00'");
       return connection;
     })().catch((error: unknown) => {
-      this.connection = undefined;
+      if (this.connection === opening) this.connection = undefined;
       throw error;
     });
-    return this.connection;
+    this.connection = opening;
+    return opening;
   }
 
   async close(): Promise<void> {

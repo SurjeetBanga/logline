@@ -1,6 +1,6 @@
 import type { Elements } from './dom';
 import type { EventScope } from './event-scope';
-import { NARROW_PANEL } from './search/source-rail';
+import { icon, NARROW_PANEL } from './search/source-rail';
 import type { ViewerState } from './state';
 
 /** A row in a tab's rail: a heading, or a filter that is chosen, or turned on and off. */
@@ -13,6 +13,8 @@ export type TabRailItem =
       meta?: string;
       /** A color, such as a service's, shown as a swatch. */
       color?: string;
+      /** An icon from the Sources rail, such as `all` or `database`, for a row without a color. */
+      icon?: string;
       /** A filter turned on and off, shown as a check box; otherwise one choice among the rest. */
       checked?: boolean;
       selected?: boolean;
@@ -68,6 +70,10 @@ export function createTabRail(
       check.className = `rail-check${item.checked ? ' on' : ''}`;
       check.setAttribute('aria-hidden', 'true');
       glyph.append(check);
+    } else if (item.icon && !item.color) {
+      const symbol = icon(item.icon, 13);
+      symbol.classList.add('rail-item-icon');
+      glyph.append(symbol);
     } else {
       // A filter without a color still has an initial, for the collapsed rail.
       const swatch = document.createElement('span');

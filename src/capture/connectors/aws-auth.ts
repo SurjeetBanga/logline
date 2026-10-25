@@ -167,6 +167,15 @@ export function listProfiles(environment: AwsEnvironment = systemEnvironment()):
 
 export class AwsAuthError extends Error {}
 
+/** JSON from a file or a command, or undefined when it is not JSON. */
+function parseJson(text: string): unknown {
+  try {
+    return JSON.parse(text);
+  } catch {
+    return undefined;
+  }
+}
+
 /**
  * Credentials the way the AWS CLI finds them: the environment, unless a
  * profile is named; then the profile's keys, its credential_process, or its
@@ -202,8 +211,8 @@ export async function resolveCredentials(
     } catch (error) {
       throw new AwsAuthError(`The credential_process of AWS profile ${name} failed: ${(error as Error).message}`);
     }
-    const parsed = JSON.parse(output) as { AccessKeyId?: string; SecretAccessKey?: string; SessionToken?: string };
-    if (!parsed.AccessKeyId || !parsed.SecretAccessKey)
+    const parsed = parseJson(output) as { AccessKeyId?: string; SecretAccessKey?: string; SessionToken?: string };
+    if (!parsed?.AccessKeyId || !parsed.SecretAccessKey)
       throw new AwsAuthError(
         `The credential_process of AWS profile ${name} printed no AccessKeyId and SecretAccessKey.`,
       );
@@ -239,7 +248,8 @@ async function sso(
     .update(settings.sso_session ?? settings.sso_start_url, 'utf8')
     .digest('hex');
   const cached = environment.readFile(join(environment.home, '.aws', 'sso', 'cache', `${key}.json`));
-  const token = cached ? (JSON.parse(cached) as { accessToken?: string; expiresAt?: string }) : undefined;
+  // A cache file cut short reads as no session, which says to log in again.
+  const token = cached ? (parseJson(cached) as { accessToken?: string; expiresAt?: string } | undefined) : undefined;
   const login = `Run "aws sso login --profile ${name}", then try again.`;
   if (!token?.accessToken || !token.expiresAt || Date.parse(token.expiresAt) <= environment.now())
     throw new AwsAuthError(`The SSO session of AWS profile ${name} has expired or was never started. ${login}`);

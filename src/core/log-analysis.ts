@@ -103,17 +103,22 @@ function timeRange(events: LogEvent[], options: AnalysisOptions): { from?: numbe
 // Strips volatile substrings (ids, numbers, paths) so structurally identical log lines
 // collapse to the same template regardless of the specific values they carry.
 export function normalizeMessage(message: string): string {
-  let normalized = normalizedMessages.get(message);
-  if (normalized === undefined) {
-    normalized = maskVariables(message, '<id>', '<n>', '<path>').toLowerCase();
-    // Analysis runs again on every refresh over mostly the same messages, and logs repeat their messages.
-    if (normalizedMessages.size >= NORMALIZED_LIMIT) normalizedMessages.clear();
-    normalizedMessages.set(message, normalized);
-  }
-  return normalized;
+  return maskVariables(message, '<id>', '<n>', '<path>').toLowerCase();
 }
-const normalizedMessages = new Map<string, string>();
-const NORMALIZED_LIMIT = 65536;
+
+// Analysis runs again on every refresh, over mostly the same retained events. Each event's
+// template is remembered with the event itself, so it is released when the event is.
+const eventTemplates = new WeakMap<LogEvent, string>();
+
+/** The normalized template of an event's message, `message` being the event's own first line. */
+function eventTemplate(event: LogEvent, message: string): string {
+  let template = eventTemplates.get(event);
+  if (template === undefined) {
+    template = normalizeMessage(message);
+    eventTemplates.set(event, template);
+  }
+  return template;
+}
 
 /** A message's first line, without copying a message that has only one. */
 function firstLine(message: string): string {
@@ -166,7 +171,7 @@ function errorFingerprint(event: LogEvent, message: string): { key: string; loca
     const location = `${frame.file}:${frame.line}`;
     return { key: `${type}@${location}`, location };
   }
-  return { key: normalizeMessage(message) };
+  return { key: eventTemplate(event, message) };
 }
 
 // Flags buckets whose value is a clear outlier against the series' own mean/stddev.
@@ -250,7 +255,7 @@ export function groupErrors(events: LogEvent[], options: AnalysisOptions = {}): 
     const bucket = bucketOf(event.timestampMs, from, to, TREND_BUCKETS);
     if (bucket >= 0) group.trend![bucket]++;
     groups.set(key, group);
-    const normalized = normalizeMessage(message);
+    const normalized = eventTemplate(event, message);
     if (location) {
       const keys = byMessage.get(normalized) ?? new Set();
       keys.add(key);
@@ -294,7 +299,7 @@ export function findPatterns(
   for (const event of events) {
     const message = firstLine(String(event.message ?? event.raw ?? ''));
     if (!message) continue;
-    const key = normalizeMessage(message);
+    const key = eventTemplate(event, message);
     const pattern: LogPattern = groups.get(key) ?? {
       key,
       message,

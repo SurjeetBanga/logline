@@ -6,6 +6,7 @@ import { parseLogLine } from './log-event';
 import {
   buildSqlLogQuery,
   checkReadOnlySql,
+  inlineMysqlParams,
   limitedSql,
   rangedSql,
   quoteTable,
@@ -346,4 +347,18 @@ test("a column named __proto__ is a field like any other, not the line object's 
   const { line } = rowToLine(row, rowRoles(Object.keys(row), mapping), 'iso');
   assert.equal(line, '{"timestamp":"2026-10-23T09:00:00.000Z","message":"hi","__proto__":{"polluted":true}}');
   assert.equal(({} as { polluted?: boolean }).polluted, undefined);
+});
+
+test('MySQL parameters fill only the placeholders outside strings, quoted names, and comments', () => {
+  assert.equal(
+    inlineMysqlParams("SELECT * FROM `t?` WHERE url LIKE '%?id=%' AND a = ? -- ? \n AND b = ? # ?\n/* ? */ LIMIT ?", [
+      "it's",
+      null,
+      5,
+    ]),
+    "SELECT * FROM `t?` WHERE url LIKE '%?id=%' AND a = 'it\\'s' -- ? \n AND b = NULL # ?\n/* ? */ LIMIT 5",
+  );
+  assert.equal(inlineMysqlParams("SELECT 'a\\'?', ?", ['x\\y\n']), "SELECT 'a\\'?', 'x\\\\y\\n'");
+  assert.equal(inlineMysqlParams('SELECT 1--?', [2]), 'SELECT 1--2', 'a -- without a space is minus minus');
+  assert.equal(inlineMysqlParams('SELECT ?', []), 'SELECT ?');
 });

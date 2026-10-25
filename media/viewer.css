@@ -777,6 +777,13 @@ header {
 .source-rail.collapsed .rail-empty p {
   display: none;
 }
+/* Outranks the rules that show a pointed-at or selected row's actions in place of its dot. */
+.source-rail.collapsed .rail-row.has-actions .rail-actions {
+  display: none;
+}
+.source-rail.collapsed .rail-row.has-actions .rail-dot {
+  display: block;
+}
 .source-rail.collapsed .rail-toggle svg {
   transform: scaleX(-1);
 }
@@ -852,6 +859,11 @@ body:not([data-view='compare']):not([data-view='traces']):not([data-view='metric
 .tab-rail .rail-glyph {
   gap: 6px;
   align-items: center;
+}
+/* A swatch or an icon takes the same room, so every row's name starts in one column. */
+.tab-rail .rail-glyph:not(:has(.rail-check)) {
+  justify-content: center;
+  width: 14px;
 }
 .source-rail.collapsed .rail-initial {
   display: inline;
@@ -935,8 +947,10 @@ body:not([data-view='compare']):not([data-view='traces']):not([data-view='metric
 .new-badge[hidden] {
   display: none;
 }
+/* flex: none: scrolling sideways would otherwise let a tall tab like Analyze squeeze it and clip the box. */
 .search-toolbar {
   display: flex;
+  flex: none;
   align-items: center;
   gap: 6px;
   min-width: 0;
@@ -1121,6 +1135,10 @@ select {
   padding-bottom: 10px;
   border-bottom: 1px solid var(--vscode-panel-border, #333);
 }
+/* Before a query has run there is nothing to say under the controls. */
+#metricQueryStatus:empty {
+  display: none;
+}
 .metric-query[hidden],
 .metric-chart[hidden],
 .metric-selection[hidden] {
@@ -1270,7 +1288,9 @@ select {
 }
 .compare-table {
   width: 100%;
+  min-width: 480px;
   border-collapse: collapse;
+  table-layout: fixed;
 }
 .compare-table th,
 .compare-table td {
@@ -1283,12 +1303,16 @@ select {
   color: var(--vscode-descriptionForeground, #aaa);
   white-space: nowrap;
 }
-/* Tables lay out by their header row: counts and status get what they need, the error the rest. */
+/* Laid out by the header row: counts fit a time like 20:51:35, status fits "Not seen locally",
+   and the error, which is what people read, gets the rest. */
 .compare-table th.compare-count {
-  width: 8.5em;
+  width: 6em;
+}
+.compare-table th.compare-count:nth-child(2) {
+  width: 8em;
 }
 .compare-table th:last-child {
-  width: 10em;
+  width: 10.5em;
 }
 .compare-table .compare-count {
   text-align: right;
@@ -1313,8 +1337,21 @@ select {
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
+.compare-changed {
+  margin-right: 6px;
+  padding: 0 5px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--vscode-charts-orange, #e2a33c) 22%, transparent);
+  color: var(--vscode-charts-orange, #e2a33c);
+  font-family: var(--vscode-font-family, sans-serif);
+  font-size: 11px;
+}
 .compare-status {
+  overflow: hidden;
+  font-family: var(--vscode-font-family, sans-serif);
+  font-size: 12px;
   white-space: nowrap;
+  text-overflow: ellipsis;
 }
 /* Each status is a pill in its own color, the same as in the rail. */
 .compare-status.compare-reproduced,
@@ -1362,7 +1399,7 @@ select {
   min-width: 0;
 }
 .compare-detail {
-  flex: 0 0 360px;
+  flex: 0 0 320px;
   min-width: 0;
   padding: 10px 0 10px 12px;
   overflow-y: auto;
@@ -1834,9 +1871,33 @@ select {
   height: auto;
   display: block;
 }
+/* Times under a chart, in HTML at a steady size whatever the chart's width. */
+.chart-axis {
+  position: relative;
+  height: 16px;
+  margin-top: 4px;
+}
 .chart-axis-label {
-  font-size: 8px;
-  fill: var(--vscode-descriptionForeground, #aaa);
+  position: absolute;
+  top: 0;
+  transform: translateX(-50%);
+  color: var(--vscode-descriptionForeground, #aaa);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.chart-axis-label:first-child {
+  transform: none;
+}
+.chart-heading {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+.chart-scale {
+  color: var(--vscode-descriptionForeground, #aaa);
+  font-size: 11px;
+  font-weight: 400;
 }
 .volume-bar-ok {
   fill: var(--vscode-charts-blue, #75beff);
@@ -1869,9 +1930,6 @@ select {
 .volume-selection-bar button {
   padding: 1px 8px;
   font-size: 12px;
-}
-.volume-bar.anomalous .volume-bar-ok {
-  fill: var(--vscode-charts-orange, #d18616);
 }
 .anomaly-marker {
   fill: var(--vscode-charts-red, #f14c4c);
@@ -1973,16 +2031,6 @@ select {
   gap: 12px;
 }
 /* Error groups beside latency: what failed, and when it got slow. */
-.analysis-pair {
-  display: grid;
-  grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
-  gap: 12px;
-}
-@media (max-width: 760px) {
-  .analysis-pair {
-    grid-template-columns: minmax(0, 1fr);
-  }
-}
 /* Each chart and breakdown sits on a quiet card, like the summary tiles. */
 .analysis-content .chart-section {
   padding: 8px 12px 10px;
@@ -2269,10 +2317,14 @@ th {
   overflow: hidden;
   text-overflow: ellipsis;
 }
+/* The grip sits in the cell's left padding, so a header's label lines up with its column's values. */
 .column-grip {
-  display: inline-block;
-  width: 14px;
-  margin-right: 4px;
+  position: absolute;
+  left: 1px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 12px;
+  text-align: center;
   cursor: grab;
   color: var(--vscode-descriptionForeground, #aaa);
   font-size: 12px;
@@ -2284,7 +2336,7 @@ th {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  width: calc(100% - 18px);
+  width: 100%;
   min-width: 0;
   padding: 2px 0;
   border: 0;
@@ -2298,7 +2350,7 @@ th {
   text-overflow: ellipsis;
 }
 th:has(.remove-column) .column-sort {
-  width: calc(100% - 34px);
+  width: calc(100% - 16px);
 }
 .column-sort:hover {
   color: var(--vscode-foreground, #d4d4d4);
@@ -2966,12 +3018,14 @@ td[data-column]:focus-visible {
   color: var(--vscode-descriptionForeground, #aaa);
   font-size: 12px;
 }
+/* Pinned to the card's foot, so values line up across a row whether or not a card has attributes. */
 .metric-card-bottom {
   display: flex;
   align-items: flex-end;
   justify-content: space-between;
   gap: 8px;
-  margin-top: 4px;
+  margin-top: auto;
+  padding-top: 6px;
 }
 .metric-card .metric-latest {
   flex: none;
@@ -3084,8 +3138,22 @@ td[data-column]:focus-visible {
   white-space: nowrap;
   text-overflow: ellipsis;
 }
+/* Counts read as words, so they use the interface font and are cut rather than overflowing. */
+.traces-row .traces-counts {
+  overflow: hidden;
+  font-family: inherit;
+  font-size: 12px;
+  color: var(--vscode-descriptionForeground, #aaa);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.traces-more-services {
+  margin-left: 6px;
+  color: var(--vscode-descriptionForeground, #aaa);
+  font-size: 12px;
+}
 .traces-services .service-chip {
-  max-width: 100%;
+  max-width: calc(100% - 32px);
   overflow: hidden;
   text-overflow: ellipsis;
   vertical-align: middle;
@@ -3166,6 +3234,10 @@ td[data-column]:focus-visible {
   }
 }
 /* Rows show what they link to, and reveal quick actions on hover or focus. */
+/* Messages start after their expand marker, so the header starts there too. */
+th[data-column='base:message'] .column-label {
+  padding-left: 16px;
+}
 .message-button::before {
   content: '›';
   display: inline-block;
@@ -3502,6 +3574,12 @@ td[data-column]:focus-visible {
   gap: 10px;
   min-height: 32px;
 }
+/* Each agent is a name with a line under it; the rows need air between them to read as separate. */
+.share-agent-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
 .share-agent-text,
 .share-connection .share-agent-name {
   flex: 1 1 auto;
@@ -3725,10 +3803,15 @@ body:not([data-view='logs']) .match-count {
   letter-spacing: 0.06em;
   text-transform: uppercase;
 }
+/* Four starts in two even columns, under the two choices, rather than a row that leaves one behind. */
 .welcome-starts {
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 8px;
+}
+.welcome-starts button {
+  justify-content: flex-start;
+  text-align: left;
 }
 .welcome-note {
   margin: 14px 0 0;
