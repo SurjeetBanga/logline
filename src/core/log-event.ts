@@ -146,8 +146,12 @@ function getTimestamp(object: JsonObject | undefined, receivedAt: Date): { text:
   return { text: formatTime(receivedAt), ms: receivedAt.getTime() };
 }
 
+// Two- and three-digit text for every value, so formatting a time builds no padded strings.
+const TWO_DIGITS = Array.from({ length: 100 }, (_, value) => String(value).padStart(2, '0'));
+const THREE_DIGITS = Array.from({ length: 1000 }, (_, value) => String(value).padStart(3, '0'));
+
 function formatTime(date: Date): string {
-  return `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}:${String(date.getSeconds()).padStart(2, '0')}.${String(date.getMilliseconds()).padStart(3, '0')}`;
+  return `${TWO_DIGITS[date.getHours()]}:${TWO_DIGITS[date.getMinutes()]}:${TWO_DIGITS[date.getSeconds()]}.${THREE_DIGITS[date.getMilliseconds()]}`;
 }
 
 export function stripAnsi(value: string): string {
@@ -158,57 +162,61 @@ function isPrimitive(value: unknown): value is string | number | boolean {
   return typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean';
 }
 
-function extractFields(object: JsonObject): Record<string, string | number | boolean> {
-  const fields: Record<string, string | number | boolean> = {};
-  const entries = Object.entries(object);
-  let fieldCount = 0;
-  const add = (key: string, value: unknown) => {
-    if (fieldCount < MAX_FIELDS && isPrimitive(value) && !Object.hasOwn(fields, key)) {
-      if (key === '__proto__')
-        Object.defineProperty(fields, key, { value, enumerable: true, writable: true, configurable: true });
-      else fields[key] = value;
-      fieldCount++;
-    }
-  };
-  // Explicit top-level values win over convenience aliases from nested objects.
-  for (const [key, value] of entries) {
-    if (fieldCount >= MAX_FIELDS) break;
-    if (!IGNORED_FIELDS.has(key) && isPrimitive(value)) add(key, value);
+// Fields are collected into one accumulator by plain functions rather than closures and
+// Object.entries arrays: this runs for every captured line.
+interface FieldSink {
+  fields: Record<string, string | number | boolean>;
+  count: number;
+}
+
+function addField(sink: FieldSink, key: string, value: unknown): void {
+  if (sink.count < MAX_FIELDS && isPrimitive(value) && !Object.hasOwn(sink.fields, key)) {
+    if (key === '__proto__')
+      Object.defineProperty(sink.fields, key, { value, enumerable: true, writable: true, configurable: true });
+    else sink.fields[key] = value;
+    sink.count++;
   }
-  const walk = (key: string, value: unknown, depth: number) => {
+}
+
+function isPlainObject(value: unknown): value is JsonObject {
+  return !!value && typeof value === 'object' && !Array.isArray(value);
+}
+
+/** A nested object's values under dotted paths, with bare aliases for its primitives, to four levels. */
+function addChildren(sink: FieldSink, key: string, object: JsonObject, depth: number): void {
+  for (const child in object) {
+    if (sink.count >= MAX_FIELDS) break;
+    const value = object[child];
+    const path = `${key}.${child}`;
     if (isPrimitive(value)) {
-      add(key, value);
-      return;
-    }
-    if (!value || typeof value !== 'object' || Array.isArray(value) || depth >= 4) return;
-    for (const [child, childValue] of Object.entries(value as JsonObject)) {
-      if (fieldCount >= MAX_FIELDS) break;
-      add(`${key}.${child}`, childValue);
-      if (isPrimitive(childValue)) add(child, childValue);
-      else walk(`${key}.${child}`, childValue, depth + 1);
-    }
-  };
-  for (const [key, value] of entries) {
-    if (fieldCount >= MAX_FIELDS) break;
-    if (IGNORED_FIELDS.has(key) || isPrimitive(value)) continue;
-    if (value && typeof value === 'object' && !Array.isArray(value)) {
-      for (const [child, childValue] of Object.entries(value as JsonObject)) {
-        if (fieldCount >= MAX_FIELDS) break;
-        add(`${key}.${child}`, childValue);
-        // Bare aliases make nested payloads easy to search while the dotted
-        // path preserves an unambiguous column name.
-        if (isPrimitive(childValue)) add(child, childValue);
-        else walk(`${key}.${child}`, childValue, 2);
-      }
-    }
+      addField(sink, path, value);
+      // Bare aliases make nested payloads easy to search while the dotted
+      // path preserves an unambiguous column name.
+      addField(sink, child, value);
+    } else if (depth < 4 && isPlainObject(value)) addChildren(sink, path, value, depth + 1);
+  }
+}
+
+function extractFields(object: JsonObject): Record<string, string | number | boolean> {
+  const sink: FieldSink = { fields: {}, count: 0 };
+  // Explicit top-level values win over convenience aliases from nested objects.
+  for (const key in object) {
+    if (sink.count >= MAX_FIELDS) break;
+    const value = object[key];
+    if (!IGNORED_FIELDS.has(key) && isPrimitive(value)) addField(sink, key, value);
+  }
+  for (const key in object) {
+    if (sink.count >= MAX_FIELDS) break;
+    const value = object[key];
+    if (!IGNORED_FIELDS.has(key) && isPlainObject(value)) addChildren(sink, key, value, 2);
   }
   // Log4j2 JsonLayout nests MDC (ThreadContext) values under contextMap instead
   // of at the top level; flatten them so they're searchable like any other field.
   const context = object.contextMap;
-  if (context && typeof context === 'object' && !Array.isArray(context)) {
-    for (const [key, value] of Object.entries(context as JsonObject)) {
-      if (fieldCount >= MAX_FIELDS) break;
-      add(key, value);
+  if (isPlainObject(context)) {
+    for (const key in context) {
+      if (sink.count >= MAX_FIELDS) break;
+      addField(sink, key, context[key]);
     }
   }
   // OTLP JSON encodes attributes as key/value entries containing typed values.
@@ -219,14 +227,14 @@ function extractFields(object: JsonObject): Record<string, string | number | boo
   ] as const) {
     if (!Array.isArray(attributes)) continue;
     for (const entry of attributes) {
-      if (fieldCount >= MAX_FIELDS) break;
+      if (sink.count >= MAX_FIELDS) break;
       if (!entry || typeof entry.key !== 'string' || !entry.value || typeof entry.value !== 'object') continue;
       const value = entry.value.stringValue ?? entry.value.intValue ?? entry.value.doubleValue ?? entry.value.boolValue;
-      add(`${prefix}.${entry.key}`, value);
-      add(entry.key, value);
+      addField(sink, `${prefix}.${entry.key}`, value);
+      addField(sink, entry.key, value);
     }
   }
-  return fields;
+  return sink.fields;
 }
 
 // Skips JSON.parse (and its exception overhead) for the common case of a plain
