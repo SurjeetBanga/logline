@@ -68,6 +68,17 @@ If you add or change a hot path (something that runs per captured line, per sear
 
 - Keep each pull request to one change, and fill in the template.
 - Write commit messages as an imperative summary of what the change does (`Report a failed read of a followed file instead of dropping it`), with a body that explains why when it is not obvious.
-- Releases are made by the maintainer, from a version tag; see [Development](README.md#development).
+- Releases are made by the maintainer, from a version tag; see [Releases](#releases).
 
 By contributing, you agree that your contributions are licensed under the [MIT License](LICENSE). Everyone taking part is expected to follow the [code of conduct](CODE_OF_CONDUCT.md).
+
+## Releases
+
+To release, open a pull request that sets the new version in `package.json` (`npm version <version> --no-git-tag-version`), renames `## Unreleased` in `CHANGELOG.md` to `## <version> — <date>`, and updates the guide's cards and the release highlights in `src/vscode/guide-content.ts` (keep their section IDs aligned with the guide). When the panel looks different, refresh the README's images in `media/readme/`. After it merges, tag the merge commit and push the tag:
+
+```sh
+git tag v<version> origin/main
+git push origin v<version>
+```
+
+The Release workflow checks the tag against `package.json` and `CHANGELOG.md`, runs CI on the commit, and waits for approval in the `release` environment. It then publishes the VSIX that CI built and tested to the VS Code Marketplace and Open VSX, and creates the GitHub release with that version's changelog and the VSIX attached. Nothing is published from a laptop.

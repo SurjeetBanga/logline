@@ -7,7 +7,7 @@ package-lock.json
 CHANGELOG.md
 # Prettier pads Markdown tables to their widest cell, which makes prose tables hard to edit.
 *.md
-# Kept as recorded in media/demo.gif.
+# Kept exactly as the samples ship.
 samples/
 coverage/
 performance/

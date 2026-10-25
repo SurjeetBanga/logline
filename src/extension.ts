@@ -14,6 +14,7 @@ import { LogBreakpoints } from './vscode/log-breakpoints';
 import { LogDoctor } from './vscode/log-doctor';
 import { LogLens } from './vscode/log-lens';
 import { GitChanges } from './vscode/git-changes';
+import { RatingPrompt } from './vscode/rating-prompt';
 
 let controller: LogsController | undefined;
 
@@ -41,6 +42,10 @@ export function activate(context: vscode.ExtensionContext): { provider: LogsProv
     controller,
     guide,
   );
+  const logs = controller;
+  const rating = new RatingPrompt(context.globalState, () => logs.store.total > 0);
+  rating.start();
+  context.subscriptions.push(rating);
   // Editor surfaces are optional: hosts without CodeLens support still capture logs.
   if (typeof vscode.languages?.registerCodeLensProvider === 'function') {
     const logController = controller;
