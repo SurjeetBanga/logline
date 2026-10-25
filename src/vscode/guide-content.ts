@@ -17,6 +17,32 @@ export interface GuideRelease {
 
 export const GUIDE_RELEASES: GuideRelease[] = [
   {
+    version: '1.16.0',
+    date: '2026-10-24',
+    highlights: [
+      {
+        title: 'Production logs next to your local run',
+        text: 'Add a connection to search and tail Datadog, Postgres, MySQL and Aurora (with AWS IAM sign-in), MongoDB, or SQLite logs from the Sources rail, read-only.',
+        section: 'connections',
+      },
+      {
+        title: 'Is it fixed? Compare tells you',
+        text: 'Compare lines production errors up with your newest local runs and marks each Reproduced, Fixed locally, Not seen locally, or New. Agents you allow can fetch and compare too.',
+        section: 'compare',
+      },
+      {
+        title: 'A panel built around your sources',
+        text: 'The Sources rail lists every run and connection with Run, Stop, and Remove; Share with agent opens a panel of what agents read; and a one-minute tour shows you around.',
+        section: 'capture',
+      },
+      {
+        title: 'Faster with big logs',
+        text: 'Logs are parsed and kept about a third faster, so a million-line import takes about 2 seconds, and Analyze, sorting while logs stream in, and autocomplete are faster too.',
+        section: 'settings',
+      },
+    ],
+  },
+  {
     version: '1.15.0',
     date: '2026-10-16',
     highlights: [
