@@ -1,9 +1,10 @@
 # Logline
 
-[![VS Code Marketplace](https://img.shields.io/visual-studio-marketplace/v/surjeetbanga.logline?label=VS%20Code%20Marketplace&color=4f46e5)](https://marketplace.visualstudio.com/items?itemName=surjeetbanga.logline)
-[![Installs](https://img.shields.io/visual-studio-marketplace/i/surjeetbanga.logline?color=4f46e5)](https://marketplace.visualstudio.com/items?itemName=surjeetbanga.logline)
-[![Rating](https://img.shields.io/visual-studio-marketplace/r/surjeetbanga.logline?color=4f46e5)](https://marketplace.visualstudio.com/items?itemName=surjeetbanga.logline&ssr=false#review-details)
+[![VS Code Marketplace](https://img.shields.io/badge/VS%20Code%20Marketplace-install-4f46e5)](https://marketplace.visualstudio.com/items?itemName=surjeetbanga.logline)
 [![Open VSX](https://img.shields.io/open-vsx/v/surjeetbanga/logline?label=Open%20VSX&color=4f46e5)](https://open-vsx.org/extension/surjeetbanga/logline)
+[![Open VSX downloads](https://img.shields.io/open-vsx/dt/surjeetbanga/logline?label=Open%20VSX%20downloads&color=4f46e5)](https://open-vsx.org/extension/surjeetbanga/logline)
+[![CI](https://github.com/SurjeetBanga/logline/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/SurjeetBanga/logline/actions/workflows/ci.yml?query=branch%3Amain)
+[![License: MIT](https://img.shields.io/badge/license-MIT-4f46e5)](LICENSE)
 
 **Your app's logs, traces, and LLM calls, live inside VS Code, and ready for your AI agent.**
 
