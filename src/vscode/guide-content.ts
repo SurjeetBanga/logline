@@ -17,6 +17,27 @@ export interface GuideRelease {
 
 export const GUIDE_RELEASES: GuideRelease[] = [
   {
+    version: '1.18.0',
+    date: '2026-10-26',
+    highlights: [
+      {
+        title: 'Faster Datadog',
+        text: 'A Datadog search shows its newest logs as soon as they arrive, fetches 1,000 by default (logline.datadogMaxRows), and says how long Datadog and Logline each took. Run again while one is running to replace it.',
+        section: 'connections',
+      },
+      {
+        title: 'Tail one service',
+        text: 'Choose a service in the Service list next to the range, then press Tail. A tail reads as often as your Datadog rate limit allows, and Tail this filter follows a changed filter.',
+        section: 'connections',
+      },
+      {
+        title: 'Search like Datadog',
+        text: 'source:, tags such as env:prod, and * wildcards work as they do in Datadog, or press Datadog syntax to send a query exactly as typed. Remove on a run clears it and its logs.',
+        section: 'connections',
+      },
+    ],
+  },
+  {
     version: '1.17.0',
     date: '2026-10-25',
     highlights: [
