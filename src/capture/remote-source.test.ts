@@ -371,3 +371,39 @@ test('a tail of a store that limits searches reads less often, and waits when to
   assert.equal(registry.records.get(id)?.captureStatus, 'streaming');
   await remote.dispose();
 });
+
+test('a tail reads at the pace its store sets before each read, and says what it follows', async () => {
+  mock.timers.enable({ apis: ['setInterval', 'Date'], now: BASE });
+  const { remote, target } = setup({ connectionPollSeconds: 1 });
+  let reads = 0;
+  const connector = {
+    tailPollMs: 10000,
+    async fetchLogs() {
+      reads++;
+      // The store's answer allows reading faster from now on.
+      connector.tailPollMs = 3000;
+      return result([]);
+    },
+  };
+  const settle = async () => {
+    for (let turn = 0; turn < 20; turn++) await new Promise((resolve) => setImmediate(resolve));
+  };
+  const id = remote.tail(target(connector), 'service:api', 'Tail: service:api');
+  await settle();
+  assert.equal(remote.tailQuery('app'), 'service:api');
+  assert.equal(remote.last('app')?.query, 'service:api');
+  mock.timers.tick(9000);
+  await settle();
+  assert.equal(reads, 1, 'the first read set the next one 10 s out');
+  mock.timers.tick(1000);
+  await settle();
+  assert.equal(reads, 2);
+  mock.timers.tick(3000);
+  await settle();
+  assert.equal(reads, 3, 'then every 3 s');
+  remote.stopTails('app');
+  assert.equal(remote.tailQuery('app'), undefined);
+  remote.forgetRun(id);
+  assert.equal(remote.last('app'), undefined, 'a removed run is no longer the latest');
+  await remote.dispose();
+});

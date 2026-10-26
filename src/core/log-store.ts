@@ -527,10 +527,19 @@ export class LogStore {
    */
   removeSource(serverId: string): number {
     const belongs = (id: string | undefined) => id === serverId || (id?.startsWith(`${serverId}::`) ?? false);
+    return this.removeWhere((event) => belongs(event.serverId));
+  }
+
+  /** Drop the logs of one run; returns how many were removed. */
+  removeSession(sessionId: string): number {
+    return this.removeWhere((event) => event.sessionId === sessionId);
+  }
+
+  private removeWhere(removes: (event: LogEvent) => boolean): number {
     const kept: Slot[] = [];
     for (let i = 0; i < this.size; i++) {
       const slot = this.slots[(this.head + i) % this.maxRows]!;
-      if (!belongs(slot.event.serverId)) kept.push(slot);
+      if (!removes(slot.event)) kept.push(slot);
     }
     const removed = this.size - kept.length;
     if (!removed) return 0;

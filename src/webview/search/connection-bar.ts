@@ -47,6 +47,10 @@ export function createConnectionBar(
   const noun = (connection: ConnectionView, count: number) =>
     `${connection.language === 'mongo' ? 'document' : connection.sql ? 'row' : 'log'}${count === 1 ? '' : 's'}`;
 
+  /** Whether the connection is tailing a filter other than the one typed now. */
+  const retargets = (connection: ConnectionView) =>
+    connection.tailing && connection.last?.kind === 'tail' && connection.last.query !== query();
+
   function resultText(connection: ConnectionView): string {
     const last = connection.last;
     if (!last)
@@ -56,12 +60,14 @@ export function createConnectionBar(
           ? 'No log collection is mapped. Use Run query to query it.'
           : 'No log table is mapped. Use Run SQL to query it.';
     const rows = `${numbers.format(last.kept)} ${noun(connection, last.kept)}`;
-    if (last.kind === 'tail')
+    if (last.kind === 'tail') {
+      const following = last.query?.trim() || 'all logs';
       return !last.running
-        ? `Tail stopped · ${rows}`
+        ? `Tail of ${following} stopped · ${rows}`
         : last.error
-          ? `Tail interrupted: ${last.error}`
-          : `Tailing · ${rows}`;
+          ? `Tail of ${following} interrupted: ${last.error}`
+          : `Tailing ${following} · ${rows}`;
+    }
     if (last.running) return 'Fetching…';
     if (last.error) return `Failed: ${last.error}`;
     const of = last.total !== undefined && last.total > last.fetched ? ` of ${numbers.format(last.total)}` : '';
@@ -87,10 +93,14 @@ export function createConnectionBar(
       : 'Map a log table to search it; Run SQL works without one';
     elements.connectionTail.disabled = !connection.mapped;
     elements.connectionTail.setAttribute('aria-pressed', String(connection.tailing));
-    elements.connectionTail.textContent = connection.tailing ? 'Stop tail' : 'Tail';
-    elements.connectionTail.title = connection.tailing
-      ? 'Stop reading new rows'
-      : 'Show the newest matching rows, then keep reading rows as they are added';
+    // A tail follows the filter it started with; once the filter changes, Tail follows the new one instead.
+    const retarget = retargets(connection);
+    elements.connectionTail.textContent = retarget ? 'Tail this filter' : connection.tailing ? 'Stop tail' : 'Tail';
+    elements.connectionTail.title = retarget
+      ? `Stop following ${connection.last?.query?.trim() || 'all logs'} and follow this filter instead`
+      : connection.tailing
+        ? 'Stop reading new rows'
+        : 'Show the newest matching rows, then keep reading rows as they are added';
     elements.connectionResult.textContent = resultText(connection);
     // The run to compare: the one selected in the run picker, else the latest.
     elements.connectionCompare.hidden = !connection.last || connection.last.kind === 'tail';
@@ -174,7 +184,7 @@ export function createConnectionBar(
         type: 'connectionTail',
         connectionId: connection.id,
         query: query(),
-        enabled: !connection.tailing,
+        enabled: !connection.tailing || retargets(connection),
       });
   });
   scope.listen(elements.connectionCompare, 'click', () => {
@@ -204,8 +214,8 @@ export function createConnectionBar(
     },
     render,
     receivePreview,
-    /** The filter changed: refresh the preview of the SQL it becomes. */
-    queryChanged: () => requestPreview(),
+    /** The filter changed: refresh the preview of the SQL it becomes, and whether Tail follows it. */
+    queryChanged: render,
     /** Fetch from the selected connection; false when no connection is selected. */
     run,
     connections: () => connections,

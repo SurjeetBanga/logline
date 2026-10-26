@@ -953,9 +953,15 @@ test('removing a source drops its events and container sources, keeps the rest i
   assert.ok(!store.fieldNames().includes('route'), 'fields only the removed source had are gone');
   assert.ok(store.fieldNames().includes('queue'));
   assert.equal(store.removeSource('missing'), 0);
-  for (let id = 6; id <= 20; id++) add(id, 'worker', 'w1');
+  add(6, 'worker', 'w2');
+  assert.equal(store.removeSession('w1'), 1, 'removing a run keeps the other runs of its source');
+  assert.deepEqual(
+    store.all().map((event) => event.id),
+    [4, 6],
+  );
+  for (let id = 7; id <= 21; id++) add(id, 'worker', 'w1');
   assert.equal(store.size, 10, 'the compacted ring keeps its size limit');
-  assert.equal(store.all().at(-1)?.id, 20);
+  assert.equal(store.all().at(-1)?.id, 21);
 });
 
 test('field names stay known while any retained event of a source has them, however its shapes vary', () => {

@@ -355,6 +355,7 @@ export class LogsController {
         clear: () => this.clear(),
         stop: (serverId, sessionId) => this.stop(serverId, sessionId),
         removeSource: (serverId) => this.removeSource(serverId),
+        removeRun: (sessionId) => this.removeRun(sessionId),
         welcomed: () => this.welcomed(),
         runner: this.runner,
         showGuide: (section) => this.guideOpener?.(section),
@@ -666,6 +667,17 @@ export class LogsController {
     this.agentAccess.forgetSource(serverId);
     this.state.status = `Removed ${label}${removed ? ` and its ${removed.toLocaleString()} log${removed === 1 ? '' : 's'}` : ''}`;
     // The view's rows and pages no longer line up with what is retained.
+    this.state.invalidate();
+    return removed;
+  }
+  /** Drop one finished run and its logs, such as a fetch no longer needed; a run still capturing stays. */
+  removeRun(sessionId: string): number {
+    const record = this.registry.records.get(sessionId);
+    if (!record || record.status === 'running' || record.status === 'stopping') return 0;
+    const removed = this.store.removeSession(sessionId);
+    this.registry.records.delete(sessionId);
+    this.remote.forgetRun(sessionId);
+    this.state.status = `Removed ${record.command || record.taskName || record.server || 'the run'}${removed ? ` and its ${removed.toLocaleString()} log${removed === 1 ? '' : 's'}` : ''}`;
     this.state.invalidate();
     return removed;
   }

@@ -3487,13 +3487,16 @@ Span ${call.spanId}`;
     const numbers = new Intl.NumberFormat();
     const selected = () => connections.find((connection) => connection.sourceId === state.selectedServer);
     const noun2 = (connection, count) => `${connection.language === "mongo" ? "document" : connection.sql ? "row" : "log"}${count === 1 ? "" : "s"}`;
+    const retargets = (connection) => connection.tailing && connection.last?.kind === "tail" && connection.last.query !== query();
     function resultText(connection) {
       const last = connection.last;
       if (!last)
         return connection.mapped ? "Choose a range and press Run. Nothing is fetched until you do." : connection.language === "mongo" ? "No log collection is mapped. Use Run query to query it." : "No log table is mapped. Use Run SQL to query it.";
       const rows = `${numbers.format(last.kept)} ${noun2(connection, last.kept)}`;
-      if (last.kind === "tail")
-        return !last.running ? `Tail stopped \xB7 ${rows}` : last.error ? `Tail interrupted: ${last.error}` : `Tailing \xB7 ${rows}`;
+      if (last.kind === "tail") {
+        const following = last.query?.trim() || "all logs";
+        return !last.running ? `Tail of ${following} stopped \xB7 ${rows}` : last.error ? `Tail of ${following} interrupted: ${last.error}` : `Tailing ${following} \xB7 ${rows}`;
+      }
       if (last.running) return "Fetching\u2026";
       if (last.error) return `Failed: ${last.error}`;
       const of = last.total !== void 0 && last.total > last.fetched ? ` of ${numbers.format(last.total)}` : "";
@@ -3516,8 +3519,9 @@ Span ${call.spanId}`;
       elements.connectionRun.title = connection.mapped ? `Fetch the newest rows from ${connection.label} in this range that match the filter` : "Map a log table to search it; Run SQL works without one";
       elements.connectionTail.disabled = !connection.mapped;
       elements.connectionTail.setAttribute("aria-pressed", String(connection.tailing));
-      elements.connectionTail.textContent = connection.tailing ? "Stop tail" : "Tail";
-      elements.connectionTail.title = connection.tailing ? "Stop reading new rows" : "Show the newest matching rows, then keep reading rows as they are added";
+      const retarget = retargets(connection);
+      elements.connectionTail.textContent = retarget ? "Tail this filter" : connection.tailing ? "Stop tail" : "Tail";
+      elements.connectionTail.title = retarget ? `Stop following ${connection.last?.query?.trim() || "all logs"} and follow this filter instead` : connection.tailing ? "Stop reading new rows" : "Show the newest matching rows, then keep reading rows as they are added";
       elements.connectionResult.textContent = resultText(connection);
       elements.connectionCompare.hidden = !connection.last || connection.last.kind === "tail";
       elements.connectionSql.hidden = !connection.sql;
@@ -3591,7 +3595,7 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
           type: "connectionTail",
           connectionId: connection.id,
           query: query(),
-          enabled: !connection.tailing
+          enabled: !connection.tailing || retargets(connection)
         });
     });
     scope.listen(elements.connectionCompare, "click", () => {
@@ -3620,8 +3624,8 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
       },
       render,
       receivePreview,
-      /** The filter changed: refresh the preview of the SQL it becomes. */
-      queryChanged: () => requestPreview(),
+      /** The filter changed: refresh the preview of the SQL it becomes, and whether Tail follows it. */
+      queryChanged: render,
       /** Fetch from the selected connection; false when no connection is selected. */
       run,
       connections: () => connections,
@@ -3905,6 +3909,14 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
           stop.dataset.runId = session.id;
           stop.disabled = session.status !== "running";
           wrapper.append(stop);
+        } else if (session.status !== "running" && session.status !== "stopping") {
+          const remove = actionButton("remove", "Remove this run and its logs", () => {
+            if (state.selectedSession === session.id) actions.selectRun("");
+            api.postMessage({ type: "removeRun", sessionId: session.id });
+          });
+          remove.classList.add("run-remove");
+          remove.dataset.runId = session.id;
+          wrapper.append(remove);
         }
         group2.append(wrapper);
       }

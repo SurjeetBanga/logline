@@ -58,7 +58,7 @@ export interface RemoteConnector {
    * service indexes it. Tails read this far back and skip what they showed.
    */
   readonly tailLagMs?: number;
-  /** The shortest time between a tail's reads, for stores that limit how often they are searched. */
+  /** The shortest time between a tail's reads, for stores that limit how often they are searched; read before each one. */
   readonly tailPollMs?: number;
 }
 

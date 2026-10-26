@@ -242,6 +242,10 @@ test('message router removes a source, asks before removing a connection, and op
       calls.push({ name: 'removeSource', value: serverId });
       return Promise.resolve(3);
     },
+    removeRun: (sessionId: string) => {
+      calls.push({ name: 'removeRun', value: sessionId });
+      return 1;
+    },
     connectAgent: async (agent?: string) => {
       calls.push({ name: 'connectAgent', value: agent });
     },
@@ -254,6 +258,8 @@ test('message router removes a source, asks before removing a connection, and op
   for (const request of [
     { type: 'removeSource', serverId: 'api' },
     { type: 'removeSource' },
+    { type: 'removeRun', sessionId: 'run-1' },
+    { type: 'removeRun' },
     { type: 'removeConnection', connectionId: 'prod' },
     { type: 'connectAgent', agent: 'claude' },
     { type: 'config', setting: 'logline.maxMemoryMb' },
@@ -263,6 +269,7 @@ test('message router removes a source, asks before removing a connection, and op
     calls.filter((call) => call.name !== 'command').map((call) => [call.name, call.value]),
     [
       ['removeSource', 'api'],
+      ['removeRun', 'run-1'],
       ['removeConnection', 'prod'],
       ['connectAgent', 'claude'],
       ['commandArgs', ['logline.maxMemoryMb']],

@@ -375,6 +375,15 @@ export function createSourceRail(
         stop.dataset.runId = session.id;
         stop.disabled = session.status !== 'running';
         wrapper.append(stop);
+      } else if (session.status !== 'running' && session.status !== 'stopping') {
+        // A finished run, such as a fetch no longer needed, can go with its logs; the source stays.
+        const remove = actionButton('remove', 'Remove this run and its logs', () => {
+          if (state.selectedSession === session.id) actions.selectRun('');
+          api.postMessage({ type: 'removeRun', sessionId: session.id });
+        });
+        remove.classList.add('run-remove');
+        remove.dataset.runId = session.id;
+        wrapper.append(remove);
       }
       group.append(wrapper);
     }

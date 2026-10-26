@@ -9,7 +9,7 @@ import { queryTokens } from './query-tokens';
 const SPECIAL = /[+\-=&|><!(){}[\]^"“”~*?:\\/\s]/g;
 const escape = (value: string) => value.replace(SPECIAL, (character) => `\\${character}`);
 // A Logline field that Datadog keeps as a reserved attribute rather than under `@`.
-const RESERVED: Record<string, string> = { service: 'service', host: 'host', traceId: 'trace_id' };
+const RESERVED: Record<string, string> = { service: 'service', host: 'host', source: 'source', traceId: 'trace_id' };
 const REGEX_TERM = /^-?(?:@?[A-Za-z_][A-Za-z0-9_.]*:(?!\/\/))?\/.+\/[dgimsuvy]*$/;
 const NUMBER = /^-?\d+(?:\.\d+)?$/;
 
@@ -58,8 +58,11 @@ function typedValue(text: string, token: Token): string {
   return value.toLowerCase() === token.value ? value : token.value;
 }
 
-/** Datadog syntax that matches every log the term matches, or undefined when Datadog cannot say. */
-function term(token: Token, typed = token.value): string | undefined {
+/**
+ * Datadog syntax that matches every log the term matches, or undefined when Datadog cannot say. A field
+ * typed with `@` is an attribute; one typed without is a tag or an attribute, as `env:prod` is a tag in Datadog.
+ */
+function term(token: Token, typed = token.value, at = false): string | undefined {
   if (token.changed !== undefined || token.regex !== undefined) return undefined;
   if (token.canonical === 'last' || token.canonical === 'timestamp' || token.canonical === 'time') return undefined;
   const not = token.negate ? '-' : '';
@@ -83,7 +86,8 @@ function term(token: Token, typed = token.value): string | undefined {
     return undefined;
   }
   if (canonical === 'message') return token.value ? `${not}${text(typed)}` : undefined;
-  const name = Object.hasOwn(RESERVED, canonical) ? RESERVED[canonical] : attribute(token.field);
+  const reserved = !at && Object.hasOwn(RESERVED, canonical);
+  const name = reserved ? RESERVED[canonical] : attribute(token.field);
   if (token.numericComparison) {
     const { operator, target } = token.numericComparison;
     return `${not}${name}:${operator}${target}`;
@@ -91,8 +95,10 @@ function term(token: Token, typed = token.value): string | undefined {
   if (token.numericRange) return `${not}${name}:[${token.numericRange[0]} TO ${token.numericRange[1]}]`;
   if (token.compare || !token.value) return undefined;
   // Logline matches a part of the value; numbers are matched whole, as Datadog has no wildcards for them.
-  if (NUMBER.test(token.value)) return `${not}${name}:${token.value}`;
-  return `${not}${name}:*${escape(typed)}*`;
+  const value = NUMBER.test(token.value) ? token.value : `*${escape(typed)}*`;
+  if (reserved || at) return `${not}${name}:${value}`;
+  const tag = token.field.replace(/[^A-Za-z0-9_.\-]/g, '_');
+  return not ? `-${tag}:${value} -${name}:${value}` : `(${tag}:${value} OR ${name}:${value})`;
 }
 
 export interface DatadogQuery {
@@ -119,7 +125,7 @@ export function datadogQuery(input: string): DatadogQuery {
   for (const group of groups.filter((candidate) => candidate.length)) {
     const terms: string[] = [];
     for (const { text, token } of group) {
-      const translated = token && term(token, typedValue(text, token));
+      const translated = token && term(token, typedValue(text, token), text.replace(/^-/, '').startsWith('@'));
       if (translated) {
         terms.push(translated);
         pushed.add(text);

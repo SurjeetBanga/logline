@@ -35,6 +35,7 @@ interface MessageServices {
   clear(): void;
   stop(serverId?: string, sessionId?: string): void;
   removeSource(serverId: string): Promise<number>;
+  removeRun(sessionId: string): number;
   welcomed?(): void;
   showGuide(section: 'guide' | 'whatsNew'): void;
   agentAccess: AgentLogAccess;
@@ -229,6 +230,9 @@ export async function handleMessage(
     case 'removeSource':
       // Asks first when the source is running.
       await services.removeSource(msg.serverId);
+      return;
+    case 'removeRun':
+      services.removeRun(msg.sessionId);
       return;
     case 'editConnection':
       await services.connections?.edit(msg.connectionId);

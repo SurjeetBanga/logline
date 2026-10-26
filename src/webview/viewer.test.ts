@@ -3840,14 +3840,31 @@ test('a selected connection shows its range, Run, Tail and Run SQL, with the SQL
   assert.equal(get('connectionResult').textContent, 'Failed: no such table: app_logs');
   assert.equal(get('connectionResult').classList.contains('connection-error'), true);
   snapshot({
-    connections: [{ ...connection, tailing: true, last: { ...last, kind: 'tail', running: true, kept: 3 } }],
+    connections: [
+      { ...connection, tailing: true, last: { ...last, kind: 'tail', running: true, kept: 3, query: 'timeout' } },
+    ],
   });
   assert.equal(get('connectionTail').textContent, 'Stop tail');
   assert.equal(get('connectionTail').attributes['aria-pressed'], 'true');
-  assert.equal(get('connectionResult').textContent, 'Tailing · 3 rows');
+  assert.equal(get('connectionResult').textContent, 'Tailing timeout · 3 rows');
   assert.equal(get('connectionRun').disabled, false, 'a tail does not block a search');
+  get('connectionTail').listeners.get('click')!();
+  assert.equal(plain(messages.at(-1)).enabled, false, 'a tail of this filter stops');
+  // A tail of another filter is followed by one of the filter typed now.
+  snapshot({
+    connections: [{ ...connection, tailing: true, last: { ...last, kind: 'tail', running: true, kept: 3, query: '' } }],
+  });
+  assert.equal(get('connectionTail').textContent, 'Tail this filter');
+  assert.equal(get('connectionResult').textContent, 'Tailing all logs · 3 rows');
+  get('connectionTail').listeners.get('click')!();
+  assert.deepEqual(plain(messages.at(-1)), {
+    type: 'connectionTail',
+    connectionId: 'app',
+    query: 'timeout',
+    enabled: true,
+  });
   snapshot({ connections: [{ ...connection, last: { ...last, kind: 'tail', running: false, kept: 3 } }] });
-  assert.equal(get('connectionResult').textContent, 'Tail stopped · 3 rows');
+  assert.equal(get('connectionResult').textContent, 'Tail of all logs stopped · 3 rows');
   assert.equal(get('empty').textContent, 'No matching rows. Change the filter or the range and press Run.');
   // A search just run is selected with its source, so earlier runs' rows do not mix in.
   const run = {

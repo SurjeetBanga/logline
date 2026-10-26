@@ -477,7 +477,7 @@ export class ConnectionManager implements vscode.Disposable {
     }
   }
 
-  /** Start or stop reading new rows from a connection as they are added. */
+  /** Start or stop reading new rows from a connection as they are added; starting again follows `query` instead. */
   async tail(id: string | undefined, query: string, enabled?: boolean): Promise<void> {
     const connection = await this.pick(id, 'Tail connection', searchable, 'No connection has logs to search.');
     if (!connection) return;
@@ -486,7 +486,12 @@ export class ConnectionManager implements vscode.Disposable {
       this.remote.stopTails(connection.id);
       return;
     }
-    if (!this.trusted('tailing a connection') || this.remote.tailing(connection.id)) return;
+    if (!this.trusted('tailing a connection')) return;
+    // A tail of another filter gives way to one of this filter; one of the same filter keeps going.
+    if (this.remote.tailing(connection.id)) {
+      if (this.remote.tailQuery(connection.id) === query) return;
+      this.remote.stopTails(connection.id);
+    }
     try {
       const runId = this.remote.tail(await this.target(connection), query, `Tail: ${query.trim() || 'all rows'}`);
       await this.showSource(connectionSourceId(connection.id), runId);

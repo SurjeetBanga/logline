@@ -16,10 +16,15 @@ test('a Logline search becomes Datadog log search syntax', () => {
     ['status:5xx', '@http.status_code:[500 TO 599]'],
     ['status:>=500', '@http.status_code:>=500'],
     ['status:404', '@http.status_code:404'],
+    // `source` is reserved in Datadog, like `service`; another field is a tag or an attribute, as `env:prod` is a tag.
+    ['source:java', 'source:*java*'],
+    ['env:prod', '(env:*prod* OR @env:*prod*)'],
+    ['-env:prod', '-env:*prod* -@env:*prod*'],
+    ['@service:checkout', '@service:*checkout*'],
     ['durationMs:>200', '@durationMs:>200'],
     ['user_id:[10 to 20]', '@user_id:[10 TO 20]'],
-    ['user_id:42', '@user_id:42'],
-    ['http.route:/orders', '@http.route:*\\/orders*'],
+    ['user_id:42', '(user_id:42 OR @user_id:42)'],
+    ['@http.route:/orders', '@http.route:*\\/orders*'],
     ['exists:user_id', '@user_id:*'],
     ['-exists:user_id', '-@user_id:*'],
     // Datadog matches whole words; a word is a wildcard term, a phrase stays a phrase. Free text, like
@@ -48,7 +53,7 @@ test('terms Datadog cannot express are applied by Logline, and never narrow the 
   assert.equal(datadogQuery('service:"a OR b) (c"').query, 'service:*a\\ OR\\ b\\)\\ \\(c*');
   // Datadog compares attribute values with case, so a value keeps the case it was typed in.
   assert.equal(datadogQuery('service:Checkout -@env:Prod').query, 'service:*Checkout* -@env:*Prod*');
-  assert.equal(datadogQuery('user:"x:y"').query, '@user:*x\\:y*');
+  assert.equal(datadogQuery('@user:"x:y"').query, '@user:*x\\:y*');
 });
 
 test('Log Explorer links and trace ids are read for what they point at', () => {

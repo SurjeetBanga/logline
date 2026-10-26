@@ -64,11 +64,8 @@ test('a search pages through Datadog, newest first, and counts every match when 
     assert.equal(capped.total, 3000);
     assert.ok(capped.records[0].timeMs! > capped.records[1].timeMs!, 'newest first');
     const searches = fake.state.requests.filter((request) => request.path === '/api/v2/logs/events/search');
-    // Pages of at most 1,000, each with the keys, the indexes, and the range in milliseconds.
-    assert.deepEqual(
-      searches.slice(-2).map((request) => (request.body.page as { limit: number }).limit),
-      [1000, 500],
-    );
+    // One page for the whole limit, with the keys, the indexes, and the range in milliseconds.
+    assert.deepEqual((searches.at(-1)!.body.page as { limit: number }).limit, 1500);
     assert.equal(searches[1].headers['dd-api-key'], API_KEY);
     assert.deepEqual((searches[1].body.filter as { indexes: string[] }).indexes, ['main']);
     assert.equal((searches[1].body.filter as { from: string }).from, String(BASE));
@@ -91,7 +88,7 @@ test('a log becomes a line with its trace id, attributes, and tags, keeping coll
       message: 'payment gateway timed out',
       service: 'checkout',
       host: 'web-1',
-      tags: ['env:prod', 'version:1.2'],
+      tags: ['env:prod', 'version:1.2', 'region:us', 'team:a', 'team:b', 'service:other', 'flag'],
       attributes: { dd: { trace_id: '7f3a', span_id: '91' }, message: 'inner', region: 'eu-west', level: 'ERROR' },
     },
   });
@@ -107,13 +104,20 @@ test('a log becomes a line with its trace id, attributes, and tags, keeping coll
     'attributes.message': 'inner',
     region: 'eu-west',
     'attributes.level': 'ERROR',
-    tags: 'env:prod,version:1.2',
+    tags: 'env:prod,version:1.2,region:us,team:a,team:b,service:other,flag',
+    // Tags are fields too, unless an attribute or a field of the event has the name.
+    env: 'prod',
+    version: '1.2',
+    team: 'a,b',
     'datadog.id': 'AwAAAZ',
   });
   const event = parseLogLine(record.line, 'remote', 1, new Date());
   assert.equal(event.level, 'error');
   assert.equal(event.message, 'payment gateway timed out');
   assert.deepEqual(JSON.parse(datadogLine({ attributes: { message: 'bare' } }).line), { message: 'bare' });
+  // Colors a service printed are dropped from the message.
+  const colored = `${String.fromCharCode(27)}[37;1mChecking for jobs${String.fromCharCode(27)}[0m`;
+  assert.equal(JSON.parse(datadogLine({ attributes: { message: colored } }).line).message, 'Checking for jobs');
   // A trace id is shown once, as traceId, rather than again under dd.
   assert.deepEqual(JSON.parse(datadogLine({ attributes: { attributes: { dd: { trace_id: 't' } } } }).line), {
     traceId: 't',
@@ -190,6 +194,34 @@ test('a typed Datadog query is sent as it is, and the default range is the last 
   assert.ok(Number(filter.to) - Number(filter.from) === 900000 && Number(filter.to) >= before);
   assert.equal(seen[0].sort, 'timestamp');
   assert.equal(connector.tailLagMs, 60000);
+});
+
+test('tails read as often as the rate limit Datadog reports allows', async () => {
+  let headers: Record<string, string> = {};
+  const connector = new DatadogConnector(
+    connection('https://example.com'),
+    { apiKey: API_KEY, appKey: APP_KEY },
+    () => 5000,
+    async () => new Response(JSON.stringify({ data: [], meta: {} }), { headers }),
+  );
+  const read = () => connector.fetchLogs({ query: '', limit: 10, order: 'asc' });
+  assert.equal(connector.tailPollMs, 15000, 'every 15 s until Datadog has said');
+  await read();
+  assert.equal(connector.tailPollMs, 15000, 'an answer without the limit leaves the pace');
+  headers = {
+    'x-ratelimit-limit': '300',
+    'x-ratelimit-period': '3600',
+    'x-ratelimit-remaining': '290',
+    'x-ratelimit-reset': '3000',
+  };
+  await read();
+  assert.equal(connector.tailPollMs, 12000, 'the period spread over its searches');
+  headers = { ...headers, 'x-ratelimit-remaining': '2', 'x-ratelimit-reset': '90' };
+  await read();
+  assert.equal(connector.tailPollMs, 45000, 'what is left spread over the time until it resets');
+  headers = { 'x-ratelimit-limit': '6000', 'x-ratelimit-period': '60' };
+  await read();
+  assert.equal(connector.tailPollMs, 10);
 });
 
 test('a metric query reads Datadog timeseries over the range, and metric names are suggested', async () => {

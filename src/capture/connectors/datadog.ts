@@ -1,5 +1,6 @@
 import { datadogApiBase, type DatadogConnection } from '../../core/connections';
 import { datadogQuery } from '../../core/datadog-query';
+import { stripAnsi } from '../../core/log-event';
 import { boundSeries, datadogSeries } from '../../core/metric-query';
 import {
   errorText,
@@ -21,10 +22,12 @@ export interface DatadogKeys {
 type Json = Record<string, unknown>;
 type Fetch = (url: string, init: RequestInit) => Promise<Response>;
 
-const PAGE = 1000;
+// The most the Logs Search API returns in one page: a default fetch is one request.
+const PAGE = 5000;
 // Fields every Logline event has; a log attribute with one of these names keeps its value under `attributes.`.
 const RESERVED = new Set(['timestamp', 'level', 'message', 'service', 'host', 'traceId', 'tags', 'datadog.id']);
 
+const SEARCH = '/api/v2/logs/events/search';
 const object = (value: unknown): Json =>
   value && typeof value === 'object' && !Array.isArray(value) ? (value as Json) : {};
 
@@ -38,7 +41,8 @@ export function datadogLine(item: unknown): RemoteRecord {
   const entries: [string, unknown][] = [
     ['timestamp', attributes.timestamp],
     ['level', attributes.status],
-    ['message', attributes.message],
+    // Colors a service printed reach Datadog as escape codes; the message keeps its text.
+    ['message', typeof attributes.message === 'string' ? stripAnsi(attributes.message) : attributes.message],
     ['service', attributes.service],
     ['host', attributes.host],
     ...(traceId !== undefined ? ([['traceId', String(traceId)]] as [string, unknown][]) : []),
@@ -51,7 +55,21 @@ export function datadogLine(item: unknown): RemoteRecord {
     }
     entries.push([RESERVED.has(name) ? `attributes.${name}` : name, value]);
   }
-  if (Array.isArray(attributes.tags) && attributes.tags.length) entries.push(['tags', attributes.tags.join(',')]);
+  if (Array.isArray(attributes.tags) && attributes.tags.length) {
+    entries.push(['tags', attributes.tags.join(',')]);
+    // A tag such as `env:prod` or `source:java` is also a field, so `env:prod` filters fetched logs as it does in
+    // Datadog; an attribute of the same name keeps its value.
+    const named = new Set(entries.map(([name]) => name));
+    const tags = new Map<string, string[]>();
+    for (const tag of attributes.tags) {
+      const colon = typeof tag === 'string' ? tag.indexOf(':') : -1;
+      if (colon < 1) continue;
+      const name = (tag as string).slice(0, colon);
+      if (!named.has(name) && !RESERVED.has(name))
+        tags.set(name, [...(tags.get(name) ?? []), (tag as string).slice(colon + 1)]);
+    }
+    for (const [name, values] of tags) entries.push([name, values.join(',')]);
+  }
   if (typeof log.id === 'string') entries.push(['datadog.id', log.id]);
   const time = typeof attributes.timestamp === 'string' ? Date.parse(attributes.timestamp) : NaN;
   return {
@@ -84,8 +102,11 @@ function problem(status: number, headers: Headers, body: Json | undefined, text:
 export class DatadogConnector implements Connector {
   /** Logs can take a minute or so to become searchable after their own time. */
   readonly tailLagMs = 60000;
-  /** Datadog limits how often an organization can search logs; tails read at most every 15 s. */
-  readonly tailPollMs = 15000;
+  /**
+   * Datadog limits how often an organization can search logs. Tails read as often as the limit its last
+   * answer reported allows, and every 15 s until one has.
+   */
+  tailPollMs = 15000;
   readonly base: string;
 
   constructor(
@@ -128,15 +149,32 @@ export class DatadogConnector implements Connector {
     } catch {
       json = undefined;
     }
+    if (path === SEARCH) this.pace(response.headers);
     if (!response.ok) throw problem(response.status, response.headers, json, text, !!this.keys.token);
     if (!json) throw new Error('Datadog returned a response that is not JSON.');
     return json;
   }
 
+  /**
+   * Spread searches evenly over the rate limit's period, or, when the organization has used most of it, over
+   * the time until it resets.
+   */
+  private pace(headers: Headers): void {
+    const header = (name: string) => Number(headers.get(name) ?? NaN);
+    const limit = header('x-ratelimit-limit');
+    const period = header('x-ratelimit-period');
+    if (!(limit > 0 && period > 0)) return;
+    let ms = (period * 1000) / limit;
+    const remaining = header('x-ratelimit-remaining');
+    const reset = header('x-ratelimit-reset');
+    if (remaining >= 0 && reset > 0) ms = Math.max(ms, (reset * 1000) / Math.max(remaining, 1));
+    this.tailPollMs = Math.min(Math.ceil(ms), 60000);
+  }
+
   async test(): Promise<string> {
     // A search of one log checks the keys and the permission to read logs together.
     const now = Date.now();
-    await this.request('POST', '/api/v2/logs/events/search', {
+    await this.request('POST', SEARCH, {
       filter: { query: '*', from: String(now - 900000), to: String(now) },
       page: { limit: 1 },
     });
@@ -165,12 +203,14 @@ export class DatadogConnector implements Connector {
     const toMs = request.toMs ?? started;
     const fromMs = request.fromMs ?? toMs - 900000;
     const filter = this.filter(translated.query, fromMs, toMs);
+    // The total is counted while the logs are read, rather than after; a failed count leaves it unknown.
+    const counting = request.countTotal ? this.count(filter, signal).catch(() => undefined) : undefined;
     const records: RemoteRecord[] = [];
     let cursor: string | undefined;
     do {
       const page = await this.request(
         'POST',
-        '/api/v2/logs/events/search',
+        SEARCH,
         {
           filter,
           sort: request.order === 'desc' ? '-timestamp' : 'timestamp',
@@ -183,19 +223,8 @@ export class DatadogConnector implements Connector {
       const after = object(object(page.meta).page).after;
       cursor = typeof after === 'string' && after && data.length ? after : undefined;
     } while (cursor && records.length < request.limit);
-    let total: number | undefined;
-    if (request.countTotal && records.length >= request.limit) {
-      const counted = await this.request(
-        'POST',
-        '/api/v2/logs/analytics/aggregate',
-        { compute: [{ aggregation: 'count', type: 'total' }], filter },
-        signal,
-      );
-      const [bucket] = Array.isArray(object(counted.data).buckets) ? (object(counted.data).buckets as unknown[]) : [];
-      // The count is the one value in the bucket's computes.
-      const [value] = Object.values(object(object(bucket).computes));
-      if (Number.isFinite(Number(value))) total = Number(value);
-    }
+    const counted = await counting;
+    const total = counted !== undefined && records.length >= request.limit ? counted : undefined;
     return {
       records,
       ...(total !== undefined ? { total } : {}),
@@ -204,6 +233,22 @@ export class DatadogConnector implements Connector {
       statement: translated.query,
       elapsedMs: Date.now() - started,
     };
+  }
+
+  private async count(
+    filter: ReturnType<DatadogConnector['filter']>,
+    signal?: AbortSignal,
+  ): Promise<number | undefined> {
+    const counted = await this.request(
+      'POST',
+      '/api/v2/logs/analytics/aggregate',
+      { compute: [{ aggregation: 'count', type: 'total' }], filter },
+      signal,
+    );
+    const [bucket] = Array.isArray(object(counted.data).buckets) ? (object(counted.data).buckets as unknown[]) : [];
+    // The count is the one value in the bucket's computes.
+    const [value] = Object.values(object(object(bucket).computes));
+    return Number.isFinite(Number(value)) ? Number(value) : undefined;
   }
 
   /** A metric query in Datadog syntax, such as `avg:trace.http.request.duration{service:checkout} by {env}`. */

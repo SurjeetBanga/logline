@@ -70,6 +70,7 @@ export type ViewRequest =
   | { type: 'run'; serverId?: string }
   | { type: 'stop'; serverId?: string; sessionId?: string }
   | { type: 'removeSource'; serverId: string }
+  | { type: 'removeRun'; sessionId: string }
   | { type: 'removeConnection' | 'editConnection'; connectionId: string }
   /** A message from the Connection form; the connection manager checks `request` itself. */
   | { type: 'connectionForm'; session: number; request: Record<string, unknown> }
@@ -461,6 +462,8 @@ export function parseViewRequest(value: unknown): ViewRequest | undefined {
       return { type: msg.type, serverId: filter.serverId, sessionId: filter.sessionId };
     case 'removeSource':
       return filter.serverId ? { type: msg.type, serverId: filter.serverId } : undefined;
+    case 'removeRun':
+      return filter.sessionId ? { type: msg.type, sessionId: filter.sessionId } : undefined;
     case 'connectionForm':
       return Number.isSafeInteger(msg.session) &&
         msg.request &&

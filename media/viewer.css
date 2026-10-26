@@ -733,6 +733,14 @@ body > header {
   min-width: 0;
   border-radius: 4px;
 }
+/* A finished run's Remove shows while the run is pointed at or focused, like a source's actions. */
+.run-option-row .run-remove {
+  visibility: hidden;
+}
+.run-option-row:hover .run-remove,
+.run-option-row:focus-within .run-remove {
+  visibility: visible;
+}
 .rail-runs .run-select {
   min-height: 24px;
   padding-left: 30px;

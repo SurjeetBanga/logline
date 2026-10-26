@@ -29,6 +29,8 @@ export interface RemoteRunInfo {
   elapsedMs?: number;
   local: string[];
   statement?: string;
+  /** What a tail follows, as typed. */
+  query?: string;
   error?: string;
   at: number;
 }
@@ -67,7 +69,7 @@ interface Run {
   seen?: Map<string, number>;
   /** Where the next read starts when the last one was cut short by the limit. */
   catchUp?: number;
-  /** No read before this time, after the store said to wait. */
+  /** No read before this time: the store's pace, or how long it said to wait. */
   resumeAt?: number;
   poll?: ReturnType<typeof setInterval>;
   pumping?: Promise<void>;
@@ -105,6 +107,11 @@ export class RemoteSource {
 
   tailing(connectionId: string): boolean {
     return [...this.runs.values()].some((run) => run.target.id === connectionId && run.info.kind === 'tail');
+  }
+
+  /** The filter a connection's tail follows, or undefined while none runs. */
+  tailQuery(connectionId: string): string | undefined {
+    return [...this.runs.values()].find((run) => run.target.id === connectionId && run.info.kind === 'tail')?.query;
   }
 
   private limit(): number {
@@ -195,12 +202,15 @@ export class RemoteSource {
   /** Show the newest matching rows, then keep reading rows as they are added. */
   tail(target: RemoteTarget, query: string, title: string): string {
     const run = this.start(target, 'tail', title);
-    run.query = query;
+    run.query = run.info.query = query;
     run.seen = new Map();
-    const pollMs = Math.max(this.config.get('connectionPollSeconds', 2) * 1000, target.connector.tailPollMs ?? 0);
-    run.poll = setInterval(() => {
-      void this.pump(run);
-    }, pollMs);
+    // A store that limits searches is read less often than every poll; see pump.
+    run.poll = setInterval(
+      () => {
+        void this.pump(run);
+      },
+      this.config.get('connectionPollSeconds', 2) * 1000,
+    );
     run.poll.unref?.();
     this.state.status = `Tailing ${target.label}`;
     this.state.notify();
@@ -212,6 +222,9 @@ export class RemoteSource {
   private pump(run: Run): Promise<void> {
     if (run.stopped || run.pumping) return run.pumping ?? Promise.resolve();
     if (run.resumeAt !== undefined && Date.now() < run.resumeAt) return Promise.resolve();
+    // The store's pace is asked before each read, as it can change with what the store reports.
+    const paceMs = run.target.connector.tailPollMs;
+    run.resumeAt = paceMs ? Date.now() + paceMs : undefined;
     run.pumping = (async () => {
       try {
         await this.readTail(run);
@@ -224,7 +237,7 @@ export class RemoteSource {
         if (run.stopped) return;
         // A tail outlives a failed read: the database may be restarting or locked.
         const retryMs = (error as { retryAfterMs?: unknown } | undefined)?.retryAfterMs;
-        run.resumeAt = typeof retryMs === 'number' && retryMs > 0 ? Date.now() + retryMs : undefined;
+        if (typeof retryMs === 'number' && retryMs > 0) run.resumeAt = Date.now() + retryMs;
         run.info.error = errorText(error);
         run.record.captureStatus = 'interrupted';
         run.record.captureReason = run.info.error;
@@ -341,6 +354,11 @@ export class RemoteSource {
   /** Forget the results of finished runs, whose rows Clear logs removed; running tails keep theirs. */
   clearResults(): void {
     for (const [id, info] of this.latest) if (!info.running) this.latest.delete(id);
+  }
+
+  /** A finished run was removed: its connection no longer reports it as the latest. */
+  forgetRun(sessionId: string): void {
+    for (const [id, info] of this.latest) if (info.sessionId === sessionId && !info.running) this.latest.delete(id);
   }
 
   stopTails(connectionId: string): void {
