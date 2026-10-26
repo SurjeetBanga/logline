@@ -60,6 +60,11 @@ test('a search pages through Datadog, newest first, and counts every match when 
       order: 'desc',
       countTotal: true,
     });
+    // Services by how many logs they had: of the first 2,001 logs, checkout has the even ones.
+    assert.deepEqual(await connector.services(BASE, BASE + 2000 * 1000), [
+      { name: 'checkout', count: 1001 },
+      { name: 'api', count: 1000 },
+    ]);
     assert.equal(capped.records.length, 1500);
     assert.equal(capped.total, 3000);
     assert.ok(capped.records[0].timeMs! > capped.records[1].timeMs!, 'newest first');

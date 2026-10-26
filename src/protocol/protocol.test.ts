@@ -205,6 +205,29 @@ test('metric requests need a connection and a query; a fetch can name an exact w
     parseViewRequest({ type: 'connectionFetch', connectionId: 'prod', query: '', range: '1h', fromMs: 20, toMs: 10 }),
     { type: 'connectionFetch', connectionId: 'prod', query: '', range: '1h' },
   );
+  // A query in Datadog's syntax goes with fetches and tails, never with an empty one or a preview.
+  assert.deepEqual(
+    parseViewRequest({ type: 'connectionFetch', connectionId: 'prod', query: '', range: '1h', native: 'service:a' }),
+    { type: 'connectionFetch', connectionId: 'prod', query: '', range: '1h', native: 'service:a' },
+  );
+  assert.deepEqual(
+    parseViewRequest({ type: 'connectionTail', connectionId: 'prod', query: '', enabled: true, native: '@x:>1' }),
+    { type: 'connectionTail', connectionId: 'prod', query: '', enabled: true, native: '@x:>1' },
+  );
+  assert.deepEqual(
+    parseViewRequest({ type: 'connectionFetch', connectionId: 'prod', query: '', range: '1h', native: '  ' }),
+    { type: 'connectionFetch', connectionId: 'prod', query: '', range: '1h' },
+  );
+  assert.deepEqual(
+    parseViewRequest({ type: 'connectionPreview', connectionId: 'prod', query: '', range: '1h', native: 'x' }),
+    { type: 'connectionPreview', connectionId: 'prod', query: '', range: '1h' },
+  );
+  assert.deepEqual(parseViewRequest({ type: 'connectionServices', connectionId: 'prod', range: 'nope' }), {
+    type: 'connectionServices',
+    connectionId: 'prod',
+    range: '1h',
+  });
+  assert.equal(parseViewRequest({ type: 'connectionServices' }), undefined);
 });
 
 test('an agent permission request names its connection and whether to allow', () => {

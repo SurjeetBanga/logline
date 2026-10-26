@@ -418,7 +418,14 @@ export class ConnectionManager implements vscode.Disposable {
   }
 
   /** Fetch the newest rows that match a search over a range, or an exact window, into a new run. */
-  async fetch(id: string, query: string, range: string, window?: { fromMs: number; toMs: number }): Promise<void> {
+  async fetch(
+    id: string,
+    query: string,
+    range: string,
+    window?: { fromMs: number; toMs: number },
+    /** A query in the store's own syntax, sent as typed instead of `query`. */
+    native?: string,
+  ): Promise<void> {
     if (!this.trusted('searching a connection')) return;
     const connection = await this.pick(id, 'Search connection', searchable, 'No connection has logs to search.');
     if (!connection) return;
@@ -431,9 +438,10 @@ export class ConnectionManager implements vscode.Disposable {
     try {
       const info = await this.remote.fetch(await this.target(connection), {
         query,
+        ...(native !== undefined ? { native } : {}),
         fromMs: window?.fromMs ?? now - span,
         toMs: window?.toMs ?? now,
-        title: `${query.trim() || 'All rows'} · ${window ? `${time(window.fromMs)}–${time(window.toMs)}${utc ? ' UTC' : ''}` : `last ${range}`}`,
+        title: `${(native ?? query).trim() || 'All rows'} · ${window ? `${time(window.fromMs)}–${time(window.toMs)}${utc ? ' UTC' : ''}` : `last ${range}`}`,
         // The panel shows the new run, not every earlier one of the same search, with that search.
         started: (runId) => void this.showSource(connectionSourceId(connection.id), runId, query),
       });
@@ -478,7 +486,7 @@ export class ConnectionManager implements vscode.Disposable {
   }
 
   /** Start or stop reading new rows from a connection as they are added; starting again follows `query` instead. */
-  async tail(id: string | undefined, query: string, enabled?: boolean): Promise<void> {
+  async tail(id: string | undefined, query: string, enabled?: boolean, native?: string): Promise<void> {
     const connection = await this.pick(id, 'Tail connection', searchable, 'No connection has logs to search.');
     if (!connection) return;
     const on = enabled ?? !this.remote.tailing(connection.id);
@@ -489,11 +497,13 @@ export class ConnectionManager implements vscode.Disposable {
     if (!this.trusted('tailing a connection')) return;
     // A tail of another filter gives way to one of this filter; one of the same filter keeps going.
     if (this.remote.tailing(connection.id)) {
-      if (this.remote.tailQuery(connection.id) === query) return;
+      const tail = this.remote.tailOf(connection.id);
+      if (tail?.query === (native ?? query) && tail.native === (native !== undefined)) return;
       this.remote.stopTails(connection.id);
     }
     try {
-      const runId = this.remote.tail(await this.target(connection), query, `Tail: ${query.trim() || 'all rows'}`);
+      const followed = (native ?? query).trim();
+      const runId = this.remote.tail(await this.target(connection), query, `Tail: ${followed || 'all rows'}`, native);
       await this.showSource(connectionSourceId(connection.id), runId);
     } catch (error) {
       await this.failed(connection, errorText(error), error);
@@ -537,6 +547,19 @@ export class ConnectionManager implements vscode.Disposable {
       return { result: { ...(await connector.queryMetrics(query, fromMs, toMs)), fromMs, toMs } };
     } catch (error) {
       return { error: errorText(error) };
+    }
+  }
+
+  /** The services that logged over a range, to choose one; none when the store does not know services. */
+  async services(id: string, range: string): Promise<{ services: { name: string; count: number }[]; error?: string }> {
+    const connection = this.find(id);
+    if (!connection || !vscode.workspace.isTrusted) return { services: [] };
+    const now = Date.now();
+    try {
+      const connector = await this.connector(connection);
+      return { services: (await connector.services?.(now - (rangeMs(range) ?? 3600000), now)) ?? [] };
+    } catch (error) {
+      return { services: [], error: errorText(error) };
     }
   }
 

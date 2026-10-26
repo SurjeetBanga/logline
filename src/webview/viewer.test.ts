@@ -4338,3 +4338,126 @@ test('a connection says whether agents may query it, and the button asks to chan
   get('connectionAgents').listeners.get('click')!();
   assert.deepEqual(plain(messages.at(-1)), { type: 'connectionAgents', connectionId: 'prod', enabled: false });
 });
+
+test('a Datadog connection lists its services to choose one, and can send a query in Datadog syntax', () => {
+  const { get, receive, messages, timers, savedStates } = viewer({ server: 'conn:dd', query: 'level:error' });
+  const plain = (value: unknown) => JSON.parse(JSON.stringify(value));
+  const connection = {
+    id: 'dd',
+    sourceId: 'conn:dd',
+    label: 'Datadog · prod',
+    type: 'datadog',
+    mapped: true,
+    sql: false,
+    tailing: false,
+  };
+  const snapshot = (extra: Record<string, unknown> = {}) =>
+    receive({
+      type: 'snapshot',
+      generation: 1,
+      newest: 100,
+      status: 'Ready',
+      command: '',
+      running: false,
+      total: 0,
+      retained: 0,
+      discarded: 0,
+      bytes: 0,
+      maxBytes: 1,
+      truncated: 0,
+      events: [],
+      columns: [],
+      page: 0,
+      pages: 1,
+      matched: 0,
+      servers: [{ id: 'conn:dd', label: 'Datadog · prod', status: 'idle', activeSessions: 0 }],
+      sessions: [],
+      connections: [connection],
+      ...extra,
+    });
+  snapshot();
+  assert.equal(get('connectionServiceLabel').hidden, false);
+  assert.equal(get('connectionSyntax').hidden, false);
+  const asked = messages.filter((message) => message.type === 'connectionServices');
+  assert.deepEqual(plain(asked), [{ type: 'connectionServices', connectionId: 'dd', range: '1h' }]);
+  snapshot();
+  assert.equal(
+    messages.filter((message) => message.type === 'connectionServices').length,
+    1,
+    'the list is not asked for again while it is fresh',
+  );
+  receive({
+    type: 'connectionServices',
+    connectionId: 'dd',
+    range: '1h',
+    services: [
+      { name: 'checkout', count: 1200 },
+      { name: 'payments api', count: 4 },
+    ],
+  });
+  const options = get('connectionService').children;
+  assert.deepEqual(
+    options.map((option) => [option.value, option.textContent]),
+    [
+      ['', 'Any service'],
+      ['checkout', 'checkout · 1,200'],
+      ['payments api', 'payments api · 4'],
+    ],
+  );
+  // Choosing a service puts it in the filter, in place of any other; Any service takes it out.
+  get('connectionService').value = 'payments api';
+  get('connectionService').listeners.get('change')!();
+  assert.equal(get('search').value, 'level:error service:"payments api"');
+  get('connectionService').value = 'checkout';
+  get('connectionService').listeners.get('change')!();
+  assert.equal(get('search').value, 'level:error service:checkout');
+  get('connectionService').value = '';
+  get('connectionService').listeners.get('change')!();
+  assert.equal(get('search').value, 'level:error');
+  // Datadog syntax starts from what the filter became, and Run and Tail send it as typed.
+  [...timers.values()].at(-1)!();
+  const preview = plain(messages.filter((message) => message.type === 'connectionPreview').at(-1));
+  receive({ ...preview, statement: 'status:(error)', local: [] });
+  get('connectionSyntax').listeners.get('click')!();
+  assert.equal(get('connectionSyntax').attributes['aria-pressed'], 'true');
+  assert.equal(get('connectionNative').hidden, false);
+  assert.equal(get('connectionNative').value, 'status:(error)');
+  get('connectionNative').value = 'service:checkout @http.status_code:>=500';
+  get('connectionNative').listeners.get('input')!();
+  assert.equal(savedStates.at(-1)?.datadogQuery, 'service:checkout @http.status_code:>=500');
+  assert.equal(savedStates.at(-1)?.datadogSyntax, true);
+  assert.equal(get('connectionService').value, 'checkout', 'the list shows the service the Datadog query names');
+  get('connectionRun').listeners.get('click')!();
+  assert.deepEqual(plain(messages.at(-1)), {
+    type: 'connectionFetch',
+    connectionId: 'dd',
+    query: 'level:error',
+    native: 'service:checkout @http.status_code:>=500',
+    range: '1h',
+  });
+  get('connectionTail').listeners.get('click')!();
+  assert.equal(plain(messages.at(-1)).native, 'service:checkout @http.status_code:>=500');
+  // A tail of the filter is followed by one of the Datadog query.
+  snapshot({
+    connections: [
+      {
+        ...connection,
+        tailing: true,
+        last: {
+          sessionId: 's',
+          kind: 'tail',
+          running: true,
+          fetched: 0,
+          kept: 0,
+          local: [],
+          at: 0,
+          query: 'level:error',
+        },
+      },
+    ],
+  });
+  assert.equal(get('connectionTail').textContent, 'Tail this filter');
+  get('connectionSyntax').listeners.get('click')!();
+  assert.equal(get('connectionNative').hidden, true);
+  assert.equal(get('connectionTail').textContent, 'Stop tail');
+});

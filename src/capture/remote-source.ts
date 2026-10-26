@@ -31,6 +31,8 @@ export interface RemoteRunInfo {
   statement?: string;
   /** What a tail follows, as typed. */
   query?: string;
+  /** Whether a tail's query is in the store's own syntax. */
+  native?: boolean;
   error?: string;
   at: number;
 }
@@ -61,6 +63,8 @@ interface Run {
   stopped: boolean;
   // Tails only.
   query?: string;
+  /** A query in the store's own syntax, followed instead of `query`. */
+  native?: string;
   watermark?: number;
   /**
    * Lines already ingested that the next read can return again, with their
@@ -116,9 +120,10 @@ export class RemoteSource {
     return [...this.runs.values()].some((run) => run.target.id === connectionId && run.info.kind === 'tail');
   }
 
-  /** The filter a connection's tail follows, or undefined while none runs. */
-  tailQuery(connectionId: string): string | undefined {
-    return [...this.runs.values()].find((run) => run.target.id === connectionId && run.info.kind === 'tail')?.query;
+  /** What a connection's tail follows, or undefined while none runs. */
+  tailOf(connectionId: string): { query: string; native: boolean } | undefined {
+    const run = [...this.runs.values()].find((one) => one.target.id === connectionId && one.info.kind === 'tail');
+    return run && { query: run.native ?? run.query!, native: run.native !== undefined };
   }
 
   private limit(): number {
@@ -206,10 +211,13 @@ export class RemoteSource {
     return run.info;
   }
 
-  /** Show the newest matching rows, then keep reading rows as they are added. */
-  tail(target: RemoteTarget, query: string, title: string): string {
+  /** Show the newest matching rows, then keep reading rows as they are added; `native` is in the store's syntax. */
+  tail(target: RemoteTarget, query: string, title: string, native?: string): string {
     const run = this.start(target, 'tail', title);
-    run.query = run.info.query = query;
+    run.query = query;
+    run.info.query = native ?? query;
+    if (native !== undefined) run.native = native;
+    run.info.native = native !== undefined;
     run.seen = new Map();
     // A store that limits searches is read less often than every poll; see pump.
     run.poll = setInterval(
@@ -263,10 +271,11 @@ export class RemoteSource {
     const lag = this.lagMs(run);
     const fromMs = run.catchUp ?? run.watermark! - lag;
     const limit = this.limit();
+    const native = run.native !== undefined ? { native: run.native } : {};
     const result = await run.target.connector.fetchLogs(
       first
-        ? { query: run.query!, limit: TAIL_START_ROWS, order: 'desc' }
-        : { query: run.query!, fromMs, limit, order: 'asc' },
+        ? { query: run.query!, ...native, limit: TAIL_START_ROWS, order: 'desc' }
+        : { query: run.query!, ...native, fromMs, limit, order: 'asc' },
       run.abort.signal,
     );
     if (run.stopped) return;
@@ -309,7 +318,7 @@ export class RemoteSource {
       statement: result.statement,
       at: Date.now(),
     });
-    await this.ingest(run, fresh, rowFilter(run.query!));
+    await this.ingest(run, fresh, run.native === undefined ? rowFilter(run.query!) : undefined);
   }
 
   /** How far back a tail's next read starts: what the store needs, judged from how late its rows have been. */

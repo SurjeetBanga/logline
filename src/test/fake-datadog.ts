@@ -164,11 +164,23 @@ export async function startFakeDatadog(options: FakeDatadogOptions = {}) {
         const matching = state.logs
           .filter((log) => inRange(log, filter) && queryMatches(log, String(filter.query ?? '*')))
           .sort((a, b) => Date.parse(a.timestamp) - Date.parse(b.timestamp));
-        if (url.pathname.endsWith('aggregate'))
+        if (url.pathname.endsWith('aggregate')) {
+          // Grouped by service: a bucket per service, in no particular order.
+          if (Array.isArray(json.group_by) && json.group_by.length) {
+            const counts = new Map<string, number>();
+            for (const log of matching) if (log.service) counts.set(log.service, (counts.get(log.service) ?? 0) + 1);
+            return send(200, {
+              data: {
+                buckets: [...counts].map(([service, count]) => ({ by: { service }, computes: { c0: count } })),
+              },
+              meta: { status: 'done' },
+            });
+          }
           return send(200, {
             data: { buckets: [{ by: {}, computes: { c0: matching.length } }] },
             meta: { status: 'done' },
           });
+        }
         if (json.sort === '-timestamp') matching.reverse();
         const page = (json.page ?? {}) as Json;
         const start = Number(page.cursor ?? 0);

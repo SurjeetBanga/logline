@@ -390,7 +390,7 @@ test('a tail reads at the pace its store sets before each read, and says what it
   };
   const id = remote.tail(target(connector), 'service:api', 'Tail: service:api');
   await settle();
-  assert.equal(remote.tailQuery('app'), 'service:api');
+  assert.deepEqual(remote.tailOf('app'), { query: 'service:api', native: false });
   assert.equal(remote.last('app')?.query, 'service:api');
   mock.timers.tick(9000);
   await settle();
@@ -402,7 +402,7 @@ test('a tail reads at the pace its store sets before each read, and says what it
   await settle();
   assert.equal(reads, 3, 'then every 3 s');
   remote.stopTails('app');
-  assert.equal(remote.tailQuery('app'), undefined);
+  assert.equal(remote.tailOf('app'), undefined);
   remote.forgetRun(id);
   assert.equal(remote.last('app'), undefined, 'a removed run is no longer the latest');
   await remote.dispose();
@@ -438,5 +438,24 @@ test('a tail reads back only as far as its store has been late, and further once
   // The late row left the newest at minute 17.
   assert.equal(requests.at(-1)!.fromMs, BASE + 17 * 60000 - 40000);
   assert.ok(messages().includes('late'));
+  await remote.dispose();
+});
+
+test('a tail of a query in the store’s syntax sends it as typed and keeps every row it returns', async () => {
+  mock.timers.enable({ apis: ['setInterval'] });
+  const { remote, target, messages } = setup({ connectionPollSeconds: 1 });
+  const requests: FetchRequest[] = [];
+  const connector: RemoteConnector = {
+    async fetchLogs(request) {
+      requests.push(request);
+      return result([row(1, 'info', 'kept')]);
+    },
+  };
+  remote.tail(target(connector), 'level:error', 'Tail', 'service:(a OR b)');
+  for (let turn = 0; turn < 20; turn++) await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(requests[0].native, 'service:(a OR b)');
+  assert.deepEqual(messages(), ['kept'], 'the filter does not apply to a query typed for the store');
+  assert.deepEqual(remote.tailOf('app'), { query: 'service:(a OR b)', native: true });
+  assert.equal(remote.last('app')?.native, true);
   await remote.dispose();
 });

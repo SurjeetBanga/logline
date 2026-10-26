@@ -259,6 +259,29 @@ export class DatadogConnector implements Connector {
     return Number.isFinite(Number(value)) ? Number(value) : undefined;
   }
 
+  /** The services with the most logs in a window, to choose one to search or tail. */
+  async services(fromMs: number, toMs: number, signal?: AbortSignal): Promise<{ name: string; count: number }[]> {
+    const answer = await this.request(
+      'POST',
+      '/api/v2/logs/analytics/aggregate',
+      {
+        compute: [{ aggregation: 'count', type: 'total' }],
+        filter: this.filter('*', fromMs, toMs),
+        group_by: [{ facet: 'service', limit: 100, sort: { aggregation: 'count', order: 'desc', type: 'measure' } }],
+      },
+      signal,
+    );
+    const buckets = object(answer.data).buckets;
+    return (Array.isArray(buckets) ? buckets : [])
+      .map((bucket) => {
+        const name = object(object(bucket).by).service;
+        const [count] = Object.values(object(object(bucket).computes));
+        return { name: typeof name === 'string' ? name : '', count: Number(count) || 0 };
+      })
+      .filter((service) => service.name)
+      .sort((a, b) => b.count - a.count);
+  }
+
   /** A metric query in Datadog syntax, such as `avg:trace.http.request.duration{service:checkout} by {env}`. */
   async queryMetrics(query: string, fromMs: number, toMs: number, signal?: AbortSignal): Promise<MetricResult> {
     const started = Date.now();
