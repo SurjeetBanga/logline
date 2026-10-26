@@ -9,36 +9,40 @@ test('a Logline search becomes Datadog log search syntax', () => {
     // Logline matches part of a level, so `warn` also finds `warning`, and fatal is any of the severe statuses.
     ['level:warn', 'status:(warn OR warning)'],
     ['severity:fatal', 'status:(emergency OR alert OR critical)'],
-    ['service:checkout', 'service:*checkout*'],
-    ['traceId:4bf92f35', 'trace_id:*4bf92f35*'],
-    ['host:web-1', 'host:*web\\-1*'],
+    ['service:checkout', 'service:checkout'],
+    // A `*` is a wildcard, as in Datadog, except in quotes.
+    ['service:check*', 'service:check*'],
+    ['service:"check*"', 'service:check\\*'],
+    ['traceId:4bf92f35', 'trace_id:4bf92f35'],
+    ['host:web-1', 'host:web\\-1'],
     // `status` is the HTTP status in Logline and the level in Datadog.
     ['status:5xx', '@http.status_code:[500 TO 599]'],
     ['status:>=500', '@http.status_code:>=500'],
     ['status:404', '@http.status_code:404'],
     // `source` is reserved in Datadog, like `service`; another field is a tag or an attribute, as `env:prod` is a tag.
-    ['source:java', 'source:*java*'],
-    ['env:prod', '(env:*prod* OR @env:*prod*)'],
-    ['-env:prod', '-env:*prod* -@env:*prod*'],
-    ['@service:checkout', '@service:*checkout*'],
+    ['source:java', 'source:java'],
+    ['env:prod', '(env:prod OR @env:prod)'],
+    ['-env:prod', '-env:prod -@env:prod'],
+    ['@service:checkout', '@service:checkout'],
     ['durationMs:>200', '@durationMs:>200'],
     ['user_id:[10 to 20]', '@user_id:[10 TO 20]'],
     ['user_id:42', '(user_id:42 OR @user_id:42)'],
-    ['@http.route:/orders', '@http.route:*\\/orders*'],
+    ['@http.route:/orders', '@http.route:\\/orders'],
     ['exists:user_id', '@user_id:*'],
     ['-exists:user_id', '-@user_id:*'],
-    // Datadog matches whole words; a word is a wildcard term, a phrase stays a phrase. Free text, like
-    // Logline's, is searched in every attribute; a message term only in the message.
-    ['timeout', '*:*timeout*'],
-    ['"gateway timed out"', '*:"gateway timed out"'],
+    // Free text is a word of the message, as Datadog searches it; a phrase stays a phrase. A message term
+    // matches a part of the message.
+    ['timeout', 'timeout'],
+    ['time*', 'time*'],
+    ['"gateway timed out"', '"gateway timed out"'],
     ['message:declined', '*declined*'],
-    ['-healthcheck', '-*:*healthcheck*'],
-    ['level:error OR service:api', '(status:(error)) OR (service:*api*)'],
+    ['-healthcheck', '-healthcheck'],
+    ['level:error OR service:api', '(status:(error)) OR (service:api)'],
   ];
   for (const [input, expected] of cases) assert.equal(datadogQuery(input).query, expected, input);
 });
 
-test('terms Datadog cannot express are applied by Logline, and never narrow the search', () => {
+test('terms Datadog cannot express are applied by Logline', () => {
   assert.deepEqual(datadogQuery('level:error /time.?out/ changed:true last:5m'), {
     query: 'status:(error)',
     pushed: ['level:error'],
@@ -50,10 +54,10 @@ test('terms Datadog cannot express are applied by Logline, and never narrow the 
     local: ['level:error', '/panic/'],
   });
   // Special characters in values are escaped, so a value cannot change the query around it.
-  assert.equal(datadogQuery('service:"a OR b) (c"').query, 'service:*a\\ OR\\ b\\)\\ \\(c*');
+  assert.equal(datadogQuery('service:"a OR b) (c"').query, 'service:a\\ OR\\ b\\)\\ \\(c');
   // Datadog compares attribute values with case, so a value keeps the case it was typed in.
-  assert.equal(datadogQuery('service:Checkout -@env:Prod').query, 'service:*Checkout* -@env:*Prod*');
-  assert.equal(datadogQuery('@user:"x:y"').query, '@user:*x\\:y*');
+  assert.equal(datadogQuery('service:Checkout -@env:Prod').query, 'service:Checkout -@env:Prod');
+  assert.equal(datadogQuery('@user:"x:y"').query, '@user:x\\:y');
 });
 
 test('Log Explorer links and trace ids are read for what they point at', () => {

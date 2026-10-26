@@ -1,13 +1,15 @@
-// Turns a Logline search into Datadog log search syntax. Like the SQL
-// translation, the Datadog query may match more logs than the search, never
-// fewer: fetched logs are filtered again with the whole search, so terms
-// Datadog cannot express (regular expressions, `changed:`) still apply.
+// Turns a Logline search into Datadog log search syntax, matching as Datadog
+// does: a field value is matched whole unless it has a `*`, and a word is a
+// word of the message. Fetched logs are filtered again with the whole search,
+// so terms Datadog cannot express (regular expressions, `changed:`) still apply.
 import { parseQuery, type Token } from './query';
 import { queryTokens } from './query-tokens';
 
 // Characters with a meaning in Datadog's search syntax, escaped in values.
 const SPECIAL = /[+\-=&|><!(){}[\]^"“”~*?:\\/\s]/g;
 const escape = (value: string) => value.replace(SPECIAL, (character) => `\\${character}`);
+/** A value with its special characters escaped, except `*`, which stays Datadog's wildcard. */
+const pattern = (value: string) => value.replace(SPECIAL, (character) => (character === '*' ? '*' : `\\${character}`));
 // A Logline field that Datadog keeps as a reserved attribute rather than under `@`.
 const RESERVED: Record<string, string> = { service: 'service', host: 'host', source: 'source', traceId: 'trace_id' };
 const REGEX_TERM = /^-?(?:@?[A-Za-z_][A-Za-z0-9_.]*:(?!\/\/))?\/.+\/[dgimsuvy]*$/;
@@ -21,9 +23,12 @@ function text(value: string): string {
   return /\s/.test(value) ? `"${value.replace(/["\\]/g, (character) => `\\${character}`)}"` : `*${escape(value)}*`;
 }
 
-/** Text anywhere in the log: Logline's free text matches the whole line, so Datadog searches every attribute too. */
-function fullText(value: string): string {
-  return `*:${text(value)}`;
+/**
+ * Free text: a word of the message, as Datadog searches it, which is far quicker for Datadog than a part of
+ * every attribute; `*` is a wildcard. A phrase is matched as a phrase.
+ */
+function words(value: string): string {
+  return /\s/.test(value) ? `"${value.replace(/["\\]/g, (character) => `\\${character}`)}"` : pattern(value);
 }
 
 /** Datadog levels, which Datadog calls statuses, for each Logline level. */
@@ -59,15 +64,18 @@ function typedValue(text: string, token: Token): string {
 }
 
 /**
- * Datadog syntax that matches every log the term matches, or undefined when Datadog cannot say. A field
+ * The term in Datadog syntax, matched as Datadog matches it, or undefined when Datadog cannot say. A field
  * typed with `@` is an attribute; one typed without is a tag or an attribute, as `env:prod` is a tag in Datadog.
  */
-function term(token: Token, typed = token.value, at = false): string | undefined {
+function term(token: Token, input: string): string | undefined {
+  const typed = typedValue(input, token);
+  const at = input.replace(/^-/, '').startsWith('@');
+  const quoted = input.endsWith('"');
   if (token.changed !== undefined || token.regex !== undefined) return undefined;
   if (token.canonical === 'last' || token.canonical === 'timestamp' || token.canonical === 'time') return undefined;
   const not = token.negate ? '-' : '';
   if (token.canonical === 'exists') return `${not}${attribute(token.value)}:*`;
-  if (token.field === undefined) return token.value ? `${not}${fullText(typed)}` : undefined;
+  if (token.field === undefined) return token.value ? `${not}${words(typed)}` : undefined;
   const canonical = token.canonical ?? token.field;
   if (canonical === 'level') {
     // Logline matches a part of the level (`warn` matches `warning`); statuses are few, so list them.
@@ -94,8 +102,8 @@ function term(token: Token, typed = token.value, at = false): string | undefined
   }
   if (token.numericRange) return `${not}${name}:[${token.numericRange[0]} TO ${token.numericRange[1]}]`;
   if (token.compare || !token.value) return undefined;
-  // Logline matches a part of the value; numbers are matched whole, as Datadog has no wildcards for them.
-  const value = NUMBER.test(token.value) ? token.value : `*${escape(typed)}*`;
+  // The whole value, as Datadog matches it; a quoted value is taken as it is, `*` and all.
+  const value = NUMBER.test(token.value) ? token.value : quoted ? escape(typed) : pattern(typed);
   if (reserved || at) return `${not}${name}:${value}`;
   const tag = token.field.replace(/[^A-Za-z0-9_.\-]/g, '_');
   return not ? `-${tag}:${value} -${name}:${value}` : `(${tag}:${value} OR ${name}:${value})`;
@@ -125,7 +133,7 @@ export function datadogQuery(input: string): DatadogQuery {
   for (const group of groups.filter((candidate) => candidate.length)) {
     const terms: string[] = [];
     for (const { text, token } of group) {
-      const translated = token && term(token, typedValue(text, token), text.replace(/^-/, '').startsWith('@'));
+      const translated = token && term(token, text);
       if (translated) {
         terms.push(translated);
         pushed.add(text);

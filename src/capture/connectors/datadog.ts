@@ -31,51 +31,59 @@ const SEARCH = '/api/v2/logs/events/search';
 const object = (value: unknown): Json =>
   value && typeof value === 'object' && !Array.isArray(value) ? (value as Json) : {};
 
-/** One log from the Logs Search API as a JSON log line. */
+/** One log from the Logs Search API as a JSON log line. This runs for every fetched log. */
 export function datadogLine(item: unknown): RemoteRecord {
   const log = object(item);
   const attributes = object(log.attributes);
   const custom = object(attributes.attributes);
-  const { trace_id: ddTraceId, ...dd } = object(custom.dd);
+  const dd = object(custom.dd);
+  const ddTraceId = dd.trace_id;
   const traceId = ddTraceId ?? custom.trace_id ?? custom.traceId;
-  const entries: [string, unknown][] = [
-    ['timestamp', attributes.timestamp],
-    ['level', attributes.status],
-    // Colors a service printed reach Datadog as escape codes; the message keeps its text.
-    ['message', typeof attributes.message === 'string' ? stripAnsi(attributes.message) : attributes.message],
-    ['service', attributes.service],
-    ['host', attributes.host],
-    ...(traceId !== undefined ? ([['traceId', String(traceId)]] as [string, unknown][]) : []),
-  ];
-  for (const [name, value] of Object.entries(custom)) {
+  const fields: Json = {};
+  const put = (name: string, value: unknown) => {
+    if (value !== undefined && value !== null) fields[name] = value;
+  };
+  put('timestamp', attributes.timestamp);
+  put('level', attributes.status);
+  // Colors a service printed reach Datadog as escape codes; the message keeps its text.
+  put('message', typeof attributes.message === 'string' ? stripAnsi(attributes.message) : attributes.message);
+  put('service', attributes.service);
+  put('host', attributes.host);
+  if (traceId !== undefined) put('traceId', String(traceId));
+  for (const name in custom) {
+    if (!Object.hasOwn(custom, name)) continue;
     // The trace id is already the event's traceId; keep the rest of `dd`, such as its span id.
     if (name === 'dd' && ddTraceId !== undefined) {
-      if (Object.keys(dd).length) entries.push(['dd', dd]);
+      const { trace_id: _, ...rest } = dd;
+      if (Object.keys(rest).length) fields.dd = rest;
       continue;
     }
-    entries.push([RESERVED.has(name) ? `attributes.${name}` : name, value]);
+    put(RESERVED.has(name) ? `attributes.${name}` : name, custom[name]);
   }
-  if (Array.isArray(attributes.tags) && attributes.tags.length) {
-    entries.push(['tags', attributes.tags.join(',')]);
+  const tags = attributes.tags;
+  if (Array.isArray(tags) && tags.length) {
+    fields.tags = tags.join(',');
     // A tag such as `env:prod` or `source:java` is also a field, so `env:prod` filters fetched logs as it does in
-    // Datadog; an attribute of the same name keeps its value.
-    const named = new Set(entries.map(([name]) => name));
-    const tags = new Map<string, string[]>();
-    for (const tag of attributes.tags) {
-      const colon = typeof tag === 'string' ? tag.indexOf(':') : -1;
+    // Datadog; an attribute of the same name keeps its value, and a repeated tag's values are joined.
+    const tagged = new Set<string>();
+    for (const tag of tags) {
+      if (typeof tag !== 'string') continue;
+      const colon = tag.indexOf(':');
       if (colon < 1) continue;
-      const name = (tag as string).slice(0, colon);
-      if (!named.has(name) && !RESERVED.has(name))
-        tags.set(name, [...(tags.get(name) ?? []), (tag as string).slice(colon + 1)]);
+      const name = tag.slice(0, colon);
+      const value = tag.slice(colon + 1);
+      if (tagged.has(name)) fields[name] = `${fields[name] as string},${value}`;
+      else if (!RESERVED.has(name) && !Object.hasOwn(custom, name)) {
+        tagged.add(name);
+        fields[name] = value;
+      }
     }
-    for (const [name, values] of tags) entries.push([name, values.join(',')]);
   }
-  if (typeof log.id === 'string') entries.push(['datadog.id', log.id]);
+  if (typeof log.id === 'string') fields['datadog.id'] = log.id;
   const time = typeof attributes.timestamp === 'string' ? Date.parse(attributes.timestamp) : NaN;
-  return {
-    line: JSON.stringify(Object.fromEntries(entries.filter(([, value]) => value !== undefined && value !== null))),
-    ...(Number.isFinite(time) ? { timeMs: time } : {}),
-  };
+  const record: RemoteRecord = { line: JSON.stringify(fields) };
+  if (Number.isFinite(time)) record.timeMs = time;
+  return record;
 }
 
 function problem(status: number, headers: Headers, body: Json | undefined, text: string, token: boolean): Error {

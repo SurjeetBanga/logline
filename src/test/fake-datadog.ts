@@ -85,10 +85,14 @@ function valueMatches(actual: unknown, pattern: string): boolean {
     return { '>': left > right, '>=': left >= right, '<': left < right, '<=': left <= right }[comparison[1]]!;
   }
   if (pattern === '*') return true;
-  const text = unescape(pattern).toLowerCase();
   const value = String(actual).toLowerCase();
-  if (pattern.startsWith('*') && pattern.endsWith('*') && pattern.length > 1) return value.includes(text.slice(1, -1));
-  return value === text;
+  // An unescaped `*` stands for any text; anything else must match whole.
+  const source = pattern
+    .toLowerCase()
+    .replace(/\\(.)|(\*)|([^\\*])/g, (_, escaped: string, star: string, plain: string) =>
+      star ? '.*' : (escaped ?? plain).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'),
+    );
+  return new RegExp(`^${source}$`, 's').test(value);
 }
 
 function termMatches(log: FakeLog, term: string): boolean {

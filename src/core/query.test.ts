@@ -190,3 +190,16 @@ test('an exact field name wins over its alias group', () => {
   assert.equal(matchesQuery(both, 'status:200'), false);
   assert.equal(matchesQuery(both, 'statusCode:500'), false);
 });
+
+test('a * in a field value matches the whole value, any text in its place', () => {
+  const event = parseLogLine(JSON.stringify({ service: 'checkout-api', message: 'paid' }), 'stdout', 1, new Date());
+  const matches = (query: string) => matchesQuery(event, parseQuery(query));
+  assert.equal(matches('service:checkout*'), true);
+  assert.equal(matches('service:*-api'), true);
+  assert.equal(matches('service:CHECK*API'), true, 'without case');
+  assert.equal(matches('service:api*'), false, 'the value starts with checkout');
+  assert.equal(matches('service:checkout'), true, 'a value without * still matches a part');
+  assert.equal(matches('service:"checkout*"'), false, 'quoted, * is a character');
+  assert.equal(matches('region:*'), false, 'a field the event lacks');
+  assert.equal(matches('-service:check*'), false);
+});
