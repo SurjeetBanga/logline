@@ -1139,16 +1139,24 @@
             "default": 5000,
             "minimum": 100,
             "maximum": 50000,
-            "description": "Most rows one search or SQL query fetches from a connection. The newest matching rows are kept.",
+            "description": "Most rows one search or SQL query fetches from a database connection. The newest matching rows are kept.",
             "order": 2
+          },
+          "logline.datadogMaxRows": {
+            "type": "integer",
+            "default": 1000,
+            "minimum": 100,
+            "maximum": 50000,
+            "description": "Most logs one search fetches from a Datadog connection, and one tail read. The newest matching logs are kept, and the result line says how many matched in all.",
+            "order": 3
           },
           "logline.connectionPollSeconds": {
             "type": "integer",
             "default": 2,
             "minimum": 1,
             "maximum": 300,
-            "order": 3,
-            "markdownDescription": "How often a tailed connection is read for new rows. Datadog is read at most every 15 seconds, whatever this says."
+            "order": 4,
+            "markdownDescription": "How often a tailed connection is read for new rows. Datadog is read as often as its rate limit allows, and never more often than this."
           },
           "logline.connectionTimeoutSeconds": {
             "type": "integer",
@@ -1156,7 +1164,7 @@
             "minimum": 1,
             "maximum": 300,
             "description": "Longest a query on a connection may run before it is stopped.",
-            "order": 4
+            "order": 5
           }
         }
       },

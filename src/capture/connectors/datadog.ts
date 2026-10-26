@@ -24,6 +24,8 @@ type Fetch = (url: string, init: RequestInit) => Promise<Response>;
 
 // The most the Logs Search API returns in one page: a default fetch is one request.
 const PAGE = 5000;
+// A first page this small comes back sooner, to show while the rest is read.
+const FIRST_PAGE = 200;
 // Fields every Logline event has; a log attribute with one of these names keeps its value under `attributes.`.
 const RESERVED = new Set(['timestamp', 'level', 'message', 'service', 'host', 'traceId', 'tags', 'datadog.id']);
 
@@ -60,25 +62,8 @@ export function datadogLine(item: unknown): RemoteRecord {
     }
     put(RESERVED.has(name) ? `attributes.${name}` : name, custom[name]);
   }
-  const tags = attributes.tags;
-  if (Array.isArray(tags) && tags.length) {
-    fields.tags = tags.join(',');
-    // A tag such as `env:prod` or `source:java` is also a field, so `env:prod` filters fetched logs as it does in
-    // Datadog; an attribute of the same name keeps its value, and a repeated tag's values are joined.
-    const tagged = new Set<string>();
-    for (const tag of tags) {
-      if (typeof tag !== 'string') continue;
-      const colon = tag.indexOf(':');
-      if (colon < 1) continue;
-      const name = tag.slice(0, colon);
-      const value = tag.slice(colon + 1);
-      if (tagged.has(name)) fields[name] = `${fields[name] as string},${value}`;
-      else if (!RESERVED.has(name) && !Object.hasOwn(custom, name)) {
-        tagged.add(name);
-        fields[name] = value;
-      }
-    }
-  }
+  // A filter finds a tag such as `env:prod` here as the field `env`.
+  if (Array.isArray(attributes.tags) && attributes.tags.length) fields.tags = attributes.tags.join(',');
   if (typeof log.id === 'string') fields['datadog.id'] = log.id;
   const time = typeof attributes.timestamp === 'string' ? Date.parse(attributes.timestamp) : NaN;
   const record: RemoteRecord = { line: JSON.stringify(fields) };
@@ -215,6 +200,7 @@ export class DatadogConnector implements Connector {
     const counting = request.countTotal ? this.count(filter, signal).catch(() => undefined) : undefined;
     const records: RemoteRecord[] = [];
     let cursor: string | undefined;
+    let early = request.firstPage !== undefined && request.limit > FIRST_PAGE;
     do {
       const page = await this.request(
         'POST',
@@ -222,7 +208,10 @@ export class DatadogConnector implements Connector {
         {
           filter,
           sort: request.order === 'desc' ? '-timestamp' : 'timestamp',
-          page: { limit: Math.min(PAGE, request.limit - records.length), ...(cursor ? { cursor } : {}) },
+          page: {
+            limit: Math.min(early ? FIRST_PAGE : PAGE, request.limit - records.length),
+            ...(cursor ? { cursor } : {}),
+          },
         },
         signal,
       );
@@ -230,6 +219,9 @@ export class DatadogConnector implements Connector {
       records.push(...data.map(datadogLine));
       const after = object(object(page.meta).page).after;
       cursor = typeof after === 'string' && after && data.length ? after : undefined;
+      // Only a first page with more to follow is worth showing early.
+      if (early && cursor) request.firstPage!([...records]);
+      early = false;
     } while (cursor && records.length < request.limit);
     const counted = await counting;
     const total = counted !== undefined && records.length >= request.limit ? counted : undefined;

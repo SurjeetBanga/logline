@@ -66,11 +66,40 @@ test('a search pages through Datadog, newest first, and counts every match when 
       { name: 'api', count: 1000 },
     ]);
     assert.equal(capped.records.length, 1500);
+    // A small first page is handed over early when more follows; the rest come in one more page.
+    const early: number[] = [];
+    const paged = await connector.fetchLogs({
+      query: '',
+      fromMs: BASE,
+      toMs: BASE + 3600000,
+      limit: 1000,
+      order: 'desc',
+      firstPage: (records) => early.push(records.length),
+    });
+    assert.deepEqual(early, [200]);
+    assert.equal(paged.records.length, 1000);
+    assert.deepEqual(
+      fake.state.requests
+        .filter((request) => request.path === '/api/v2/logs/events/search')
+        .slice(-2)
+        .map((request) => (request.body.page as { limit: number }).limit),
+      [200, 800],
+    );
+    // One page holds it all: nothing is handed over early.
+    await connector.fetchLogs({
+      query: '',
+      limit: 150,
+      order: 'desc',
+      fromMs: BASE,
+      toMs: BASE + 3600000,
+      firstPage: () => early.push(-1),
+    });
+    assert.deepEqual(early, [200]);
     assert.equal(capped.total, 3000);
     assert.ok(capped.records[0].timeMs! > capped.records[1].timeMs!, 'newest first');
     const searches = fake.state.requests.filter((request) => request.path === '/api/v2/logs/events/search');
     // One page for the whole limit, with the keys, the indexes, and the range in milliseconds.
-    assert.deepEqual((searches.at(-1)!.body.page as { limit: number }).limit, 1500);
+    assert.ok(searches.some((request) => (request.body.page as { limit: number }).limit === 1500));
     assert.equal(searches[1].headers['dd-api-key'], API_KEY);
     assert.deepEqual((searches[1].body.filter as { indexes: string[] }).indexes, ['main']);
     assert.equal((searches[1].body.filter as { from: string }).from, String(BASE));
@@ -110,13 +139,16 @@ test('a log becomes a line with its trace id, attributes, and tags, keeping coll
     region: 'eu-west',
     'attributes.level': 'ERROR',
     tags: 'env:prod,version:1.2,region:us,team:a,team:b,service:other,flag',
-    // Tags are fields too, unless an attribute or a field of the event has the name.
-    env: 'prod',
-    version: '1.2',
-    team: 'a,b',
     'datadog.id': 'AwAAAZ',
   });
   const event = parseLogLine(record.line, 'remote', 1, new Date());
+  // A filter finds a tag as a field, unless the event has a field of that name.
+  const matches = (query: string) => matchesQuery(event, parseQuery(query));
+  assert.equal(matches('env:prod'), true);
+  assert.equal(matches('team:b'), true, 'a repeated tag keeps every value');
+  assert.equal(matches('region:us'), false, 'the attribute wins');
+  assert.equal(matches('service:other'), false);
+  assert.equal(matches('flag:x'), false);
   assert.equal(event.level, 'error');
   assert.equal(event.message, 'payment gateway timed out');
   assert.deepEqual(JSON.parse(datadogLine({ attributes: { message: 'bare' } }).line), { message: 'bare' });

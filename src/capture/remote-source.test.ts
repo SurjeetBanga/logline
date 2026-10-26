@@ -71,16 +71,20 @@ test('a fetch keeps the rows that match the whole search, oldest first, in a run
     },
   });
   assert.deepEqual(started, [info.sessionId]);
-  assert.deepEqual(requests, [
-    {
-      query: 'level:error /time.?out/',
-      fromMs: BASE,
-      toMs: BASE + 3600000,
-      limit: 300,
-      order: 'desc',
-      countTotal: true,
-    },
-  ]);
+  assert.equal(typeof requests[0].firstPage, 'function');
+  assert.deepEqual(
+    requests.map(({ firstPage: _, ...request }) => request),
+    [
+      {
+        query: 'level:error /time.?out/',
+        fromMs: BASE,
+        toMs: BASE + 3600000,
+        limit: 300,
+        order: 'desc',
+        countTotal: true,
+      },
+    ],
+  );
   assert.deepEqual(messages(), ['time out', 'timeout']);
   assert.deepEqual(
     store.all().map((event) => [event.serverId, event.server, event.stream, event.timestampMs]),
@@ -458,4 +462,54 @@ test('a tail of a query in the store’s syntax sends it as typed and keeps ever
   assert.deepEqual(remote.tailOf('app'), { query: 'service:(a OR b)', native: true });
   assert.equal(remote.last('app')?.native, true);
   await remote.dispose();
+});
+
+test('a search shows its first page early, then its rows in order, and says where the time went', async () => {
+  const { remote, target, store, messages, state } = setup({ datadogMaxRows: 4, connectionMaxRows: 300 });
+  const generation = state.generation;
+  let shownEarly: unknown[] = [];
+  const connector: RemoteConnector = {
+    async fetchLogs(request) {
+      assert.equal(request.limit, 4, 'the connection’s own row limit');
+      // Newest first: the first page, then the rest, which are older.
+      request.firstPage!([row(4, 'info', 'four'), row(3, 'info', 'three')]);
+      await new Promise((resolve) => setImmediate(resolve));
+      shownEarly = messages();
+      return result([row(4, 'info', 'four'), row(3, 'info', 'three'), row(2, 'info', 'two'), row(1, 'info', 'one')]);
+    },
+  };
+  const info = await remote.fetch(
+    { ...target(connector), maxRowsSetting: 'datadogMaxRows' },
+    { query: '', title: 'All' },
+  );
+  assert.deepEqual(shownEarly, ['three', 'four']);
+  assert.deepEqual(messages(), ['one', 'two', 'three', 'four'], 'oldest first, each once');
+  assert.equal(store.all().length, 4);
+  assert.equal(info.kept, 4);
+  assert.equal(typeof info.firstMs, 'number');
+  assert.equal(typeof info.processMs, 'number');
+  assert.ok(state.generation > generation, 'the view starts over with the run in order');
+});
+
+test('a newer search replaces one still running, and drops what it showed', async () => {
+  const { remote, target, registry, messages } = setup();
+  let release!: () => void;
+  const slow: RemoteConnector = {
+    async fetchLogs(request) {
+      request.firstPage?.([row(9, 'info', 'old')]);
+      await new Promise<void>((resolve) => (release = resolve));
+      return result([row(9, 'info', 'old')]);
+    },
+  };
+  const first = remote.fetch(target(slow), { query: '', title: 'Old' });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(messages(), ['old']);
+  const oldId = remote.last('app')!.sessionId;
+  remote.cancelFetches('app');
+  release();
+  await first;
+  assert.deepEqual(messages(), []);
+  assert.equal(registry.records.has(oldId), false);
+  await remote.fetch(target({ fetchLogs: async () => result([row(1, 'info', 'new')]) }), { query: '', title: 'New' });
+  assert.deepEqual(messages(), ['new']);
 });

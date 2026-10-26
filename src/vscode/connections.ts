@@ -297,6 +297,7 @@ export class ConnectionManager implements vscode.Disposable {
       sourceId: connectionSourceId(connection.id),
       label: connectionLabel(connection),
       connector: await this.connector(connection),
+      ...(connection.type === 'datadog' ? { maxRowsSetting: 'datadogMaxRows' } : {}),
     };
   }
 
@@ -435,6 +436,8 @@ export class ConnectionManager implements vscode.Disposable {
     const utc = this.config.get<string>('timezone', 'local') === 'utc';
     const time = (ms: number) =>
       utc ? new Date(ms).toISOString().slice(11, 19) : new Date(ms).toTimeString().slice(0, 8);
+    // A search still running is replaced by this one, rather than waited for.
+    this.remote.cancelFetches(connection.id);
     try {
       const info = await this.remote.fetch(await this.target(connection), {
         query,

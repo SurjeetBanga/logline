@@ -114,11 +114,21 @@ export function createConnectionBar(
           ? `Tail of ${following} interrupted: ${last.error}`
           : `Tailing ${following} · ${rows}`;
     }
-    if (last.running) return 'Fetching…';
+    if (last.running)
+      return last.firstMs !== undefined
+        ? `Showing the newest ${numbers.format(last.kept)} ${noun(connection, last.kept)} · reading the rest…`
+        : 'Fetching…';
     if (last.error) return `Failed: ${last.error}`;
     const of = last.total !== undefined && last.total > last.fetched ? ` of ${numbers.format(last.total)}` : '';
     const kept = last.kept < last.fetched ? ` · ${numbers.format(last.kept)} match the filter` : '';
-    const time = last.elapsedMs !== undefined ? ` · ${numbers.format(last.elapsedMs)} ms` : '';
+    // Where the time went: waiting for the store, or showing what it returned.
+    const store = connection.type === 'datadog' ? 'Datadog' : connection.language === 'mongo' ? 'MongoDB' : 'database';
+    const ms = (value: number) => `${numbers.format(value)} ms`;
+    const time = [
+      last.elapsedMs !== undefined ? ` · ${store} ${ms(last.elapsedMs)}` : '',
+      last.processMs !== undefined ? ` · shown in ${ms(last.processMs)}` : '',
+      last.firstMs !== undefined ? ` · first rows after ${ms(last.firstMs)}` : '',
+    ].join('');
     return `Fetched ${numbers.format(last.fetched)}${of} ${noun(connection, last.fetched)}${kept}${time} · read-only`;
   }
 
@@ -130,13 +140,16 @@ export function createConnectionBar(
       previewKey = '';
       return;
     }
-    const busy = connection.last?.running === true && connection.last.kind !== 'tail';
+    const busy = connection.last?.running === true && connection.last.kind === 'fetch';
     elements.connectionRange.value = state.connectionRange;
     elements.connectionRange.disabled = !connection.mapped;
-    elements.connectionRun.disabled = !connection.mapped || busy;
-    elements.connectionRun.title = connection.mapped
-      ? `Fetch the newest rows from ${connection.label} in this range that match the filter`
-      : 'Map a log table to search it; Run SQL works without one';
+    // Run while a search runs replaces it, so a changed filter need not wait for the old one.
+    elements.connectionRun.disabled = !connection.mapped;
+    elements.connectionRun.title = !connection.mapped
+      ? 'Map a log table to search it; Run SQL works without one'
+      : busy
+        ? 'Stop the search that is running, and fetch with this filter instead'
+        : `Fetch the newest rows from ${connection.label} in this range that match the filter`;
     elements.connectionTail.disabled = !connection.mapped;
     elements.connectionTail.setAttribute('aria-pressed', String(connection.tailing));
     // A tail follows the filter it started with; once the filter changes, Tail follows the new one instead.

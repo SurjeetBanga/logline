@@ -33,6 +33,11 @@ export interface FetchRequest {
   order: 'asc' | 'desc';
   /** Also count every matching row when the limit cuts the result short. */
   countTotal?: boolean;
+  /**
+   * Sees the first rows while more are still being read, so they can be shown sooner. A store that reads in
+   * pages calls it once, with a small first page, when the limit asks for more than that page holds.
+   */
+  firstPage?(records: RemoteRecord[]): void;
 }
 
 export interface FetchResult {

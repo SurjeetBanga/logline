@@ -345,5 +345,20 @@ export function getField(event: LogEvent, field: string): FieldValue {
     const value = readField(event, name);
     if (value !== undefined) return value;
   }
-  return undefined;
+  return tagValue(event, field);
+}
+
+/**
+ * A tag for a field the event does not have, such as `env` from `env:prod` in a Datadog log's `tags`, so
+ * `env:prod` filters as it does in Datadog. A tag given several times has its values joined with commas.
+ */
+function tagValue(event: LogEvent, field: string): string | undefined {
+  const tags = event.fields?.tags;
+  const prefix = `${field}:`;
+  if (typeof tags !== 'string' || !tags.includes(prefix)) return undefined;
+  let value: string | undefined;
+  for (const tag of tags.split(','))
+    if (tag.startsWith(prefix))
+      value = value === undefined ? tag.slice(prefix.length) : `${value},${tag.slice(prefix.length)}`;
+  return value;
 }

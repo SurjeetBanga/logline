@@ -3831,11 +3831,19 @@ test('a selected connection shows its range, Run, Tail and Run SQL, with the SQL
   snapshot({ connections: [{ ...connection, last }] });
   assert.equal(
     get('connectionResult').textContent,
-    'Fetched 500 of 4,800 rows · 12 match the filter · 38 ms · read-only',
+    'Fetched 500 of 4,800 rows · 12 match the filter · database 38 ms · read-only',
   );
   snapshot({ connections: [{ ...connection, last: { ...last, running: true } }] });
   assert.equal(get('connectionResult').textContent, 'Fetching…');
-  assert.equal(get('connectionRun').disabled, true);
+  assert.equal(get('connectionRun').disabled, false, 'Run replaces a search that is running');
+  assert.match(get('connectionRun').title, /^Stop the search that is running/);
+  snapshot({ connections: [{ ...connection, last: { ...last, running: true, firstMs: 300, kept: 200 } }] });
+  assert.equal(get('connectionResult').textContent, 'Showing the newest 200 rows · reading the rest…');
+  snapshot({ connections: [{ ...connection, last: { ...last, processMs: 9, firstMs: 300 } }] });
+  assert.equal(
+    get('connectionResult').textContent,
+    'Fetched 500 of 4,800 rows · 12 match the filter · database 38 ms · shown in 9 ms · first rows after 300 ms · read-only',
+  );
   snapshot({ connections: [{ ...connection, last: { ...last, error: 'no such table: app_logs' } }] });
   assert.equal(get('connectionResult').textContent, 'Failed: no such table: app_logs');
   assert.equal(get('connectionResult').classList.contains('connection-error'), true);
@@ -4123,7 +4131,7 @@ test('a Datadog connection offers Open link instead of Run SQL, and speaks of lo
   assert.deepEqual(plain(messages.at(-1)), { type: 'connectionLink', connectionId: 'prod' });
   const last = { sessionId: 's', kind: 'fetch', running: false, fetched: 1, kept: 1, local: [], at: 0, elapsedMs: 80 };
   snapshot({ connections: [{ ...connection, last }] });
-  assert.equal(get('connectionResult').textContent, 'Fetched 1 log · 80 ms · read-only');
+  assert.equal(get('connectionResult').textContent, 'Fetched 1 log · Datadog 80 ms · read-only');
 });
 
 test('a metric query is charted, and a window dragged across it shows the logs from then', () => {

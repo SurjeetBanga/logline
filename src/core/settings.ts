@@ -15,6 +15,7 @@ const LIMITS: Record<string, [number, number]> = {
   'otlp.port': [0, 65535],
   logLensMaxFiles: [100, 50000],
   connectionMaxRows: [100, 50000],
+  datadogMaxRows: [100, 50000],
   connectionPollSeconds: [1, 300],
   connectionTimeoutSeconds: [1, 300],
 };
@@ -26,6 +27,7 @@ const INTEGERS = new Set([
   'otlp.port',
   'logLensMaxFiles',
   'connectionMaxRows',
+  'datadogMaxRows',
   'connectionPollSeconds',
   'connectionTimeoutSeconds',
 ]);

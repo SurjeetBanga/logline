@@ -3536,11 +3536,18 @@ Span ${call.spanId}`;
         const following = last.query?.trim() || "all logs";
         return !last.running ? `Tail of ${following} stopped \xB7 ${rows}` : last.error ? `Tail of ${following} interrupted: ${last.error}` : `Tailing ${following} \xB7 ${rows}`;
       }
-      if (last.running) return "Fetching\u2026";
+      if (last.running)
+        return last.firstMs !== void 0 ? `Showing the newest ${numbers.format(last.kept)} ${noun2(connection, last.kept)} \xB7 reading the rest\u2026` : "Fetching\u2026";
       if (last.error) return `Failed: ${last.error}`;
       const of = last.total !== void 0 && last.total > last.fetched ? ` of ${numbers.format(last.total)}` : "";
       const kept = last.kept < last.fetched ? ` \xB7 ${numbers.format(last.kept)} match the filter` : "";
-      const time = last.elapsedMs !== void 0 ? ` \xB7 ${numbers.format(last.elapsedMs)} ms` : "";
+      const store = connection.type === "datadog" ? "Datadog" : connection.language === "mongo" ? "MongoDB" : "database";
+      const ms = (value) => `${numbers.format(value)} ms`;
+      const time = [
+        last.elapsedMs !== void 0 ? ` \xB7 ${store} ${ms(last.elapsedMs)}` : "",
+        last.processMs !== void 0 ? ` \xB7 shown in ${ms(last.processMs)}` : "",
+        last.firstMs !== void 0 ? ` \xB7 first rows after ${ms(last.firstMs)}` : ""
+      ].join("");
       return `Fetched ${numbers.format(last.fetched)}${of} ${noun2(connection, last.fetched)}${kept}${time} \xB7 read-only`;
     }
     function render() {
@@ -3551,11 +3558,11 @@ Span ${call.spanId}`;
         previewKey = "";
         return;
       }
-      const busy = connection.last?.running === true && connection.last.kind !== "tail";
+      const busy = connection.last?.running === true && connection.last.kind === "fetch";
       elements.connectionRange.value = state.connectionRange;
       elements.connectionRange.disabled = !connection.mapped;
-      elements.connectionRun.disabled = !connection.mapped || busy;
-      elements.connectionRun.title = connection.mapped ? `Fetch the newest rows from ${connection.label} in this range that match the filter` : "Map a log table to search it; Run SQL works without one";
+      elements.connectionRun.disabled = !connection.mapped;
+      elements.connectionRun.title = !connection.mapped ? "Map a log table to search it; Run SQL works without one" : busy ? "Stop the search that is running, and fetch with this filter instead" : `Fetch the newest rows from ${connection.label} in this range that match the filter`;
       elements.connectionTail.disabled = !connection.mapped;
       elements.connectionTail.setAttribute("aria-pressed", String(connection.tailing));
       const retarget = retargets(connection);

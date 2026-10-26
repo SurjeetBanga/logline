@@ -15,6 +15,9 @@ All notable changes to Logline are documented in this file.
 - **Datadog syntax**: type a query in Datadog's own syntax, which **Run** and **Tail** send as typed; the search box then only narrows what is shown.
 - **Remove** on **All runs** drops every finished run of a source at once.
 - A Datadog tail of every log, with no filter, asks first.
+- **`logline.datadogMaxRows`** (default 1,000) limits the logs one Datadog search, or one tail read, fetches; `logline.connectionMaxRows` now applies to databases only.
+- A connection's result line says where a search's time went: how long the database or Datadog took to answer, how long Logline took to show the rows, and when the first rows appeared.
+- Pressing **Run** while a connection search is running replaces it, instead of waiting for it to finish.
 
 ### Fixes
 
@@ -23,6 +26,7 @@ All notable changes to Logline are documented in this file.
 - Color codes in Datadog log messages are removed instead of shown as `[37;1m`.
 - A Datadog tail reads back only as far as Datadog has been late to make logs searchable, at least 15 seconds, instead of a whole minute on every read, so a busy tail downloads far fewer logs it already showed.
 - Fetched Datadog logs are turned into events faster.
+- A Datadog search shows its newest 200 logs as soon as they arrive, while it reads the rest.
 
 ## 1.17.0 — 2026-10-25
 

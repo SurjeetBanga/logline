@@ -14,6 +14,8 @@ export interface RemoteTarget {
   sourceId: string;
   label: string;
   connector: RemoteConnector;
+  /** The setting that limits the rows one search or tail read fetches, when not `connectionMaxRows`. */
+  maxRowsSetting?: string;
 }
 
 /** What the latest fetch from a connection did, for the Logs panel's result line. */
@@ -26,7 +28,11 @@ export interface RemoteRunInfo {
   kept: number;
   /** Matching rows in the range, when the limit cut the result short. */
   total?: number;
+  /** How long the store took to answer, and how long Logline took to show what it returned. */
   elapsedMs?: number;
+  processMs?: number;
+  /** How long after the search started its first rows were shown, when they came before the rest. */
+  firstMs?: number;
   local: string[];
   statement?: string;
   /** What a tail follows, as typed. */
@@ -126,8 +132,10 @@ export class RemoteSource {
     return run && { query: run.native ?? run.query!, native: run.native !== undefined };
   }
 
-  private limit(): number {
-    return this.config.get('connectionMaxRows', 5000);
+  private limit(target: RemoteTarget): number {
+    return target.maxRowsSetting
+      ? this.config.get(target.maxRowsSetting, 1000)
+      : this.config.get('connectionMaxRows', 5000);
   }
 
   private start(target: RemoteTarget, kind: RemoteRunInfo['kind'], title: string): Run {
@@ -166,12 +174,22 @@ export class RemoteSource {
     this.state.status = `Fetching from ${target.label}…`;
     this.state.notify();
     options.started?.(run.record.id);
+    const started = Date.now();
+    const filter = options.sql === undefined && options.native === undefined ? rowFilter(options.query) : undefined;
+    // The first rows of a store that reads in pages are shown while it reads the rest.
+    let early: Promise<void> | undefined;
+    const firstPage = (records: RemoteRecord[]) => {
+      if (run.stopped) return;
+      run.info.firstMs = Date.now() - started;
+      run.info.fetched = records.length;
+      early = this.timed(run, () => this.ingest(run, [...records].reverse(), filter));
+    };
     try {
       const connector = target.connector;
       let result: FetchResult;
       if (options.sql !== undefined) {
         if (!connector.runSql) throw new Error(`${target.label} does not run SQL.`);
-        result = await connector.runSql(options.sql, this.limit(), run.abort.signal);
+        result = await connector.runSql(options.sql, this.limit(target), run.abort.signal);
       } else
         result = await connector.fetchLogs(
           {
@@ -179,13 +197,23 @@ export class RemoteSource {
             ...(options.native !== undefined ? { native: options.native } : {}),
             fromMs: options.fromMs,
             toMs: options.toMs,
-            limit: Math.min(options.limit ?? Infinity, this.limit()),
+            limit: Math.min(options.limit ?? Infinity, this.limit(target)),
             order: 'desc',
             countTotal: true,
+            firstPage,
           },
           run.abort.signal,
         );
       if (run.stopped) return run.info;
+      if (early) {
+        // The rest are older than the first rows: the run is filled again, oldest first, so its rows stay in order.
+        await early;
+        if (run.stopped) return run.info;
+        this.ingestion.store.removeSessions(new Set([run.record.id]));
+        run.record.events = 0;
+        run.info.kept = 0;
+        this.state.invalidate();
+      }
       options.inspect?.(result.records);
       Object.assign(run.info, {
         fetched: result.records.length,
@@ -196,8 +224,7 @@ export class RemoteSource {
       });
       // A search returns the newest rows first; they enter oldest first. Typed SQL keeps its own order.
       const records = options.sql === undefined ? [...result.records].reverse() : result.records;
-      const filter = options.sql === undefined && options.native === undefined ? rowFilter(options.query) : undefined;
-      await this.ingest(run, records, filter);
+      await this.timed(run, () => this.ingest(run, records, filter));
       this.finish(run, run.stopped ? 'stopped' : `${run.info.kept.toLocaleString()} rows`);
       this.state.status = `Fetched ${run.info.kept.toLocaleString()} rows from ${target.label}`;
     } catch (error) {
@@ -270,7 +297,7 @@ export class RemoteSource {
     // A store that makes logs searchable late is read from further back.
     const lag = this.lagMs(run);
     const fromMs = run.catchUp ?? run.watermark! - lag;
-    const limit = this.limit();
+    const limit = this.limit(run.target);
     const native = run.native !== undefined ? { native: run.native } : {};
     const result = await run.target.connector.fetchLogs(
       first
@@ -326,6 +353,13 @@ export class RemoteSource {
     const most = run.target.connector.tailLagMs ?? 0;
     if (!most || (run.late?.length ?? 0) < LAG_READS) return most;
     return Math.min(most, Math.max(LAG_FLOOR_MS, 2 * Math.max(...run.late!)));
+  }
+
+  /** Ingest, adding the time it took to the run's processing time. */
+  private async timed(run: Run, ingest: () => Promise<void>): Promise<void> {
+    const started = Date.now();
+    await ingest();
+    run.info.processMs = (run.info.processMs ?? 0) + Date.now() - started;
   }
 
   private async ingest(run: Run, records: RemoteRecord[], filter: ParsedQuery | undefined): Promise<void> {
@@ -385,6 +419,23 @@ export class RemoteSource {
   /** Forget the results of finished runs, whose rows Clear logs removed; running tails keep theirs. */
   clearResults(): void {
     for (const [id, info] of this.latest) if (!info.running) this.latest.delete(id);
+  }
+
+  /**
+   * Stop a connection's searches that are still running and drop the rows they showed, since a newer search
+   * replaces them. Tails go on.
+   */
+  cancelFetches(connectionId: string): void {
+    const replaced = new Set<string>();
+    for (const run of [...this.runs.values()])
+      if (run.target.id === connectionId && run.info.kind === 'fetch') {
+        this.halt(run);
+        replaced.add(run.record.id);
+      }
+    if (!replaced.size) return;
+    this.ingestion.store.removeSessions(replaced);
+    for (const id of replaced) this.registry.records.delete(id);
+    this.state.invalidate();
   }
 
   /** A finished run was removed: its connection no longer reports it as the latest. */
