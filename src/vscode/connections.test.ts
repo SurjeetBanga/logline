@@ -8,6 +8,7 @@ import { Ingestion } from '../capture/ingestion';
 import { RemoteSource } from '../capture/remote-source';
 import { RuntimeState } from '../capture/runtime-state';
 import { SessionRegistry } from '../capture/session-registry';
+import { emptyDraft, type FormDraft } from '../core/connection-form';
 import { normalizeConnections, secretKey, type PostgresConnection } from '../core/connections';
 import { LogStore } from '../core/log-store';
 import { startFakeDatadog } from '../test/fake-datadog';
@@ -29,6 +30,46 @@ let trusted = true;
 let folder = tmpdir();
 const raw: { workspace?: unknown[]; global?: unknown[] } = {};
 const updates: { value: unknown[]; target: number }[] = [];
+type Posted = { type: string; [key: string]: any };
+
+/** The Connection form's tab: what the extension posts to it, and messages sent as the form would. */
+/** The Connection form in the Logs panel: what the extension answers it, and messages sent as the form would. */
+class FakePanel {
+  posted: Posted[] = [];
+  /** The form's tab closed: saved, cancelled, or replaced. */
+  disposed = false;
+  constructor(
+    readonly open: { session: number; title: string; focus: boolean },
+    private readonly deliver: (session: number, message: unknown, reply: (update: Posted) => void) => Promise<void>,
+  ) {}
+  /** Send a message the form would, without waiting for an answer. */
+  post(message: object) {
+    void this.deliver(this.open.session, message, (update) => {
+      this.posted.push(update);
+      if (update.type === 'close') this.disposed = true;
+    });
+  }
+  /** Send a message and wait for the answer of `until`'s type; `saved` waits for the tab to close or the save to fail. */
+  async send(message: object, until: string): Promise<Posted> {
+    const start = this.posted.length;
+    this.post(message);
+    const deadline = Date.now() + 10000;
+    for (;;) {
+      const answers = this.posted.slice(start);
+      const found =
+        until === 'saved'
+          ? this.disposed
+            ? { type: 'saved' }
+            : answers.find((item) => item.type === 'saveFailed')
+          : answers.find((item) => item.type === until);
+      if (found) return found;
+      if (Date.now() > deadline) throw new Error(`The form got no ${until}`);
+      await new Promise((resolve) => setTimeout(resolve, 2));
+    }
+  }
+}
+const panels: FakePanel[] = [];
+
 const mock = {
   ConfigurationTarget: { Global: 1, Workspace: 2, WorkspaceFolder: 3 },
   ProgressLocation: { Notification: 15 },
@@ -104,8 +145,28 @@ function setup() {
       get: <T>(key: string, fallback?: T) => (memento.has(key) ? memento.get(key) : fallback) as T,
       update: async (key: string, value: unknown) => void memento.set(key, value),
     },
+    // The Logs panel shows each form opened as a tab.
+    async (open, focus) => {
+      // Opening focuses the panel; showing the open form again in a new view does not add a form.
+      if (focus)
+        panels.push(
+          new FakePanel({ ...open, focus }, (session, message, reply) => manager.formRequest(session, message, reply)),
+        );
+    },
   );
   return { store, registry, remote, manager, secrets, shown, memento, settings };
+}
+
+const draft = (fields: Partial<FormDraft> & Pick<FormDraft, 'type'>): FormDraft => ({
+  ...emptyDraft(fields.type),
+  ...fields,
+});
+
+/** Open the form to add a connection, and wait for it to be filled in. */
+async function openForm(manager: { add(): Promise<void> }): Promise<{ panel: FakePanel; init: Posted }> {
+  await manager.add();
+  const panel = panels.at(-1)!;
+  return { panel, init: await panel.send({ type: 'ready' }, 'init') };
 }
 
 function reset() {
@@ -163,24 +224,45 @@ test('Postgres connection URLs are read without keeping the password in settings
 });
 
 test(
-  'adding a SQLite connection tests it, maps its log table, and saves it relative to the workspace',
+  'adding a SQLite connection tests it, previews its log table, and saves it relative to the workspace',
   { skip: !hasSqlite },
   async () => {
     reset();
     ui.file = workspaceDatabase();
     const { manager, shown } = setup();
-    ui.picks.push(
-      pick('SQLite'),
-      pick('app_logs'),
-      // Change the suggested service column, then confirm.
-      pick('Service'),
-      pick('user_id'),
-      pick('Service'),
-      pick('None'),
-      pick(/Use these columns/),
+    const { panel, init } = await openForm(manager);
+    assert.equal(init.mode, 'add');
+    assert.equal(init.secret, false);
+    // Browse saves a file inside the workspace relative to it.
+    assert.deepEqual(await panel.send({ type: 'browse' }, 'file'), { type: 'file', path: 'app.db', outside: false });
+    const form = draft({ type: 'sqlite', path: 'app.db', label: 'App DB' });
+    // Saving before a test is refused.
+    assert.match(
+      (await panel.send({ type: 'save', draft: form, mapping: null }, 'saved')).error,
+      /Test the connection/,
     );
-    ui.inputs.push('App DB');
-    await manager.add();
+    const tested = await panel.send({ type: 'test', draft: form }, 'tested');
+    assert.equal(tested.ok, true);
+    assert.match(tested.detail, /^SQLite [\d.]+ · 1 table$/);
+    assert.deepEqual(tested.tables, ['app_logs']);
+    const columns = await panel.send({ type: 'table', table: 'app_logs' }, 'columns');
+    assert.deepEqual(columns.suggested, { timestamp: 'created_at', level: 'severity', message: 'msg' });
+    assert.equal(columns.rows.length, 4);
+    assert.equal(columns.rows[0].user_id, '42', 'sample values reach the form as text');
+    // A column the table does not have is dropped; a mapping without its time is refused.
+    const refused = await panel.send(
+      { type: 'save', draft: form, mapping: { table: 'app_logs', timestamp: 'nope' } },
+      'saved',
+    );
+    assert.match(refused.error, /time column/);
+    await panel.send(
+      {
+        type: 'save',
+        draft: form,
+        mapping: { table: 'app_logs', timestamp: 'created_at', level: 'severity', message: 'msg', service: 'nope' },
+      },
+      'saved',
+    );
     assert.deepEqual(updates, [
       {
         value: [
@@ -198,24 +280,34 @@ test(
     assert.deepEqual(shown, ['conn:app-db']);
     assert.match(ui.messages.at(-1)!, /Added SQLite · App DB\. Pick a time range and press Run/);
     // A second connection with the same name gets its own id, and without a table it only runs SQL.
-    ui.picks.push(pick('SQLite'), pick('No log table'));
-    ui.inputs.push('App DB');
-    await manager.add();
+    const second = (await openForm(manager)).panel;
+    await second.send({ type: 'test', draft: form }, 'tested');
+    await second.send({ type: 'save', draft: form, mapping: null }, 'saved');
     assert.deepEqual(raw.workspace?.[1], { id: 'app-db-2', label: 'App DB', type: 'sqlite', path: 'app.db' });
+    assert.match(ui.messages.at(-1)!, /Use Run SQL in the Logs panel/);
     manager.dispose();
   },
 );
 
-test('a connection that cannot be reached is reported and not saved', async () => {
+test('a connection that cannot be reached is reported in the form, keeps what was typed, and is not saved', async () => {
   reset();
   const { manager, secrets } = setup();
-  ui.picks.push(pick('Postgres'));
-  // Built at runtime: a URL with a password in it looks like a leaked credential to secret scanners.
-  ui.inputs.push(['postgres://dev', 'pw@127.0.0.1:1/orders'].join(':'));
-  await manager.add();
+  const { panel } = await openForm(manager);
+  const form = draft({ type: 'postgres', host: '127.0.0.1', port: '1', user: 'dev', database: 'orders', label: 'o' });
+  // Built at runtime: a password next to a URL looks like a leaked credential to secret scanners.
+  form.password = ['p', 'w'].join('');
+  const tested = await panel.send({ type: 'test', draft: form }, 'tested');
+  assert.equal(tested.ok, false);
+  assert.match(tested.error, /ECONNREFUSED/);
+  assert.equal(panel.disposed, false, 'the form stays open to fix and test again');
+  assert.match((await panel.send({ type: 'save', draft: form, mapping: null }, 'saved')).error, /Test the connection/);
+  // An incomplete draft is answered with what is missing, without connecting.
+  const incomplete = await panel.send({ type: 'test', draft: { ...form, user: '' } }, 'tested');
+  assert.deepEqual(incomplete, { type: 'tested', ok: false, error: 'Enter the user to sign in as' });
   assert.equal(updates.length, 0);
   assert.equal(secrets.size, 0);
-  assert.match(ui.messages.at(-1)!, /^error: Could not connect: .*ECONNREFUSED/);
+  panel.post({ type: 'cancel' });
+  assert.equal(panel.disposed, true);
   manager.dispose();
 });
 
@@ -446,9 +538,14 @@ test('a Datadog connection is added with its keys, searched, and opened from a l
   });
   try {
     const { manager, store, secrets, shown, registry } = setup();
-    ui.picks.push(pick('Datadog'), pick('Other…'), pick('API and application keys'));
-    ui.inputs.push(fake.url, apiKey, appKey, 'prod');
-    await manager.add();
+    const { panel, init } = await openForm(manager);
+    assert.ok(init.sites.includes('datadoghq.eu'));
+    const form = draft({ type: 'datadog', site: fake.url, apiKey, appKey, label: 'prod' });
+    // Keys are required to add one.
+    const missing = await panel.send({ type: 'test', draft: { ...form, appKey: '' } }, 'tested');
+    assert.deepEqual(missing, { type: 'tested', ok: false, error: 'Enter an application key' });
+    assert.equal((await panel.send({ type: 'test', draft: form }, 'tested')).ok, true);
+    await panel.send({ type: 'save', draft: form, mapping: null }, 'saved');
     assert.deepEqual(raw.workspace, [{ id: 'prod', label: 'prod', type: 'datadog', site: fake.url }]);
     assert.deepEqual(JSON.parse(secrets.get(`logline.connection.datadog:${fake.url}`)!), { apiKey, appKey });
     assert.deepEqual(shown, ['conn:prod']);
@@ -508,14 +605,16 @@ test('a Datadog connection is added with its keys, searched, and opened from a l
   }
 });
 
-test('a Datadog site that cannot be reached is reported and not saved', async () => {
+test('a Datadog site that cannot be reached is reported in the form and not saved', async () => {
   reset();
   const { manager } = setup();
-  ui.picks.push(pick('Datadog'), pick('Other…'), pick('Access token'));
-  ui.inputs.push('http://127.0.0.1:1', 'a-token');
-  await manager.add();
+  const { panel } = await openForm(manager);
+  const form = draft({ type: 'datadog', site: 'http://127.0.0.1:1', keyKind: 'token', token: 'a-token', label: 'x' });
+  const tested = await panel.send({ type: 'test', draft: form }, 'tested');
+  assert.equal(tested.ok, false);
+  assert.match(tested.error, /Could not reach Datadog/);
   assert.equal(updates.length, 0);
-  assert.match(ui.messages.at(-1)!, /^error: Could not connect: Could not reach Datadog/);
+  manager.dispose();
 });
 
 test('metric queries, name suggestions, watches, and windowed fetches go through the connection', async () => {
@@ -693,9 +792,21 @@ test('adding Aurora MySQL with an IAM token stores no password, and searches run
       close: async () => undefined,
     };
   };
-  ui.picks.push(pick('MySQL'), pick('AWS IAM token'), pick('Default credentials'), pick('app_logs'), pick(/Use these/));
-  ui.inputs.push('mysql://app@billing.cluster-c9.us-east-1.rds.amazonaws.com/billing', 'Billing');
-  await manager.add();
+  const { panel } = await openForm(manager);
+  const form = draft({
+    type: 'mysql',
+    host: 'billing.cluster-c9.us-east-1.rds.amazonaws.com',
+    port: '3306',
+    user: 'app',
+    database: 'billing',
+    auth: 'iam',
+    label: 'Billing',
+  });
+  const tested = await panel.send({ type: 'test', draft: form }, 'tested');
+  assert.deepEqual(tested, { type: 'tested', ok: true, detail: 'MySQL 8.0.36 · 1 table', tables: ['app_logs'] });
+  const columns = await panel.send({ type: 'table', table: 'app_logs' }, 'columns');
+  assert.deepEqual(columns.rows, [{ created_at: at, severity: 'ERROR', msg: 'payment gateway timed out' }]);
+  await panel.send({ type: 'save', draft: form, mapping: { table: 'app_logs', ...columns.suggested } }, 'saved');
   assert.deepEqual(raw.workspace, [
     {
       id: 'billing',
@@ -711,11 +822,11 @@ test('adding Aurora MySQL with an IAM token stores no password, and searches run
     },
   ]);
   assert.equal(secrets.size, 0, 'an IAM connection keeps no secret');
-  assert.deepEqual(passwords, [undefined]);
+  assert.deepEqual(passwords, [undefined], 'the IAM connection was opened once, by the test');
   assert.match(ui.messages.at(-1)!, /Added MySQL · Billing/);
 
   await manager.fetch('billing', 'level:error', '1h');
-  const search = queries.find((sql) => sql.startsWith('SELECT * FROM `app_logs`'))!;
+  const search = queries.find((sql) => sql.startsWith('SELECT * FROM `app_logs` WHERE'))!;
   assert.match(
     search,
     /WHERE `created_at` BETWEEN \? AND \? AND LOWER\(CAST\(`severity` AS CHAR\)\) LIKE \? ESCAPE '!'/,
@@ -725,9 +836,18 @@ test('adding Aurora MySQL with an IAM token stores no password, and searches run
     'the fetched row is a log event',
   );
   // A host outside AWS signs in with a password, which is kept in secret storage.
-  ui.picks.push(pick('MySQL'), pick('No log table'));
-  ui.inputs.push('mysql://reader@db.local/billing', 'pw', 'Local billing');
-  await manager.add();
+  const local = (await openForm(manager)).panel;
+  const localForm = draft({
+    type: 'mysql',
+    host: 'db.local',
+    port: '3306',
+    user: 'reader',
+    database: 'billing',
+    password: 'pw',
+    label: 'Local billing',
+  });
+  await local.send({ type: 'test', draft: localForm }, 'tested');
+  await local.send({ type: 'save', draft: localForm, mapping: null }, 'saved');
   assert.equal(secrets.get('logline.connection.mysql://reader@db.local:3306/billing'), 'pw');
   assert.match(ui.messages.at(-1)!, /Use Run SQL in the Logs panel/);
   manager.dispose();
@@ -737,25 +857,33 @@ test('adding MongoDB moves the password out of the URL and can use _id as the ti
   reset();
   const { manager, secrets } = setup();
   let password: string | undefined;
-  (manager as unknown as { probe: (connection: unknown, password?: string) => Promise<unknown> }).probe = async (
-    _connection,
-    given,
-  ) => {
-    password = given;
-    return {
-      test: async () => 'MongoDB 7.0.4 · 1 collection',
-      tables: async () => ['events'],
-      columns: async () => [
-        { name: '_id', type: 'objectId' },
-        { name: 'level', type: 'string' },
-        { name: 'msg', type: 'string' },
-      ],
-      dispose: async () => undefined,
+  (manager as unknown as { probe: (connection: unknown, secret: { password?: string }) => Promise<unknown> }).probe =
+    async (_connection, given) => {
+      password = given.password;
+      return {
+        test: async () => 'MongoDB 7.0.4 · 1 collection',
+        tables: async () => ['events'],
+        columns: async () => [
+          { name: '_id', type: 'objectId' },
+          { name: 'level', type: 'string' },
+          { name: 'msg', type: 'string' },
+        ],
+        dispose: async () => undefined,
+      };
     };
-  };
-  ui.picks.push(pick('MongoDB'), pick('events'), pick(/Use these/));
-  ui.inputs.push(['mongodb+srv://reader', 'p%40ss@cluster0.example.net/app'].join(':'), 'Events');
-  await manager.add();
+  const { panel } = await openForm(manager);
+  // The form moves a password out of a pasted URL; here it arrives as typed.
+  const form = draft({
+    type: 'mongodb',
+    url: 'mongodb+srv://reader@cluster0.example.net/app',
+    password: ['p', 'ss'].join('@'),
+    label: 'Events',
+  });
+  assert.equal((await panel.send({ type: 'test', draft: form }, 'tested')).ok, true);
+  const columns = await panel.send({ type: 'table', table: 'events' }, 'columns');
+  assert.deepEqual(columns.suggested, { timestamp: '_id', level: 'level', message: 'msg' });
+  assert.deepEqual(columns.rows, [], 'a probe without sample rows previews none');
+  await panel.send({ type: 'save', draft: form, mapping: { table: 'events', ...columns.suggested } }, 'saved');
   assert.equal(password, 'p@ss');
   assert.deepEqual(raw.workspace, [
     {
@@ -768,10 +896,288 @@ test('adding MongoDB moves the password out of the URL and can use _id as the ti
     },
   ]);
   assert.equal(secrets.get('logline.connection.mongodb://reader@cluster0.example.net/app'), 'p@ss');
-  // A URL without the database is refused at the prompt, so nothing is added.
-  ui.picks.push(pick('MongoDB'));
-  ui.inputs.push('mongodb://reader@db');
-  await manager.add();
+  // A URL without the database is refused by the form, so nothing is added.
+  const second = (await openForm(manager)).panel;
+  const refused = await second.send(
+    { type: 'test', draft: draft({ type: 'mongodb', url: 'mongodb://reader@db' }) },
+    'tested',
+  );
+  assert.deepEqual(refused, {
+    type: 'tested',
+    ok: false,
+    error: 'Enter the database, here or at the end of the URL, such as …/app',
+  });
   assert.equal(raw.workspace?.length, 1);
+  manager.dispose();
+});
+
+test('editing a connection replaces it where it is kept, and keeps its id and saved password', async () => {
+  reset();
+  const saved = {
+    id: 'orders',
+    label: 'orders',
+    type: 'postgres',
+    host: 'db.local',
+    port: 5432,
+    database: 'orders',
+    user: 'dev',
+    logs: { table: 'events', timestamp: 'at', timestampFormat: 'epoch_ms' },
+  };
+  raw.global = [saved, { id: 'other', label: 'other', type: 'sqlite', path: 'x.db' }];
+  const { manager, secrets } = setup();
+  const password = ['old', 'secret'].join('-');
+  secrets.set('logline.connection.postgres://dev@db.local:5432/orders', password);
+  const opened: (string | undefined)[] = [];
+  (manager as unknown as { probe: (connection: unknown, secret: { password?: string }) => Promise<unknown> }).probe =
+    async (_connection, secret) => {
+      opened.push(secret.password);
+      return {
+        test: async () => 'Postgres 16.2 · 1 table',
+        tables: async () => ['events'],
+        columns: async () => [
+          { name: 'at', type: 'bigint' },
+          { name: 'lvl', type: 'text' },
+        ],
+        sample: async () => [{ at: 1, lvl: 'warn' }],
+        dispose: async () => undefined,
+      };
+    };
+  await manager.edit('orders');
+  const panel = panels.at(-1)!;
+  const init = await panel.send({ type: 'ready' }, 'init');
+  assert.equal(init.mode, 'edit');
+  assert.equal(init.secret, true);
+  assert.deepEqual(init.mapping, saved.logs);
+  assert.equal(init.draft.password, '', 'the saved password never reaches the form');
+  assert.equal(init.draft.host, 'db.local');
+  const form = { ...init.draft, label: 'Orders (prod)' };
+  // Another type is refused: an edited connection keeps its type.
+  const refused = await panel.send({ type: 'test', draft: { ...form, type: 'mysql' } }, 'tested');
+  assert.equal(refused.ok, false, 'the form always gets an answer, so it never waits on Testing…');
+  assert.match((await panel.send({ type: 'save', draft: { ...form, type: 'mysql' } }, 'saved')).error, /another type/);
+  assert.deepEqual(opened, [], 'nothing was opened for the refused draft');
+  await panel.send({ type: 'test', draft: form }, 'tested');
+  assert.deepEqual(opened, [password], 'an empty password field tests with the saved one');
+  await panel.send({ type: 'table', table: 'events' }, 'columns');
+  // A change after the test needs a new test; a new name does not.
+  const changed = await panel.send(
+    { type: 'save', draft: { ...form, database: 'orders2' }, mapping: { table: 'events', timestamp: 'at' } },
+    'saved',
+  );
+  assert.match(changed.error, /changed since the last test/);
+  await panel.send({ type: 'save', draft: form, mapping: { table: 'events', timestamp: 'at', level: 'lvl' } }, 'saved');
+  assert.deepEqual(updates, [
+    {
+      value: [
+        {
+          id: 'orders',
+          label: 'Orders (prod)',
+          type: 'postgres',
+          host: 'db.local',
+          port: 5432,
+          database: 'orders',
+          user: 'dev',
+          // A time format set by hand stays while the time column does.
+          logs: { table: 'events', timestamp: 'at', level: 'lvl', timestampFormat: 'epoch_ms' },
+        },
+        { id: 'other', label: 'other', type: 'sqlite', path: 'x.db' },
+      ],
+      target: 1,
+    },
+  ]);
+  assert.equal(secrets.get('logline.connection.postgres://dev@db.local:5432/orders'), password);
+  assert.match(ui.messages.at(-1)!, /^info: Saved Postgres · Orders \(prod\)\.$/);
+  manager.dispose();
+});
+
+test('an edit uses the saved password only for its own server, and can forget it', async () => {
+  reset();
+  raw.global = [
+    { id: 'orders', label: 'orders', type: 'postgres', host: 'db.local', port: 5432, database: 'orders', user: 'dev' },
+  ];
+  const { manager, secrets } = setup();
+  const key = 'logline.connection.postgres://dev@db.local:5432/orders';
+  secrets.set(key, ['old', 'secret'].join('-'));
+  const opened: (string | undefined)[] = [];
+  (manager as unknown as { probe: (connection: unknown, secret: { password?: string }) => Promise<unknown> }).probe =
+    async (_connection, secret) => {
+      opened.push(secret.password);
+      return {
+        test: async () => 'ok',
+        tables: async () => ['events'],
+        columns: async () => [{ name: 'at', type: 'timestamp' }],
+        sample: async () => {
+          throw new Error('permission denied for column secret');
+        },
+        dispose: async () => undefined,
+      };
+    };
+  await manager.edit('orders');
+  const panel = panels.at(-1)!;
+  const init = await panel.send({ type: 'ready' }, 'init');
+  assert.equal(init.secretKey, key);
+  await panel.send({ type: 'test', draft: { ...init.draft, host: 'other.local' } }, 'tested');
+  assert.deepEqual(opened, [undefined], 'another server does not get the saved password');
+  // A preview that cannot be read still lists the columns to map.
+  const columns = await panel.send({ type: 'table', table: 'events' }, 'columns');
+  assert.deepEqual(columns.columns, [{ name: 'at', type: 'timestamp' }]);
+  assert.equal(columns.previewError, 'permission denied for column secret');
+  const forget = { ...init.draft, forgetSecret: true };
+  await panel.send({ type: 'test', draft: forget }, 'tested');
+  assert.deepEqual(opened, [undefined, undefined], 'a forgotten password is not used');
+  await panel.send({ type: 'save', draft: forget, mapping: null }, 'saved');
+  assert.equal(secrets.has(key), false);
+  manager.dispose();
+});
+
+test('removing the connection a form edits closes the form, and removing another keeps it', async () => {
+  reset();
+  raw.global = [
+    { id: 'orders', label: 'orders', type: 'sqlite', path: 'orders.db' },
+    { id: 'other', label: 'other', type: 'sqlite', path: 'x.db' },
+  ];
+  const { manager } = setup();
+  await manager.edit('orders');
+  const panel = panels.at(-1)!;
+  assert.equal((panel.open as { connectionId?: string }).connectionId, 'orders', 'the rail marks the one edited');
+  await panel.send({ type: 'ready' }, 'init');
+  ui.modal = 'Remove';
+  await manager.remove('other');
+  assert.equal(panel.disposed, false);
+  await manager.remove('orders');
+  assert.equal(panel.disposed, true);
+  manager.dispose();
+});
+
+/** A connection whose test always passes, and whose columns arrive when `release` is called. */
+function stubProbe(manager: object, opened: unknown[] = []) {
+  const pending: (() => void)[] = [];
+  (manager as { probe: (connection: unknown) => Promise<unknown> }).probe = async (connection) => {
+    opened.push(connection);
+    return {
+      test: async () => 'ok',
+      tables: async () => ['events'],
+      columns: () => new Promise((resolve) => pending.push(() => resolve([{ name: 'at', type: 'bigint' }]))),
+      sample: async () => [],
+      dispose: async () => undefined,
+    };
+  };
+  return { release: () => pending.shift()?.() };
+}
+
+test('saving an edited connection keeps what the form does not show, such as Datadog indexes', async () => {
+  reset();
+  raw.workspace = [{ id: 'prod', label: 'prod', type: 'datadog', site: 'datadoghq.eu', indexes: ['main', 'audit'] }];
+  const { manager, secrets } = setup();
+  secrets.set('logline.connection.datadog:https://api.datadoghq.eu', JSON.stringify({ token: ['t', 'k'].join('') }));
+  const opened: unknown[] = [];
+  stubProbe(manager, opened);
+  await manager.edit('prod');
+  const panel = panels.at(-1)!;
+  const init = await panel.send({ type: 'ready' }, 'init');
+  assert.equal(init.secret, true);
+  await panel.send({ type: 'test', draft: init.draft }, 'tested');
+  assert.deepEqual(
+    (opened[0] as { indexes?: string[] }).indexes,
+    ['main', 'audit'],
+    'the test searches the same indexes',
+  );
+  await panel.send({ type: 'save', draft: init.draft, mapping: null }, 'saved');
+  assert.deepEqual(raw.workspace, [
+    { id: 'prod', label: 'prod', type: 'datadog', site: 'datadoghq.eu', indexes: ['main', 'audit'] },
+  ]);
+  manager.dispose();
+});
+
+test('an edit that points a connection at another database says agents must be allowed again', async () => {
+  reset();
+  const connection = {
+    id: 'db',
+    label: 'db',
+    type: 'postgres',
+    host: 'old.local',
+    port: 5432,
+    database: 'app',
+    user: 'u',
+  };
+  raw.workspace = [connection];
+  const { manager, memento } = setup();
+  memento.set('logline.agentConnections.v1', ['logline.connection.postgres://u@old.local:5432/app']);
+  stubProbe(manager);
+  await manager.edit('db');
+  const panel = panels.at(-1)!;
+  const init = await panel.send({ type: 'ready' }, 'init');
+  const moved = { ...init.draft, host: 'new.local', password: 'pw' };
+  await panel.send({ type: 'test', draft: moved }, 'tested');
+  await panel.send({ type: 'save', draft: moved, mapping: null }, 'saved');
+  assert.match(
+    ui.messages.at(-1)!,
+    /^info: Saved Postgres · db\. It now opens another database, so agents may not query it/,
+  );
+  assert.equal(manager.views()[0].agents, false, 'the permission stays with the database it was given for');
+  // A rename alone keeps it.
+  ui.messages.length = 0;
+  memento.set('logline.agentConnections.v1', ['logline.connection.postgres://u@new.local:5432/app']);
+  await manager.edit('db');
+  const again = panels.at(-1)!;
+  const draft = { ...(await again.send({ type: 'ready' }, 'init')).draft, label: 'renamed' };
+  await again.send({ type: 'test', draft }, 'tested');
+  await again.send({ type: 'save', draft, mapping: null }, 'saved');
+  assert.match(ui.messages.at(-1)!, /^info: Saved Postgres · renamed\.$/);
+  assert.equal(manager.views()[0].agents, true);
+  manager.dispose();
+});
+
+test('columns read through a connection a newer test replaced are not shown', async () => {
+  reset();
+  const { manager } = setup();
+  const columns = stubProbe(manager);
+  const { panel } = await openForm(manager);
+  const form = draft({ type: 'postgres', host: 'h', user: 'u', database: 'd', label: 'd' });
+  await panel.send({ type: 'test', draft: form }, 'tested');
+  panel.post({ type: 'table', table: 'events' });
+  // Tested again before the first table's columns came back.
+  await panel.send({ type: 'test', draft: form }, 'tested');
+  const before = panel.posted.length;
+  columns.release();
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  assert.equal(panel.posted.length, before, 'the old answer is dropped');
+  const fresh = panel.send({ type: 'table', table: 'events' }, 'columns');
+  columns.release();
+  assert.deepEqual((await fresh).columns, [{ name: 'at', type: 'bigint' }]);
+  manager.dispose();
+});
+
+test('a form left open comes back in a new Logs view without its secrets, and an earlier form is closed', async () => {
+  reset();
+  raw.global = [{ id: 'other', label: 'other', type: 'sqlite', path: 'x.db' }];
+  const { manager } = setup();
+  stubProbe(manager);
+  const { panel } = await openForm(manager);
+  assert.deepEqual(panel.open, { session: 1, title: 'Add connection', focus: true });
+  const typed = draft({ type: 'postgres', host: 'h', user: 'u', database: 'd', label: 'd', password: 'pw' });
+  await panel.send({ type: 'test', draft: typed }, 'tested');
+  // The panel was hidden and made again: the open form is shown again, without focusing the panel.
+  const shown = panels.length;
+  await manager.formRequest(0, { type: 'resume' }, () => undefined);
+  assert.equal(panels.length, shown);
+  const again = await panel.send({ type: 'ready' }, 'init');
+  assert.equal(again.draft.host, 'h');
+  assert.equal(again.draft.password, '', 'a secret never goes back to the page');
+  // Adding again shows the same form, keeping what was typed, rather than starting it over.
+  const same = (await openForm(manager)).panel;
+  assert.equal(same.open.session, 1);
+  assert.equal(panel.disposed, false);
+  // Opening another form ends this one: its next message is answered by closing it.
+  await manager.edit('other');
+  const second = panels.at(-1)!;
+  assert.equal(second.open.session, 2);
+  panel.post({ type: 'test', draft: typed });
+  assert.equal(panel.disposed, true);
+  // With no form open, a new view shows none.
+  second.post({ type: 'cancel' });
+  assert.equal(second.disposed, true);
+  await manager.formRequest(0, { type: 'resume' }, () => undefined);
+  assert.equal(panels.length, shown + 2);
   manager.dispose();
 });

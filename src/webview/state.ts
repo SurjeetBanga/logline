@@ -21,6 +21,8 @@ export interface PersistedState {
   range?: string;
   /** Whether the Sources rail was collapsed or opened by hand. */
   rail?: 'collapsed' | 'open';
+  /** The rails' width in pixels when resized by hand. */
+  railWidth?: number;
 }
 /** Persistent preferences and interaction state, independent of DOM rendering. */
 export class ViewerState {
@@ -58,8 +60,12 @@ export class ViewerState {
   connectionRange: string;
   /** The Sources rail's state when set by hand; undefined follows the panel's width. */
   railCollapsed?: boolean;
+  /** The rails' width when resized by hand; undefined keeps the default. */
+  railWidth?: number;
   constructor(saved: PersistedState = {}) {
     if (saved.rail === 'collapsed' || saved.rail === 'open') this.railCollapsed = saved.rail === 'collapsed';
+    if (typeof saved.railWidth === 'number' && Number.isFinite(saved.railWidth) && saved.railWidth > 0)
+      this.railWidth = saved.railWidth;
     this.view = typeof saved.view === 'string' ? saved.view : 'logs';
     this.connectionRange = typeof saved.range === 'string' && RANGE_CHOICES.includes(saved.range) ? saved.range : '1h';
     this.following = !saved.sort;
@@ -148,6 +154,7 @@ export class ViewerState {
       ...(this.view !== 'logs' ? { view: this.view } : {}),
       ...(this.connectionRange !== '1h' ? { range: this.connectionRange } : {}),
       ...(this.railCollapsed !== undefined ? { rail: this.railCollapsed ? 'collapsed' : 'open' } : {}),
+      ...(this.railWidth !== undefined ? { railWidth: this.railWidth } : {}),
     };
   }
 }

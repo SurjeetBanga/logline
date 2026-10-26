@@ -71,10 +71,9 @@ test('commands register the complete action surface and honor trust/focus/config
     },
     terminalCapture: { availableTerminals: () => [], toggleSource: () => undefined },
     connections: Object.fromEntries(
-      ['add', 'query', 'runSql', 'tail', 'test', 'remove', 'openLink', 'allowAgents', 'revokeAgents'].map((name) => [
-        name,
-        async (...args: unknown[]) => calls.push({ name: `connections.${name}`, value: args }),
-      ]),
+      ['add', 'edit', 'query', 'runSql', 'tail', 'test', 'remove', 'openLink', 'allowAgents', 'revokeAgents'].map(
+        (name) => [name, async (...args: unknown[]) => calls.push({ name: `connections.${name}`, value: args })],
+      ),
     ),
     files: {
       follow: async (file: string) => {
@@ -85,7 +84,7 @@ test('commands register the complete action surface and honor trust/focus/config
   } as any;
   const guideCalls: string[] = [];
   const registrations = registerCommands(controller, (section) => guideCalls.push(section));
-  assert.equal(handlers.size, 34);
+  assert.equal(handlers.size, 35);
   await handlers.get('logline.runCommand')!();
   for (const name of [
     'logline.stopCommand',
@@ -134,6 +133,7 @@ test('commands register the complete action surface and honor trust/focus/config
   await handlers.get('logline.runConnectionSql')!({ not: 'an id' });
   await handlers.get('logline.tailConnection')!('prod');
   await handlers.get('logline.testConnection')!();
+  await handlers.get('logline.editConnection')!('prod');
   await handlers.get('logline.removeConnection')!('prod');
   await handlers.get('logline.openConnectionLink')!('prod');
   await handlers.get('logline.allowAgentConnection')!('prod');
@@ -146,6 +146,7 @@ test('commands register the complete action surface and honor trust/focus/config
       { name: 'connections.runSql', value: [undefined] },
       { name: 'connections.tail', value: ['prod', ''] },
       { name: 'connections.test', value: [undefined] },
+      { name: 'connections.edit', value: ['prod'] },
       { name: 'connections.remove', value: ['prod'] },
       { name: 'connections.openLink', value: ['prod'] },
       { name: 'connections.allowAgents', value: ['prod'] },

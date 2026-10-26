@@ -1,4 +1,5 @@
 import type { ServerSummary, SessionRegistry } from '../capture/session-registry';
+import type { FormUpdate } from '../core/connection-form';
 import type { ExceptionBlock } from '../core/exceptions';
 import type { GenAiCallDetail, GenAiSummary } from '../core/gen-ai';
 import type { AnalysisResult } from '../core/log-analysis';
@@ -69,7 +70,9 @@ export type ViewRequest =
   | { type: 'run'; serverId?: string }
   | { type: 'stop'; serverId?: string; sessionId?: string }
   | { type: 'removeSource'; serverId: string }
-  | { type: 'removeConnection'; connectionId: string }
+  | { type: 'removeConnection' | 'editConnection'; connectionId: string }
+  /** A message from the Connection form; the connection manager checks `request` itself. */
+  | { type: 'connectionForm'; session: number; request: Record<string, unknown> }
   | { type: 'connectionPreview'; connectionId: string; query: string; range: string }
   | {
       type: 'connectionFetch';
@@ -193,6 +196,8 @@ export interface Snapshot extends Stats {
   reveal?: { target: string; fallback?: string };
   /** Start the guided tour of the panel, applied once. */
   startTour?: boolean;
+  /** Open the Connection form as a tab, applied once; its messages carry `session`. */
+  openConnectionForm?: { session: number; title: string; connectionId?: string };
   otlp?: ReceiverStatus;
   /** Traces with spans currently retained. */
   traceCount?: number;
@@ -299,6 +304,7 @@ export type HostMessage =
       error?: string;
     }
   | { type: 'metricNames'; connectionId: string; search: string; names: string[] }
+  | { type: 'connectionForm'; session: number; update: FormUpdate }
   | {
       type: 'connectionPreview';
       connectionId: string;
@@ -455,7 +461,16 @@ export function parseViewRequest(value: unknown): ViewRequest | undefined {
       return { type: msg.type, serverId: filter.serverId, sessionId: filter.sessionId };
     case 'removeSource':
       return filter.serverId ? { type: msg.type, serverId: filter.serverId } : undefined;
-    case 'removeConnection': {
+    case 'connectionForm':
+      return Number.isSafeInteger(msg.session) &&
+        msg.request &&
+        typeof msg.request === 'object' &&
+        !Array.isArray(msg.request) &&
+        typeof (msg.request as { type?: unknown }).type === 'string'
+        ? { type: msg.type, session: msg.session as number, request: msg.request as Record<string, unknown> }
+        : undefined;
+    case 'removeConnection':
+    case 'editConnection': {
       const connectionId = string('connectionId')?.slice(0, 128);
       return connectionId ? { type: msg.type, connectionId } : undefined;
     }

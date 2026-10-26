@@ -3,13 +3,22 @@ import type { EventScope } from './event-scope';
 import { icon, NARROW_PANEL } from './search/source-rail';
 import type { ViewerState } from './state';
 
+/** A button on a rail row or heading, such as Edit or Remove, shown with an icon from the Sources rail. */
+export interface TabRailAction {
+  icon: 'add' | 'edit' | 'remove';
+  label: string;
+  onSelect(): void;
+}
+
 /** A row in a tab's rail: a heading, or a filter that is chosen, or turned on and off. */
 export type TabRailItem =
-  | { kind: 'group'; label: string }
+  | { kind: 'group'; label: string; action?: TabRailAction }
   | {
       kind: 'item';
       key: string;
       label: string;
+      /** A second line under the label, such as what a connection is doing. */
+      status?: string;
       meta?: string;
       /** A color, such as a service's, shown as a swatch. */
       color?: string;
@@ -19,14 +28,16 @@ export type TabRailItem =
       checked?: boolean;
       selected?: boolean;
       title?: string;
+      actions?: TabRailAction[];
       onSelect(): void;
     };
 
 type RailElements = Pick<Elements, 'tabRail' | 'tabRailTitle' | 'tabRailList' | 'tabRailToggle'>;
 
 /**
- * The rail beside Compare, Traces, and Metrics: what that tab shows, such as
- * error statuses or services, the way the Sources rail scopes Logs. It shares
+ * The rail beside Compare, Traces, Metrics, and the Connection tab: what that
+ * tab shows, such as error statuses, services, or the saved connections, the
+ * way the Sources rail scopes Logs. It shares
  * the Sources rail's collapsed state, so collapsing either collapses both.
  */
 export function createTabRail(
@@ -39,6 +50,34 @@ export function createTabRail(
   let active = '';
   let signature = '';
   const handlers = new Map<string, () => void>();
+
+  /** A row's or heading's button, which finds its handler by key so a render with new handlers keeps it. */
+  function actionButton(key: string, action: TabRailAction): HTMLButtonElement {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = `rail-action rail-${action.icon}`;
+    button.setAttribute('aria-label', action.label);
+    button.title = action.label;
+    button.append(icon(action.icon, 13));
+    handlers.set(key, action.onSelect);
+    scope.listen(button, 'click', (event) => {
+      event.stopPropagation();
+      handlers.get(key)?.();
+    });
+    return button;
+  }
+
+  /** Every handler of the rail's rows, headings, and their buttons, by key. */
+  function setHandlers(items: TabRailItem[]): void {
+    for (const item of items) {
+      if (item.kind === 'group') {
+        if (item.action) handlers.set(`group:${item.label}`, item.action.onSelect);
+        continue;
+      }
+      handlers.set(item.key, item.onSelect);
+      for (const action of item.actions ?? []) handlers.set(`${item.key}:${action.icon}`, action.onSelect);
+    }
+  }
 
   function collapsed(): boolean {
     return state.railCollapsed ?? window.innerWidth < NARROW_PANEL;
@@ -98,6 +137,12 @@ export function createTabRail(
     name.className = 'rail-name';
     name.textContent = item.label;
     text.append(name);
+    if (item.status) {
+      const status = document.createElement('span');
+      status.className = 'rail-status';
+      status.textContent = item.status;
+      text.append(status);
+    }
     button.append(glyph, text);
     if (item.meta) {
       const meta = document.createElement('span');
@@ -108,6 +153,13 @@ export function createTabRail(
     handlers.set(item.key, item.onSelect);
     scope.listen(button, 'click', () => handlers.get(item.key)?.());
     wrapper.append(button);
+    if (item.actions?.length) {
+      wrapper.classList.add('has-actions');
+      const group = document.createElement('span');
+      group.className = 'rail-actions';
+      group.append(...item.actions.map((action) => actionButton(`${item.key}:${action.icon}`, action)));
+      wrapper.append(group);
+    }
     return wrapper;
   }
 
@@ -116,7 +168,7 @@ export function createTabRail(
     elements.tabRail.hidden = !content;
     if (!content) return;
     // Handlers change with each render; only the rows wait for something new to show.
-    for (const item of content.items) if (item.kind === 'item') handlers.set(item.key, item.onSelect);
+    setHandlers(content.items);
     const next = JSON.stringify([active, content.title, content.items]);
     if (next === signature) return;
     signature = next;
@@ -131,6 +183,7 @@ export function createTabRail(
         label.className = 'rail-group-label';
         label.textContent = item.label;
         heading.append(label);
+        if (item.action) heading.append(actionButton(`group:${item.label}`, item.action));
         return heading;
       }),
     );

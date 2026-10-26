@@ -59,7 +59,12 @@ function fakeMongo(documents: Doc[], fail?: Error) {
       db(name: string) {
         return {
           collection: (collection: string) => ({
-            find: (filter: Doc) => cursor('find', [collection, filter], documents),
+            find: (filter: Doc, options?: Doc) => {
+              const found = cursor('find', [collection, filter], documents);
+              Object.assign(calls[calls.length - 1], { options });
+              (calls[calls.length - 1] as unknown as { limit: unknown }).limit = options?.limit;
+              return found;
+            },
             aggregate: (pipeline: Doc[], options: Doc) =>
               cursor('aggregate', [collection, pipeline, options], documents),
             countDocuments: (filter: Doc) => {
@@ -317,4 +322,26 @@ test('a time field holding ObjectIds other than _id is the one ranges, sorting, 
   assert.deepEqual(Object.keys(find.args[1]), ['eventId']);
   assert.deepEqual(find.sort, { eventId: -1 });
   assert.match(result.records[0].line, /^{"timestamp":"2024-10-24T10:02:20\.000Z"/);
+});
+
+test('a sample is a few documents of a collection, limited to 1 to 50, read as JSON', async () => {
+  const fake = fakeMongo(documents);
+  const connector = new MongoConnector(
+    connection(),
+    undefined,
+    () => 5000,
+    () => fake.module,
+  );
+  const rows = await connector.sample('logs');
+  assert.deepEqual(rows[0], plainDocument(documents[0]));
+  const find = () =>
+    fake.calls.filter((call) => call.op === 'find').at(-1) as unknown as { args: unknown[]; options: Doc };
+  assert.deepEqual(find().args, ['logs', {}]);
+  assert.deepEqual(find().options, { limit: 5, maxTimeMS: 5000 });
+  await connector.sample('logs', 500);
+  assert.equal(find().options.limit, 50);
+  await connector.sample('logs', 0);
+  assert.equal(find().options.limit, 1);
+  await connector.sample('logs', 2.9);
+  assert.equal(find().options.limit, 2);
 });

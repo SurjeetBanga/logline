@@ -1,3 +1,4 @@
+import { connectionIdOf } from '../../core/connections';
 import type { ConnectionView, Snapshot } from '../../protocol/messages';
 import type { Elements } from '../dom';
 import type { EventScope } from '../event-scope';
@@ -25,6 +26,7 @@ const ICONS: Record<string, string> = {
   run: 'M5 3l7 5-7 5z',
   stop: 'M4.5 4.5h7v7h-7z',
   add: 'M8 3v10M3 8h10',
+  edit: 'M10.5 2.5l3 3-8 8h-3v-3zM9 4l3 3',
   remove: 'M3 4.5h10M6.5 4.5V3h3v1.5M4.5 4.5l.6 8.5h5.8l.6-8.5M7 7v4M9 7v4',
 };
 
@@ -146,7 +148,11 @@ export function createSourceRail(
     elements.railToggle.title = label;
   }
 
-  function actionButton(kind: 'run' | 'stop' | 'remove', label: string, onClick: () => void): HTMLButtonElement {
+  function actionButton(
+    kind: 'run' | 'stop' | 'edit' | 'remove',
+    label: string,
+    onClick: () => void,
+  ): HTMLButtonElement {
     const button = document.createElement('button');
     button.type = 'button';
     button.className = `rail-action rail-${kind}`;
@@ -270,6 +276,11 @@ export function createSourceRail(
           }),
         ),
       );
+    rowActions.push(
+      actionButton('edit', `Edit connection ${connection.label}…`, () =>
+        api.postMessage({ type: 'editConnection', connectionId: connection.id }),
+      ),
+    );
     const remove = () => api.postMessage({ type: 'removeConnection', connectionId: connection.id });
     removers.set(connection.sourceId, remove);
     rowActions.push(actionButton('remove', `Remove connection ${connection.label}…`, remove));
@@ -284,6 +295,25 @@ export function createSourceRail(
       dot: connection.tailing ? 'tailing' : undefined,
       agents: connection.agents,
       actions: rowActions,
+    });
+  }
+
+  /**
+   * A connection's source whose connection is not in this workspace's settings,
+   * because it was removed or saved elsewhere: its fetched runs stay until removed.
+   */
+  function detachedRow(server: Server): HTMLElement {
+    const remove = () => api.postMessage({ type: 'removeSource', serverId: server.id });
+    removers.set(server.id, remove);
+    const status = 'Not connected · fetched logs kept';
+    return row({
+      id: server.id,
+      name: server.label,
+      icon: server.label.startsWith('Datadog') ? 'cloud' : 'database',
+      title: `${server.label} · not in this workspace's logline.connections. Its fetched logs stay until you remove them.`,
+      status,
+      statusClass: 'muted',
+      actions: [actionButton('remove', `Remove ${server.label} and its fetched logs`, remove)],
     });
   }
 
@@ -311,9 +341,15 @@ export function createSourceRail(
           })
         : '';
       const stateText = session.status === 'running' ? 'running' : session.exitReason || session.status;
+      // A run named by what it fetched or imported has a long name, so its time and status go on a line of their own.
       const button = byTime
         ? runButton(session.id, started || runName(session), stateText)
-        : runButton(session.id, runName(session), [started, stateText].filter(Boolean).join(' · '));
+        : runButton(
+            session.id,
+            runName(session),
+            [started, stateText].filter(Boolean).join(' · '),
+            session.sourceKind === 'remote' || session.sourceKind === 'import',
+          );
       button.title = [
         runName(session),
         session.cwd,
@@ -345,16 +381,23 @@ export function createSourceRail(
     return group;
   }
 
-  function runButton(id: string, label: string, meta: string): HTMLButtonElement {
+  function runButton(id: string, label: string, meta: string, stacked = false): HTMLButtonElement {
     const selected = id === state.selectedSession;
     const button = document.createElement('button');
     button.type = 'button';
-    button.className = 'run-select rail-focusable';
+    button.className = `run-select rail-focusable${stacked ? ' stacked' : ''}`;
     button.dataset.runId = id;
     button.tabIndex = -1;
     button.setAttribute('aria-current', String(selected));
-    button.append(span('rail-name', label));
-    if (meta) button.append(span('rail-meta', meta));
+    if (stacked) {
+      const text = span('rail-text');
+      text.append(span('rail-name', label));
+      if (meta) text.append(span('rail-status', meta));
+      button.append(text);
+    } else {
+      button.append(span('rail-name', label));
+      if (meta) button.append(span('rail-meta', meta));
+    }
     scope.listen(button, 'click', () => actions.selectRun(id));
     return button;
   }
@@ -384,7 +427,10 @@ export function createSourceRail(
     const focusedSource = (document.activeElement as HTMLElement | undefined)?.dataset?.sourceId;
     const focusedRun = (document.activeElement as HTMLElement | undefined)?.dataset?.runId;
     const connectionIds = new Set(connections.map((connection) => connection.sourceId));
-    const local = servers.filter((server) => !connectionIds.has(server.id));
+    const unlisted = servers.filter((server) => !connectionIds.has(server.id));
+    // A connection's source stays a connection when its settings are gone, rather than passing for a local one.
+    const detached = unlisted.filter((server) => connectionIdOf(server.id) !== undefined);
+    const local = unlisted.filter((server) => connectionIdOf(server.id) === undefined);
     const active = servers.reduce((sum, server) => sum + (server.activeSessions || 0), 0);
     const children: HTMLElement[] = [
       row({
@@ -403,9 +449,9 @@ export function createSourceRail(
     for (const server of local) withRuns(serverRow(server), server.id);
     const add = addButton();
     children.push(group('Connections', add));
-    if (connections.length)
-      for (const connection of connections) withRuns(connectionRow(connection), connection.sourceId);
-    else {
+    for (const connection of connections) withRuns(connectionRow(connection), connection.sourceId);
+    for (const server of detached) withRuns(detachedRow(server), server.id);
+    if (!connections.length && !detached.length) {
       const empty = document.createElement('div');
       empty.className = 'rail-empty';
       const text = document.createElement('p');

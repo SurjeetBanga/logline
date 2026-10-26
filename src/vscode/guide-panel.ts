@@ -1,6 +1,6 @@
-import { randomBytes } from 'node:crypto';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync } from 'node:fs';
 import * as vscode from 'vscode';
+import { webviewHtml } from './webview-html';
 import { GUIDE_CARDS, GUIDE_KEYS, GUIDE_RELEASES, GUIDE_SECTIONS, type GuideProgress } from './guide-content';
 
 type GuideSection = 'guide' | 'whatsNew';
@@ -78,13 +78,6 @@ export class GuidePanel implements vscode.Disposable {
       keys: GUIDE_KEYS,
       unreadHighlights: this.host?.unreadHighlights?.() ?? 0,
     };
-    const replacements: Record<string, string> = {
-      '{{CSP_SOURCE}}': panel.webview.cspSource,
-      '{{NONCE}}': randomBytes(16).toString('hex'),
-      '{{STYLE_URI}}': String(panel.webview.asWebviewUri(vscode.Uri.joinPath(media, 'guide.css'))),
-      '{{SCRIPT_URI}}': String(panel.webview.asWebviewUri(vscode.Uri.joinPath(media, 'guide.js'))),
-      '{{GUIDE_JSON}}': JSON.stringify(guide).replace(/</g, '\\u003c'),
-    };
     const messageSubscription = panel.webview.onDidReceiveMessage((message) => this.receive(message as GuideMessage));
     // Steps done elsewhere tick off when the guide is looked at again.
     const visibility = panel.onDidChangeViewState?.(() => {
@@ -98,9 +91,11 @@ export class GuidePanel implements vscode.Disposable {
         this.ready = false;
       }
     });
-    panel.webview.html = readFileSync(vscode.Uri.joinPath(media, 'guide.html').fsPath, 'utf8').replace(
-      /\{\{[A-Z_]+\}\}/g,
-      (key) => replacements[key] ?? '',
+    panel.webview.html = webviewHtml(
+      panel.webview,
+      media,
+      { html: 'guide.html', style: 'guide.css', script: 'guide.js' },
+      { GUIDE_JSON: JSON.stringify(guide).replace(/</g, '\\u003c') },
     );
   }
 

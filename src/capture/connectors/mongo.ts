@@ -1,6 +1,12 @@
 import { existsSync } from 'node:fs';
 import * as path from 'node:path';
-import { mongoUrl, type ColumnInfo, type LogTableMapping, type MongoConnection } from '../../core/connections';
+import {
+  mongoUrl,
+  sampleLimit,
+  type ColumnInfo,
+  type LogTableMapping,
+  type MongoConnection,
+} from '../../core/connections';
 import { boundSeries, rowsToSeries } from '../../core/metric-query';
 import { buildMongoLogQuery, checkMongoQuery, filterText, type MongoFilter } from '../../core/mongo-query';
 import { rowRoles, rowToLine, setField, type RowRoles } from '../../core/remote-query';
@@ -15,7 +21,7 @@ interface Cursor {
   close(): Promise<void>;
 }
 interface Collection {
-  find(filter: MongoFilter): Cursor;
+  find(filter: MongoFilter, options?: { limit?: number; maxTimeMS?: number }): Cursor;
   aggregate(pipeline: MongoFilter[], options: { maxTimeMS: number }): Cursor;
   countDocuments(filter: MongoFilter, options: { maxTimeMS: number }): Promise<number>;
 }
@@ -203,6 +209,18 @@ export class MongoConnector implements Connector {
         .aggregate([{ $sample: { size: SAMPLE } }], { maxTimeMS: this.timeoutMs() })
         .toArray();
       return sampleFields(documents);
+    });
+  }
+
+  /** A few documents of a collection, to preview its fields. */
+  async sample(collection: string, limit = 5): Promise<Record<string, unknown>[]> {
+    const count = sampleLimit(limit);
+    return this.read(async (database) => {
+      const documents = await database
+        .collection(collection)
+        .find({}, { limit: count, maxTimeMS: this.timeoutMs() })
+        .toArray();
+      return documents.map((document) => plainDocument(document) as Record<string, unknown>);
     });
   }
 

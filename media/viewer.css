@@ -538,10 +538,11 @@ header {
   margin-right: 14px;
 }
 .source-rail {
+  position: relative;
   display: flex;
   flex-direction: column;
   flex: none;
-  width: 236px;
+  width: var(--rail-width, 236px);
   min-width: 0;
   min-height: 0;
   overflow: hidden;
@@ -639,6 +640,9 @@ header {
 .rail-status.live {
   color: var(--vscode-textLink-foreground, #3794ff);
 }
+.rail-status.muted {
+  font-style: italic;
+}
 .rail-status.error {
   color: var(--vscode-errorForeground, #f48771);
 }
@@ -735,6 +739,10 @@ header {
   flex: 1 1 auto;
   min-width: 0;
 }
+.rail-runs .run-select.stacked {
+  padding-top: 3px;
+  padding-bottom: 3px;
+}
 .rail-empty {
   display: flex;
   flex-direction: column;
@@ -757,6 +765,26 @@ header {
 }
 .rail-empty-add:hover {
   background: var(--vscode-button-hoverBackground, #1177bb);
+}
+/* The rail's right edge drags to resize it; the line shows while pointed at or dragged. */
+.rail-resizer {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 2;
+  width: 5px;
+  cursor: col-resize;
+  touch-action: none;
+}
+.rail-resizer:hover,
+.rail-resizer.dragging,
+.rail-resizer:focus-visible {
+  outline: none;
+  background: var(--vscode-sash-hoverBorder, var(--vscode-focusBorder, #007fd4));
+}
+.source-rail.collapsed .rail-resizer {
+  display: none;
 }
 /* Collapsed, the rail is a strip of icons; each row's name, status, and count are in its tooltip. */
 .source-rail.collapsed {
@@ -2294,10 +2322,13 @@ body[data-view='traces'] .search-toolbar,
 body[data-view='metrics'] .search-toolbar,
 body[data-view='aiCalls'] .search-toolbar,
 body[data-view='doctor'] .search-toolbar,
+body[data-view='connection'] .search-toolbar,
 body[data-view='traces'] .connection-bar,
 body[data-view='metrics'] .connection-bar,
 body[data-view='aiCalls'] .connection-bar,
-body[data-view='doctor'] .connection-bar {
+body[data-view='doctor'] .connection-bar,
+body[data-view='connection'] .connection-bar,
+body[data-view='connection'] .table-hint {
   display: none;
 }
 table {
@@ -3938,4 +3969,470 @@ body:not([data-view='logs']) .match-count {
   border-radius: 8px;
   background: var(--vscode-editorWidget-background, #252526);
   box-shadow: 0 6px 24px var(--vscode-widget-shadow, rgba(0, 0, 0, 0.5));
+}
+
+/* The Connection form: a tab of its own while a connection is added or edited, scrolling under its pinned footer. */
+.view-panel.connection-view {
+  display: block;
+  padding: 0;
+  overflow-y: auto;
+  color: var(--text);
+}
+.connection-view {
+  --surface: var(--vscode-editor-background, #1e1e1e);
+  --raised: var(--vscode-editorWidget-background, #252526);
+  --text: var(--vscode-foreground, #cccccc);
+  --muted: var(--vscode-descriptionForeground, #9d9d9d);
+  --border: var(--vscode-panel-border, #3c3c3c);
+  --accent: var(--vscode-focusBorder, #007fd4);
+  --error: var(--vscode-errorForeground, #f48771);
+  --ok: var(--vscode-testing-iconPassed, #73c991);
+  --input: var(--vscode-input-background, #313131);
+  --input-border: var(--vscode-input-border, var(--vscode-dropdown-border, #3c3c3c));
+}
+.connection-view button,
+.connection-view input,
+.connection-view select {
+  font: inherit;
+  color: inherit;
+}
+.connection-view :focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.connection-view .form {
+  max-width: 820px;
+  margin: 0 auto;
+  padding: 12px 16px 0;
+}
+.connection-view header h1 {
+  margin: 0 0 2px;
+  font-size: 15px;
+  font-weight: 600;
+}
+.connection-view .lead {
+  margin: 0 0 16px;
+  max-width: 64ch;
+  color: var(--muted);
+}
+
+/* Steps sit flat on the page, divided by a rule; a locked one waits for the test. */
+.connection-view .step {
+  padding: 16px 0 20px;
+  border-top: 1px solid var(--border);
+}
+.connection-view .step h2 {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0 0 12px;
+  font-size: 13px;
+  font-weight: 600;
+}
+.connection-view .step-number {
+  display: inline-grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--vscode-badge-background, #4d4d4d);
+  color: var(--vscode-badge-foreground, #fff);
+  font-size: 11px;
+}
+.connection-view .step.locked {
+  opacity: 0.6;
+}
+
+/* Step 1: a card for each kind of store, log services apart from databases. */
+.connection-view .type-groups {
+  display: grid;
+  grid-template-columns: minmax(140px, 1fr) minmax(0, 4fr);
+  gap: 16px;
+}
+.connection-view .type-caption {
+  margin-bottom: 6px;
+  color: var(--muted);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.connection-view .type-group.service .type-grid {
+  grid-template-columns: 1fr;
+}
+.connection-view .type-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 8px;
+}
+.connection-view .type-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  cursor: pointer;
+}
+.connection-view .type-card input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+.connection-view .type-card:hover:not(.disabled) {
+  background: var(--vscode-list-hoverBackground, rgba(255, 255, 255, 0.04));
+}
+.connection-view .type-card.selected {
+  border-color: var(--accent);
+  background: var(--vscode-list-inactiveSelectionBackground, rgba(0, 127, 212, 0.12));
+}
+.connection-view .type-card:has(input:focus-visible) {
+  outline: 1px solid var(--accent);
+  outline-offset: 2px;
+}
+.connection-view .type-card.disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+.connection-view .type-name {
+  font-weight: 600;
+}
+.connection-view .type-description {
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+/* Fields. */
+.connection-view .details,
+.connection-view .logs {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.connection-view .grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 12px 14px;
+}
+/* Host and port share a row, three to one; database and user split the next evenly. */
+.connection-view .grid.server {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+.connection-view .grid.server > :nth-child(1) {
+  grid-column: span 3;
+}
+.connection-view .grid.server > :nth-child(3),
+.connection-view .grid.server > :nth-child(4) {
+  grid-column: span 2;
+}
+.connection-view .grid .wide,
+.connection-view .field.wide {
+  grid-column: 1 / -1;
+}
+.connection-view .field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+.connection-view .field > label,
+.connection-view legend {
+  font-weight: 600;
+  font-size: 12px;
+}
+.connection-view input[type='text'],
+.connection-view input[type='password'],
+.connection-view select {
+  width: 100%;
+  min-height: 28px;
+  padding: 4px 8px;
+  border: 1px solid var(--input-border);
+  border-radius: 4px;
+  background: var(--input);
+  color: var(--vscode-input-foreground, inherit);
+}
+.connection-view input::placeholder {
+  color: var(--vscode-input-placeholderForeground, var(--muted));
+}
+.connection-view input:focus,
+.connection-view select:focus {
+  outline: 1px solid var(--accent);
+  outline-offset: -1px;
+}
+.connection-view input[aria-invalid='true'] {
+  border-color: var(--vscode-inputValidation-errorBorder, var(--error));
+}
+.connection-view .inline {
+  display: flex;
+  gap: 8px;
+}
+.connection-view .inline input {
+  flex: 1;
+}
+.connection-view .hint {
+  color: var(--muted);
+  font-size: 12px;
+}
+.connection-view .hint.callout {
+  padding: 6px 10px;
+  border-left: 2px solid var(--accent);
+  background: var(--vscode-textBlockQuote-background, transparent);
+}
+.connection-view p.hint {
+  margin: 0;
+}
+.connection-view .error {
+  color: var(--error);
+  font-size: 12px;
+}
+.connection-view p.error {
+  margin: 0;
+}
+.connection-view .url-preview {
+  font-family: var(--vscode-editor-font-family, monospace);
+  word-break: break-all;
+}
+.connection-view .check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  justify-self: start;
+  cursor: pointer;
+}
+.connection-view .check input {
+  margin: 0;
+  accent-color: var(--vscode-checkbox-selectBackground, var(--accent));
+}
+
+/* A choice of two or three, as a segmented control. */
+.connection-view fieldset.choice {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.connection-view .segmented {
+  display: inline-flex;
+  align-self: flex-start;
+  flex-wrap: wrap;
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid var(--input-border);
+  border-radius: 5px;
+  background: var(--input);
+}
+.connection-view .segment {
+  padding: 2px 12px;
+  border-radius: 3px;
+  color: var(--muted);
+  cursor: pointer;
+}
+.connection-view .segment:hover:not(.selected) {
+  color: var(--text);
+}
+.connection-view .segment input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+.connection-view .segment.selected {
+  background: var(--vscode-button-secondaryBackground, #3a3d41);
+  color: var(--vscode-button-secondaryForeground, var(--text));
+}
+.connection-view .segment:has(input:focus-visible) {
+  outline: 1px solid var(--accent);
+  outline-offset: -1px;
+}
+
+/* Buttons. */
+.connection-view button {
+  min-height: 28px;
+  padding: 4px 14px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: var(--vscode-button-background, #0e639c);
+  color: var(--vscode-button-foreground, #fff);
+  cursor: pointer;
+}
+.connection-view button:hover:not(:disabled) {
+  background: var(--vscode-button-hoverBackground, #1177bb);
+}
+/* Some themes give secondary buttons the page's own background, so they keep a border to read as buttons. */
+.connection-view button.secondary {
+  border-color: var(--vscode-button-border, var(--input-border));
+  background: var(--vscode-button-secondaryBackground, #3a3d41);
+  color: var(--vscode-button-secondaryForeground, inherit);
+}
+.connection-view button.secondary:hover:not(:disabled) {
+  background: var(--vscode-button-secondaryHoverBackground, #45494e);
+}
+.connection-view button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* The test: its button and what it found. */
+.connection-view .test-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 16px;
+}
+.connection-view .test-status {
+  flex: 1;
+  min-width: 200px;
+}
+.connection-view .test-status.running,
+.connection-view .test-status.stale {
+  color: var(--muted);
+}
+.connection-view .test-status.ok {
+  color: var(--ok);
+}
+.connection-view .test-status.failed {
+  color: var(--error);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* Step 3: which column holds what, with a value from the table beside it. */
+.connection-view .mapping {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.connection-view .mapping-row {
+  display: grid;
+  grid-template-columns: 96px minmax(160px, 300px) minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+}
+.connection-view .mapping-row label {
+  font-weight: 600;
+  font-size: 12px;
+}
+.connection-view .mapping-row.missing select {
+  border-color: var(--vscode-inputValidation-warningBorder, #b89500);
+}
+.connection-view .required {
+  color: var(--muted);
+  font-weight: normal;
+  font-size: 11px;
+}
+.connection-view .sample {
+  overflow: hidden;
+  color: var(--muted);
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.connection-view .preview-title {
+  margin-bottom: 6px;
+  color: var(--muted);
+  font-size: 12px;
+}
+.connection-view .preview-scroll {
+  overflow-x: auto;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+}
+.connection-view .preview table {
+  width: 100%;
+  border-collapse: collapse;
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: 12px;
+}
+.connection-view .preview th,
+.connection-view .preview td {
+  max-width: 240px;
+  padding: 4px 8px;
+  overflow: hidden;
+  border-bottom: 1px solid var(--border);
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.connection-view .preview th {
+  position: sticky;
+  top: 0;
+  background: var(--raised);
+  font-weight: 600;
+}
+.connection-view .preview tr:last-child td {
+  border-bottom: 0;
+}
+/* Mapped columns are marked in the header; their cells only lightly, so a fully mapped table stays readable. */
+.connection-view .preview th.mapped {
+  background: var(--vscode-list-inactiveSelectionBackground, rgba(0, 127, 212, 0.15));
+}
+.connection-view .preview td.mapped {
+  color: var(--vscode-foreground, inherit);
+}
+.connection-view .preview td:not(.mapped) {
+  color: var(--muted);
+}
+.connection-view .role {
+  margin-left: 6px;
+  padding: 0 5px;
+  border-radius: 3px;
+  background: var(--vscode-badge-background, #4d4d4d);
+  color: var(--vscode-badge-foreground, #fff);
+  font-family: var(--vscode-font-family, sans-serif);
+  font-size: 10px;
+  font-weight: normal;
+}
+
+/* The footer stays in view, with what is left to do before Save. */
+.connection-view footer {
+  position: sticky;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin: 0 -16px;
+  padding: 10px 16px;
+  border-top: 1px solid var(--border);
+  background: var(--surface);
+}
+.connection-view .footer-note {
+  flex: 1;
+  min-width: 180px;
+  color: var(--muted);
+}
+.connection-view .footer-note.error {
+  color: var(--error);
+}
+.connection-view .buttons {
+  display: flex;
+  gap: 8px;
+}
+
+@media (max-width: 640px) {
+  .connection-view .type-groups {
+    grid-template-columns: 1fr;
+  }
+}
+@media (max-width: 520px) {
+  .connection-view .form {
+    padding: 10px 10px 0;
+  }
+  .connection-view footer {
+    margin: 0 -10px;
+    padding: 10px;
+  }
+  .connection-view .mapping-row,
+  .connection-view .grid.server {
+    grid-template-columns: 1fr;
+    gap: 2px;
+  }
+  .connection-view .grid.server > :nth-child(n) {
+    grid-column: 1 / -1;
+  }
 }

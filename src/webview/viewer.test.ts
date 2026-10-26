@@ -15,7 +15,14 @@ class Element {
   listeners = new Map<string, (event?: any) => void>();
   handlers = new Map<string, Set<(event?: any) => void>>();
   dataset: Record<string, unknown> = {};
-  style: Record<string, string> = {};
+  style: Record<string, any> = {
+    setProperty(name: string, value: string) {
+      this[name] = value;
+    },
+    removeProperty(name: string) {
+      delete this[name];
+    },
+  };
   attributes: Record<string, string> = {};
   className = '';
   textContent = '';
@@ -50,6 +57,10 @@ class Element {
         this.className = names()
           .filter((item) => item !== name)
           .join(' ');
+      },
+      toggle: (name: string, force?: boolean) => {
+        const on = force ?? !names().includes(name);
+        this.className = [...names().filter((item) => item !== name), ...(on ? [name] : [])].join(' ');
       },
     };
   }
@@ -1680,6 +1691,130 @@ test('the rail selects a run, moves with the arrow keys, and collapses to a stri
   assert.equal(savedStates.at(-1)?.rail, 'collapsed');
 });
 
+test('the rail is resized by dragging its edge or with the arrow keys, and the width is kept', () => {
+  const { get, dom, savedStates } = viewer();
+  const handle = get('railResizer');
+  assert.equal(handle.attributes['aria-valuenow'], '236');
+  handle.listeners.get('pointerdown')!({ clientX: 236, button: 0 });
+  dom.listeners.get('pointermove')!({ clientX: 336 });
+  assert.equal(dom.body.style['--rail-width'], '336px');
+  dom.listeners.get('pointerup')!();
+  assert.equal(savedStates.at(-1)?.railWidth, 336);
+  // Never narrower than the minimum, nor so wide the table has no room.
+  handle.listeners.get('pointerdown')!({ clientX: 0, button: 0 });
+  dom.listeners.get('pointermove')!({ clientX: -900 });
+  dom.listeners.get('pointerup')!();
+  assert.equal(savedStates.at(-1)?.railWidth, 160);
+  get('tabRailResizer').listeners.get('keydown')!({ key: 'ArrowRight', preventDefault() {} });
+  assert.equal(savedStates.at(-1)?.railWidth, 176);
+  handle.listeners.get('dblclick')!();
+  assert.equal(savedStates.at(-1)?.railWidth, undefined);
+  assert.equal(dom.body.style['--rail-width'], undefined);
+
+  const restored = viewer({ railWidth: 2000 });
+  assert.equal(restored.dom.body.style['--rail-width'], '560px', 'a saved width is fitted to the panel');
+});
+
+test('a connection source without its settings stays under Connections, offering to remove it', () => {
+  const { get, messages, receive } = viewer({ server: 'conn:prod' });
+  receive({
+    ...railSnapshot,
+    servers: [...railSnapshot.servers, { id: 'conn:prod', label: 'Datadog · prod', status: 'idle', activeSessions: 0 }],
+    sessions: [
+      {
+        id: 'r1',
+        serverId: 'conn:prod',
+        server: 'Datadog · prod',
+        command: 'All rows · last 15m',
+        status: 'exited',
+        startedAt: 1,
+        sourceKind: 'remote',
+      },
+    ],
+    connections: [],
+  });
+  const view = rail(get);
+  const groups = view.list.children.map((child) =>
+    child.classList.contains('rail-group') ? child.children[0].textContent : child.dataset.sourceId,
+  );
+  assert.ok(groups.indexOf('Connections') < groups.indexOf('conn:prod'), 'listed under Connections, not Local');
+  assert.equal(
+    view.select('conn:prod')!.querySelector('.rail-status')!.textContent,
+    'Not connected · fetched logs kept',
+  );
+  assert.equal(get('railList').querySelectorAll('.rail-empty').length, 0);
+  const run = view.runs().find((button) => button.dataset.runId === 'r1')!;
+  assert.ok(run.classList.contains('stacked'), 'a fetched run shows its time on a line of its own');
+  assert.equal(run.querySelector('.rail-name')!.textContent, 'All rows · last 15m');
+  view.actions('conn:prod')[0].listeners.get('click')!({ stopPropagation() {} });
+  assert.deepEqual(JSON.parse(JSON.stringify(messages.at(-1))), { type: 'removeSource', serverId: 'conn:prod' });
+});
+
+test('the Connection form opens as a tab of the panel, and closes back to the tab it came from', () => {
+  const { get, messages, receive } = viewer();
+  const plain = (value: unknown) => JSON.parse(JSON.stringify(value));
+  // A view starting up asks for a form left open in an earlier one.
+  assert.ok(messages.some((message) => message.type === 'connectionForm' && message.request.type === 'resume'));
+  // Opened even by a snapshot whose rest is skipped, as one that selects another source is.
+  receive({ ...railSnapshot, applySource: 'worker', openConnectionForm: { session: 3, title: 'Edit App DB' } });
+  assert.equal(get('connectionTab').hidden, false);
+  assert.equal(get('connectionTabLabel').textContent, 'Edit App DB');
+  assert.equal(get('connectionView').hidden, false);
+  assert.equal(get('logsView').hidden, true);
+  assert.deepEqual(plain(messages.at(-1)), { type: 'connectionForm', session: 3, request: { type: 'ready' } });
+  // Its rail lists every connection, the one being edited marked, each to edit or remove.
+  const saved = (id: string, label: string, type: string) => ({
+    id,
+    sourceId: `conn:${id}`,
+    label,
+    type,
+    mapped: type === 'datadog',
+    sql: type !== 'datadog',
+    watching: [],
+    agents: false,
+    tailing: false,
+  });
+  receive({
+    ...railSnapshot,
+    connections: [saved('app', 'App DB', 'postgres'), saved('dd', 'Datadog · prod', 'datadog')],
+    openConnectionForm: { session: 3, title: 'Edit App DB', connectionId: 'app' },
+  });
+  assert.equal(get('tabRail').hidden, false);
+  assert.equal(get('tabRailTitle').textContent, 'Connections');
+  const rows = get('tabRailList').querySelectorAll('.rail-row');
+  assert.deepEqual(
+    rows.map((row) => row.querySelector('.rail-name')!.textContent),
+    ['App DB', 'Datadog · prod'],
+  );
+  assert.ok(rows[0].classList.contains('selected'));
+  assert.equal(rows[0].querySelector('.rail-status')!.textContent, 'No log table · SQL only');
+  rows[1].querySelectorAll('.rail-select')[0].listeners.get('click')!();
+  assert.deepEqual(plain(messages.at(-1)), { type: 'editConnection', connectionId: 'dd' });
+  rows[1].querySelectorAll('.rail-remove')[0].listeners.get('click')!({ stopPropagation() {} });
+  assert.deepEqual(plain(messages.at(-1)), { type: 'removeConnection', connectionId: 'dd' });
+  get('tabRailList').querySelectorAll('.rail-add')[0].listeners.get('click')!({ stopPropagation() {} });
+  assert.deepEqual(plain(messages.at(-1)), { type: 'addConnection' });
+  // Another tab can be visited meanwhile; the form stays in its tab.
+  get('logsTab').listeners.get('click')!();
+  assert.equal(get('connectionView').hidden, true);
+  assert.equal(get('connectionTab').hidden, false);
+  get('connectionTab').listeners.get('click')!();
+  assert.equal(get('connectionView').hidden, false);
+  // An answer meant for an earlier form is dropped; closing this one hides its tab.
+  receive({ type: 'connectionForm', session: 2, update: { type: 'close' } });
+  assert.equal(get('connectionTab').hidden, false);
+  receive({ type: 'connectionForm', session: 3, update: { type: 'close' } });
+  assert.equal(get('connectionTab').hidden, true);
+  assert.equal(get('connectionView').hidden, true);
+  assert.equal(get('logsView').hidden, false);
+  // Going back to Analyze loads it again, as choosing its tab does.
+  get('analyze').listeners.get('click')!();
+  receive({ ...railSnapshot, openConnectionForm: { session: 4, title: 'Add connection' } });
+  receive({ type: 'connectionForm', session: 4, update: { type: 'close' } });
+  assert.equal(get('analysisView').hidden, false);
+  assert.equal(messages.at(-1)?.type, 'analysis');
+});
+
 test('a rail collapsed or opened by hand stays that way', () => {
   assert.equal(viewer({ rail: 'collapsed' }).get('sourceRail').classList.contains('collapsed'), true);
   assert.equal(viewer({ rail: 'open' }).get('sourceRail').classList.contains('collapsed'), false);
@@ -1728,6 +1863,8 @@ test('the rail lists connections with what they are doing, and offers to add one
     enabled: false,
   });
   view.actions('conn:pg')[1].listeners.get('click')!({ stopPropagation() {} });
+  assert.deepEqual(plain(messages.at(-1)), { type: 'editConnection', connectionId: 'pg' });
+  view.actions('conn:pg')[2].listeners.get('click')!({ stopPropagation() {} });
   assert.deepEqual(plain(messages.at(-1)), { type: 'removeConnection', connectionId: 'pg' });
   receive({ ...railSnapshot, connections: [{ ...connection, tailing: false, last: undefined, mapped: false }] });
   assert.equal(rail(get).select('conn:pg')!.querySelector('.rail-status')!.textContent, 'No log table · SQL only');
@@ -3729,7 +3866,7 @@ test('a selected connection shows its range, Run, Tail and Run SQL, with the SQL
   assert.ok(
     rail(get)
       .runs()
-      .some((button) => button.children[0].textContent === 'level:error · last 1h'),
+      .some((button) => button.querySelector('.rail-name')?.textContent === 'level:error · last 1h'),
   );
   // Without a mapped table, Run asks for SQL.
   snapshot({ connections: [{ ...connection, mapped: false }] });

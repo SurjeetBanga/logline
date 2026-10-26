@@ -70,6 +70,8 @@ interface MessageServices {
     | 'allowAgents'
     | 'revokeAgents'
     | 'remove'
+    | 'edit'
+    | 'formRequest'
   >;
   compare?(request: CompareRequest): CompareView;
 }
@@ -227,6 +229,14 @@ export async function handleMessage(
     case 'removeSource':
       // Asks first when the source is running.
       await services.removeSource(msg.serverId);
+      return;
+    case 'editConnection':
+      await services.connections?.edit(msg.connectionId);
+      return;
+    case 'connectionForm':
+      await services.connections?.formRequest(msg.session, msg.request, (update) =>
+        send({ type: 'connectionForm', session: msg.session, update }),
+      );
       return;
     case 'removeConnection':
       // Asks first: it changes settings, and can forget the password.

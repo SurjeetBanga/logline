@@ -17,6 +17,8 @@ import { createSearch } from './search/controls';
 import { createConnectionBar } from './search/connection-bar';
 import { createSourceRail } from './search/source-rail';
 import { createSharePanel } from './share-panel';
+import { createConnectionTab } from './connection-tab';
+import { createRailResize } from './rail-resize';
 import { createTabRail } from './tab-rail';
 import { createTour } from './tour';
 import { createCompare } from './inspection/compare';
@@ -49,6 +51,7 @@ export function createViewer(api: WebviewApi) {
     saveState: () => saveState(),
     collapsedChanged: () => rail.applyCollapsed(),
   });
+  createRailResize([elements.railResizer, elements.tabRailResizer], state, scope, { saveState: () => saveState() });
   createTooltips(scope);
   // The remembered tab, until the first snapshot says whether it has data.
   let restoreTab: TabName | undefined;
@@ -61,6 +64,7 @@ export function createViewer(api: WebviewApi) {
       metrics: elements.metrics,
       aiCalls: elements.aiCalls,
       doctor: elements.doctor,
+      connection: elements.connectionTab,
     },
     {
       logs: elements.logsView,
@@ -72,10 +76,21 @@ export function createViewer(api: WebviewApi) {
       aiCalls: elements.aiCallsView,
       aiCall: elements.aiCallView,
       doctor: elements.doctorView,
+      connection: elements.connectionView,
     },
     scope,
     openView,
     viewChanged,
+  );
+  const connectionTab = createConnectionTab(
+    elements,
+    api,
+    {
+      show: (view) => views.show(view),
+      active: () => views.active(),
+      back: (tab) => openView(views.available(tab) ? tab : 'logs'),
+    },
+    (title, items) => tabRail.set('connection', title, items),
   );
   const formatTimestamp = createTimestampFormatter(state);
   const analysis = createAnalysis(
@@ -268,6 +283,10 @@ export function createViewer(api: WebviewApi) {
   };
   scope.listen(window, 'message', onMessage);
   function receive(data: HostMessage) {
+    if (data.type === 'connectionForm') {
+      connectionTab.receive(data);
+      return;
+    }
     if (data.type === 'guideStatus') {
       updateGuideStatus(data);
       return;
@@ -375,9 +394,12 @@ export function createViewer(api: WebviewApi) {
     ) {
       views.show('logs');
       selectSource(data.applySource, data.applyRun);
+      if (data.openConnectionForm) connectionTab.open(data.openConnectionForm);
       bridge.flush();
       return;
     }
+    // Opened here rather than with the rest of the snapshot, which a stale generation skips below.
+    if (data.openConnectionForm) connectionTab.open(data.openConnectionForm);
     const receiverWasRunning = otlpRunning;
     otlpRunning = data.otlp?.running === true;
     otlpEndpoint = data.otlp?.endpoint;
@@ -522,6 +544,7 @@ export function createViewer(api: WebviewApi) {
       sessions: data.sessions ? visibleSessions : undefined,
       connections: data.connections ?? [],
     });
+    connectionTab.setConnections(data.connections ?? []);
     if (selectionChanged) {
       state.filterChanged();
       saveState();
@@ -1113,6 +1136,7 @@ export function createViewer(api: WebviewApi) {
   }
 
   request();
+  connectionTab.resume();
   return {
     state,
     views,
@@ -1145,6 +1169,7 @@ export function createViewer(api: WebviewApi) {
       aiCallsView: 'aiCalls',
       aiCallView: 'aiCalls',
       doctorView: 'doctor',
+      connectionView: 'connection',
     };
     return tabs[id];
   }

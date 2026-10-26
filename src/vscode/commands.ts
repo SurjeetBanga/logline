@@ -113,6 +113,9 @@ export function registerCommands(
     vscode.commands.registerCommand('logline.testConnection', (id?: unknown) =>
       controller.connections.test(typeof id === 'string' ? id : undefined),
     ),
+    vscode.commands.registerCommand('logline.editConnection', (id?: unknown) =>
+      controller.connections.edit(typeof id === 'string' ? id : undefined),
+    ),
     vscode.commands.registerCommand('logline.removeConnection', (id?: unknown) =>
       controller.connections.remove(typeof id === 'string' ? id : undefined),
     ),
