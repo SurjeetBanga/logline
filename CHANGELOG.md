@@ -9,12 +9,20 @@ All notable changes to Logline are documented in this file.
 - **Remove a run**: pointing at a finished run in the Sources rail shows **Remove** (the trash icon), which drops that run and its logs, such as a fetch you no longer need, and keeps the source and its other runs.
 - A connection's result line names what a tail follows, such as *Tailing service:checkout · 1,024 logs*. Change the filter while tailing and **Tail** reads **Tail this filter**, which follows the new filter instead.
 - Datadog searches use Datadog's own field names: `source:` is the log's source, a field without `@`, such as `env:prod`, matches a tag or an attribute, and one with `@`, such as `@http.url:`, only an attribute. Tags are also fields of fetched logs, so `env:prod` and `source:java` keep the logs Datadog returns.
+- Datadog searches match as Datadog does: a field value matches the whole value unless it has a `*`, and a word of free text is a word of the message, which Datadog answers faster than a part of every attribute.
+- **Wildcards**: a field value with `*`, such as `service:check*`, matches the whole value with `*` standing for any text, in every search, including SQL and MongoDB connections. A value without `*` still matches any part.
+- **Service list** for Datadog: the services that logged in the range, by how many logs. Choosing one sets the `service:` term of the filter, so **Tail** follows that service.
+- **Datadog syntax**: type a query in Datadog's own syntax, which **Run** and **Tail** send as typed; the search box then only narrows what is shown.
+- **Remove** on **All runs** drops every finished run of a source at once.
+- A Datadog tail of every log, with no filter, asks first.
 
 ### Fixes
 
 - Datadog is faster: a search reads up to 5,000 logs in one request instead of pages of 1,000, and counts the total at the same time instead of after.
 - A Datadog tail reads as often as the organization's Datadog rate limit allows, from what Datadog reports with each answer, instead of every 15 seconds.
 - Color codes in Datadog log messages are removed instead of shown as `[37;1m`.
+- A Datadog tail reads back only as far as Datadog has been late to make logs searchable, at least 15 seconds, instead of a whole minute on every read, so a busy tail downloads far fewer logs it already showed.
+- Fetched Datadog logs are turned into events faster.
 
 ## 1.17.0 — 2026-10-25
 

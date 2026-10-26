@@ -501,8 +501,21 @@ export class ConnectionManager implements vscode.Disposable {
       if (tail?.query === (native ?? query) && tail.native === (native !== undefined)) return;
       this.remote.stopTails(connection.id);
     }
+    const followed = (native ?? query).trim();
+    // Every log of a Datadog organization can be thousands a minute: say so before tailing them all.
+    if (connection.type === 'datadog' && (!followed || followed === '*')) {
+      const answer = await vscode.window.showWarningMessage(
+        `Tail every log in ${connectionLabel(connection)}?`,
+        {
+          modal: true,
+          detail:
+            'A tail of every log can bring thousands of logs a minute and fill the panel quickly. Choose a service in the Service list, or type a filter, to tail fewer.',
+        },
+        'Tail Every Log',
+      );
+      if (answer !== 'Tail Every Log') return;
+    }
     try {
-      const followed = (native ?? query).trim();
       const runId = this.remote.tail(await this.target(connection), query, `Tail: ${followed || 'all rows'}`, native);
       await this.showSource(connectionSourceId(connection.id), runId);
     } catch (error) {

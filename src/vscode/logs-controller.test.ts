@@ -214,6 +214,35 @@ test('removing a finished run drops its logs and record, and keeps a running one
   assert.equal(controller.registry.records.has('f1'), false);
   assert.equal(controller.state.status, 'Removed level:error · last 1h and its 1 log');
   assert.ok(controller.state.generation > generation);
+  // Every finished run of a source at once, its containers' too; the running one stays.
+  for (const [id, serverId] of [
+    ['g1', 'db'],
+    ['g2', 'db::worker'],
+    ['g3', 'dbx'],
+  ]) {
+    controller.store.add({
+      level: 'info',
+      id: controller.store.all().length + 10,
+      serverId,
+      sessionId: id,
+      message: id,
+    });
+    controller.registry.records.set(id, {
+      id,
+      serverId,
+      server: 'DB',
+      status: 'exited',
+      startedAt: 0,
+      events: 1,
+    } as never);
+  }
+  assert.equal(controller.removeFinishedRuns('db'), 2);
+  assert.deepEqual(
+    controller.store.all().map((event) => event.message),
+    ['two', 'g3'],
+  );
+  assert.equal(controller.state.status, 'Removed 2 finished runs of DB and their 2 logs');
+  assert.equal(controller.removeFinishedRuns('db'), 0, 'only a running run is left');
 });
 
 test('the guide’s steps stay done once done, and Show me reaches the panel with the next snapshot', async (t) => {

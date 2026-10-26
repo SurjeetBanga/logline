@@ -530,9 +530,9 @@ export class LogStore {
     return this.removeWhere((event) => belongs(event.serverId));
   }
 
-  /** Drop the logs of one run; returns how many were removed. */
-  removeSession(sessionId: string): number {
-    return this.removeWhere((event) => event.sessionId === sessionId);
+  /** Drop the logs of these runs; returns how many were removed. */
+  removeSessions(sessionIds: ReadonlySet<string>): number {
+    return this.removeWhere((event) => event.sessionId !== undefined && sessionIds.has(event.sessionId));
   }
 
   private removeWhere(removes: (event: LogEvent) => boolean): number {

@@ -269,6 +269,10 @@ test('removing a source names it, and removing a connection names the connection
     sessionId: 'run-1',
   });
   assert.equal(parseViewRequest({ type: 'removeRun' }), undefined);
+  assert.deepEqual(parseViewRequest({ type: 'removeFinishedRuns', serverId: 'conn:dd' }), {
+    type: 'removeFinishedRuns',
+    serverId: 'conn:dd',
+  });
   assert.deepEqual(parseViewRequest({ type: 'removeConnection', connectionId: 'prod' }), {
     type: 'removeConnection',
     connectionId: 'prod',

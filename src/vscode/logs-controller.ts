@@ -56,7 +56,7 @@ import { ChangedLines, ChangeScope } from '../core/changed-lines';
 import { eventLocation, LogSiteIndex, LogSiteTracker } from '../core/log-sites';
 import { getField } from '../core/query';
 import { extractExceptions } from '../core/exceptions';
-import type { LogEvent } from '../core/types';
+import type { LogEvent, SessionSummary } from '../core/types';
 import type {
   AgentSetupView,
   CompareRequest,
@@ -356,6 +356,7 @@ export class LogsController {
         stop: (serverId, sessionId) => this.stop(serverId, sessionId),
         removeSource: (serverId) => this.removeSource(serverId),
         removeRun: (sessionId) => this.removeRun(sessionId),
+        removeFinishedRuns: (serverId) => this.removeFinishedRuns(serverId),
         welcomed: () => this.welcomed(),
         runner: this.runner,
         showGuide: (section) => this.guideOpener?.(section),
@@ -674,10 +675,30 @@ export class LogsController {
   removeRun(sessionId: string): number {
     const record = this.registry.records.get(sessionId);
     if (!record || record.status === 'running' || record.status === 'stopping') return 0;
-    const removed = this.store.removeSession(sessionId);
-    this.registry.records.delete(sessionId);
-    this.remote.forgetRun(sessionId);
-    this.state.status = `Removed ${record.command || record.taskName || record.server || 'the run'}${removed ? ` and its ${removed.toLocaleString()} log${removed === 1 ? '' : 's'}` : ''}`;
+    return this.removeRuns([record], record.command || record.taskName || record.server || 'the run');
+  }
+
+  /** Drop every finished run of a source, and of its containers, with their logs; running runs stay. */
+  removeFinishedRuns(serverId: string): number {
+    const belongsTo = (id: string) => id === serverId || id.startsWith(`${serverId}::`);
+    const finished = [...this.registry.records.values()].filter(
+      (record) => belongsTo(record.serverId) && record.status !== 'running' && record.status !== 'stopping',
+    );
+    if (!finished.length) return 0;
+    const label = this.store.serverLabel(serverId) ?? finished[0].server ?? serverId;
+    return this.removeRuns(
+      finished,
+      `${finished.length.toLocaleString()} finished run${finished.length === 1 ? '' : 's'} of ${label}`,
+    );
+  }
+
+  private removeRuns(records: SessionSummary[], name: string): number {
+    const removed = this.store.removeSessions(new Set(records.map((record) => record.id)));
+    for (const record of records) {
+      this.registry.records.delete(record.id);
+      this.remote.forgetRun(record.id);
+    }
+    this.state.status = `Removed ${name}${removed ? ` and ${records.length === 1 ? 'its' : 'their'} ${removed.toLocaleString()} log${removed === 1 ? '' : 's'}` : ''}`;
     this.state.invalidate();
     return removed;
   }

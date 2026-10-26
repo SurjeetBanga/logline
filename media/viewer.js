@@ -3998,7 +3998,19 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
       group2.setAttribute("role", "group");
       group2.setAttribute("aria-label", "Runs");
       const all = runButton("", sessions.length ? `All runs \xB7 ${sessions.length}` : "All runs", "");
-      group2.append(all);
+      const finished = sessions.filter((session) => session.status !== "running" && session.status !== "stopping");
+      if (finished.length > 1) {
+        const wrapper = document.createElement("div");
+        wrapper.className = "run-option-row";
+        const serverId = state.selectedServer;
+        const remove = actionButton("remove", `Remove the ${finished.length} finished runs and their logs`, () => {
+          if (finished.some((session) => session.id === state.selectedSession)) actions.selectRun("");
+          api.postMessage({ type: "removeFinishedRuns", serverId });
+        });
+        remove.classList.add("run-remove");
+        wrapper.append(all, remove);
+        group2.append(wrapper);
+      } else group2.append(all);
       const byTime = new Set(sessions.map(runName)).size <= 1 && !sessions.some((session) => session.sourceKind === "remote" || session.sourceKind === "import");
       for (const session of sessions) {
         const wrapper = document.createElement("div");

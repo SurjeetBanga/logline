@@ -954,7 +954,7 @@ test('removing a source drops its events and container sources, keeps the rest i
   assert.ok(store.fieldNames().includes('queue'));
   assert.equal(store.removeSource('missing'), 0);
   add(6, 'worker', 'w2');
-  assert.equal(store.removeSession('w1'), 1, 'removing a run keeps the other runs of its source');
+  assert.equal(store.removeSessions(new Set(['w1'])), 1, 'removing a run keeps the other runs of its source');
   assert.deepEqual(
     store.all().map((event) => event.id),
     [4, 6],

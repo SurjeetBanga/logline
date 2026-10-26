@@ -323,7 +323,20 @@ export function createSourceRail(
     group.setAttribute('role', 'group');
     group.setAttribute('aria-label', 'Runs');
     const all = runButton('', sessions.length ? `All runs · ${sessions.length}` : 'All runs', '');
-    group.append(all);
+    // Several finished runs, such as searches of a connection, can go at once; the source and running runs stay.
+    const finished = sessions.filter((session) => session.status !== 'running' && session.status !== 'stopping');
+    if (finished.length > 1) {
+      const wrapper = document.createElement('div');
+      wrapper.className = 'run-option-row';
+      const serverId = state.selectedServer;
+      const remove = actionButton('remove', `Remove the ${finished.length} finished runs and their logs`, () => {
+        if (finished.some((session) => session.id === state.selectedSession)) actions.selectRun('');
+        api.postMessage({ type: 'removeFinishedRuns', serverId });
+      });
+      remove.classList.add('run-remove');
+      wrapper.append(all, remove);
+      group.append(wrapper);
+    } else group.append(all);
     // Runs of one command, the usual case, are told apart by when they started; the
     // source's row above already names the command. Different commands keep their names,
     // and so do a connection's or an import's runs, which are named by what they fetched.
