@@ -54,6 +54,11 @@ test('a field term becomes a parameterized condition on its mapped column, withi
   assert.deepEqual(built.local, []);
 });
 
+test('a * in a value is a wildcard, as % in LIKE', () => {
+  assert.deepEqual(build('msg:time*out').select.params, ['%time%out%', 500]);
+  assert.deepEqual(build('msg:100%').select.params, ['%100\\%%', 500], 'a % typed is still a percent sign');
+});
+
 test('Postgres gets numbered placeholders and compares time as timestamptz', () => {
   const native = buildSqlLogQuery({
     dialect: 'postgres',

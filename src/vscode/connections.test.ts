@@ -537,7 +537,7 @@ test('a Datadog connection is added with its keys, searched, and opened from a l
     ],
   });
   try {
-    const { manager, store, secrets, shown, registry } = setup();
+    const { manager, store, secrets, shown, registry, remote } = setup();
     const { panel, init } = await openForm(manager);
     assert.ok(init.sites.includes('datadoghq.eu'));
     const form = draft({ type: 'datadog', site: fake.url, apiKey, appKey, label: 'prod' });
@@ -572,6 +572,23 @@ test('a Datadog connection is added with its keys, searched, and opened from a l
     // Run SQL is for databases only.
     await manager.runSql('prod');
     assert.equal(ui.messages.length, 1, 'no SQL prompt for Datadog');
+    // A tail of every log is asked about first.
+    ui.modal = undefined;
+    await manager.tail('prod', '  ');
+    assert.equal(ui.messages.at(-1), 'warning: Tail every log in Datadog · prod?');
+    assert.equal(remote.tailing('prod'), false, 'declined');
+    ui.modal = 'Tail Every Log';
+    await manager.tail('prod', '', true, '*');
+    assert.equal(remote.tailing('prod'), true);
+    ui.messages.length = 1;
+    await manager.tail('prod', 'service:checkout', true);
+    assert.equal(ui.messages.length, 1, 'a tail of a filter is not asked about');
+    assert.deepEqual(remote.tailOf('prod'), { query: 'service:checkout', native: false });
+    // Declining a tail of every log keeps the tail that runs.
+    ui.modal = undefined;
+    await manager.tail('prod', '', true);
+    assert.deepEqual(remote.tailOf('prod'), { query: 'service:checkout', native: false });
+    await manager.tail('prod', '', false);
     // A Log Explorer link: its search and range, then the trace of the log it points at.
     const link = `https://app.datadoghq.com/logs?query=${encodeURIComponent('status:error')}&event=log-2&from_ts=${now - 7200000}&to_ts=${now}`;
     await manager.openLink('prod', link);

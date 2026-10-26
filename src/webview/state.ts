@@ -19,6 +19,9 @@ export interface PersistedState {
   view?: string;
   /** The time range searched on connections. */
   range?: string;
+  /** A Datadog query typed in Datadog's own syntax, and whether Run and Tail send it. */
+  datadogQuery?: string;
+  datadogSyntax?: boolean;
   /** Whether the Sources rail was collapsed or opened by hand. */
   rail?: 'collapsed' | 'open';
   /** The rails' width in pixels when resized by hand. */
@@ -58,6 +61,9 @@ export class ViewerState {
   view: string;
   /** The time range a connection search covers, such as `1h`. */
   connectionRange: string;
+  /** A query in Datadog's own syntax, and whether Run and Tail on a Datadog connection send it as typed. */
+  datadogQuery: string;
+  datadogSyntax: boolean;
   /** The Sources rail's state when set by hand; undefined follows the panel's width. */
   railCollapsed?: boolean;
   /** The rails' width when resized by hand; undefined keeps the default. */
@@ -68,6 +74,8 @@ export class ViewerState {
       this.railWidth = saved.railWidth;
     this.view = typeof saved.view === 'string' ? saved.view : 'logs';
     this.connectionRange = typeof saved.range === 'string' && RANGE_CHOICES.includes(saved.range) ? saved.range : '1h';
+    this.datadogQuery = typeof saved.datadogQuery === 'string' ? saved.datadogQuery.slice(0, 2048) : '';
+    this.datadogSyntax = saved.datadogSyntax === true;
     this.following = !saved.sort;
     this.cellHintDismissed = saved.cellHintDismissed === true;
     this.rowHintDismissed = saved.rowHintDismissed === true;
@@ -153,6 +161,8 @@ export class ViewerState {
       ...(this.rowHintDismissed ? { rowHintDismissed: true } : {}),
       ...(this.view !== 'logs' ? { view: this.view } : {}),
       ...(this.connectionRange !== '1h' ? { range: this.connectionRange } : {}),
+      ...(this.datadogQuery ? { datadogQuery: this.datadogQuery } : {}),
+      ...(this.datadogSyntax ? { datadogSyntax: true } : {}),
       ...(this.railCollapsed !== undefined ? { rail: this.railCollapsed ? 'collapsed' : 'open' } : {}),
       ...(this.railWidth !== undefined ? { railWidth: this.railWidth } : {}),
     };

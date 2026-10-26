@@ -733,6 +733,14 @@ body > header {
   min-width: 0;
   border-radius: 4px;
 }
+/* A finished run's Remove shows while the run is pointed at or focused, like a source's actions. */
+.run-option-row .run-remove {
+  visibility: hidden;
+}
+.run-option-row:hover .run-remove,
+.run-option-row:focus-within .run-remove {
+  visibility: visible;
+}
 .rail-runs .run-select {
   min-height: 24px;
   padding-left: 30px;
@@ -1531,6 +1539,12 @@ select {
   height: 26px;
   padding: 2px 6px;
 }
+.connection-range[hidden] {
+  display: none;
+}
+#connectionService {
+  max-width: 220px;
+}
 #connectionRun:not(:disabled) {
   color: var(--vscode-button-foreground, #fff);
   background: var(--vscode-button-background, #0e639c);
@@ -1548,6 +1562,24 @@ select {
 }
 .connection-preview {
   font-family: var(--vscode-editor-font-family, monospace);
+}
+.connection-native {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 3px 6px;
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: 12px;
+  color: var(--vscode-input-foreground);
+  background: var(--vscode-input-background);
+  border: 1px solid var(--vscode-input-border, transparent);
+  border-radius: 2px;
+}
+.connection-native:focus {
+  outline: 1px solid var(--vscode-focusBorder);
+  outline-offset: -1px;
+}
+.connection-native[hidden] {
+  display: none;
 }
 .connection-preview:empty {
   display: none;

@@ -125,6 +125,7 @@ export function createViewer(api: WebviewApi) {
     () => search.query(),
     saveState,
     (baselineServerId, baselineSessionId) => compareView.open({ baselineServerId, baselineSessionId }),
+    (query) => search.setQuery(query, true),
   );
   const rail = createSourceRail(elements, state, api, scope, {
     selectSource: (id) => selectSource(id),
@@ -332,6 +333,10 @@ export function createViewer(api: WebviewApi) {
     }
     if (data.type === 'connectionPreview') {
       connectionBar.receivePreview(data);
+      return;
+    }
+    if (data.type === 'connectionServices') {
+      connectionBar.receiveServices(data);
       return;
     }
     if (data.type === 'aiCalls') {

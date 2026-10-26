@@ -29,8 +29,9 @@ export interface MongoLogQuery {
 const NUMERIC = /^(?:number|int|long|double|decimal)$/i;
 
 /** A pattern for a value as text, in any case, anywhere in the field. */
+// `*` in a value is a wildcard, as in `service:check*`; as `.*` it also matches a value with a `*` in it.
 function pattern(value: string, prefix = false): string {
-  return `${prefix ? '^' : ''}${value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`;
+  return `${prefix ? '^' : ''}${value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replaceAll('\\*', '.*')}`;
 }
 
 /**

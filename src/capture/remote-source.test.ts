@@ -71,16 +71,20 @@ test('a fetch keeps the rows that match the whole search, oldest first, in a run
     },
   });
   assert.deepEqual(started, [info.sessionId]);
-  assert.deepEqual(requests, [
-    {
-      query: 'level:error /time.?out/',
-      fromMs: BASE,
-      toMs: BASE + 3600000,
-      limit: 300,
-      order: 'desc',
-      countTotal: true,
-    },
-  ]);
+  assert.equal(typeof requests[0].firstPage, 'function');
+  assert.deepEqual(
+    requests.map(({ firstPage: _, ...request }) => request),
+    [
+      {
+        query: 'level:error /time.?out/',
+        fromMs: BASE,
+        toMs: BASE + 3600000,
+        limit: 300,
+        order: 'desc',
+        countTotal: true,
+      },
+    ],
+  );
   assert.deepEqual(messages(), ['time out', 'timeout']);
   assert.deepEqual(
     store.all().map((event) => [event.serverId, event.server, event.stream, event.timestampMs]),
@@ -370,4 +374,186 @@ test('a tail of a store that limits searches reads less often, and waits when to
   assert.equal(reads, 3);
   assert.equal(registry.records.get(id)?.captureStatus, 'streaming');
   await remote.dispose();
+});
+
+test('a tail reads at the pace its store sets before each read, and says what it follows', async () => {
+  mock.timers.enable({ apis: ['setInterval', 'Date'], now: BASE });
+  const { remote, target } = setup({ connectionPollSeconds: 1 });
+  let reads = 0;
+  const connector = {
+    tailPollMs: 10000,
+    async fetchLogs() {
+      reads++;
+      // The store's answer allows reading faster from now on.
+      connector.tailPollMs = 3000;
+      return result([]);
+    },
+  };
+  const settle = async () => {
+    for (let turn = 0; turn < 20; turn++) await new Promise((resolve) => setImmediate(resolve));
+  };
+  const id = remote.tail(target(connector), 'service:api', 'Tail: service:api');
+  await settle();
+  assert.deepEqual(remote.tailOf('app'), { query: 'service:api', native: false });
+  assert.equal(remote.last('app')?.query, 'service:api');
+  mock.timers.tick(9000);
+  await settle();
+  assert.equal(reads, 1, 'the first read set the next one 10 s out');
+  mock.timers.tick(1000);
+  await settle();
+  assert.equal(reads, 2);
+  mock.timers.tick(3000);
+  await settle();
+  assert.equal(reads, 3, 'then every 3 s');
+  remote.stopTails('app');
+  assert.equal(remote.tailOf('app'), undefined);
+  remote.forgetRun(id);
+  assert.equal(remote.last('app'), undefined, 'a removed run is no longer the latest');
+  await remote.dispose();
+});
+
+test('a tail reads back only as far as its store has been late, and further once it is late again', async () => {
+  mock.timers.enable({ apis: ['setInterval'] });
+  const { remote, target, messages } = setup({ connectionPollSeconds: 1 });
+  const requests: FetchRequest[] = [];
+  let minute = 10;
+  const connector: RemoteConnector = {
+    tailLagMs: 60000,
+    async fetchLogs(request) {
+      requests.push(request);
+      // One new row a minute, on time, until one arrives 20 s behind the newest.
+      minute++;
+      if (minute === 18) return result([{ ...row(16, 'info', 'late'), timeMs: BASE + 16 * 60000 + 40000 }]);
+      return result([row(minute, 'info', `row ${minute}`)]);
+    },
+  };
+  const settle = async () => {
+    for (let turn = 0; turn < 20; turn++) await new Promise((resolve) => setImmediate(resolve));
+  };
+  remote.tail(target(connector), '', 'Tail');
+  await settle();
+  for (let poll = 0; poll < 8; poll++) {
+    mock.timers.tick(1000);
+    await settle();
+  }
+  const back = requests.slice(1).map((request, i) => BASE + (11 + i) * 60000 - request.fromMs!);
+  // The whole minute until five reads have shown rows on time, then 15 s, then twice the 20 s one row was late.
+  assert.deepEqual(back.slice(0, 6), [60000, 60000, 60000, 60000, 60000, 15000]);
+  // The late row left the newest at minute 17.
+  assert.equal(requests.at(-1)!.fromMs, BASE + 17 * 60000 - 40000);
+  assert.ok(messages().includes('late'));
+  await remote.dispose();
+});
+
+test('a tail of a query in the store’s syntax sends it as typed and keeps every row it returns', async () => {
+  mock.timers.enable({ apis: ['setInterval'] });
+  const { remote, target, messages } = setup({ connectionPollSeconds: 1 });
+  const requests: FetchRequest[] = [];
+  const connector: RemoteConnector = {
+    async fetchLogs(request) {
+      requests.push(request);
+      return result([row(1, 'info', 'kept')]);
+    },
+  };
+  remote.tail(target(connector), 'level:error', 'Tail', 'service:(a OR b)');
+  for (let turn = 0; turn < 20; turn++) await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(requests[0].native, 'service:(a OR b)');
+  assert.deepEqual(messages(), ['kept'], 'the filter does not apply to a query typed for the store');
+  assert.deepEqual(remote.tailOf('app'), { query: 'service:(a OR b)', native: true });
+  assert.equal(remote.last('app')?.native, true);
+  await remote.dispose();
+});
+
+test('a search shows its first page early, then its rows in order, and says where the time went', async () => {
+  const { remote, target, store, messages, state } = setup({ datadogMaxRows: 4, connectionMaxRows: 300 });
+  const generation = state.generation;
+  let shownEarly: unknown[] = [];
+  const connector: RemoteConnector = {
+    async fetchLogs(request) {
+      assert.equal(request.limit, 4, 'the connection’s own row limit');
+      // Newest first: the first page, then the rest, which are older.
+      request.firstPage!([row(4, 'info', 'four'), row(3, 'info', 'three')]);
+      await new Promise((resolve) => setImmediate(resolve));
+      shownEarly = messages();
+      return result([row(4, 'info', 'four'), row(3, 'info', 'three'), row(2, 'info', 'two'), row(1, 'info', 'one')]);
+    },
+  };
+  const info = await remote.fetch(
+    { ...target(connector), maxRowsSetting: 'datadogMaxRows' },
+    { query: '', title: 'All' },
+  );
+  assert.deepEqual(shownEarly, ['three', 'four']);
+  assert.deepEqual(messages(), ['one', 'two', 'three', 'four'], 'oldest first, each once');
+  assert.equal(store.all().length, 4);
+  assert.equal(info.kept, 4);
+  assert.equal(typeof info.firstMs, 'number');
+  assert.equal(typeof info.processMs, 'number');
+  assert.ok(state.generation > generation, 'the view starts over with the run in order');
+});
+
+test('a newer search replaces one still running, and drops what it showed', async () => {
+  const { remote, target, registry, messages } = setup();
+  let release!: () => void;
+  const slow: RemoteConnector = {
+    async fetchLogs(request) {
+      request.firstPage?.([row(9, 'info', 'old')]);
+      await new Promise<void>((resolve) => (release = resolve));
+      return result([row(9, 'info', 'old')]);
+    },
+  };
+  const first = remote.fetch(target(slow), { query: '', title: 'Old' });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(messages(), ['old']);
+  const oldId = remote.last('app')!.sessionId;
+  remote.cancelFetches('app');
+  release();
+  await first;
+  assert.deepEqual(messages(), []);
+  assert.equal(registry.records.has(oldId), false);
+  await remote.fetch(target({ fetchLogs: async () => result([row(1, 'info', 'new')]) }), { query: '', title: 'New' });
+  assert.deepEqual(messages(), ['new']);
+});
+
+test('a tail that reads back less goes back over the whole lag every tenth read', async () => {
+  mock.timers.enable({ apis: ['setInterval'] });
+  const { remote, target } = setup({ connectionPollSeconds: 1 });
+  const requests: FetchRequest[] = [];
+  let minute = 10;
+  const connector: RemoteConnector = {
+    tailLagMs: 60000,
+    async fetchLogs(request) {
+      requests.push(request);
+      minute++;
+      return result([row(minute, 'info', `row ${minute}`)]);
+    },
+  };
+  const settle = async () => {
+    for (let turn = 0; turn < 20; turn++) await new Promise((resolve) => setImmediate(resolve));
+  };
+  remote.tail(target(connector), '', 'Tail');
+  await settle();
+  for (let poll = 0; poll < 11; poll++) {
+    mock.timers.tick(1000);
+    await settle();
+  }
+  const back = requests.slice(1).map((request, i) => BASE + (11 + i) * 60000 - request.fromMs!);
+  assert.deepEqual(back, [60000, 60000, 60000, 60000, 60000, 15000, 15000, 15000, 15000, 60000, 15000]);
+  await remote.dispose();
+});
+
+test('a search that fails after showing its first page keeps none of it', async () => {
+  const { remote, target, messages } = setup();
+  const info = await remote.fetch(
+    target({
+      async fetchLogs(request) {
+        request.firstPage!([row(2, 'info', 'early')]);
+        await new Promise((resolve) => setImmediate(resolve));
+        throw new Error('rate limit');
+      },
+    }),
+    { query: '', title: 'All' },
+  );
+  assert.equal(info.error, 'rate limit');
+  assert.equal(info.kept, 0);
+  assert.deepEqual(messages(), []);
 });

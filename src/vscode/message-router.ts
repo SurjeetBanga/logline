@@ -35,6 +35,8 @@ interface MessageServices {
   clear(): void;
   stop(serverId?: string, sessionId?: string): void;
   removeSource(serverId: string): Promise<number>;
+  removeRun(sessionId: string): number;
+  removeFinishedRuns(serverId: string): number;
   welcomed?(): void;
   showGuide(section: 'guide' | 'whatsNew'): void;
   agentAccess: AgentLogAccess;
@@ -66,6 +68,7 @@ interface MessageServices {
     | 'openLink'
     | 'metricQuery'
     | 'metricNames'
+    | 'services'
     | 'watchMetric'
     | 'allowAgents'
     | 'revokeAgents'
@@ -230,6 +233,12 @@ export async function handleMessage(
       // Asks first when the source is running.
       await services.removeSource(msg.serverId);
       return;
+    case 'removeRun':
+      services.removeRun(msg.sessionId);
+      return;
+    case 'removeFinishedRuns':
+      services.removeFinishedRuns(msg.serverId);
+      return;
     case 'editConnection':
       await services.connections?.edit(msg.connectionId);
       return;
@@ -267,7 +276,16 @@ export async function handleMessage(
         msg.query,
         msg.range,
         msg.fromMs !== undefined && msg.toMs !== undefined ? { fromMs: msg.fromMs, toMs: msg.toMs } : undefined,
+        msg.native,
       );
+      return;
+    case 'connectionServices':
+      send({
+        type: 'connectionServices',
+        connectionId: msg.connectionId,
+        range: msg.range,
+        ...((await services.connections?.services(msg.connectionId, msg.range)) ?? { services: [] }),
+      });
       return;
     case 'metricQuery': {
       const answer = (await services.connections?.metricQuery(msg.connectionId, msg.query, msg.range)) ?? {
@@ -292,7 +310,7 @@ export async function handleMessage(
       else await services.connections?.revokeAgents(msg.connectionId);
       return;
     case 'connectionTail':
-      await services.connections?.tail(msg.connectionId, msg.query, msg.enabled);
+      await services.connections?.tail(msg.connectionId, msg.query, msg.enabled, msg.native);
       return;
     case 'connectionSql':
       await services.connections?.runSql(msg.connectionId);

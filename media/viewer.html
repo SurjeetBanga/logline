@@ -573,6 +573,8 @@
                 </dd>
                 <dt>status:5xx</dt>
                 <dd>Wildcard: 2xx / 4xx / 5xx</dd>
+                <dt>service:check*</dt>
+                <dd>Wildcard: the whole value, * for any text</dd>
                 <dt>status:&gt;=500</dt>
                 <dd>Numeric comparison: &gt; &gt;= &lt; &lt;=</dd>
                 <dt>status:[500 TO 599]</dt>
@@ -735,9 +737,24 @@
                 <option value="7d">Last 7 days</option>
               </select></label
             >
+            <label id="connectionServiceLabel" class="connection-range" hidden
+              >Service
+              <select id="connectionService" title="Search or tail one service's logs">
+                <option value="">Any service</option>
+              </select></label
+            >
             <button id="connectionRun" type="button">Run</button>
             <button id="connectionTail" type="button" aria-pressed="false">Tail</button>
             <button id="connectionSql" type="button" title="Run a read-only SELECT you type">Run SQL…</button>
+            <button
+              id="connectionSyntax"
+              type="button"
+              aria-pressed="false"
+              title="Type the query in Datadog's own syntax, sent as you type it"
+              hidden
+            >
+              Datadog syntax
+            </button>
             <button
               id="connectionLink"
               type="button"
@@ -764,6 +781,16 @@
             </button>
             <span id="connectionResult" class="connection-note" aria-live="polite"></span>
           </div>
+          <input
+            id="connectionNative"
+            class="connection-native"
+            type="text"
+            spellcheck="false"
+            autocomplete="off"
+            aria-label="Datadog query"
+            placeholder="Datadog query, such as service:checkout @http.status_code:>=500"
+            hidden
+          />
           <code id="connectionPreview" class="connection-note connection-preview"></code>
         </div>
         <p id="rowHint" class="detail-hint table-hint" hidden>

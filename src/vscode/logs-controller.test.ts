@@ -182,6 +182,69 @@ test('removing a source drops its logs, runs, and share, and says so', async (t)
   assert.equal(await controller.removeSource(''), 0);
 });
 
+test('removing a finished run drops its logs and record, and keeps a running one', async (t) => {
+  const controller = setup(t);
+  controller.store.add({ level: 'info', id: 1, serverId: 'db', sessionId: 'f1', message: 'one' });
+  controller.store.add({ level: 'info', id: 2, serverId: 'db', sessionId: 'f2', message: 'two' });
+  controller.registry.records.set('f1', {
+    id: 'f1',
+    serverId: 'db',
+    server: 'DB',
+    command: 'level:error · last 1h',
+    status: 'exited',
+    startedAt: 0,
+    events: 1,
+  } as never);
+  controller.registry.records.set('f2', {
+    id: 'f2',
+    serverId: 'db',
+    server: 'DB',
+    status: 'running',
+    startedAt: 0,
+    events: 1,
+  } as never);
+  assert.equal(controller.removeRun('f2'), 0, 'a run still capturing stays');
+  assert.equal(controller.removeRun('missing'), 0);
+  const generation = controller.state.generation;
+  assert.equal(controller.removeRun('f1'), 1);
+  assert.deepEqual(
+    controller.store.all().map((event) => event.id),
+    [2],
+  );
+  assert.equal(controller.registry.records.has('f1'), false);
+  assert.equal(controller.state.status, 'Removed level:error · last 1h and its 1 log');
+  assert.ok(controller.state.generation > generation);
+  // Every finished run of a source at once, its containers' too; the running one stays.
+  for (const [id, serverId] of [
+    ['g1', 'db'],
+    ['g2', 'db::worker'],
+    ['g3', 'dbx'],
+  ]) {
+    controller.store.add({
+      level: 'info',
+      id: controller.store.all().length + 10,
+      serverId,
+      sessionId: id,
+      message: id,
+    });
+    controller.registry.records.set(id, {
+      id,
+      serverId,
+      server: 'DB',
+      status: 'exited',
+      startedAt: 0,
+      events: 1,
+    } as never);
+  }
+  assert.equal(controller.removeFinishedRuns('db'), 2);
+  assert.deepEqual(
+    controller.store.all().map((event) => event.message),
+    ['two', 'g3'],
+  );
+  assert.equal(controller.state.status, 'Removed 2 finished runs of DB and their 2 logs');
+  assert.equal(controller.removeFinishedRuns('db'), 0, 'only a running run is left');
+});
+
 test('the guide’s steps stay done once done, and Show me reaches the panel with the next snapshot', async (t) => {
   const saved = new Map<string, unknown>();
   const controller = new LogsController({

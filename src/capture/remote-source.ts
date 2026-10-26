@@ -14,6 +14,8 @@ export interface RemoteTarget {
   sourceId: string;
   label: string;
   connector: RemoteConnector;
+  /** The setting that limits the rows one search or tail read fetches, when not `connectionMaxRows`. */
+  maxRowsSetting?: string;
 }
 
 /** What the latest fetch from a connection did, for the Logs panel's result line. */
@@ -26,9 +28,17 @@ export interface RemoteRunInfo {
   kept: number;
   /** Matching rows in the range, when the limit cut the result short. */
   total?: number;
+  /** How long the store took to answer, and how long Logline took to show what it returned. */
   elapsedMs?: number;
+  processMs?: number;
+  /** How long after the search started its first rows were shown, when they came before the rest. */
+  firstMs?: number;
   local: string[];
   statement?: string;
+  /** What a tail follows, as typed. */
+  query?: string;
+  /** Whether a tail's query is in the store's own syntax. */
+  native?: boolean;
   error?: string;
   at: number;
 }
@@ -59,15 +69,21 @@ interface Run {
   stopped: boolean;
   // Tails only.
   query?: string;
+  /** A query in the store's own syntax, followed instead of `query`. */
+  native?: string;
   watermark?: number;
   /**
    * Lines already ingested that the next read can return again, with their
    * times: those at the watermark, and those within the store's indexing lag.
    */
   seen?: Map<string, number>;
+  /** How far behind the newest row seen each recent read's new rows were, newest last. */
+  late?: number[];
+  /** Reads after the first. */
+  reads?: number;
   /** Where the next read starts when the last one was cut short by the limit. */
   catchUp?: number;
-  /** No read before this time, after the store said to wait. */
+  /** No read before this time: the store's pace, or how long it said to wait. */
   resumeAt?: number;
   poll?: ReturnType<typeof setInterval>;
   pumping?: Promise<void>;
@@ -75,6 +91,13 @@ interface Run {
 
 const CHUNK = 500;
 const TAIL_START_ROWS = 200;
+// A store that indexes late is read back over twice the lateness of the last reads, at least LAG_FLOOR_MS,
+// once LAG_READS reads have shown it; until then, over all of the store's lag. Every LAG_FULL_EVERY reads go
+// back over all of it again: a row later than the shorter look-back is seen only then, and widens it.
+const LAG_READS = 5;
+const LAG_HISTORY = 20;
+const LAG_FLOOR_MS = 15000;
+const LAG_FULL_EVERY = 10;
 const yieldTurn = () => new Promise<void>((resolve) => setImmediate(resolve));
 
 /**
@@ -107,8 +130,16 @@ export class RemoteSource {
     return [...this.runs.values()].some((run) => run.target.id === connectionId && run.info.kind === 'tail');
   }
 
-  private limit(): number {
-    return this.config.get('connectionMaxRows', 5000);
+  /** What a connection's tail follows, or undefined while none runs. */
+  tailOf(connectionId: string): { query: string; native: boolean } | undefined {
+    const run = [...this.runs.values()].find((one) => one.target.id === connectionId && one.info.kind === 'tail');
+    return run && { query: run.native ?? run.query!, native: run.native !== undefined };
+  }
+
+  private limit(target: RemoteTarget): number {
+    return target.maxRowsSetting
+      ? this.config.get(target.maxRowsSetting, 1000)
+      : this.config.get('connectionMaxRows', 5000);
   }
 
   private start(target: RemoteTarget, kind: RemoteRunInfo['kind'], title: string): Run {
@@ -147,12 +178,34 @@ export class RemoteSource {
     this.state.status = `Fetching from ${target.label}…`;
     this.state.notify();
     options.started?.(run.record.id);
+    const started = Date.now();
+    const filter = options.sql === undefined && options.native === undefined ? rowFilter(options.query) : undefined;
+    // The first rows of a store that reads in pages are shown while it reads the rest.
+    let early: Promise<void> | undefined;
+    const firstPage = (records: RemoteRecord[]) => {
+      if (run.stopped) return;
+      run.info.firstMs = Date.now() - started;
+      run.info.fetched = records.length;
+      early = this.ingest(run, [...records].reverse(), filter);
+    };
+    // The rows shown early leave once the search ends: the whole result takes their place, oldest first so the
+    // run stays in order, and a failed search keeps none of them.
+    const dropEarly = async () => {
+      if (!early) return;
+      await early;
+      early = undefined;
+      if (run.stopped) return;
+      this.ingestion.store.removeSessions(new Set([run.record.id]));
+      run.record.events = 0;
+      run.info.kept = 0;
+      this.state.invalidate();
+    };
     try {
       const connector = target.connector;
       let result: FetchResult;
       if (options.sql !== undefined) {
         if (!connector.runSql) throw new Error(`${target.label} does not run SQL.`);
-        result = await connector.runSql(options.sql, this.limit(), run.abort.signal);
+        result = await connector.runSql(options.sql, this.limit(target), run.abort.signal);
       } else
         result = await connector.fetchLogs(
           {
@@ -160,12 +213,15 @@ export class RemoteSource {
             ...(options.native !== undefined ? { native: options.native } : {}),
             fromMs: options.fromMs,
             toMs: options.toMs,
-            limit: Math.min(options.limit ?? Infinity, this.limit()),
+            limit: Math.min(options.limit ?? Infinity, this.limit(target)),
             order: 'desc',
             countTotal: true,
+            firstPage,
           },
           run.abort.signal,
         );
+      if (run.stopped) return run.info;
+      await dropEarly();
       if (run.stopped) return run.info;
       options.inspect?.(result.records);
       Object.assign(run.info, {
@@ -177,12 +233,12 @@ export class RemoteSource {
       });
       // A search returns the newest rows first; they enter oldest first. Typed SQL keeps its own order.
       const records = options.sql === undefined ? [...result.records].reverse() : result.records;
-      const filter = options.sql === undefined && options.native === undefined ? rowFilter(options.query) : undefined;
-      await this.ingest(run, records, filter);
+      await this.timed(run, () => this.ingest(run, records, filter));
       this.finish(run, run.stopped ? 'stopped' : `${run.info.kept.toLocaleString()} rows`);
       this.state.status = `Fetched ${run.info.kept.toLocaleString()} rows from ${target.label}`;
     } catch (error) {
       if (!run.stopped) {
+        await dropEarly();
         run.info.error = errorText(error);
         this.finish(run, 'failed', run.info.error);
         this.state.status = `${target.label}: ${run.info.error}`;
@@ -192,15 +248,21 @@ export class RemoteSource {
     return run.info;
   }
 
-  /** Show the newest matching rows, then keep reading rows as they are added. */
-  tail(target: RemoteTarget, query: string, title: string): string {
+  /** Show the newest matching rows, then keep reading rows as they are added; `native` is in the store's syntax. */
+  tail(target: RemoteTarget, query: string, title: string, native?: string): string {
     const run = this.start(target, 'tail', title);
     run.query = query;
+    run.info.query = native ?? query;
+    if (native !== undefined) run.native = native;
+    run.info.native = native !== undefined;
     run.seen = new Map();
-    const pollMs = Math.max(this.config.get('connectionPollSeconds', 2) * 1000, target.connector.tailPollMs ?? 0);
-    run.poll = setInterval(() => {
-      void this.pump(run);
-    }, pollMs);
+    // A store that limits searches is read less often than every poll; see pump.
+    run.poll = setInterval(
+      () => {
+        void this.pump(run);
+      },
+      this.config.get('connectionPollSeconds', 2) * 1000,
+    );
     run.poll.unref?.();
     this.state.status = `Tailing ${target.label}`;
     this.state.notify();
@@ -212,6 +274,9 @@ export class RemoteSource {
   private pump(run: Run): Promise<void> {
     if (run.stopped || run.pumping) return run.pumping ?? Promise.resolve();
     if (run.resumeAt !== undefined && Date.now() < run.resumeAt) return Promise.resolve();
+    // The store's pace is asked before each read, as it can change with what the store reports.
+    const paceMs = run.target.connector.tailPollMs;
+    run.resumeAt = paceMs ? Date.now() + paceMs : undefined;
     run.pumping = (async () => {
       try {
         await this.readTail(run);
@@ -224,7 +289,7 @@ export class RemoteSource {
         if (run.stopped) return;
         // A tail outlives a failed read: the database may be restarting or locked.
         const retryMs = (error as { retryAfterMs?: unknown } | undefined)?.retryAfterMs;
-        run.resumeAt = typeof retryMs === 'number' && retryMs > 0 ? Date.now() + retryMs : undefined;
+        if (typeof retryMs === 'number' && retryMs > 0) run.resumeAt = Date.now() + retryMs;
         run.info.error = errorText(error);
         run.record.captureStatus = 'interrupted';
         run.record.captureReason = run.info.error;
@@ -240,13 +305,14 @@ export class RemoteSource {
   private async readTail(run: Run): Promise<void> {
     const first = run.watermark === undefined;
     // A store that makes logs searchable late is read from further back.
-    const lag = run.target.connector.tailLagMs ?? 0;
+    const lag = this.lagMs(run);
     const fromMs = run.catchUp ?? run.watermark! - lag;
-    const limit = this.limit();
+    const limit = this.limit(run.target);
+    const native = run.native !== undefined ? { native: run.native } : {};
     const result = await run.target.connector.fetchLogs(
       first
-        ? { query: run.query!, limit: TAIL_START_ROWS, order: 'desc' }
-        : { query: run.query!, fromMs, limit, order: 'asc' },
+        ? { query: run.query!, ...native, limit: TAIL_START_ROWS, order: 'desc' }
+        : { query: run.query!, ...native, fromMs, limit, order: 'asc' },
       run.abort.signal,
     );
     if (run.stopped) return;
@@ -254,6 +320,15 @@ export class RemoteSource {
     // Reads overlap at the watermark time and over the lag; only rows not shown yet are new.
     const seen = run.seen!;
     const fresh = ordered.filter((record) => !seen.has(record.line));
+    if (!first) {
+      // How late the store made this read's new rows searchable, behind the newest row seen before it.
+      let late = 0;
+      for (const record of fresh)
+        if (record.timeMs !== undefined) late = Math.max(late, run.watermark! - record.timeMs);
+      (run.late ??= []).push(late);
+      if (run.late.length > LAG_HISTORY) run.late.shift();
+      run.reads = (run.reads ?? 0) + 1;
+    }
     let last: number | undefined;
     for (const record of ordered) {
       if (record.timeMs === undefined) continue;
@@ -281,7 +356,22 @@ export class RemoteSource {
       statement: result.statement,
       at: Date.now(),
     });
-    await this.ingest(run, fresh, rowFilter(run.query!));
+    await this.ingest(run, fresh, run.native === undefined ? rowFilter(run.query!) : undefined);
+  }
+
+  /** How far back a tail's next read starts: what the store needs, judged from how late its rows have been. */
+  private lagMs(run: Run): number {
+    const most = run.target.connector.tailLagMs ?? 0;
+    if (!most || (run.late?.length ?? 0) < LAG_READS || (run.reads ?? 0) % LAG_FULL_EVERY === LAG_FULL_EVERY - 1)
+      return most;
+    return Math.min(most, Math.max(LAG_FLOOR_MS, 2 * Math.max(...run.late!)));
+  }
+
+  /** Ingest, adding the time it took to the run's processing time. */
+  private async timed(run: Run, ingest: () => Promise<void>): Promise<void> {
+    const started = Date.now();
+    await ingest();
+    run.info.processMs = (run.info.processMs ?? 0) + Date.now() - started;
   }
 
   private async ingest(run: Run, records: RemoteRecord[], filter: ParsedQuery | undefined): Promise<void> {
@@ -341,6 +431,28 @@ export class RemoteSource {
   /** Forget the results of finished runs, whose rows Clear logs removed; running tails keep theirs. */
   clearResults(): void {
     for (const [id, info] of this.latest) if (!info.running) this.latest.delete(id);
+  }
+
+  /**
+   * Stop a connection's searches that are still running and drop the rows they showed, since a newer search
+   * replaces them. Tails go on.
+   */
+  cancelFetches(connectionId: string): void {
+    const replaced = new Set<string>();
+    for (const run of [...this.runs.values()])
+      if (run.target.id === connectionId && run.info.kind === 'fetch') {
+        this.halt(run);
+        replaced.add(run.record.id);
+      }
+    if (!replaced.size) return;
+    this.ingestion.store.removeSessions(replaced);
+    for (const id of replaced) this.registry.records.delete(id);
+    this.state.invalidate();
+  }
+
+  /** A finished run was removed: its connection no longer reports it as the latest. */
+  forgetRun(sessionId: string): void {
+    for (const [id, info] of this.latest) if (info.sessionId === sessionId && !info.running) this.latest.delete(id);
   }
 
   stopTails(connectionId: string): void {

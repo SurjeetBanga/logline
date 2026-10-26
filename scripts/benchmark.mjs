@@ -220,6 +220,33 @@ timed('remote-rows', 'Turn 5,000 fetched table rows into events, filtered by the
       });
   };
 });
+timed('datadog-logs', 'Turn 5,000 Datadog search results, with tags and colored messages, into events', async () => {
+  const { LogStore } = await load('core/log-store.js');
+  const { Ingestion } = await load('capture/ingestion.js');
+  const { datadogLine } = await load('capture/connectors/datadog.js');
+  const escape = String.fromCharCode(27);
+  const logs = Array.from({ length: 5000 }, (_, i) => ({
+    id: `log-${i}`,
+    attributes: {
+      timestamp: new Date(receivedAt.getTime() + i * 10).toISOString(),
+      status: i % 10 ? 'info' : 'error',
+      message: `${escape}[37;1mrequest ${i}${escape}[0m took ${i % 900} ms`,
+      service: 'orchestrator',
+      host: `web-${i % 4}`,
+      tags: ['env:prod', 'source:java', `version:1.${i % 3}`, 'team:payments'],
+      attributes: { dd: { trace_id: `${i % 100}`, span_id: `${i}` }, http: { status_code: 200 }, user_id: i % 97 },
+    },
+  }));
+  return () => {
+    const ingestion = new Ingestion(new LogStore(10000, 100 * 1024 * 1024), () => {});
+    for (const log of logs)
+      ingestion.accept(datadogLine(log).line, 'remote', {
+        serverId: 'conn:prod',
+        server: 'Datadog · prod',
+        sessionId: 'run',
+      });
+  };
+});
 timed('remote-sql', 'Turn 1,000 searches into SQL for a log table', async () => {
   const { buildSqlLogQuery } = await load('core/remote-query.js');
   const table = {

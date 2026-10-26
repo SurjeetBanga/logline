@@ -60,9 +60,12 @@ export function quoteTable(table: string, dialect: SqlDialect = 'postgres'): str
 // LIKE there escapes with a character that means the same in both modes.
 const likeEscape = (dialect: SqlDialect) => (dialect === 'mysql' ? '!' : '\\');
 
+// `*` in a value is a wildcard, as in `service:check*`; as `%` it also matches a value with a `*` in it.
 function escapeLike(value: string, dialect: SqlDialect): string {
   const escape = likeEscape(dialect);
-  return value.replace(dialect === 'mysql' ? /[!%_]/g : /[\\%_]/g, (character) => `${escape}${character}`);
+  return value
+    .replace(dialect === 'mysql' ? /[!%_]/g : /[\\%_]/g, (character) => `${escape}${character}`)
+    .replaceAll('*', '%');
 }
 
 /** A UTC time as MySQL reads a DATETIME literal; the driver's sessions use UTC. */

@@ -75,10 +75,15 @@ export interface Token {
   relativeMs?: number;
   /** For `changed:true` or `changed:false`, which answer the event must give. */
   changed?: boolean;
+  /** A field value with `*`, such as `service:check*`: it matches the whole value, `*` standing for any text. */
+  glob?: RegExp;
 }
 export type TokenGroup = Token[];
 export type ParsedQuery = TokenGroup[];
 type FieldValue = string | number | boolean | undefined;
+
+// Fields whose values are not text to match, so `*` in them is not a wildcard.
+const SPECIAL_FIELDS = new Set(['exists', 'last', 'timestamp', 'time', 'changed']);
 
 function groupFor(field: string): string[] | undefined {
   const lower = String(field).toLowerCase();
@@ -151,7 +156,9 @@ function parseToken(token: string): Token {
   let search: RegExp | undefined;
   if (field === undefined && regex === undefined && value && !value.includes(' ')) {
     try {
-      search = new RegExp(value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
+      // An unquoted `*` stands for any text, as in `connect*`, as it does in Datadog.
+      const escaped = value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      search = new RegExp(quoted ? escaped : escaped.replaceAll('\\*', '.*'), 'i');
     } catch {
       search = undefined;
     }
@@ -179,6 +186,21 @@ function parseToken(token: string): Token {
     ? Number(last[1]) * ({ s: 1000, m: 60000, h: 3600000, d: 86400000 } as Record<string, number>)[last[2]]
     : undefined;
   const changed = canonical === 'changed' && /^(?:true|false)$/.test(value) ? value === 'true' : undefined;
+  const glob =
+    field !== undefined &&
+    !quoted &&
+    regex === undefined &&
+    !compare &&
+    value.includes('*') &&
+    !SPECIAL_FIELDS.has(canonical!)
+      ? new RegExp(
+          `^${value
+            .split('*')
+            .map((part) => part.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+            .join('.*')}$`,
+          's',
+        )
+      : undefined;
   return {
     negate,
     field,
@@ -193,6 +215,7 @@ function parseToken(token: string): Token {
     timestampRange: parsedTimestampRange,
     relativeMs,
     changed,
+    ...(glob ? { glob } : {}),
   };
 }
 
@@ -280,6 +303,7 @@ export function matchesQuery(
         // field must not fall back to a substring match for a comparison token.
         matched = false;
       }
+      if (matched === undefined && token.glob) matched = actualValue !== undefined && token.glob.test(actual);
       if (matched === undefined) {
         if (token.canonical === 'status' && /^\dxx$/.test(token.value)) matched = actual.startsWith(token.value[0]);
         else if (token.canonical === 'status' && /^\d{3}$/.test(token.value)) matched = actual === token.value;
@@ -323,5 +347,20 @@ export function getField(event: LogEvent, field: string): FieldValue {
     const value = readField(event, name);
     if (value !== undefined) return value;
   }
-  return undefined;
+  return tagValue(event, field);
+}
+
+/**
+ * A tag for a field the event does not have, such as `env` from `env:prod` in a Datadog log's `tags`, so
+ * `env:prod` filters as it does in Datadog. A tag given several times has its values joined with commas.
+ */
+function tagValue(event: LogEvent, field: string): string | undefined {
+  const tags = event.fields?.tags;
+  const prefix = `${field}:`;
+  if (typeof tags !== 'string' || !tags.includes(prefix)) return undefined;
+  let value: string | undefined;
+  for (const tag of tags.split(','))
+    if (tag.startsWith(prefix))
+      value = value === undefined ? tag.slice(prefix.length) : `${value},${tag.slice(prefix.length)}`;
+  return value;
 }

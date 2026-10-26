@@ -41,6 +41,8 @@ test('field terms become case-insensitive matches on their mapped or nested fiel
   assert.deepEqual(build('level:fatal').filter, text('level', 'fatal|critical'));
   assert.deepEqual(build('exists:user.email').filter, { 'user.email': { $exists: true } });
   assert.deepEqual(build('-level:debug').filter, { $nor: [text('level', 'debug')] });
+  // A * is a wildcard.
+  assert.deepEqual(build('service:check*out').filter, text('svc', 'check.*out'));
 });
 
 test('free text and what else a filter cannot promise are applied by Logline; OR becomes $or', () => {

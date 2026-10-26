@@ -33,6 +33,11 @@ export interface FetchRequest {
   order: 'asc' | 'desc';
   /** Also count every matching row when the limit cuts the result short. */
   countTotal?: boolean;
+  /**
+   * Sees the first rows while more are still being read, so they can be shown sooner. A store that reads in
+   * pages calls it once, with a small first page, when the limit asks for more than that page holds.
+   */
+  firstPage?(records: RemoteRecord[]): void;
 }
 
 export interface FetchResult {
@@ -58,8 +63,10 @@ export interface RemoteConnector {
    * service indexes it. Tails read this far back and skip what they showed.
    */
   readonly tailLagMs?: number;
-  /** The shortest time between a tail's reads, for stores that limit how often they are searched. */
+  /** The shortest time between a tail's reads, for stores that limit how often they are searched; read before each one. */
   readonly tailPollMs?: number;
+  /** The services that logged in a window, most logs first; only stores that know services have it. */
+  services?(fromMs: number, toMs: number, signal?: AbortSignal): Promise<{ name: string; count: number }[]>;
 }
 
 export interface MetricResult {

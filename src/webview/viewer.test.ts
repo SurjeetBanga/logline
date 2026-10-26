@@ -3831,23 +3831,63 @@ test('a selected connection shows its range, Run, Tail and Run SQL, with the SQL
   snapshot({ connections: [{ ...connection, last }] });
   assert.equal(
     get('connectionResult').textContent,
-    'Fetched 500 of 4,800 rows · 12 match the filter · 38 ms · read-only',
+    'Fetched 500 of 4,800 rows · 12 match the filter · database 38 ms · read-only',
   );
   snapshot({ connections: [{ ...connection, last: { ...last, running: true } }] });
   assert.equal(get('connectionResult').textContent, 'Fetching…');
-  assert.equal(get('connectionRun').disabled, true);
+  assert.equal(get('connectionRun').disabled, false, 'Run replaces a search that is running');
+  assert.match(get('connectionRun').title, /^Stop the search that is running/);
+  snapshot({ connections: [{ ...connection, last: { ...last, running: true, firstMs: 300, kept: 200 } }] });
+  assert.equal(get('connectionResult').textContent, 'Showing the newest 200 rows · reading the rest…');
+  snapshot({ connections: [{ ...connection, last: { ...last, processMs: 9, firstMs: 300 } }] });
+  assert.equal(
+    get('connectionResult').textContent,
+    'Fetched 500 of 4,800 rows · 12 match the filter · database 38 ms · shown in 9 ms · first rows after 300 ms · read-only',
+  );
   snapshot({ connections: [{ ...connection, last: { ...last, error: 'no such table: app_logs' } }] });
   assert.equal(get('connectionResult').textContent, 'Failed: no such table: app_logs');
   assert.equal(get('connectionResult').classList.contains('connection-error'), true);
   snapshot({
-    connections: [{ ...connection, tailing: true, last: { ...last, kind: 'tail', running: true, kept: 3 } }],
+    connections: [
+      {
+        ...connection,
+        tailing: true,
+        tail: { query: 'timeout', native: false },
+        last: { ...last, kind: 'tail', running: true, kept: 3, query: 'timeout' },
+      },
+    ],
   });
   assert.equal(get('connectionTail').textContent, 'Stop tail');
   assert.equal(get('connectionTail').attributes['aria-pressed'], 'true');
-  assert.equal(get('connectionResult').textContent, 'Tailing · 3 rows');
+  assert.equal(get('connectionResult').textContent, 'Tailing timeout · 3 rows');
   assert.equal(get('connectionRun').disabled, false, 'a tail does not block a search');
+  get('connectionTail').listeners.get('click')!();
+  assert.equal(plain(messages.at(-1)).enabled, false, 'a tail of this filter stops');
+  // A tail of another filter is followed by one of the filter typed now.
+  snapshot({
+    connections: [
+      {
+        ...connection,
+        tailing: true,
+        tail: { query: '', native: false },
+        last: { ...last, kind: 'tail', running: true, kept: 3, query: '' },
+      },
+    ],
+  });
+  assert.equal(get('connectionTail').textContent, 'Tail this filter');
+  assert.equal(get('connectionResult').textContent, 'Tailing all logs · 3 rows');
+  get('connectionTail').listeners.get('click')!();
+  assert.deepEqual(plain(messages.at(-1)), {
+    type: 'connectionTail',
+    connectionId: 'app',
+    query: 'timeout',
+    enabled: true,
+  });
+  // A search run while tailing becomes the latest result; the tail still follows what it followed.
+  snapshot({ connections: [{ ...connection, tailing: true, tail: { query: '', native: false }, last }] });
+  assert.equal(get('connectionTail').textContent, 'Tail this filter');
   snapshot({ connections: [{ ...connection, last: { ...last, kind: 'tail', running: false, kept: 3 } }] });
-  assert.equal(get('connectionResult').textContent, 'Tail stopped · 3 rows');
+  assert.equal(get('connectionResult').textContent, 'Tail of all logs stopped · 3 rows');
   assert.equal(get('empty').textContent, 'No matching rows. Change the filter or the range and press Run.');
   // A search just run is selected with its source, so earlier runs' rows do not mix in.
   const run = {
@@ -4106,7 +4146,7 @@ test('a Datadog connection offers Open link instead of Run SQL, and speaks of lo
   assert.deepEqual(plain(messages.at(-1)), { type: 'connectionLink', connectionId: 'prod' });
   const last = { sessionId: 's', kind: 'fetch', running: false, fetched: 1, kept: 1, local: [], at: 0, elapsedMs: 80 };
   snapshot({ connections: [{ ...connection, last }] });
-  assert.equal(get('connectionResult').textContent, 'Fetched 1 log · 80 ms · read-only');
+  assert.equal(get('connectionResult').textContent, 'Fetched 1 log · Datadog 80 ms · read-only');
 });
 
 test('a metric query is charted, and a window dragged across it shows the logs from then', () => {
@@ -4320,4 +4360,135 @@ test('a connection says whether agents may query it, and the button asks to chan
   assert.equal(get('connectionAgents').textContent, 'Agents allowed');
   get('connectionAgents').listeners.get('click')!();
   assert.deepEqual(plain(messages.at(-1)), { type: 'connectionAgents', connectionId: 'prod', enabled: false });
+});
+
+test('a Datadog connection lists its services to choose one, and can send a query in Datadog syntax', () => {
+  const { get, receive, messages, timers, savedStates, runtime } = viewer({ server: 'conn:dd', query: 'level:error' });
+  const plain = (value: unknown) => JSON.parse(JSON.stringify(value));
+  const connection = {
+    id: 'dd',
+    sourceId: 'conn:dd',
+    label: 'Datadog · prod',
+    type: 'datadog',
+    mapped: true,
+    sql: false,
+    tailing: false,
+  };
+  const snapshot = (extra: Record<string, unknown> = {}) =>
+    receive({
+      type: 'snapshot',
+      generation: 1,
+      newest: 100,
+      status: 'Ready',
+      command: '',
+      running: false,
+      total: 0,
+      retained: 0,
+      discarded: 0,
+      bytes: 0,
+      maxBytes: 1,
+      truncated: 0,
+      events: [],
+      columns: [],
+      page: 0,
+      pages: 1,
+      matched: 0,
+      servers: [{ id: 'conn:dd', label: 'Datadog · prod', status: 'idle', activeSessions: 0 }],
+      sessions: [],
+      connections: [connection],
+      ...extra,
+    });
+  snapshot();
+  assert.equal(get('connectionServiceLabel').hidden, false);
+  assert.equal(get('connectionSyntax').hidden, false);
+  const asked = messages.filter((message) => message.type === 'connectionServices');
+  assert.deepEqual(plain(asked), [{ type: 'connectionServices', connectionId: 'dd', range: '1h' }]);
+  snapshot();
+  assert.equal(
+    messages.filter((message) => message.type === 'connectionServices').length,
+    1,
+    'the list is not asked for again while it is fresh',
+  );
+  // A failed list is asked for again after a short wait, not the five minutes a list stands.
+  receive({ type: 'connectionServices', connectionId: 'dd', range: '1h', services: [], error: 'rate limit' });
+  assert.match(get('connectionService').title, /^Could not list services: rate limit/);
+  // The panel's own clock moves on 31 s.
+  runInContext('Date.now = ((now) => () => now() + 31000)(Date.now)', runtime);
+  snapshot();
+  assert.equal(messages.filter((message) => message.type === 'connectionServices').length, 2);
+  receive({
+    type: 'connectionServices',
+    connectionId: 'dd',
+    range: '1h',
+    services: [
+      { name: 'checkout', count: 1200 },
+      { name: 'payments api', count: 4 },
+    ],
+  });
+  const options = get('connectionService').children;
+  assert.deepEqual(
+    options.map((option) => [option.value, option.textContent]),
+    [
+      ['', 'Any service'],
+      ['checkout', 'checkout · 1,200'],
+      ['payments api', 'payments api · 4'],
+    ],
+  );
+  // Choosing a service puts it in the filter, in place of any other; Any service takes it out.
+  get('connectionService').value = 'payments api';
+  get('connectionService').listeners.get('change')!();
+  assert.equal(get('search').value, 'level:error service:"payments api"');
+  get('connectionService').value = 'checkout';
+  get('connectionService').listeners.get('change')!();
+  assert.equal(get('search').value, 'level:error service:checkout');
+  get('connectionService').value = '';
+  get('connectionService').listeners.get('change')!();
+  assert.equal(get('search').value, 'level:error');
+  // Datadog syntax starts from what the filter became, and Run and Tail send it as typed.
+  [...timers.values()].at(-1)!();
+  const preview = plain(messages.filter((message) => message.type === 'connectionPreview').at(-1));
+  receive({ ...preview, statement: 'status:(error)', local: [] });
+  get('connectionSyntax').listeners.get('click')!();
+  assert.equal(get('connectionSyntax').attributes['aria-pressed'], 'true');
+  assert.equal(get('connectionNative').hidden, false);
+  assert.equal(get('connectionNative').value, 'status:(error)');
+  get('connectionNative').value = 'service:checkout @http.status_code:>=500';
+  get('connectionNative').listeners.get('input')!();
+  assert.equal(savedStates.at(-1)?.datadogQuery, 'service:checkout @http.status_code:>=500');
+  assert.equal(savedStates.at(-1)?.datadogSyntax, true);
+  assert.equal(get('connectionService').value, 'checkout', 'the list shows the service the Datadog query names');
+  get('connectionRun').listeners.get('click')!();
+  assert.deepEqual(plain(messages.at(-1)), {
+    type: 'connectionFetch',
+    connectionId: 'dd',
+    query: 'level:error',
+    native: 'service:checkout @http.status_code:>=500',
+    range: '1h',
+  });
+  get('connectionTail').listeners.get('click')!();
+  assert.equal(plain(messages.at(-1)).native, 'service:checkout @http.status_code:>=500');
+  // A tail of the filter is followed by one of the Datadog query.
+  snapshot({
+    connections: [
+      {
+        ...connection,
+        tailing: true,
+        tail: { query: 'level:error', native: false },
+        last: {
+          sessionId: 's',
+          kind: 'tail',
+          running: true,
+          fetched: 0,
+          kept: 0,
+          local: [],
+          at: 0,
+          query: 'level:error',
+        },
+      },
+    ],
+  });
+  assert.equal(get('connectionTail').textContent, 'Tail this filter');
+  get('connectionSyntax').listeners.get('click')!();
+  assert.equal(get('connectionNative').hidden, true);
+  assert.equal(get('connectionTail').textContent, 'Stop tail');
 });

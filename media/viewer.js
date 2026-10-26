@@ -812,6 +812,10 @@
       connectionCompare: element("connectionCompare"),
       connectionAgents: element("connectionAgents"),
       connectionLink: element("connectionLink"),
+      connectionSyntax: element("connectionSyntax"),
+      connectionNative: element("connectionNative"),
+      connectionService: element("connectionService"),
+      connectionServiceLabel: element("connectionServiceLabel"),
       compare: element("compare"),
       compareView: element("compareView"),
       compareBaseline: element("compareBaseline"),
@@ -3026,6 +3030,9 @@ Span ${call.spanId}`;
     view;
     /** The time range a connection search covers, such as `1h`. */
     connectionRange;
+    /** A query in Datadog's own syntax, and whether Run and Tail on a Datadog connection send it as typed. */
+    datadogQuery;
+    datadogSyntax;
     /** The Sources rail's state when set by hand; undefined follows the panel's width. */
     railCollapsed;
     /** The rails' width when resized by hand; undefined keeps the default. */
@@ -3036,6 +3043,8 @@ Span ${call.spanId}`;
         this.railWidth = saved.railWidth;
       this.view = typeof saved.view === "string" ? saved.view : "logs";
       this.connectionRange = typeof saved.range === "string" && RANGE_CHOICES.includes(saved.range) ? saved.range : "1h";
+      this.datadogQuery = typeof saved.datadogQuery === "string" ? saved.datadogQuery.slice(0, 2048) : "";
+      this.datadogSyntax = saved.datadogSyntax === true;
       this.following = !saved.sort;
       this.cellHintDismissed = saved.cellHintDismissed === true;
       this.rowHintDismissed = saved.rowHintDismissed === true;
@@ -3117,6 +3126,8 @@ Span ${call.spanId}`;
         ...this.rowHintDismissed ? { rowHintDismissed: true } : {},
         ...this.view !== "logs" ? { view: this.view } : {},
         ...this.connectionRange !== "1h" ? { range: this.connectionRange } : {},
+        ...this.datadogQuery ? { datadogQuery: this.datadogQuery } : {},
+        ...this.datadogSyntax ? { datadogSyntax: true } : {},
         ...this.railCollapsed !== void 0 ? { rail: this.railCollapsed ? "collapsed" : "open" } : {},
         ...this.railWidth !== void 0 ? { railWidth: this.railWidth } : {}
       };
@@ -3480,25 +3491,65 @@ Span ${call.spanId}`;
 
   // src/webview/search/connection-bar.ts
   var PREVIEW_DELAY_MS = 250;
-  function createConnectionBar(elements, state, api, scope, query, saveState, compare) {
+  var SERVICES_TTL_MS = 5 * 6e4;
+  var SERVICES_RETRY_MS = 3e4;
+  var SERVICE_TERM = /^@?service:/i;
+  function serviceOf(text2) {
+    const term = queryTokens(text2).find((token) => SERVICE_TERM.test(token));
+    if (!term) return "";
+    const value = term.slice(term.indexOf(":") + 1);
+    if (!value.startsWith('"')) return value;
+    try {
+      return JSON.parse(value);
+    } catch {
+      return value.slice(1, -1);
+    }
+  }
+  function withService(text2, service) {
+    const kept = queryTokens(text2).filter((token) => !SERVICE_TERM.test(token));
+    if (service) kept.push(`service:${/[\s"():]/.test(service) ? JSON.stringify(service) : service}`);
+    return kept.join(" ");
+  }
+  function createConnectionBar(elements, state, api, scope, query, saveState, compare, setQuery) {
     let connections = [];
     let previewKey = "";
     let previewTimer;
+    let services;
+    let servicesAsked = "";
+    let listed = [];
+    let statement = "";
     const numbers = new Intl.NumberFormat();
     const selected = () => connections.find((connection) => connection.sourceId === state.selectedServer);
     const noun2 = (connection, count) => `${connection.language === "mongo" ? "document" : connection.sql ? "row" : "log"}${count === 1 ? "" : "s"}`;
+    const native = (connection) => connection.type === "datadog" && state.datadogSyntax;
+    const search = (connection) => native(connection) ? { query: query(), native: state.datadogQuery.trim() || "*" } : { query: query() };
+    const retargets = (connection) => {
+      const tail = connection.tail;
+      if (!connection.tailing || !tail) return false;
+      const now = search(connection);
+      return tail.query !== (now.native ?? now.query) || tail.native !== native(connection);
+    };
     function resultText(connection) {
       const last = connection.last;
       if (!last)
         return connection.mapped ? "Choose a range and press Run. Nothing is fetched until you do." : connection.language === "mongo" ? "No log collection is mapped. Use Run query to query it." : "No log table is mapped. Use Run SQL to query it.";
       const rows = `${numbers.format(last.kept)} ${noun2(connection, last.kept)}`;
-      if (last.kind === "tail")
-        return !last.running ? `Tail stopped \xB7 ${rows}` : last.error ? `Tail interrupted: ${last.error}` : `Tailing \xB7 ${rows}`;
-      if (last.running) return "Fetching\u2026";
+      if (last.kind === "tail") {
+        const following = last.query?.trim() || "all logs";
+        return !last.running ? `Tail of ${following} stopped \xB7 ${rows}` : last.error ? `Tail of ${following} interrupted: ${last.error}` : `Tailing ${following} \xB7 ${rows}`;
+      }
+      if (last.running)
+        return last.firstMs !== void 0 ? `Showing the newest ${numbers.format(last.kept)} ${noun2(connection, last.kept)} \xB7 reading the rest\u2026` : "Fetching\u2026";
       if (last.error) return `Failed: ${last.error}`;
       const of = last.total !== void 0 && last.total > last.fetched ? ` of ${numbers.format(last.total)}` : "";
       const kept = last.kept < last.fetched ? ` \xB7 ${numbers.format(last.kept)} match the filter` : "";
-      const time = last.elapsedMs !== void 0 ? ` \xB7 ${numbers.format(last.elapsedMs)} ms` : "";
+      const store = connection.type === "datadog" ? "Datadog" : connection.language === "mongo" ? "MongoDB" : "database";
+      const ms = (value) => `${numbers.format(value)} ms`;
+      const time = [
+        last.elapsedMs !== void 0 ? ` \xB7 ${store} ${ms(last.elapsedMs)}` : "",
+        last.processMs !== void 0 ? ` \xB7 shown in ${ms(last.processMs)}` : "",
+        last.firstMs !== void 0 ? ` \xB7 first rows after ${ms(last.firstMs)}` : ""
+      ].join("");
       return `Fetched ${numbers.format(last.fetched)}${of} ${noun2(connection, last.fetched)}${kept}${time} \xB7 read-only`;
     }
     function render() {
@@ -3509,15 +3560,16 @@ Span ${call.spanId}`;
         previewKey = "";
         return;
       }
-      const busy = connection.last?.running === true && connection.last.kind !== "tail";
+      const busy = connection.last?.running === true && connection.last.kind === "fetch";
       elements.connectionRange.value = state.connectionRange;
       elements.connectionRange.disabled = !connection.mapped;
-      elements.connectionRun.disabled = !connection.mapped || busy;
-      elements.connectionRun.title = connection.mapped ? `Fetch the newest rows from ${connection.label} in this range that match the filter` : "Map a log table to search it; Run SQL works without one";
+      elements.connectionRun.disabled = !connection.mapped;
+      elements.connectionRun.title = !connection.mapped ? "Map a log table to search it; Run SQL works without one" : busy ? "Stop the search that is running, and fetch with this filter instead" : `Fetch the newest rows from ${connection.label} in this range that match the filter`;
       elements.connectionTail.disabled = !connection.mapped;
       elements.connectionTail.setAttribute("aria-pressed", String(connection.tailing));
-      elements.connectionTail.textContent = connection.tailing ? "Stop tail" : "Tail";
-      elements.connectionTail.title = connection.tailing ? "Stop reading new rows" : "Show the newest matching rows, then keep reading rows as they are added";
+      const retarget = retargets(connection);
+      elements.connectionTail.textContent = retarget ? "Tail this filter" : connection.tailing ? "Stop tail" : "Tail";
+      elements.connectionTail.title = retarget ? `Stop following ${connection.tail?.query.trim() || "all logs"} and follow this filter instead` : connection.tailing ? "Stop reading new rows" : "Show the newest matching rows, then keep reading rows as they are added";
       elements.connectionResult.textContent = resultText(connection);
       elements.connectionCompare.hidden = !connection.last || connection.last.kind === "tail";
       elements.connectionSql.hidden = !connection.sql;
@@ -3530,8 +3582,65 @@ Span ${call.spanId}`;
       elements.connectionLink.hidden = connection.type !== "datadog";
       elements.connectionResult.title = connection.last?.statement ?? "";
       elements.connectionResult.classList[connection.last?.error ? "add" : "remove"]("connection-error");
+      const datadog = connection.type === "datadog" && connection.mapped;
+      elements.connectionSyntax.hidden = !datadog;
+      elements.connectionSyntax.setAttribute("aria-pressed", String(native(connection)));
+      elements.connectionNative.hidden = !native(connection);
+      if (elements.connectionNative.value !== state.datadogQuery) elements.connectionNative.value = state.datadogQuery;
+      elements.connectionServiceLabel.hidden = !datadog;
+      if (datadog) {
+        requestServices(connection);
+        showService(connection);
+      }
       if (!connection.mapped) elements.connectionPreview.textContent = "";
-      else requestPreview(connection);
+      else if (native(connection)) {
+        clearTimeout(previewTimer);
+        previewKey = "";
+        elements.connectionPreview.classList.remove("connection-error");
+        elements.connectionPreview.textContent = "Run and Tail send the Datadog query as typed; the filter above narrows what is shown.";
+        elements.connectionPreview.title = "";
+      } else requestPreview(connection);
+    }
+    function requestServices(connection) {
+      const key = `${connection.id}
+${state.connectionRange}`;
+      if (services?.key === key && Date.now() < services.until || servicesAsked === key) return;
+      servicesAsked = key;
+      api.postMessage({ type: "connectionServices", connectionId: connection.id, range: state.connectionRange });
+    }
+    function receiveServices(answer) {
+      const key = `${answer.connectionId}
+${answer.range}`;
+      if (key !== servicesAsked) return;
+      servicesAsked = "";
+      services = { key, until: Date.now() + (answer.error ? SERVICES_RETRY_MS : SERVICES_TTL_MS) };
+      const select = elements.connectionService;
+      const any = document.createElement("option");
+      any.value = "";
+      any.textContent = "Any service";
+      const options = answer.services.map(({ name, count }) => {
+        const option = document.createElement("option");
+        option.value = name;
+        option.textContent = `${name} \xB7 ${numbers.format(count)}`;
+        return option;
+      });
+      select.replaceChildren(any, ...options);
+      listed = answer.services.map((service) => service.name);
+      select.title = answer.error ? `Could not list services: ${answer.error}` : "Search or tail one service's logs; services are listed by how many logs they had in the range";
+      const connection = selected();
+      if (connection) showService(connection);
+    }
+    function showService(connection) {
+      const service = serviceOf(native(connection) ? state.datadogQuery : query());
+      const select = elements.connectionService;
+      if (service && !listed.includes(service)) {
+        const option = document.createElement("option");
+        option.value = service;
+        option.textContent = service;
+        select.append(option);
+        listed.push(service);
+      }
+      select.value = service;
     }
     function requestPreview(connection = selected()) {
       if (!connection?.mapped) return;
@@ -3558,6 +3667,7 @@ Span ${call.spanId}`;
         note.title = "";
         return;
       }
+      statement = connection.type === "datadog" ? preview.statement ?? "" : "";
       const local = preview.local.length ? ` \xB7 Filtered locally: ${preview.local.join(" ")}` : "";
       const sends = connection.sql ? "Runs as" : "Datadog search";
       note.textContent = preview.statement ? `${sends}: ${preview.statement}${local}` : "";
@@ -3572,7 +3682,7 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
         api.postMessage({
           type: "connectionFetch",
           connectionId: connection.id,
-          query: query(),
+          ...search(connection),
           range: state.connectionRange
         });
       else api.postMessage({ type: "connectionSql", connectionId: connection.id });
@@ -3581,7 +3691,32 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
     scope.listen(elements.connectionRange, "change", () => {
       state.connectionRange = elements.connectionRange.value;
       saveState();
-      requestPreview();
+      render();
+    });
+    scope.listen(elements.connectionService, "change", () => {
+      const connection = selected();
+      if (!connection) return;
+      const service = elements.connectionService.value;
+      if (native(connection)) {
+        state.datadogQuery = withService(state.datadogQuery, service);
+        saveState();
+        render();
+      } else setQuery(withService(query(), service));
+    });
+    scope.listen(elements.connectionSyntax, "click", () => {
+      state.datadogSyntax = !state.datadogSyntax;
+      if (state.datadogSyntax && !state.datadogQuery.trim() && statement !== "*") state.datadogQuery = statement;
+      saveState();
+      render();
+      if (state.datadogSyntax) elements.connectionNative.focus();
+    });
+    scope.listen(elements.connectionNative, "input", () => {
+      state.datadogQuery = elements.connectionNative.value.slice(0, 2048);
+      saveState();
+      render();
+    });
+    scope.listen(elements.connectionNative, "keydown", (event) => {
+      if (event.key === "Enter") run();
     });
     scope.listen(elements.connectionRun, "click", () => run());
     scope.listen(elements.connectionTail, "click", () => {
@@ -3590,8 +3725,8 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
         api.postMessage({
           type: "connectionTail",
           connectionId: connection.id,
-          query: query(),
-          enabled: !connection.tailing
+          ...search(connection),
+          enabled: !connection.tailing || retargets(connection)
         });
     });
     scope.listen(elements.connectionCompare, "click", () => {
@@ -3620,8 +3755,9 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
       },
       render,
       receivePreview,
-      /** The filter changed: refresh the preview of the SQL it becomes. */
-      queryChanged: () => requestPreview(),
+      receiveServices,
+      /** The filter changed: refresh the preview of the SQL it becomes, and whether Tail follows it. */
+      queryChanged: render,
       /** Fetch from the selected connection; false when no connection is selected. */
       run,
       connections: () => connections,
@@ -3871,7 +4007,19 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
       group2.setAttribute("role", "group");
       group2.setAttribute("aria-label", "Runs");
       const all = runButton("", sessions.length ? `All runs \xB7 ${sessions.length}` : "All runs", "");
-      group2.append(all);
+      const finished = sessions.filter((session) => session.status !== "running" && session.status !== "stopping");
+      if (finished.length > 1) {
+        const wrapper = document.createElement("div");
+        wrapper.className = "run-option-row";
+        const serverId = state.selectedServer;
+        const remove = actionButton("remove", `Remove the ${finished.length} finished runs and their logs`, () => {
+          if (finished.some((session) => session.id === state.selectedSession)) actions.selectRun("");
+          api.postMessage({ type: "removeFinishedRuns", serverId });
+        });
+        remove.classList.add("run-remove");
+        wrapper.append(all, remove);
+        group2.append(wrapper);
+      } else group2.append(all);
       const byTime = new Set(sessions.map(runName)).size <= 1 && !sessions.some((session) => session.sourceKind === "remote" || session.sourceKind === "import");
       for (const session of sessions) {
         const wrapper = document.createElement("div");
@@ -3905,6 +4053,14 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
           stop.dataset.runId = session.id;
           stop.disabled = session.status !== "running";
           wrapper.append(stop);
+        } else if (session.status !== "running" && session.status !== "stopping") {
+          const remove = actionButton("remove", "Remove this run and its logs", () => {
+            if (state.selectedSession === session.id) actions.selectRun("");
+            api.postMessage({ type: "removeRun", sessionId: session.id });
+          });
+          remove.classList.add("run-remove");
+          remove.dataset.runId = session.id;
+          wrapper.append(remove);
         }
         group2.append(wrapper);
       }
@@ -7524,7 +7680,8 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
       scope,
       () => search.query(),
       saveState,
-      (baselineServerId, baselineSessionId) => compareView.open({ baselineServerId, baselineSessionId })
+      (baselineServerId, baselineSessionId) => compareView.open({ baselineServerId, baselineSessionId }),
+      (query) => search.setQuery(query, true)
     );
     const rail = createSourceRail(elements, state, api, scope, {
       selectSource: (id) => selectSource(id),
@@ -7720,6 +7877,10 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
       }
       if (data.type === "connectionPreview") {
         connectionBar.receivePreview(data);
+        return;
+      }
+      if (data.type === "connectionServices") {
+        connectionBar.receiveServices(data);
         return;
       }
       if (data.type === "aiCalls") {

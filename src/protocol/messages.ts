@@ -70,6 +70,8 @@ export type ViewRequest =
   | { type: 'run'; serverId?: string }
   | { type: 'stop'; serverId?: string; sessionId?: string }
   | { type: 'removeSource'; serverId: string }
+  | { type: 'removeRun'; sessionId: string }
+  | { type: 'removeFinishedRuns'; serverId: string }
   | { type: 'removeConnection' | 'editConnection'; connectionId: string }
   /** A message from the Connection form; the connection manager checks `request` itself. */
   | { type: 'connectionForm'; session: number; request: Record<string, unknown> }
@@ -82,11 +84,14 @@ export type ViewRequest =
       /** An exact window, such as one selected on a metric chart, instead of the range. */
       fromMs?: number;
       toMs?: number;
+      /** A query in the store's own syntax, sent as typed, instead of `query`. */
+      native?: string;
     }
   | { type: 'metricQuery'; connectionId: string; query: string; range: string }
   | { type: 'metricNames'; connectionId: string; search: string }
   | { type: 'metricWatch'; connectionId: string; query: string; enabled: boolean }
-  | { type: 'connectionTail'; connectionId: string; query: string; enabled: boolean }
+  | { type: 'connectionTail'; connectionId: string; query: string; enabled: boolean; native?: string }
+  | { type: 'connectionServices'; connectionId: string; range: string }
   | { type: 'connectionSql' | 'connectionLink'; connectionId: string }
   | { type: 'connectionAgents'; connectionId: string; enabled: boolean }
   | ({ type: 'compare' } & CompareRequest)
@@ -137,6 +142,8 @@ export interface ConnectionView {
   /** Whether agents may fetch from it. */
   agents: boolean;
   tailing: boolean;
+  /** What the running tail follows, as typed, and whether in the store's own syntax. */
+  tail?: { query: string; native: boolean };
   /** The latest fetch or tail. */
   last?: RemoteRunInfo;
 }
@@ -304,6 +311,14 @@ export type HostMessage =
       error?: string;
     }
   | { type: 'metricNames'; connectionId: string; search: string; names: string[] }
+  | {
+      type: 'connectionServices';
+      connectionId: string;
+      range: string;
+      /** The services that logged in the range, most logs first. */
+      services: { name: string; count: number }[];
+      error?: string;
+    }
   | { type: 'connectionForm'; session: number; update: FormUpdate }
   | {
       type: 'connectionPreview';
@@ -461,6 +476,10 @@ export function parseViewRequest(value: unknown): ViewRequest | undefined {
       return { type: msg.type, serverId: filter.serverId, sessionId: filter.sessionId };
     case 'removeSource':
       return filter.serverId ? { type: msg.type, serverId: filter.serverId } : undefined;
+    case 'removeRun':
+      return filter.sessionId ? { type: msg.type, sessionId: filter.sessionId } : undefined;
+    case 'removeFinishedRuns':
+      return filter.serverId ? { type: msg.type, serverId: filter.serverId } : undefined;
     case 'connectionForm':
       return Number.isSafeInteger(msg.session) &&
         msg.request &&
@@ -499,14 +518,24 @@ export function parseViewRequest(value: unknown): ViewRequest | undefined {
       if (!connectionId) return;
       if (msg.type === 'connectionSql' || msg.type === 'connectionLink') return { type: msg.type, connectionId };
       const query = (string('query') ?? '').slice(0, 1024);
-      if (msg.type === 'connectionTail') return { type: msg.type, connectionId, query, enabled: msg.enabled === true };
+      const typed = string('native')?.slice(0, 2048);
+      const native = typed?.trim() && msg.type !== 'connectionPreview' ? { native: typed } : {};
+      if (msg.type === 'connectionTail')
+        return { type: msg.type, connectionId, query, enabled: msg.enabled === true, ...native };
       const range = string('range');
       const valid = range && RANGE_CHOICES.includes(range) ? range : '1h';
       const fromMs = number('fromMs');
       const toMs = number('toMs');
       if (msg.type === 'connectionFetch' && fromMs !== undefined && toMs !== undefined && fromMs < toMs)
-        return { type: msg.type, connectionId, query, range: valid, fromMs, toMs };
-      return { type: msg.type, connectionId, query, range: valid };
+        return { type: msg.type, connectionId, query, range: valid, fromMs, toMs, ...native };
+      return { type: msg.type, connectionId, query, range: valid, ...native };
+    }
+    case 'connectionServices': {
+      const connectionId = string('connectionId')?.slice(0, 128);
+      const range = string('range');
+      return connectionId
+        ? { type: msg.type, connectionId, range: range && RANGE_CHOICES.includes(range) ? range : '1h' }
+        : undefined;
     }
     case 'compare': {
       const baselineServerId = string('baselineServerId')?.slice(0, 4096);

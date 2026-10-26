@@ -242,6 +242,14 @@ test('message router removes a source, asks before removing a connection, and op
       calls.push({ name: 'removeSource', value: serverId });
       return Promise.resolve(3);
     },
+    removeRun: (sessionId: string) => {
+      calls.push({ name: 'removeRun', value: sessionId });
+      return 1;
+    },
+    removeFinishedRuns: (serverId: string) => {
+      calls.push({ name: 'removeFinishedRuns', value: serverId });
+      return 2;
+    },
     connectAgent: async (agent?: string) => {
       calls.push({ name: 'connectAgent', value: agent });
     },
@@ -254,6 +262,9 @@ test('message router removes a source, asks before removing a connection, and op
   for (const request of [
     { type: 'removeSource', serverId: 'api' },
     { type: 'removeSource' },
+    { type: 'removeRun', sessionId: 'run-1' },
+    { type: 'removeRun' },
+    { type: 'removeFinishedRuns', serverId: 'conn:dd' },
     { type: 'removeConnection', connectionId: 'prod' },
     { type: 'connectAgent', agent: 'claude' },
     { type: 'config', setting: 'logline.maxMemoryMb' },
@@ -263,9 +274,37 @@ test('message router removes a source, asks before removing a connection, and op
     calls.filter((call) => call.name !== 'command').map((call) => [call.name, call.value]),
     [
       ['removeSource', 'api'],
+      ['removeRun', 'run-1'],
+      ['removeFinishedRuns', 'conn:dd'],
       ['removeConnection', 'prod'],
       ['connectAgent', 'claude'],
       ['commandArgs', ['logline.maxMemoryMb']],
     ],
   );
+});
+
+test('message router passes a Datadog query typed as is, and answers with the services of a connection', async () => {
+  const seen: unknown[][] = [];
+  const service = {
+    ...services(),
+    connections: {
+      fetch: async (...args: unknown[]) => void seen.push(['fetch', ...args]),
+      tail: async (...args: unknown[]) => void seen.push(['tail', ...args]),
+      services: async (id: string, range: string) => ({ services: [{ name: `${id}-api`, count: 3 }], range }),
+    },
+  };
+  const sent: unknown[] = [];
+  for (const request of [
+    { type: 'connectionFetch', connectionId: 'prod', query: 'x', range: '1h', native: 'service:a' },
+    { type: 'connectionTail', connectionId: 'prod', query: 'x', enabled: true, native: 'service:a' },
+    { type: 'connectionServices', connectionId: 'prod', range: '4h' },
+  ])
+    await handleMessage(service as any, (message) => sent.push(message), request);
+  assert.deepEqual(seen, [
+    ['fetch', 'prod', 'x', '1h', undefined, 'service:a'],
+    ['tail', 'prod', 'x', true, 'service:a'],
+  ]);
+  assert.deepEqual(sent, [
+    { type: 'connectionServices', connectionId: 'prod', range: '4h', services: [{ name: 'prod-api', count: 3 }] },
+  ]);
 });
