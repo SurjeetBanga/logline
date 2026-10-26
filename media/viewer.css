@@ -435,6 +435,11 @@ header {
   padding: 4px 14px 6px;
   flex: none;
 }
+/* The divider under the tabs spans the panel, so it meets the rails' edge and the table's. */
+body > header {
+  padding-left: 0;
+  padding-right: 0;
+}
 /* Tabs on the left, what is captured and shared on the right. The row wraps
    rather than scrolls on narrow panels, so no control is ever out of reach. */
 .view-bar {
@@ -442,6 +447,7 @@ header {
   align-items: center;
   flex-wrap: wrap;
   gap: 4px 12px;
+  padding: 0 14px;
   border-bottom: 1px solid var(--vscode-panel-border, #444);
 }
 .view-tabs {
@@ -534,7 +540,8 @@ header {
 .workspace-main > .search-toolbar,
 .workspace-main > .connection-bar,
 .workspace-main > .table-hint {
-  margin-left: 12px;
+  /* In line with the tabs above and the table's first column below. */
+  margin-left: 14px;
   margin-right: 14px;
 }
 .source-rail {
@@ -546,6 +553,9 @@ header {
   min-width: 0;
   min-height: 0;
   overflow: hidden;
+  /* Up through the header's bottom padding, so its edge meets the divider under the tabs. */
+  margin-top: -6px;
+  padding-top: 6px;
   border-right: 1px solid var(--vscode-panel-border, #444);
 }
 .rail-header {
@@ -748,8 +758,9 @@ header {
   flex-direction: column;
   align-items: flex-start;
   gap: 8px;
-  margin: 4px 2px 0;
-  padding: 10px;
+  /* As wide as the rows, its text in line with the group labels. */
+  margin: 4px 0 0;
+  padding: 10px 10px 10px 7px;
   border: 1px dashed var(--vscode-panel-border, #444);
   border-radius: 6px;
 }
@@ -987,8 +998,9 @@ body:not([data-view='compare']):not([data-view='traces']):not([data-view='metric
   scrollbar-width: thin;
   overscroll-behavior-x: contain;
   /* Each row above the views (toolbar, connection bar, hint) keeps 8px below it and none above,
-     so the table never meets the search box, whichever rows are showing. */
-  margin: 6px 0 8px;
+     so the table never meets the search box, whichever rows are showing. The 3px above, with the
+     header's padding, matches the gap below. */
+  margin: 3px 0 8px;
 }
 .search-toolbar > .popover-container:not(.search-group),
 .search-toolbar > button {
@@ -2538,7 +2550,7 @@ td.time {
   font: inherit;
 }
 #empty {
-  padding: 18px;
+  padding: 18px 14px;
   color: var(--vscode-descriptionForeground, #aaa);
 }
 /* What the table shows on the left; what is running, kept, and shared on the right, each one click away. */
