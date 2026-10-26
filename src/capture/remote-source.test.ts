@@ -407,3 +407,36 @@ test('a tail reads at the pace its store sets before each read, and says what it
   assert.equal(remote.last('app'), undefined, 'a removed run is no longer the latest');
   await remote.dispose();
 });
+
+test('a tail reads back only as far as its store has been late, and further once it is late again', async () => {
+  mock.timers.enable({ apis: ['setInterval'] });
+  const { remote, target, messages } = setup({ connectionPollSeconds: 1 });
+  const requests: FetchRequest[] = [];
+  let minute = 10;
+  const connector: RemoteConnector = {
+    tailLagMs: 60000,
+    async fetchLogs(request) {
+      requests.push(request);
+      // One new row a minute, on time, until one arrives 20 s behind the newest.
+      minute++;
+      if (minute === 18) return result([{ ...row(16, 'info', 'late'), timeMs: BASE + 16 * 60000 + 40000 }]);
+      return result([row(minute, 'info', `row ${minute}`)]);
+    },
+  };
+  const settle = async () => {
+    for (let turn = 0; turn < 20; turn++) await new Promise((resolve) => setImmediate(resolve));
+  };
+  remote.tail(target(connector), '', 'Tail');
+  await settle();
+  for (let poll = 0; poll < 8; poll++) {
+    mock.timers.tick(1000);
+    await settle();
+  }
+  const back = requests.slice(1).map((request, i) => BASE + (11 + i) * 60000 - request.fromMs!);
+  // The whole minute until five reads have shown rows on time, then 15 s, then twice the 20 s one row was late.
+  assert.deepEqual(back.slice(0, 6), [60000, 60000, 60000, 60000, 60000, 15000]);
+  // The late row left the newest at minute 17.
+  assert.equal(requests.at(-1)!.fromMs, BASE + 17 * 60000 - 40000);
+  assert.ok(messages().includes('late'));
+  await remote.dispose();
+});

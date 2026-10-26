@@ -67,6 +67,8 @@ interface Run {
    * times: those at the watermark, and those within the store's indexing lag.
    */
   seen?: Map<string, number>;
+  /** How far behind the newest row seen each recent read's new rows were, newest last. */
+  late?: number[];
   /** Where the next read starts when the last one was cut short by the limit. */
   catchUp?: number;
   /** No read before this time: the store's pace, or how long it said to wait. */
@@ -77,6 +79,11 @@ interface Run {
 
 const CHUNK = 500;
 const TAIL_START_ROWS = 200;
+// A store that indexes late is read back over twice the lateness of the last reads, at least LAG_FLOOR_MS,
+// once LAG_READS reads have shown it; until then, over all of the store's lag.
+const LAG_READS = 5;
+const LAG_HISTORY = 20;
+const LAG_FLOOR_MS = 15000;
 const yieldTurn = () => new Promise<void>((resolve) => setImmediate(resolve));
 
 /**
@@ -253,7 +260,7 @@ export class RemoteSource {
   private async readTail(run: Run): Promise<void> {
     const first = run.watermark === undefined;
     // A store that makes logs searchable late is read from further back.
-    const lag = run.target.connector.tailLagMs ?? 0;
+    const lag = this.lagMs(run);
     const fromMs = run.catchUp ?? run.watermark! - lag;
     const limit = this.limit();
     const result = await run.target.connector.fetchLogs(
@@ -267,6 +274,14 @@ export class RemoteSource {
     // Reads overlap at the watermark time and over the lag; only rows not shown yet are new.
     const seen = run.seen!;
     const fresh = ordered.filter((record) => !seen.has(record.line));
+    if (!first) {
+      // How late the store made this read's new rows searchable, behind the newest row seen before it.
+      let late = 0;
+      for (const record of fresh)
+        if (record.timeMs !== undefined) late = Math.max(late, run.watermark! - record.timeMs);
+      (run.late ??= []).push(late);
+      if (run.late.length > LAG_HISTORY) run.late.shift();
+    }
     let last: number | undefined;
     for (const record of ordered) {
       if (record.timeMs === undefined) continue;
@@ -295,6 +310,13 @@ export class RemoteSource {
       at: Date.now(),
     });
     await this.ingest(run, fresh, rowFilter(run.query!));
+  }
+
+  /** How far back a tail's next read starts: what the store needs, judged from how late its rows have been. */
+  private lagMs(run: Run): number {
+    const most = run.target.connector.tailLagMs ?? 0;
+    if (!most || (run.late?.length ?? 0) < LAG_READS) return most;
+    return Math.min(most, Math.max(LAG_FLOOR_MS, 2 * Math.max(...run.late!)));
   }
 
   private async ingest(run: Run, records: RemoteRecord[], filter: ParsedQuery | undefined): Promise<void> {
