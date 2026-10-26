@@ -26,8 +26,9 @@ type Preview = Extract<HostMessage, { type: 'connectionPreview' }>;
 type Services = Extract<HostMessage, { type: 'connectionServices' }>;
 
 const PREVIEW_DELAY_MS = 250;
-// The services a connection lists are asked again after this long, or for another range.
+// The services a connection lists are asked again after this long, or for another range; a failed answer sooner.
 const SERVICES_TTL_MS = 5 * 60000;
+const SERVICES_RETRY_MS = 30000;
 const SERVICE_TERM = /^@?service:/i;
 
 /** The `service:` value of a query, without quotes, or '' when it has none. */
@@ -71,8 +72,8 @@ export function createConnectionBar(
   let connections: ConnectionView[] = [];
   let previewKey = '';
   let previewTimer: ReturnType<typeof setTimeout> | undefined;
-  /** Which connection and range the listed services are for, and when they were read. */
-  let services: { key: string; at: number } | undefined;
+  /** Which connection and range the listed services are for, and until when they stand. */
+  let services: { key: string; until: number } | undefined;
   let servicesAsked = '';
   /** The services the list shows. */
   let listed: string[] = [];
@@ -92,9 +93,10 @@ export function createConnectionBar(
     native(connection) ? { query: query(), native: state.datadogQuery.trim() || '*' } : { query: query() };
   /** Whether the connection is tailing something other than what Run and Tail would search now. */
   const retargets = (connection: ConnectionView) => {
-    if (!connection.tailing || connection.last?.kind !== 'tail') return false;
+    const tail = connection.tail;
+    if (!connection.tailing || !tail) return false;
     const now = search(connection);
-    return connection.last.query !== (now.native ?? now.query) || !!connection.last.native !== native(connection);
+    return tail.query !== (now.native ?? now.query) || tail.native !== native(connection);
   };
 
   function resultText(connection: ConnectionView): string {
@@ -156,7 +158,7 @@ export function createConnectionBar(
     const retarget = retargets(connection);
     elements.connectionTail.textContent = retarget ? 'Tail this filter' : connection.tailing ? 'Stop tail' : 'Tail';
     elements.connectionTail.title = retarget
-      ? `Stop following ${connection.last?.query?.trim() || 'all logs'} and follow this filter instead`
+      ? `Stop following ${connection.tail?.query.trim() || 'all logs'} and follow this filter instead`
       : connection.tailing
         ? 'Stop reading new rows'
         : 'Show the newest matching rows, then keep reading rows as they are added';
@@ -202,7 +204,7 @@ export function createConnectionBar(
 
   function requestServices(connection: ConnectionView): void {
     const key = `${connection.id}\n${state.connectionRange}`;
-    if ((services?.key === key && Date.now() - services.at < SERVICES_TTL_MS) || servicesAsked === key) return;
+    if ((services?.key === key && Date.now() < services.until) || servicesAsked === key) return;
     servicesAsked = key;
     api.postMessage({ type: 'connectionServices', connectionId: connection.id, range: state.connectionRange });
   }
@@ -211,7 +213,7 @@ export function createConnectionBar(
     const key = `${answer.connectionId}\n${answer.range}`;
     if (key !== servicesAsked) return;
     servicesAsked = '';
-    services = { key, at: Date.now() };
+    services = { key, until: Date.now() + (answer.error ? SERVICES_RETRY_MS : SERVICES_TTL_MS) };
     const select = elements.connectionService;
     const any = document.createElement('option');
     any.value = '';

@@ -3849,7 +3849,12 @@ test('a selected connection shows its range, Run, Tail and Run SQL, with the SQL
   assert.equal(get('connectionResult').classList.contains('connection-error'), true);
   snapshot({
     connections: [
-      { ...connection, tailing: true, last: { ...last, kind: 'tail', running: true, kept: 3, query: 'timeout' } },
+      {
+        ...connection,
+        tailing: true,
+        tail: { query: 'timeout', native: false },
+        last: { ...last, kind: 'tail', running: true, kept: 3, query: 'timeout' },
+      },
     ],
   });
   assert.equal(get('connectionTail').textContent, 'Stop tail');
@@ -3860,7 +3865,14 @@ test('a selected connection shows its range, Run, Tail and Run SQL, with the SQL
   assert.equal(plain(messages.at(-1)).enabled, false, 'a tail of this filter stops');
   // A tail of another filter is followed by one of the filter typed now.
   snapshot({
-    connections: [{ ...connection, tailing: true, last: { ...last, kind: 'tail', running: true, kept: 3, query: '' } }],
+    connections: [
+      {
+        ...connection,
+        tailing: true,
+        tail: { query: '', native: false },
+        last: { ...last, kind: 'tail', running: true, kept: 3, query: '' },
+      },
+    ],
   });
   assert.equal(get('connectionTail').textContent, 'Tail this filter');
   assert.equal(get('connectionResult').textContent, 'Tailing all logs · 3 rows');
@@ -3871,6 +3883,9 @@ test('a selected connection shows its range, Run, Tail and Run SQL, with the SQL
     query: 'timeout',
     enabled: true,
   });
+  // A search run while tailing becomes the latest result; the tail still follows what it followed.
+  snapshot({ connections: [{ ...connection, tailing: true, tail: { query: '', native: false }, last }] });
+  assert.equal(get('connectionTail').textContent, 'Tail this filter');
   snapshot({ connections: [{ ...connection, last: { ...last, kind: 'tail', running: false, kept: 3 } }] });
   assert.equal(get('connectionResult').textContent, 'Tail of all logs stopped · 3 rows');
   assert.equal(get('empty').textContent, 'No matching rows. Change the filter or the range and press Run.');
@@ -4348,7 +4363,7 @@ test('a connection says whether agents may query it, and the button asks to chan
 });
 
 test('a Datadog connection lists its services to choose one, and can send a query in Datadog syntax', () => {
-  const { get, receive, messages, timers, savedStates } = viewer({ server: 'conn:dd', query: 'level:error' });
+  const { get, receive, messages, timers, savedStates, runtime } = viewer({ server: 'conn:dd', query: 'level:error' });
   const plain = (value: unknown) => JSON.parse(JSON.stringify(value));
   const connection = {
     id: 'dd',
@@ -4394,6 +4409,13 @@ test('a Datadog connection lists its services to choose one, and can send a quer
     1,
     'the list is not asked for again while it is fresh',
   );
+  // A failed list is asked for again after a short wait, not the five minutes a list stands.
+  receive({ type: 'connectionServices', connectionId: 'dd', range: '1h', services: [], error: 'rate limit' });
+  assert.match(get('connectionService').title, /^Could not list services: rate limit/);
+  // The panel's own clock moves on 31 s.
+  runInContext('Date.now = ((now) => () => now() + 31000)(Date.now)', runtime);
+  snapshot();
+  assert.equal(messages.filter((message) => message.type === 'connectionServices').length, 2);
   receive({
     type: 'connectionServices',
     connectionId: 'dd',
@@ -4451,6 +4473,7 @@ test('a Datadog connection lists its services to choose one, and can send a quer
       {
         ...connection,
         tailing: true,
+        tail: { query: 'level:error', native: false },
         last: {
           sessionId: 's',
           kind: 'tail',

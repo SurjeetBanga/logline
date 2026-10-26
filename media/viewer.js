@@ -3492,6 +3492,7 @@ Span ${call.spanId}`;
   // src/webview/search/connection-bar.ts
   var PREVIEW_DELAY_MS = 250;
   var SERVICES_TTL_MS = 5 * 6e4;
+  var SERVICES_RETRY_MS = 3e4;
   var SERVICE_TERM = /^@?service:/i;
   function serviceOf(text2) {
     const term = queryTokens(text2).find((token) => SERVICE_TERM.test(token));
@@ -3523,9 +3524,10 @@ Span ${call.spanId}`;
     const native = (connection) => connection.type === "datadog" && state.datadogSyntax;
     const search = (connection) => native(connection) ? { query: query(), native: state.datadogQuery.trim() || "*" } : { query: query() };
     const retargets = (connection) => {
-      if (!connection.tailing || connection.last?.kind !== "tail") return false;
+      const tail = connection.tail;
+      if (!connection.tailing || !tail) return false;
       const now = search(connection);
-      return connection.last.query !== (now.native ?? now.query) || !!connection.last.native !== native(connection);
+      return tail.query !== (now.native ?? now.query) || tail.native !== native(connection);
     };
     function resultText(connection) {
       const last = connection.last;
@@ -3567,7 +3569,7 @@ Span ${call.spanId}`;
       elements.connectionTail.setAttribute("aria-pressed", String(connection.tailing));
       const retarget = retargets(connection);
       elements.connectionTail.textContent = retarget ? "Tail this filter" : connection.tailing ? "Stop tail" : "Tail";
-      elements.connectionTail.title = retarget ? `Stop following ${connection.last?.query?.trim() || "all logs"} and follow this filter instead` : connection.tailing ? "Stop reading new rows" : "Show the newest matching rows, then keep reading rows as they are added";
+      elements.connectionTail.title = retarget ? `Stop following ${connection.tail?.query.trim() || "all logs"} and follow this filter instead` : connection.tailing ? "Stop reading new rows" : "Show the newest matching rows, then keep reading rows as they are added";
       elements.connectionResult.textContent = resultText(connection);
       elements.connectionCompare.hidden = !connection.last || connection.last.kind === "tail";
       elements.connectionSql.hidden = !connection.sql;
@@ -3602,7 +3604,7 @@ Span ${call.spanId}`;
     function requestServices(connection) {
       const key = `${connection.id}
 ${state.connectionRange}`;
-      if (services?.key === key && Date.now() - services.at < SERVICES_TTL_MS || servicesAsked === key) return;
+      if (services?.key === key && Date.now() < services.until || servicesAsked === key) return;
       servicesAsked = key;
       api.postMessage({ type: "connectionServices", connectionId: connection.id, range: state.connectionRange });
     }
@@ -3611,7 +3613,7 @@ ${state.connectionRange}`;
 ${answer.range}`;
       if (key !== servicesAsked) return;
       servicesAsked = "";
-      services = { key, at: Date.now() };
+      services = { key, until: Date.now() + (answer.error ? SERVICES_RETRY_MS : SERVICES_TTL_MS) };
       const select = elements.connectionService;
       const any = document.createElement("option");
       any.value = "";

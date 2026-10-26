@@ -196,8 +196,9 @@ export class DatadogConnector implements Connector {
     const toMs = request.toMs ?? started;
     const fromMs = request.fromMs ?? toMs - 900000;
     const filter = this.filter(translated.query, fromMs, toMs);
-    // The total is counted while the logs are read, rather than after; a failed count leaves it unknown.
-    const counting = request.countTotal ? this.count(filter, signal).catch(() => undefined) : undefined;
+    // The total is counted once the first page shows there are more logs than it held, while the rest are read;
+    // a failed count leaves it unknown.
+    let counting: Promise<number | undefined> | undefined;
     const records: RemoteRecord[] = [];
     let cursor: string | undefined;
     let early = request.firstPage !== undefined && request.limit > FIRST_PAGE;
@@ -219,12 +220,13 @@ export class DatadogConnector implements Connector {
       records.push(...data.map(datadogLine));
       const after = object(object(page.meta).page).after;
       cursor = typeof after === 'string' && after && data.length ? after : undefined;
+      if (request.countTotal && cursor && !counting) counting = this.count(filter, signal).catch(() => undefined);
       // Only a first page with more to follow is worth showing early.
       if (early && cursor) request.firstPage!([...records]);
       early = false;
     } while (cursor && records.length < request.limit);
-    const counted = await counting;
-    const total = counted !== undefined && records.length >= request.limit ? counted : undefined;
+    // Every match was read when the limit did not cut the result short: the count is not waited for.
+    const total = records.length >= request.limit ? await counting : undefined;
     return {
       records,
       ...(total !== undefined ? { total } : {}),

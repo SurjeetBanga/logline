@@ -584,6 +584,10 @@ test('a Datadog connection is added with its keys, searched, and opened from a l
     await manager.tail('prod', 'service:checkout', true);
     assert.equal(ui.messages.length, 1, 'a tail of a filter is not asked about');
     assert.deepEqual(remote.tailOf('prod'), { query: 'service:checkout', native: false });
+    // Declining a tail of every log keeps the tail that runs.
+    ui.modal = undefined;
+    await manager.tail('prod', '', true);
+    assert.deepEqual(remote.tailOf('prod'), { query: 'service:checkout', native: false });
     await manager.tail('prod', '', false);
     // A Log Explorer link: its search and range, then the trace of the log it points at.
     const link = `https://app.datadoghq.com/logs?query=${encodeURIComponent('status:error')}&event=log-2&from_ts=${now - 7200000}&to_ts=${now}`;

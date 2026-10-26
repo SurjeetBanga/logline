@@ -156,7 +156,9 @@ function parseToken(token: string): Token {
   let search: RegExp | undefined;
   if (field === undefined && regex === undefined && value && !value.includes(' ')) {
     try {
-      search = new RegExp(value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
+      // An unquoted `*` stands for any text, as in `connect*`, as it does in Datadog.
+      const escaped = value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      search = new RegExp(quoted ? escaped : escaped.replaceAll('\\*', '.*'), 'i');
     } catch {
       search = undefined;
     }

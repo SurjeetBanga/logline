@@ -79,6 +79,8 @@ interface Run {
   seen?: Map<string, number>;
   /** How far behind the newest row seen each recent read's new rows were, newest last. */
   late?: number[];
+  /** Reads after the first. */
+  reads?: number;
   /** Where the next read starts when the last one was cut short by the limit. */
   catchUp?: number;
   /** No read before this time: the store's pace, or how long it said to wait. */
@@ -90,10 +92,12 @@ interface Run {
 const CHUNK = 500;
 const TAIL_START_ROWS = 200;
 // A store that indexes late is read back over twice the lateness of the last reads, at least LAG_FLOOR_MS,
-// once LAG_READS reads have shown it; until then, over all of the store's lag.
+// once LAG_READS reads have shown it; until then, over all of the store's lag. Every LAG_FULL_EVERY reads go
+// back over all of it again: a row later than the shorter look-back is seen only then, and widens it.
 const LAG_READS = 5;
 const LAG_HISTORY = 20;
 const LAG_FLOOR_MS = 15000;
+const LAG_FULL_EVERY = 10;
 const yieldTurn = () => new Promise<void>((resolve) => setImmediate(resolve));
 
 /**
@@ -182,7 +186,19 @@ export class RemoteSource {
       if (run.stopped) return;
       run.info.firstMs = Date.now() - started;
       run.info.fetched = records.length;
-      early = this.timed(run, () => this.ingest(run, [...records].reverse(), filter));
+      early = this.ingest(run, [...records].reverse(), filter);
+    };
+    // The rows shown early leave once the search ends: the whole result takes their place, oldest first so the
+    // run stays in order, and a failed search keeps none of them.
+    const dropEarly = async () => {
+      if (!early) return;
+      await early;
+      early = undefined;
+      if (run.stopped) return;
+      this.ingestion.store.removeSessions(new Set([run.record.id]));
+      run.record.events = 0;
+      run.info.kept = 0;
+      this.state.invalidate();
     };
     try {
       const connector = target.connector;
@@ -205,15 +221,8 @@ export class RemoteSource {
           run.abort.signal,
         );
       if (run.stopped) return run.info;
-      if (early) {
-        // The rest are older than the first rows: the run is filled again, oldest first, so its rows stay in order.
-        await early;
-        if (run.stopped) return run.info;
-        this.ingestion.store.removeSessions(new Set([run.record.id]));
-        run.record.events = 0;
-        run.info.kept = 0;
-        this.state.invalidate();
-      }
+      await dropEarly();
+      if (run.stopped) return run.info;
       options.inspect?.(result.records);
       Object.assign(run.info, {
         fetched: result.records.length,
@@ -229,6 +238,7 @@ export class RemoteSource {
       this.state.status = `Fetched ${run.info.kept.toLocaleString()} rows from ${target.label}`;
     } catch (error) {
       if (!run.stopped) {
+        await dropEarly();
         run.info.error = errorText(error);
         this.finish(run, 'failed', run.info.error);
         this.state.status = `${target.label}: ${run.info.error}`;
@@ -317,6 +327,7 @@ export class RemoteSource {
         if (record.timeMs !== undefined) late = Math.max(late, run.watermark! - record.timeMs);
       (run.late ??= []).push(late);
       if (run.late.length > LAG_HISTORY) run.late.shift();
+      run.reads = (run.reads ?? 0) + 1;
     }
     let last: number | undefined;
     for (const record of ordered) {
@@ -351,7 +362,8 @@ export class RemoteSource {
   /** How far back a tail's next read starts: what the store needs, judged from how late its rows have been. */
   private lagMs(run: Run): number {
     const most = run.target.connector.tailLagMs ?? 0;
-    if (!most || (run.late?.length ?? 0) < LAG_READS) return most;
+    if (!most || (run.late?.length ?? 0) < LAG_READS || (run.reads ?? 0) % LAG_FULL_EVERY === LAG_FULL_EVERY - 1)
+      return most;
     return Math.min(most, Math.max(LAG_FLOOR_MS, 2 * Math.max(...run.late!)));
   }
 

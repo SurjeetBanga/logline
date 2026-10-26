@@ -142,6 +142,8 @@ export interface ConnectionView {
   /** Whether agents may fetch from it. */
   agents: boolean;
   tailing: boolean;
+  /** What the running tail follows, as typed, and whether in the store's own syntax. */
+  tail?: { query: string; native: boolean };
   /** The latest fetch or tail. */
   last?: RemoteRunInfo;
 }

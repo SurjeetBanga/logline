@@ -211,6 +211,7 @@ export class ConnectionManager implements vscode.Disposable {
   views(): ConnectionView[] {
     return this.list().map((connection) => {
       const last = this.remote.last(connection.id);
+      const tail = this.remote.tailOf(connection.id);
       return {
         id: connection.id,
         sourceId: connectionSourceId(connection.id),
@@ -222,6 +223,7 @@ export class ConnectionManager implements vscode.Disposable {
         watching: this.watched?.watching(connection.id) ?? [],
         agents: this.agentsAllowed(connection),
         tailing: this.remote.tailing(connection.id),
+        ...(tail ? { tail } : {}),
         ...(last ? { last } : {}),
       };
     });
@@ -498,14 +500,12 @@ export class ConnectionManager implements vscode.Disposable {
       return;
     }
     if (!this.trusted('tailing a connection')) return;
-    // A tail of another filter gives way to one of this filter; one of the same filter keeps going.
-    if (this.remote.tailing(connection.id)) {
-      const tail = this.remote.tailOf(connection.id);
-      if (tail?.query === (native ?? query) && tail.native === (native !== undefined)) return;
-      this.remote.stopTails(connection.id);
-    }
+    // A tail of the same filter keeps going.
+    const tail = this.remote.tailOf(connection.id);
+    if (tail?.query === (native ?? query) && tail.native === (native !== undefined)) return;
     const followed = (native ?? query).trim();
-    // Every log of a Datadog organization can be thousands a minute: say so before tailing them all.
+    // Every log of a Datadog organization can be thousands a minute: say so before tailing them all. A tail
+    // already running stays when the answer is no.
     if (connection.type === 'datadog' && (!followed || followed === '*')) {
       const answer = await vscode.window.showWarningMessage(
         `Tail every log in ${connectionLabel(connection)}?`,
@@ -518,6 +518,8 @@ export class ConnectionManager implements vscode.Disposable {
       );
       if (answer !== 'Tail Every Log') return;
     }
+    // A tail of another filter gives way to this one.
+    this.remote.stopTails(connection.id);
     try {
       const runId = this.remote.tail(await this.target(connection), query, `Tail: ${followed || 'all rows'}`, native);
       await this.showSource(connectionSourceId(connection.id), runId);

@@ -513,3 +513,47 @@ test('a newer search replaces one still running, and drops what it showed', asyn
   await remote.fetch(target({ fetchLogs: async () => result([row(1, 'info', 'new')]) }), { query: '', title: 'New' });
   assert.deepEqual(messages(), ['new']);
 });
+
+test('a tail that reads back less goes back over the whole lag every tenth read', async () => {
+  mock.timers.enable({ apis: ['setInterval'] });
+  const { remote, target } = setup({ connectionPollSeconds: 1 });
+  const requests: FetchRequest[] = [];
+  let minute = 10;
+  const connector: RemoteConnector = {
+    tailLagMs: 60000,
+    async fetchLogs(request) {
+      requests.push(request);
+      minute++;
+      return result([row(minute, 'info', `row ${minute}`)]);
+    },
+  };
+  const settle = async () => {
+    for (let turn = 0; turn < 20; turn++) await new Promise((resolve) => setImmediate(resolve));
+  };
+  remote.tail(target(connector), '', 'Tail');
+  await settle();
+  for (let poll = 0; poll < 11; poll++) {
+    mock.timers.tick(1000);
+    await settle();
+  }
+  const back = requests.slice(1).map((request, i) => BASE + (11 + i) * 60000 - request.fromMs!);
+  assert.deepEqual(back, [60000, 60000, 60000, 60000, 60000, 15000, 15000, 15000, 15000, 60000, 15000]);
+  await remote.dispose();
+});
+
+test('a search that fails after showing its first page keeps none of it', async () => {
+  const { remote, target, messages } = setup();
+  const info = await remote.fetch(
+    target({
+      async fetchLogs(request) {
+        request.firstPage!([row(2, 'info', 'early')]);
+        await new Promise((resolve) => setImmediate(resolve));
+        throw new Error('rate limit');
+      },
+    }),
+    { query: '', title: 'All' },
+  );
+  assert.equal(info.error, 'rate limit');
+  assert.equal(info.kept, 0);
+  assert.deepEqual(messages(), []);
+});

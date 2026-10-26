@@ -36,6 +36,8 @@ test('a Logline search becomes Datadog log search syntax', () => {
     ['time*', 'time*'],
     ['"gateway timed out"', '"gateway timed out"'],
     ['message:declined', '*declined*'],
+    ['message:time*out', '*time*out*'],
+    ['level:err*', 'status:err*'],
     ['-healthcheck', '-healthcheck'],
     ['level:error OR service:api', '(status:(error)) OR (service:api)'],
   ];

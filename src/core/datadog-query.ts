@@ -20,7 +20,7 @@ const NUMBER = /^-?\d+(?:\.\d+)?$/;
  * wildcard term; a phrase is matched as a phrase.
  */
 function text(value: string): string {
-  return /\s/.test(value) ? `"${value.replace(/["\\]/g, (character) => `\\${character}`)}"` : `*${escape(value)}*`;
+  return /\s/.test(value) ? `"${value.replace(/["\\]/g, (character) => `\\${character}`)}"` : `*${pattern(value)}*`;
 }
 
 /**
@@ -82,7 +82,7 @@ function term(token: Token, input: string): string | undefined {
     const statuses = Object.entries(STATUSES)
       .filter(([level, names]) => level.includes(token.value) || names.some((name) => name.includes(token.value)))
       .flatMap(([, names]) => names);
-    if (!statuses.length) return `${not}status:${escape(token.value)}`;
+    if (!statuses.length) return `${not}status:${pattern(token.value)}`;
     return `${not}status:(${[...new Set(statuses)].join(' OR ')})`;
   }
   if (canonical === 'status') {

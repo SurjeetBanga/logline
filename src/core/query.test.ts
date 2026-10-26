@@ -203,3 +203,12 @@ test('a * in a field value matches the whole value, any text in its place', () =
   assert.equal(matches('region:*'), false, 'a field the event lacks');
   assert.equal(matches('-service:check*'), false);
 });
+
+test('a * in free text stands for any text, except in quotes', () => {
+  const event = parseLogLine('connection refused by db', 'stdout', 1, new Date());
+  const matches = (query: string) => matchesQuery(event, parseQuery(query));
+  assert.equal(matches('connect*'), true);
+  assert.equal(matches('conn*by'), true);
+  assert.equal(matches('"connect*"'), false);
+  assert.equal(matches('-connect*'), false);
+});

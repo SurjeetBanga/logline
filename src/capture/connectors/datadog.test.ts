@@ -51,6 +51,11 @@ test('a search pages through Datadog, newest first, and counts every match when 
     // 750 errors, all from checkout since every fourth log is even.
     assert.equal(result.records.length, 750);
     assert.equal(result.total, undefined, 'not counted when every match fit');
+    assert.equal(
+      fake.state.requests.filter((request) => request.path === '/api/v2/logs/analytics/aggregate').length,
+      0,
+      'nor asked for',
+    );
     assert.equal(result.statement, 'status:(error) service:checkout');
     const capped = await connector.fetchLogs({
       query: '',
