@@ -38,7 +38,7 @@ Run your app the way you already do: in a terminal, with F5, as a task, in Docke
 
 ![Compare: production errors from Datadog lined up with local runs, marked Reproduced, Fixed locally, Not seen locally, or New, with both sides of one error shown](media/readme/compare.webp)
 
-- **Connections** search and tail Datadog, Postgres, MySQL and Aurora (with AWS IAM sign-in), MongoDB, and SQLite logs, read-only, beside your local runs.
+- **Connections** search and tail Datadog, Postgres, MySQL and Aurora (with AWS IAM sign-in), MongoDB, and SQLite logs, read-only, beside your local runs. Add one in a form that tests it and previews its log table first; **Edit** changes it later.
 - **Compare** lines production errors up with your newest local runs: is it reproduced, and is your fix working? Errors from code you changed are tagged.
 - **Metrics** chart a connection's queries; drag across a spike to fetch the logs from that window.
 
@@ -54,7 +54,7 @@ Run your app the way you already do: in a terminal, with F5, as a task, in Docke
 2. Open the **Logs** panel. Click **Capture off** in its status bar so it reads **Capture on**, then run your app in a terminal as usual. Or press F5: debug output appears automatically.
 3. Type `level:error` in the search box and press **Enter**. Click an event to see everything about it.
 
-New to it? Logline offers a one-minute tour the first time, and **More actions → Help** opens the guide. To try it without your own app, import [samples/demo-logs.jsonl](samples/demo-logs.jsonl) with **Logline: Import Logs**, or run the [checkout sample](samples/README.md#checkout-demo).
+New to it? Logline offers a one-minute tour the first time, which **More actions → Take the tour** replays, and **More actions → Help** opens the guide. To try it without your own app, import [samples/demo-logs.jsonl](samples/demo-logs.jsonl) with **Logline: Import Logs**, or run the [checkout sample](samples/README.md#checkout-demo).
 
 ## Everything else
 

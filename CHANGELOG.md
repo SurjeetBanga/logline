@@ -2,7 +2,7 @@
 
 All notable changes to Logline are documented in this file.
 
-## Unreleased
+## 1.17.0 — 2026-10-25
 
 ### Changes
 
@@ -14,6 +14,7 @@ All notable changes to Logline are documented in this file.
 
 ### Fixes
 
+- The Logs panel lines up: the line under the tabs meets the Sources rail and spans the table, the search row has the same space above and below it and starts in line with the table's first column, the Connections card is as wide as the rail's rows with its text in line with their labels, and the empty table's message starts where the Time column does.
 - On Windows, Claude Code, Codex, and other MCP clients find the VS Code window of their project again. VS Code names folders with a lowercase drive letter (`c:\`) and agents start in `C:\`, so no window seemed to contain the agent's folder; folders now match whatever their case.
 - When Logline cannot edit the MCP settings of Cursor, Windsurf, or Kiro and copies the server entry instead, the entry names the open folder (`--workspace ${workspaceFolder}`), as the one it writes does, so the editor's agent reads this window's logs.
 - Redaction hides `passwd` values and the `Pwd` of connection strings, such as `Server=db;Uid=sa;Pwd=…`, from agents, exports, and copies.

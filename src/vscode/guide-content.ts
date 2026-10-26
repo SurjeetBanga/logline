@@ -17,6 +17,27 @@ export interface GuideRelease {
 
 export const GUIDE_RELEASES: GuideRelease[] = [
   {
+    version: '1.17.0',
+    date: '2026-10-25',
+    highlights: [
+      {
+        title: 'Add a connection in one form',
+        text: 'Add Connection opens a Connection tab in the Logs panel: choose the service or database, test it, pick the log table with a preview of its rows, and name it. Nothing is saved until you add it.',
+        section: 'connections',
+      },
+      {
+        title: 'Edit a connection',
+        text: 'Edit on a connection opens the same form filled in, to rename it, sign in again, or map another table. Its saved password stays while it points at the same server, and its runs stay with it.',
+        section: 'connections',
+      },
+      {
+        title: 'A rail as wide as you like',
+        text: 'Drag the right edge of the Sources rail, or focus it and press Left or Right; Compare, Traces, and Metrics use the same width.',
+        section: 'capture',
+      },
+    ],
+  },
+  {
     version: '1.16.0',
     date: '2026-10-24',
     highlights: [
@@ -312,7 +333,6 @@ export const GUIDE_SECTIONS: GuideSection[] = [
     id: 'compare',
     title: 'Compare with production',
     summary: 'See whether your local run reproduces a production failure, and whether your fix removes it.',
-    isNew: true,
   },
   {
     id: 'share',
@@ -396,9 +416,18 @@ export const GUIDE_CARDS: GuideCard[] = [
     section: 'connections',
     title: 'Add a connection',
     where: ['Sources rail', '+'],
-    text: 'Pick Datadog, Postgres, MySQL, MongoDB, or SQLite. Passwords and keys stay in VS Code secret storage, never in settings; Aurora and RDS can sign in with AWS IAM instead.',
+    text: 'A Connection tab opens with a form: choose Datadog, Postgres, MySQL, MongoDB, or SQLite, test it, and pick the log table with a preview of its rows, or none to only run queries. Passwords and keys stay in VS Code secret storage, never in settings; Aurora and RDS can sign in with AWS IAM instead.',
     target: 'railAddConnection',
     fallback: 'sourceRail',
+    docs: 'connections-datadog-postgres-mysql-mongodb-and-sqlite',
+  },
+  {
+    section: 'connections',
+    title: 'Edit a connection',
+    where: ['Sources rail', 'Connection', 'Edit'],
+    text: 'Opens the same form filled in and tests it, to rename the connection, sign in again, or choose another table and columns. A saved password is kept while the connection points at the same server; its runs stay with it.',
+    command: 'logline.editConnection',
+    target: 'sourceRail',
     docs: 'connections-datadog-postgres-mysql-mongodb-and-sqlite',
   },
   {

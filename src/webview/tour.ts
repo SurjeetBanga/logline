@@ -17,13 +17,13 @@ export const TOUR_STEPS: TourStep[] = [
   {
     target: 'sourceRail',
     title: 'Your sources',
-    text: 'Everything Logline captures, in one list: terminals, tasks, debug sessions, OpenTelemetry, and imports. Click one to see only its logs; point at it to stop or remove it.',
+    text: 'Everything Logline captures, in one list: terminals, tasks, debug sessions, OpenTelemetry, and imports. Click one to see only its logs; point at it to stop or remove it. Drag the rail’s right edge to widen it.',
   },
   {
     target: 'railAddConnection',
     fallback: 'sourceRail',
     title: 'Production, next to local',
-    text: 'Press + to add Datadog, Postgres, MySQL or Aurora, MongoDB, or SQLite. Searches run read-only, and each result is a run you can compare with your own.',
+    text: 'Press + to add Datadog, Postgres, MySQL or Aurora, MongoDB, or SQLite in a form that tests it and previews its log table; Edit changes it later. Searches run read-only, and each result is a run you can compare with your own.',
   },
   {
     target: 'searchEditor',
@@ -42,7 +42,7 @@ export const TOUR_STEPS: TourStep[] = [
   {
     target: 'viewTabs',
     title: 'Other angles on the same logs',
-    text: 'Analyze charts them, Compare lines production up with your runs, Traces follows requests across services, and Metrics charts numbers.',
+    text: 'Analyze charts them, Compare lines production up with your runs, Traces follows requests across services, AI calls shows what your app asks the model, and Metrics charts numbers.',
   },
   {
     target: 'shareSplit',
