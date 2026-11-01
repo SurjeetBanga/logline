@@ -5588,7 +5588,7 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
           id: "field-table",
           onchange: () => chooseTable(select.value === "\0none" ? null : select.value || void 0)
         },
-        table === void 0 ? h("option", { value: "", selected: true }, `Choose a ${word}\u2026`) : void 0,
+        table === void 0 ? h("option", { value: "", selected: true }, `Choose ${/^[aeiou]/.test(word) ? "an" : "a"} ${word}\u2026`) : void 0,
         // A store that is only searched has nothing to run without its logs.
         required ? void 0 : h(
           "option",
