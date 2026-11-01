@@ -501,17 +501,41 @@ test('a newer search replaces one still running, and drops what it showed', asyn
       return result([row(9, 'info', 'old')]);
     },
   };
-  const first = remote.fetch(target(slow), { query: '', title: 'Old' });
+  const first = remote.fetch(target(slow), { query: '', title: 'Old', replace: true });
   await new Promise((resolve) => setImmediate(resolve));
   assert.deepEqual(messages(), ['old']);
   const oldId = remote.last('app')!.sessionId;
-  remote.cancelFetches('app');
+  const next = remote.fetch(target({ fetchLogs: async () => result([row(1, 'info', 'new')]) }), {
+    query: '',
+    title: 'New',
+    replace: true,
+  });
   release();
-  await first;
-  assert.deepEqual(messages(), []);
-  assert.equal(registry.records.has(oldId), false);
-  await remote.fetch(target({ fetchLogs: async () => result([row(1, 'info', 'new')]) }), { query: '', title: 'New' });
+  await Promise.all([first, next]);
   assert.deepEqual(messages(), ['new']);
+  assert.equal(registry.records.has(oldId), false);
+});
+
+test('a search from the panel leaves a running fetch an agent started', async () => {
+  const { remote, target, messages } = setup();
+  let release!: () => void;
+  const slow: RemoteConnector = {
+    async fetchLogs() {
+      await new Promise<void>((resolve) => (release = resolve));
+      return result([row(9, 'info', 'agent')]);
+    },
+  };
+  const agent = remote.fetch(target(slow), { query: '', title: 'Agent' });
+  await new Promise((resolve) => setImmediate(resolve));
+  await remote.fetch(target({ fetchLogs: async () => result([row(1, 'info', 'new')]) }), {
+    query: '',
+    title: 'New',
+    replace: true,
+  });
+  release();
+  const info = await agent;
+  assert.equal(info.kept, 1);
+  assert.deepEqual(messages(), ['new', 'agent']);
 });
 
 test('a tail that reads back less goes back over the whole lag every tenth read', async () => {
@@ -538,6 +562,42 @@ test('a tail that reads back less goes back over the whole lag every tenth read'
   }
   const back = requests.slice(1).map((request, i) => BASE + (11 + i) * 60000 - request.fromMs!);
   assert.deepEqual(back, [60000, 60000, 60000, 60000, 60000, 15000, 15000, 15000, 15000, 60000, 15000]);
+  await remote.dispose();
+});
+
+test('a tail that goes back over the whole lag again shows no log twice', async () => {
+  mock.timers.enable({ apis: ['setInterval'] });
+  const { remote, target, messages } = setup({ connectionPollSeconds: 1 });
+  const rows: RemoteRecord[] = [];
+  let minute = 10;
+  const connector: RemoteConnector = {
+    tailLagMs: 60000,
+    async fetchLogs(request) {
+      // A log every 10 s, each read returning every log from where it starts, as Datadog does.
+      minute++;
+      for (let second = 50; second >= 0; second -= 10) {
+        const timeMs = BASE + minute * 60000 - second * 1000;
+        rows.push({
+          line: JSON.stringify({ timestamp: new Date(timeMs).toISOString(), message: `${timeMs}` }),
+          timeMs,
+        });
+      }
+      if (request.fromMs === undefined) return result(rows.slice(-request.limit).reverse());
+      return result(rows.filter((row) => row.timeMs! >= request.fromMs!));
+    },
+  };
+  const settle = async () => {
+    for (let turn = 0; turn < 20; turn++) await new Promise((resolve) => setImmediate(resolve));
+  };
+  remote.tail(target(connector), '', 'Tail');
+  await settle();
+  for (let poll = 0; poll < 11; poll++) {
+    mock.timers.tick(1000);
+    await settle();
+  }
+  const shown = messages();
+  assert.equal(new Set(shown).size, shown.length, 'each log once');
+  assert.equal(shown.length, rows.length);
   await remote.dispose();
 });
 
