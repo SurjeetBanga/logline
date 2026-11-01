@@ -968,20 +968,25 @@ export class LogStore {
             if (id.toLowerCase() !== wantedServer) continue;
             for (let i = index.start; i < index.items.length; i++) count(index.items[i]!.event);
           }
-        seen = [...tally].map(([text, count]) => ({ text, lower: text.toLowerCase(), count }));
+        // Most frequent first, equal counts in the order first seen, so a keystroke stops at its 20th match.
+        // Grouping by count, rather than sorting every value, keeps this linear while logs stream in.
+        const byCount = new Map<number, { text: string; lower: string; count: number }[]>();
+        for (const [text, count] of tally) {
+          let group = byCount.get(count);
+          if (!group) byCount.set(count, (group = []));
+          group.push({ text, lower: text.toLowerCase(), count });
+        }
+        seen = [];
+        for (const count of [...byCount.keys()].sort((a, b) => b - a))
+          for (const entry of byCount.get(count)!) seen.push(entry);
         this.suggestionCache = { key, values: seen };
       }
-      // The 20 most frequent matches, kept in order while scanning; equal counts keep the order first seen.
-      const top: { text: string; count: number }[] = [];
+      // The 20 most frequent matches: the first 20 in this order.
       for (const entry of seen) {
         if (!entry.lower.startsWith(valuePrefix)) continue;
-        if (top.length === 20 && entry.count <= top[19].count) continue;
-        let at = top.length;
-        while (at > 0 && top[at - 1].count < entry.count) at--;
-        top.splice(at, 0, entry);
-        if (top.length > 20) top.pop();
+        values.set(entry.text, entry.count);
+        if (values.size === 20) break;
       }
-      for (const entry of top) values.set(entry.text, entry.count);
     }
     return {
       fields: [...fields]
