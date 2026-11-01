@@ -3,7 +3,7 @@
 // them in secret storage under `secretKey`.
 import { CONNECTION_KINDS } from './connection-types';
 
-export type ConnectionType = 'sqlite' | 'postgres' | 'mysql' | 'mongodb' | 'datadog';
+export type ConnectionType = 'sqlite' | 'postgres' | 'mysql' | 'mongodb' | 'datadog' | 'cloudwatch';
 /** How a timestamp column stores time; `native` is a database date/time type. */
 export type TimeEncoding = 'iso' | 'epoch_s' | 'epoch_ms' | 'native';
 
@@ -69,8 +69,22 @@ export interface DatadogConnection extends BaseConnection {
   /** Log indexes to search; all when left out. */
   indexes?: string[];
 }
+/** Log groups of an AWS account in one region, read with the credentials of an AWS profile. */
+export interface CloudWatchConnection extends BaseConnection {
+  type: 'cloudwatch';
+  region: string;
+  /** The AWS profile whose credentials sign requests; the default chain when left out. */
+  profile?: string;
+  /** Log group names or ARNs: 1 to 10, since a search reads each one. */
+  logGroups: string[];
+  /** A CloudWatch Logs API in place of the region's, such as LocalStack on this machine. */
+  endpoint?: string;
+}
 export type ConnectionConfig =
-  SqliteConnection | PostgresConnection | MysqlConnection | MongoConnection | DatadogConnection;
+  SqliteConnection | PostgresConnection | MysqlConnection | MongoConnection | DatadogConnection | CloudWatchConnection;
+
+/** The most log groups one connection searches. */
+export const MAX_LOG_GROUPS = 10;
 
 /** Datadog's sites, by the domain their web app is on. */
 export const DATADOG_SITES = [
@@ -89,9 +103,17 @@ export const DATADOG_SITES = [
  */
 export function datadogApiBase(site: string): string | undefined {
   if (DATADOG_SITES.includes(site)) return `https://api.${site}`;
+  return apiUrl(site);
+}
+
+/**
+ * The URL of an API typed in place of a service's own, such as a proxy: https,
+ * or plain http only on this machine, since requests carry credentials.
+ */
+export function apiUrl(value: string): string | undefined {
   let url: URL;
   try {
-    url = new URL(site);
+    url = new URL(value);
   } catch {
     return undefined;
   }
@@ -99,6 +121,28 @@ export function datadogApiBase(site: string): string | undefined {
   if (url.protocol !== 'https:' && !(url.protocol === 'http:' && loopback)) return undefined;
   if (url.username || url.password || url.search || url.hash) return undefined;
   return `${url.origin}${url.pathname.replace(/\/+$/, '')}`;
+}
+
+const AWS_REGION = /^[a-z]{2}(?:-gov|-iso[a-z]?)?-[a-z]+-\d+$/;
+
+/** Whether text is an AWS region's name, such as `us-east-1`. */
+export function isAwsRegion(value: string): boolean {
+  return AWS_REGION.test(value);
+}
+
+/** The CloudWatch Logs API a connection reads: its endpoint, or its region's. */
+export function cloudwatchEndpoint(connection: Pick<CloudWatchConnection, 'region' | 'endpoint'>): string {
+  if (connection.endpoint) return connection.endpoint;
+  return `https://logs.${connection.region}.amazonaws.com${connection.region.startsWith('cn-') ? '.cn' : ''}`;
+}
+
+/** A log group's name or ARN as CloudWatch takes it, or undefined when it is neither. */
+export function logGroupIdentifier(value: string): string | undefined {
+  const text = value.trim();
+  // An ARN copied from the console ends in `:*`, which the API refuses.
+  const arn = /^arn:aws(?:-[a-z-]+)?:logs:[a-z0-9-]+:\d{12}:log-group:([\w.\-/#]{1,512})(?::\*)?$/.exec(text);
+  if (arn) return text.replace(/:\*$/, '');
+  return /^[\w.\-/#]{1,512}$/.test(text) ? text : undefined;
 }
 
 /** The roles a mapping can assign, in the order the setup asks for them. */
@@ -126,7 +170,7 @@ export function connectionLabel(connection: Pick<ConnectionConfig, 'type' | 'lab
  * open, so the same one is shared across workspaces, and a workspace that
  * points a connection elsewhere never receives them.
  */
-export function secretKey(connection: Exclude<ConnectionConfig, SqliteConnection>): string {
+export function secretKey(connection: Exclude<ConnectionConfig, SqliteConnection | CloudWatchConnection>): string {
   if (connection.type === 'datadog')
     return `logline.connection.datadog:${datadogApiBase(connection.site) ?? connection.site}`;
   if (connection.type === 'mongodb') {
@@ -189,7 +233,7 @@ function normalizeAuth(value: unknown): IamAuth | undefined {
   return {
     kind: 'iam',
     ...(profile ? { profile } : {}),
-    ...(region && /^[a-z]{2}(?:-gov)?-[a-z]+-\d+$/.test(region) ? { region } : {}),
+    ...(region && AWS_REGION.test(region) ? { region } : {}),
   };
 }
 
@@ -258,6 +302,29 @@ export function normalizeConnections(value: unknown): ConnectionConfig[] {
           : [];
         connection = { id, label, type: 'datadog', site, ...(indexes.length ? { indexes } : {}) };
       }
+    } else if (item.type === 'cloudwatch') {
+      const region = text(item.region, 32);
+      const profile = text(item.profile, 128);
+      const endpoint = typeof item.endpoint === 'string' ? apiUrl(item.endpoint.trim()) : undefined;
+      const groups: unknown[] = Array.isArray(item.logGroups) ? item.logGroups : [];
+      const logGroups = [
+        ...new Set(
+          groups.flatMap((group) => {
+            const identifier = typeof group === 'string' ? logGroupIdentifier(group) : undefined;
+            return identifier ? [identifier] : [];
+          }),
+        ),
+      ].slice(0, MAX_LOG_GROUPS);
+      if (region && AWS_REGION.test(region) && logGroups.length)
+        connection = {
+          id,
+          label,
+          type: 'cloudwatch',
+          region,
+          ...(profile ? { profile } : {}),
+          logGroups,
+          ...(endpoint ? { endpoint } : {}),
+        };
     }
     if (!connection) return [];
     seen.add(id);

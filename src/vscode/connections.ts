@@ -1,5 +1,6 @@
 import * as path from 'node:path';
 import * as vscode from 'vscode';
+import { CloudWatchConnector } from '../capture/connectors/cloudwatch';
 import { DatadogConnector, type DatadogKeys } from '../capture/connectors/datadog';
 import { iamPassword, listProfiles } from '../capture/connectors/aws-auth';
 import { MongoConnector } from '../capture/connectors/mongo';
@@ -12,6 +13,7 @@ import type { RemoteMetrics } from '../capture/remote-metrics';
 import type { RemoteSource, RemoteTarget } from '../capture/remote-source';
 import type { MetricSeriesData } from '../core/metric-query';
 import {
+  cloudwatchEndpoint,
   connectionLabel,
   connectionSourceId,
   mongoUrl,
@@ -108,6 +110,9 @@ export class ConnectionManager implements vscode.Disposable {
   /** What a connection opens: the same database or API, whatever a workspace calls it. */
   private identity(connection: ConnectionConfig): string {
     if (connection.type === 'sqlite') return `sqlite:${this.resolvePath(connection.path)}`;
+    // The same groups read with the same credentials; other groups are another permission.
+    if (connection.type === 'cloudwatch')
+      return `cloudwatch:${cloudwatchEndpoint(connection)}/${connection.profile ?? ''}/${[...connection.logGroups].sort().join(',')}`;
     return secretKey(connection);
   }
 
@@ -298,6 +303,7 @@ export class ConnectionManager implements vscode.Disposable {
       secret: FormSecret | undefined,
     ) => Promise<Opened>;
   } = {
+    cloudwatch: async (connection) => new CloudWatchConnector(connection, this.timeoutMs),
     datadog: async (connection, secret) =>
       new DatadogConnector(connection, secret ? (secret.keys ?? {}) : await this.keys(connection), this.timeoutMs),
     mongodb: async (connection, secret) =>
@@ -369,7 +375,12 @@ export class ConnectionManager implements vscode.Disposable {
     const choice = await vscode.window.showQuickPick(
       connections.map((connection) => ({
         label: connectionLabel(connection),
-        description: connection.type === 'datadog' ? connection.site : connection.logs?.table,
+        description:
+          connection.type === 'datadog'
+            ? connection.site
+            : connection.type === 'cloudwatch'
+              ? `${connection.region} · ${connection.logGroups.join(', ')}`
+              : connection.logs?.table,
         connection,
       })),
       { title },
@@ -607,7 +618,7 @@ export class ConnectionManager implements vscode.Disposable {
   }
 
   /** The services that logged over a range, to choose one; none when the store does not know services. */
-  async services(id: string, range: string): Promise<{ services: { name: string; count: number }[]; error?: string }> {
+  async services(id: string, range: string): Promise<{ services: { name: string; count?: number }[]; error?: string }> {
     const connection = this.find(id);
     if (!connection || !vscode.workspace.isTrusted) return { services: [] };
     const now = Date.now();
@@ -758,6 +769,7 @@ export class ConnectionManager implements vscode.Disposable {
         return listProfiles().map((item) => ({
           name: item.name,
           description: [kinds[item.kind], item.region].filter(Boolean).join(' · '),
+          ...(item.region ? { region: item.region } : {}),
         }));
       },
       savedSecret: async (connection) => {

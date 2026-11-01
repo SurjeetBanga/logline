@@ -75,19 +75,19 @@ function fieldFor(token: Token, request: MongoLogRequest): ColumnInfo | undefine
 type Time = { fromMs?: number; toMs?: number };
 
 /** A filter that holds for every document the term matches, or undefined when a filter cannot say. */
-function condition(token: Token, request: MongoLogRequest, now: number, time: Time): MongoFilter | 'time' | undefined {
+function condition(token: Token, request: MongoLogRequest, now: number, time: Time): MongoFilter | 'taken' | undefined {
   if (token.changed !== undefined || token.regex !== undefined) return undefined;
   if (token.canonical === 'last') {
     if (token.negate || token.relativeMs === undefined) return undefined;
     time.fromMs = Math.max(time.fromMs ?? -Infinity, now - token.relativeMs);
-    return 'time';
+    return 'taken';
   }
   if (token.canonical === 'timestamp' || token.canonical === 'time') {
     const range = token.timestampRange;
     if (token.negate || !range || !range.every(Number.isFinite)) return undefined;
     time.fromMs = Math.max(time.fromMs ?? -Infinity, range[0]);
     time.toMs = Math.min(time.toMs ?? Infinity, range[1]);
-    return 'time';
+    return 'taken';
   }
   if (token.canonical === 'exists') {
     const field = fieldNamed(request.fields, token.value) ?? { name: token.value, type: 'string' };

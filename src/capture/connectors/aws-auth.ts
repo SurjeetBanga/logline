@@ -112,6 +112,62 @@ export function rdsAuthToken(input: {
   return `${host}/?${canonicalQuery}&X-Amz-Signature=${signature}`;
 }
 
+/**
+ * The headers that sign a request to an AWS API with SigV4: `x-amz-date`, the
+ * session token when there is one, and `authorization`, beside `headers`.
+ */
+export function signRequest(input: {
+  method: string;
+  url: string;
+  headers: Record<string, string>;
+  body: string;
+  region: string;
+  service: string;
+  credentials: AwsCredentials;
+  now: number;
+}): Record<string, string> {
+  const url = new URL(input.url);
+  const stamp = new Date(input.now).toISOString().replace(/[:-]|\.\d{3}/g, '');
+  const date = stamp.slice(0, 8);
+  const scope = `${date}/${input.region}/${input.service}/aws4_request`;
+  const added: Record<string, string> = {
+    'x-amz-date': stamp,
+    ...(input.credentials.sessionToken ? { 'x-amz-security-token': input.credentials.sessionToken } : {}),
+  };
+  // Every header is signed, by its lowercase name; fetch sends the host from the URL.
+  const signed = new Map<string, string>([['host', url.host]]);
+  for (const [name, value] of Object.entries({ ...input.headers, ...added }))
+    signed.set(name.toLowerCase(), value.trim().replace(/\s+/g, ' '));
+  const names = [...signed.keys()].sort();
+  const canonicalQuery = [...url.searchParams]
+    .map(([key, value]) => [encode(key), encode(value)])
+    .sort(([a, x], [b, y]) => (a < b ? -1 : a > b ? 1 : x < y ? -1 : x > y ? 1 : 0))
+    .map(([key, value]) => `${key}=${value}`)
+    .join('&');
+  // The path as sent, each segment encoded once more, as AWS expects of every service but S3.
+  const path = url.pathname.split('/').map(encode).join('/') || '/';
+  const canonicalRequest = [
+    input.method,
+    path,
+    canonicalQuery,
+    names.map((name) => `${name}:${signed.get(name)}\n`).join(''),
+    names.join(';'),
+    sha256(input.body),
+  ].join('\n');
+  const toSign = ['AWS4-HMAC-SHA256', stamp, scope, sha256(canonicalRequest)].join('\n');
+  const signature = createHmac(
+    'sha256',
+    signingKey(input.credentials.secretAccessKey, date, input.region, input.service),
+  )
+    .update(toSign, 'utf8')
+    .digest('hex');
+  return {
+    ...input.headers,
+    ...added,
+    authorization: `AWS4-HMAC-SHA256 Credential=${input.credentials.accessKeyId}/${scope}, SignedHeaders=${names.join(';')}, Signature=${signature}`,
+  };
+}
+
 /** Sections of an AWS INI file, by name. */
 export function parseIni(text: string | undefined): Map<string, Record<string, string>> {
   const sections = new Map<string, Record<string, string>>();

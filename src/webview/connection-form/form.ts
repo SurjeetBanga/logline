@@ -20,6 +20,7 @@ import {
 import {
   mongoUrl,
   MAPPED_FIELDS,
+  MAX_LOG_GROUPS,
   type ColumnInfo,
   type ConnectionType,
   type LogTableMapping,
@@ -228,11 +229,13 @@ export function createConnectionForm(api: FormApi, root: HTMLElement) {
       wide?: boolean;
       inputMode?: string;
       onInput?: (value: string) => void;
+      /** A box of this many lines, for a list typed one a line. */
+      rows?: number;
     } = {},
   ): HTMLElement {
-    const input = h('input', {
+    const input = h(options.rows ? 'textarea' : 'input', {
       id: `field-${name}`,
-      type: options.type ?? 'text',
+      ...(options.rows ? { rows: options.rows } : { type: options.type ?? 'text' }),
       value: String(draft[name] ?? ''),
       placeholder: options.placeholder,
       spellcheck: 'false',
@@ -249,7 +252,8 @@ export function createConnectionForm(api: FormApi, root: HTMLElement) {
         updateErrors();
       },
       onkeydown: (event: KeyboardEvent) => {
-        if (event.key === 'Enter') runTest();
+        // In a box of lines, Enter starts another.
+        if (event.key === 'Enter' && !options.rows) runTest();
       },
     });
     return h(
@@ -260,6 +264,66 @@ export function createConnectionForm(api: FormApi, root: HTMLElement) {
       options.hint ? h('div', { className: 'hint' }, options.hint) : undefined,
       h('div', { className: 'error', id: `error-${name}`, 'data-error-for': name, hidden: true }),
     );
+  }
+
+  /** The AWS profile whose credentials sign requests, from ~/.aws; '' is the default credentials. */
+  function profileField(
+    label: string,
+    hint: string,
+    onChange?: (profile: FormProfile | undefined) => void,
+  ): HTMLElement {
+    return h(
+      'div',
+      { className: 'field' },
+      h('label', { for: 'field-profile' }, label),
+      h(
+        'select',
+        {
+          id: 'field-profile',
+          onchange: (event: Event) => {
+            draft.profile = (event.target as HTMLSelectElement).value;
+            onChange?.(profiles.find((profile) => profile.name === draft.profile));
+            changed();
+          },
+        },
+        h('option', { value: '' }, 'Default credentials (environment, AWS_PROFILE, or default)'),
+        ...profiles.map((profile) =>
+          h(
+            'option',
+            { value: profile.name, ...(profile.name === draft.profile ? { selected: true } : {}) },
+            profile.description ? `${profile.name} · ${profile.description}` : profile.name,
+          ),
+        ),
+      ),
+      h('div', { className: 'hint' }, hint),
+    );
+  }
+
+  function cloudwatchDetails(): Child[] {
+    return [
+      h(
+        'div',
+        { className: 'grid' },
+        profileField(
+          'AWS profile',
+          'Its keys, credential_process, or SSO session from aws sso login. Nothing is stored.',
+          (profile) => {
+            // A profile's region is where its logs usually are; one typed by hand stays.
+            if (profile?.region && !draft.region.trim()) {
+              draft.region = profile.region;
+              renderDetails();
+            }
+          },
+        ),
+        field('region', 'Region', { placeholder: 'us-east-1' }),
+        field('logGroups', 'Log groups', {
+          rows: 3,
+          wide: true,
+          placeholder: '/aws/lambda/checkout',
+          hint: `Names or ARNs, one a line, up to ${MAX_LOG_GROUPS}. Searches use FilterLogEvents rather than Logs Insights, and need logs:FilterLogEvents and logs:DescribeLogGroups.`,
+        }),
+      ),
+    ];
   }
 
   function secretField(name: 'password' | 'apiKey' | 'appKey' | 'token', label: string, hint?: string): HTMLElement {
@@ -397,6 +461,9 @@ export function createConnectionForm(api: FormApi, root: HTMLElement) {
       case 'datadog':
         children.push(...datadogDetails());
         break;
+      case 'cloudwatch':
+        children.push(...cloudwatchDetails());
+        break;
     }
     details.replaceChildren(...children.filter((child): child is Node | string => !!child));
     updateErrors();
@@ -488,33 +555,9 @@ export function createConnectionForm(api: FormApi, root: HTMLElement) {
     }
     const auth =
       draft.auth === 'iam'
-        ? h(
-            'div',
-            { className: 'field' },
-            h('label', { for: 'field-profile' }, 'AWS profile that signs the token'),
-            h(
-              'select',
-              {
-                id: 'field-profile',
-                onchange: (event: Event) => {
-                  draft.profile = (event.target as HTMLSelectElement).value;
-                  changed();
-                },
-              },
-              h('option', { value: '' }, 'Default credentials (environment, AWS_PROFILE, or default)'),
-              ...profiles.map((profile) =>
-                h(
-                  'option',
-                  { value: profile.name, ...(profile.name === draft.profile ? { selected: true } : {}) },
-                  profile.description ? `${profile.name} · ${profile.description}` : profile.name,
-                ),
-              ),
-            ),
-            h(
-              'div',
-              { className: 'hint' },
-              'A 15-minute token is made for each connection, so no password is stored. TLS is required.',
-            ),
+        ? profileField(
+            'AWS profile that signs the token',
+            'A 15-minute token is made for each connection, so no password is stored. TLS is required.',
           )
         : secretField(
             'password',

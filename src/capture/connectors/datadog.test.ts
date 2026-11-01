@@ -3,6 +3,7 @@ import { test } from 'node:test';
 import type { DatadogConnection } from '../../core/connections';
 import { matchesQuery, parseQuery } from '../../core/query';
 import { parseLogLine } from '../../core/log-event';
+import { describeConnector } from '../../test/connector-contract';
 import { startFakeDatadog, type FakeLog } from '../../test/fake-datadog';
 import { DatadogConnector, datadogLine } from './datadog';
 
@@ -29,6 +30,23 @@ const connection = (site: string, indexes?: string[]): DatadogConnection => ({
   type: 'datadog',
   site,
   ...(indexes ? { indexes } : {}),
+});
+
+describeConnector('datadog', async (contract) => {
+  const fake = await startFakeDatadog({
+    apiKey: API_KEY,
+    appKey: APP_KEY,
+    logs: contract.map((log, i) => ({
+      id: `contract-${i}`,
+      timestamp: new Date(log.timeMs).toISOString(),
+      status: log.level,
+      message: log.message,
+      service: log.service,
+      attributes: { trace_id: log.traceId },
+    })),
+  });
+  const connector = new DatadogConnector(connection(fake.url), { apiKey: API_KEY, appKey: APP_KEY }, () => 5000);
+  return { connector, rateLimit: () => (fake.state.rateLimited = 1), close: fake.close };
 });
 
 test('a search pages through Datadog, newest first, and counts every match when cut short', async () => {

@@ -16,6 +16,7 @@ const LIMITS: Record<string, [number, number]> = {
   logLensMaxFiles: [100, 50000],
   connectionMaxRows: [100, 50000],
   datadogMaxRows: [100, 50000],
+  logServiceMaxRows: [100, 50000],
   connectionPollSeconds: [1, 300],
   connectionTimeoutSeconds: [1, 300],
 };
@@ -28,6 +29,7 @@ const INTEGERS = new Set([
   'logLensMaxFiles',
   'connectionMaxRows',
   'datadogMaxRows',
+  'logServiceMaxRows',
   'connectionPollSeconds',
   'connectionTimeoutSeconds',
 ]);
