@@ -174,8 +174,11 @@ export class LogsController {
   private disposing?: Promise<void>;
   private sharingRequest?: Promise<void>;
   private usageCounter?: Usage;
-  /** The last search a snapshot was asked for, and the wait before it counts as one search rather than typing. */
-  private countedQuery = '';
+  /**
+   * The last search a snapshot was asked for, and the wait before it counts as one search rather than
+   * typing. Undefined until the first snapshot: the search a panel opens with was restored, not typed.
+   */
+  private countedQuery: string | undefined;
   private searchSettle?: ReturnType<typeof setTimeout>;
   /** Anonymous usage counts; the connections count theirs too. */
   get usage(): Usage | undefined {
@@ -298,6 +301,7 @@ export class LogsController {
     // The guide's first steps tick off from what was done; a search is remembered once it happens.
     const query = request.query?.trim() ?? '';
     if (query) this.markProgress('searched');
+    if (this.countedQuery === undefined) this.countedQuery = query;
     const changed = query !== this.countedQuery && this.usage?.enabled;
     const started = changed ? performance.now() : 0;
     const snapshot = this.buildSnapshot(request);

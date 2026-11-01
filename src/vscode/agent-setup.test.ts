@@ -179,3 +179,32 @@ test('an MCP file that is not a JSON object is left alone, and the entry is copi
     assert.ok(JSON.parse(seen.clipboard!).mcpServers.logline);
   });
 });
+
+test("VS Code's built-in Copilot counts as Copilot, though no extension shows it; other editors' chat does not", async () => {
+  const load = (appName: string, commands: string[], extension?: object) => {
+    delete require.cache[require.resolve('./agent-setup')];
+    return withVscode(
+      {
+        env: { appName },
+        extensions: { getExtension: (id: string) => (id === 'GitHub.copilot-chat' ? extension : undefined) },
+        commands: { getCommands: async () => commands },
+      },
+      () => require('./agent-setup') as typeof import('./agent-setup'),
+    );
+  };
+  const builtIn = load('Visual Studio Code', ['workbench.action.chat.open']);
+  assert.equal(builtIn.copilotAvailable(), false, 'not until the commands are looked up');
+  await builtIn.refreshCopilot();
+  assert.equal(builtIn.copilotAvailable(), true);
+
+  const cursor = load('Cursor', ['workbench.action.chat.open']);
+  await cursor.refreshCopilot();
+  assert.equal(cursor.copilotAvailable(), false, 'another editor’s chat is its own agent');
+
+  const without = load('Visual Studio Code', []);
+  await without.refreshCopilot();
+  assert.equal(without.copilotAvailable(), false, 'no chat, no Copilot');
+
+  const extension = load('VSCodium', [], {});
+  assert.equal(extension.copilotAvailable(), true, 'the Copilot Chat extension counts wherever it is installed');
+});

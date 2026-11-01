@@ -17,6 +17,7 @@ All notable changes to Logline are documented in this file.
 
 ### Fixes
 
+- **Ask Copilot** and **Fix with Copilot** work with the GitHub Copilot built into current VS Code, which no longer shows as an extension: Logline opened chat only when the Copilot Chat extension was installed, so it copied the prompt to the clipboard instead, Show Status said Copilot was not installed, and sharing offered no **Ask Copilot**.
 - Suggesting a field's values as you type after `field:` is faster with large captures: the values are counted once and kept up to date as logs arrive and are dropped, rather than counted again from every retained log whenever new ones come in, and typing with nothing new stops at the 20 most frequent matches.
 - A Datadog tail no longer shows logs again when a read goes back further than the one before it, such as every tenth read or after a late log.
 - Pressing **Run** on a connection no longer stops a fetch an agent or a Log Explorer link started, and two searches sent at once no longer both run.

@@ -9,7 +9,7 @@ import { GuidePanel } from './vscode/guide-panel';
 import { GUIDE_SECTIONS, latestGuideRelease } from './vscode/guide-content';
 import { registerAgentTools, runAgentTool } from './vscode/agent-tools';
 import { AgentBridge, installMcpScript } from './vscode/agent-bridge';
-import { copilotAvailable, refreshInstalledSkills } from './vscode/agent-setup';
+import { copilotAvailable, refreshCopilot, refreshInstalledSkills } from './vscode/agent-setup';
 import { registerDebugCapture } from './vscode/debug-capture';
 import { LogBreakpoints } from './vscode/log-breakpoints';
 import { LogDoctor } from './vscode/log-doctor';
@@ -32,6 +32,8 @@ export function activate(context: vscode.ExtensionContext): { provider: LogsProv
     ),
     environment: usageEnvironment(packageJSON?.version ?? ''),
   });
+  // Built-in Copilot shows only as a chat command, which can only be looked up asynchronously.
+  void refreshCopilot().then(() => controller?.notifications.notify());
   controller = new LogsController(context);
   controller.usage = usage;
   usage.start(controller.usageSummary());
