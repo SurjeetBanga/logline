@@ -1,3 +1,4 @@
+import { connectionKind } from '../../core/connection-types';
 import {
   applyUrl,
   CONNECTION_TYPES,
@@ -746,21 +747,19 @@ export function createConnectionForm(api: FormApi, root: HTMLElement) {
   // ---- Step 3: the log table and its columns.
 
   function renderLogs(): void {
-    const isDatadog = draft.type === 'datadog';
+    const kind = connectionKind(draft.type);
     const ready = test.state === 'ok';
     logsStep.classList.toggle('locked', !ready);
     nameStep.classList.toggle('locked', !ready);
     labelInput.disabled = !ready;
     const word = draft.type === 'mongodb' ? 'collection' : 'table';
-    logsHeading.textContent = isDatadog ? 'Logs' : `Log ${word}`;
-    if (isDatadog) {
+    logsHeading.textContent = kind.service ? 'Logs' : `Log ${word}`;
+    if (kind.service) {
       logs.replaceChildren(
         h(
           'p',
           { className: 'hint' },
-          ready
-            ? 'Datadog logs need no table. Searches use Datadog’s own fields: service, host, status, and @attributes.'
-            : 'Test the connection first.',
+          ready ? `${kind.label} logs need no table. ${kind.fields ?? ''}`.trim() : 'Test the connection first.',
         ),
       );
       return;
@@ -946,7 +945,7 @@ export function createConnectionForm(api: FormApi, root: HTMLElement) {
   function missing(): string | undefined {
     if (test.state === 'running') return 'Testing the connection…';
     if (test.state !== 'ok') return 'Test the connection to continue.';
-    if (draft.type !== 'datadog') {
+    if (!connectionKind(draft.type).service) {
       const word = draft.type === 'mongodb' ? 'collection' : 'table';
       if (table === undefined) return `Choose the log ${word}, or None.`;
       if (table && columnsState !== 'ready') return `Reading ${table}…`;
@@ -970,7 +969,7 @@ export function createConnectionForm(api: FormApi, root: HTMLElement) {
     saveError = '';
     updateFooter();
     const chosen: LogTableMapping | null =
-      draft.type === 'datadog' || !table ? null : ({ table, ...mapping } as LogTableMapping);
+      connectionKind(draft.type).service || !table ? null : ({ table, ...mapping } as LogTableMapping);
     api.postMessage({ type: 'save', draft, mapping: chosen });
   }
 
@@ -1021,7 +1020,7 @@ export function createConnectionForm(api: FormApi, root: HTMLElement) {
           if (again && tables.includes(again)) chooseTable(again);
           else if (table && !tables.includes(table)) chooseTable(undefined);
           // A database needs no log table: unless one was saved, it starts as None.
-          else if (table === undefined && !savedMapping && draft.type !== 'datadog') table = null;
+          else if (table === undefined && !savedMapping && !connectionKind(draft.type).service) table = null;
         }
         renderLogs();
         updateFooter();

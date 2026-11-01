@@ -20,6 +20,7 @@ import {
   type LogTableMapping,
   type MappedField,
 } from './connections';
+import { CONNECTION_KINDS, keepsSecret } from './connection-types';
 
 /** What the form offers: a log service, whose logs are searched, or a database, which is queried. */
 export const CONNECTION_TYPES: {
@@ -27,13 +28,10 @@ export const CONNECTION_TYPES: {
   kind: 'logs' | 'database';
   label: string;
   description: string;
-}[] = [
-  { type: 'datadog', kind: 'logs', label: 'Datadog', description: 'Search the logs of a Datadog organization' },
-  { type: 'postgres', kind: 'database', label: 'Postgres', description: 'Also Aurora PostgreSQL, RDS, Cloud SQL' },
-  { type: 'mysql', kind: 'database', label: 'MySQL', description: 'Also Aurora MySQL, MariaDB, RDS' },
-  { type: 'mongodb', kind: 'database', label: 'MongoDB', description: 'Also Atlas, DocumentDB' },
-  { type: 'sqlite', kind: 'database', label: 'SQLite', description: 'A database file on this machine' },
-];
+}[] = (Object.keys(CONNECTION_KINDS) as ConnectionType[]).map((type) => {
+  const { service, label, description } = CONNECTION_KINDS[type];
+  return { type, kind: service ? 'logs' : 'database', label, description };
+});
 
 export const ROLE_LABELS: Record<MappedField, string> = {
   timestamp: 'Time',
@@ -228,7 +226,7 @@ export interface DraftResult {
  */
 export function draftSecretKey(draft: FormDraft): string | undefined {
   const { connection } = readDraft(draft, { secret: true });
-  return connection && connection.type !== 'sqlite' ? secretKey(connection) : undefined;
+  return connection && keepsSecret(connection) ? secretKey(connection) : undefined;
 }
 
 /**
@@ -299,7 +297,7 @@ export function readDraft(draft: FormDraft, saved: { secret?: boolean } = {}): D
   return {
     ...(connection ? { connection } : {}),
     errors,
-    ...(password !== undefined && draft.type !== 'sqlite' && draft.type !== 'datadog' ? { password } : {}),
+    ...(password !== undefined && CONNECTION_KINDS[draft.type].secret === 'password' ? { password } : {}),
     ...(keys ? { keys } : {}),
   };
 }

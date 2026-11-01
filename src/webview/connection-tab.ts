@@ -1,3 +1,4 @@
+import { connectionKind } from '../core/connection-types';
 import type { FormUpdate } from '../core/connection-form';
 import type { ConnectionView } from '../protocol/messages';
 import { createConnectionForm } from './connection-form/form';
@@ -76,7 +77,7 @@ export function createConnectionTab(
         key: connection.id,
         label: connection.label,
         status: connectionStatus(connection, (value) => numbers.format(value)),
-        icon: connection.type === 'datadog' ? 'cloud' : 'database',
+        icon: connectionKind(connection.type).icon,
         selected: connection.id === editing,
         title: `Edit ${connection.label}`,
         actions: [

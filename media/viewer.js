@@ -2027,6 +2027,73 @@ Trace ${trace.traceId}`;
     return { show, receive, receiverChanged };
   }
 
+  // src/core/connection-types.ts
+  var CONNECTION_KINDS = {
+    datadog: {
+      label: "Datadog",
+      description: "Search the logs of a Datadog organization",
+      service: true,
+      icon: "cloud",
+      noun: "log",
+      native: { label: "Datadog syntax", title: "Type the query in Datadog's own syntax, sent as you type it" },
+      traceQuery: (traceId) => `trace_id:${traceId}`,
+      fields: "Searches use Datadog\u2019s own fields: service, host, status, and @attributes.",
+      services: true,
+      maxRowsSetting: "datadogMaxRows",
+      secret: "keys"
+    },
+    postgres: {
+      label: "Postgres",
+      description: "Also Aurora PostgreSQL, RDS, Cloud SQL",
+      service: false,
+      icon: "database",
+      noun: "row",
+      language: "sql",
+      services: false,
+      secret: "password"
+    },
+    mysql: {
+      label: "MySQL",
+      description: "Also Aurora MySQL, MariaDB, RDS",
+      service: false,
+      icon: "database",
+      noun: "row",
+      language: "sql",
+      services: false,
+      secret: "password"
+    },
+    mongodb: {
+      label: "MongoDB",
+      description: "Also Atlas, DocumentDB",
+      service: false,
+      icon: "database",
+      noun: "document",
+      language: "mongo",
+      services: false,
+      secret: "password"
+    },
+    sqlite: {
+      label: "SQLite",
+      description: "A database file on this machine",
+      service: false,
+      icon: "database",
+      noun: "row",
+      language: "sql",
+      services: false,
+      secret: "none"
+    }
+  };
+  function connectionKind(type) {
+    return CONNECTION_KINDS[type];
+  }
+  function storeName(type) {
+    const kind = CONNECTION_KINDS[type];
+    return kind.service || kind.language === "mongo" ? kind.label : "database";
+  }
+  function keepsSecret(connection) {
+    return CONNECTION_KINDS[connection.type].secret !== "none";
+  }
+
   // src/webview/inspection/metrics.ts
   var REFRESH_MS = 5e3;
   var MEASURE_LABELS = {
@@ -2182,7 +2249,7 @@ Trace ${trace.traceId}`;
           kind: "item",
           key: `connection:${connection.id}`,
           label: connection.label,
-          icon: connection.type === "datadog" ? "cloud" : "database",
+          icon: connectionKind(connection.type).icon,
           meta: connection.watching.length ? `${connection.watching.length} watched` : void 0,
           title: `Query metrics from ${connection.label}`,
           onSelect: () => actions.queryConnection?.(connection.id)
@@ -2951,7 +3018,7 @@ Span ${call.spanId}`;
       }
       if (!connection) return [];
       seen.add(id);
-      if (logs && connection.type !== "datadog") connection.logs = logs;
+      if (logs && !CONNECTION_KINDS[connection.type].service) connection.logs = logs;
       return [connection];
     });
   }
@@ -3030,9 +3097,8 @@ Span ${call.spanId}`;
     view;
     /** The time range a connection search covers, such as `1h`. */
     connectionRange;
-    /** A query in Datadog's own syntax, and whether Run and Tail on a Datadog connection send it as typed. */
-    datadogQuery;
-    datadogSyntax;
+    /** A query in each kind of connection's own syntax, and whether Run and Tail send it as typed. */
+    native = {};
     /** The Sources rail's state when set by hand; undefined follows the panel's width. */
     railCollapsed;
     /** The rails' width when resized by hand; undefined keeps the default. */
@@ -3043,8 +3109,16 @@ Span ${call.spanId}`;
         this.railWidth = saved.railWidth;
       this.view = typeof saved.view === "string" ? saved.view : "logs";
       this.connectionRange = typeof saved.range === "string" && RANGE_CHOICES.includes(saved.range) ? saved.range : "1h";
-      this.datadogQuery = typeof saved.datadogQuery === "string" ? saved.datadogQuery.slice(0, 2048) : "";
-      this.datadogSyntax = saved.datadogSyntax === true;
+      const native = {
+        datadog: { query: saved.datadogQuery, on: saved.datadogSyntax },
+        ...saved.native
+      };
+      for (const type of Object.keys(CONNECTION_KINDS)) {
+        const entry = native[type];
+        if (!entry || typeof entry !== "object") continue;
+        const query = typeof entry.query === "string" ? entry.query.slice(0, 2048) : "";
+        if (query || entry.on === true) this.native[type] = { query, on: entry.on === true };
+      }
       this.following = !saved.sort;
       this.cellHintDismissed = saved.cellHintDismissed === true;
       this.rowHintDismissed = saved.rowHintDismissed === true;
@@ -3126,11 +3200,27 @@ Span ${call.spanId}`;
         ...this.rowHintDismissed ? { rowHintDismissed: true } : {},
         ...this.view !== "logs" ? { view: this.view } : {},
         ...this.connectionRange !== "1h" ? { range: this.connectionRange } : {},
-        ...this.datadogQuery ? { datadogQuery: this.datadogQuery } : {},
-        ...this.datadogSyntax ? { datadogSyntax: true } : {},
+        ...Object.keys(this.native).length ? { native: this.persistedNative() } : {},
         ...this.railCollapsed !== void 0 ? { rail: this.railCollapsed ? "collapsed" : "open" } : {},
         ...this.railWidth !== void 0 ? { railWidth: this.railWidth } : {}
       };
+    }
+    /** The query typed in a kind of connection's own syntax, and whether Run and Tail send it. */
+    nativeOf(type) {
+      return this.native[type] ?? { query: "", on: false };
+    }
+    setNative(type, change) {
+      const next = { ...this.nativeOf(type), ...change };
+      if (next.query || next.on) this.native[type] = next;
+      else delete this.native[type];
+    }
+    persistedNative() {
+      return Object.fromEntries(
+        Object.entries(this.native).map(([type, entry]) => [
+          type,
+          { ...entry.query ? { query: entry.query } : {}, ...entry.on ? { on: true } : {} }
+        ])
+      );
     }
   };
 
@@ -3520,9 +3610,9 @@ Span ${call.spanId}`;
     let statement = "";
     const numbers = new Intl.NumberFormat();
     const selected = () => connections.find((connection) => connection.sourceId === state.selectedServer);
-    const noun2 = (connection, count) => `${connection.language === "mongo" ? "document" : connection.sql ? "row" : "log"}${count === 1 ? "" : "s"}`;
-    const native = (connection) => connection.type === "datadog" && state.datadogSyntax;
-    const search = (connection) => native(connection) ? { query: query(), native: state.datadogQuery.trim() || "*" } : { query: query() };
+    const noun2 = (connection, count) => `${connectionKind(connection.type).noun}${count === 1 ? "" : "s"}`;
+    const native = (connection) => connectionKind(connection.type).native !== void 0 && state.nativeOf(connection.type).on;
+    const search = (connection) => native(connection) ? { query: query(), native: state.nativeOf(connection.type).query.trim() || "*" } : { query: query() };
     const retargets = (connection) => {
       const tail = connection.tail;
       if (!connection.tailing || !tail) return false;
@@ -3543,7 +3633,7 @@ Span ${call.spanId}`;
       if (last.error) return `Failed: ${last.error}`;
       const of = last.total !== void 0 && last.total > last.fetched ? ` of ${numbers.format(last.total)}` : "";
       const kept = last.kept < last.fetched ? ` \xB7 ${numbers.format(last.kept)} match the filter` : "";
-      const store = connection.type === "datadog" ? "Datadog" : connection.language === "mongo" ? "MongoDB" : "database";
+      const store = storeName(connection.type);
       const ms = (value) => `${numbers.format(value)} ms`;
       const time = [
         last.elapsedMs !== void 0 ? ` \xB7 ${store} ${ms(last.elapsedMs)}` : "",
@@ -3582,13 +3672,19 @@ Span ${call.spanId}`;
       elements.connectionLink.hidden = connection.type !== "datadog";
       elements.connectionResult.title = connection.last?.statement ?? "";
       elements.connectionResult.classList[connection.last?.error ? "add" : "remove"]("connection-error");
-      const datadog = connection.type === "datadog" && connection.mapped;
-      elements.connectionSyntax.hidden = !datadog;
+      const kind = connectionKind(connection.type);
+      elements.connectionSyntax.hidden = !kind.native || !connection.mapped;
+      if (kind.native) {
+        elements.connectionSyntax.textContent = kind.native.label;
+        elements.connectionSyntax.title = kind.native.title;
+      }
       elements.connectionSyntax.setAttribute("aria-pressed", String(native(connection)));
       elements.connectionNative.hidden = !native(connection);
-      if (elements.connectionNative.value !== state.datadogQuery) elements.connectionNative.value = state.datadogQuery;
-      elements.connectionServiceLabel.hidden = !datadog;
-      if (datadog) {
+      const typed = state.nativeOf(connection.type).query;
+      if (elements.connectionNative.value !== typed) elements.connectionNative.value = typed;
+      const listsServices = kind.services && connection.mapped;
+      elements.connectionServiceLabel.hidden = !listsServices;
+      if (listsServices) {
         requestServices(connection);
         showService(connection);
       }
@@ -3597,7 +3693,7 @@ Span ${call.spanId}`;
         clearTimeout(previewTimer);
         previewKey = "";
         elements.connectionPreview.classList.remove("connection-error");
-        elements.connectionPreview.textContent = "Run and Tail send the Datadog query as typed; the filter above narrows what is shown.";
+        elements.connectionPreview.textContent = `Run and Tail send the ${kind.label} query as typed; the filter above narrows what is shown.`;
         elements.connectionPreview.title = "";
       } else requestPreview(connection);
     }
@@ -3631,7 +3727,7 @@ ${answer.range}`;
       if (connection) showService(connection);
     }
     function showService(connection) {
-      const service = serviceOf(native(connection) ? state.datadogQuery : query());
+      const service = serviceOf(native(connection) ? state.nativeOf(connection.type).query : query());
       const select = elements.connectionService;
       if (service && !listed.includes(service)) {
         const option = document.createElement("option");
@@ -3667,9 +3763,10 @@ ${answer.range}`;
         note.title = "";
         return;
       }
-      statement = connection.type === "datadog" ? preview.statement ?? "" : "";
+      const kind = connectionKind(connection.type);
+      statement = kind.native ? preview.statement ?? "" : "";
       const local = preview.local.length ? ` \xB7 Filtered locally: ${preview.local.join(" ")}` : "";
-      const sends = connection.sql ? "Runs as" : "Datadog search";
+      const sends = connection.sql ? "Runs as" : `${kind.label} search`;
       note.textContent = preview.statement ? `${sends}: ${preview.statement}${local}` : "";
       note.title = preview.statement ? `${preview.statement}${preview.local.length ? `
 
@@ -3698,20 +3795,25 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
       if (!connection) return;
       const service = elements.connectionService.value;
       if (native(connection)) {
-        state.datadogQuery = withService(state.datadogQuery, service);
+        state.setNative(connection.type, { query: withService(state.nativeOf(connection.type).query, service) });
         saveState();
         render();
       } else setQuery(withService(query(), service));
     });
     scope.listen(elements.connectionSyntax, "click", () => {
-      state.datadogSyntax = !state.datadogSyntax;
-      if (state.datadogSyntax && !state.datadogQuery.trim() && statement !== "*") state.datadogQuery = statement;
+      const connection = selected();
+      if (!connection) return;
+      const on = !state.nativeOf(connection.type).on;
+      const start = on && !state.nativeOf(connection.type).query.trim() && statement !== "*" ? { query: statement } : {};
+      state.setNative(connection.type, { on, ...start });
       saveState();
       render();
-      if (state.datadogSyntax) elements.connectionNative.focus();
+      if (on) elements.connectionNative.focus();
     });
     scope.listen(elements.connectionNative, "input", () => {
-      state.datadogQuery = elements.connectionNative.value.slice(0, 2048);
+      const connection = selected();
+      if (!connection) return;
+      state.setNative(connection.type, { query: elements.connectionNative.value.slice(0, 2048) });
       saveState();
       render();
     });
@@ -3978,7 +4080,7 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
       return row({
         id: connection.sourceId,
         name: connection.label,
-        icon: connection.type === "datadog" ? "cloud" : "database",
+        icon: connectionKind(connection.type).icon,
         title: `${connection.label} \xB7 ${status}`,
         status,
         statusClass: connection.tailing ? "live" : connection.last?.error ? "error" : void 0,
@@ -4414,13 +4516,10 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
   }
 
   // src/core/connection-form.ts
-  var CONNECTION_TYPES = [
-    { type: "datadog", kind: "logs", label: "Datadog", description: "Search the logs of a Datadog organization" },
-    { type: "postgres", kind: "database", label: "Postgres", description: "Also Aurora PostgreSQL, RDS, Cloud SQL" },
-    { type: "mysql", kind: "database", label: "MySQL", description: "Also Aurora MySQL, MariaDB, RDS" },
-    { type: "mongodb", kind: "database", label: "MongoDB", description: "Also Atlas, DocumentDB" },
-    { type: "sqlite", kind: "database", label: "SQLite", description: "A database file on this machine" }
-  ];
+  var CONNECTION_TYPES = Object.keys(CONNECTION_KINDS).map((type) => {
+    const { service, label, description } = CONNECTION_KINDS[type];
+    return { type, kind: service ? "logs" : "database", label, description };
+  });
   var ROLE_LABELS = {
     timestamp: "Time",
     level: "Level",
@@ -4498,7 +4597,7 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
   }
   function draftSecretKey(draft) {
     const { connection } = readDraft(draft, { secret: true });
-    return connection && connection.type !== "sqlite" ? secretKey(connection) : void 0;
+    return connection && keepsSecret(connection) ? secretKey(connection) : void 0;
   }
   function readDraft(draft, saved = {}) {
     const errors = {};
@@ -4562,7 +4661,7 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
     return {
       ...connection ? { connection } : {},
       errors,
-      ...password !== void 0 && draft.type !== "sqlite" && draft.type !== "datadog" ? { password } : {},
+      ...password !== void 0 && CONNECTION_KINDS[draft.type].secret === "password" ? { password } : {},
       ...keys ? { keys } : {}
     };
   }
@@ -4672,13 +4771,13 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
       )
     );
     function result() {
-      return readDraft(draft, { secret: keepsSecret() });
+      return readDraft(draft, { secret: keepsSecret2() });
     }
-    function keepsSecret() {
+    function keepsSecret2() {
       return secretSaved && !draft.forgetSecret && draftSecretKey(draft) === secretFor;
     }
     function secretPlaceholder() {
-      return keepsSecret() ? "Saved \xB7 leave empty to keep" : "";
+      return keepsSecret2() ? "Saved \xB7 leave empty to keep" : "";
     }
     function changed(field2) {
       if (field2) touched.add(field2);
@@ -5169,19 +5268,19 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
       testStatus.textContent = test.state === "running" ? "Connecting\u2026" : test.state === "ok" ? `\u2713 Connected \xB7 ${test.detail}` : test.state === "failed" ? test.error : test.state === "stale" ? "Changed since the last test. Test again to continue." : "";
     }
     function renderLogs() {
-      const isDatadog = draft.type === "datadog";
+      const kind = connectionKind(draft.type);
       const ready = test.state === "ok";
       logsStep.classList.toggle("locked", !ready);
       nameStep.classList.toggle("locked", !ready);
       labelInput.disabled = !ready;
       const word = draft.type === "mongodb" ? "collection" : "table";
-      logsHeading.textContent = isDatadog ? "Logs" : `Log ${word}`;
-      if (isDatadog) {
+      logsHeading.textContent = kind.service ? "Logs" : `Log ${word}`;
+      if (kind.service) {
         logs.replaceChildren(
           h(
             "p",
             { className: "hint" },
-            ready ? "Datadog logs need no table. Searches use Datadog\u2019s own fields: service, host, status, and @attributes." : "Test the connection first."
+            ready ? `${kind.label} logs need no table. ${kind.fields ?? ""}`.trim() : "Test the connection first."
           )
         );
         return;
@@ -5357,7 +5456,7 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
     function missing() {
       if (test.state === "running") return "Testing the connection\u2026";
       if (test.state !== "ok") return "Test the connection to continue.";
-      if (draft.type !== "datadog") {
+      if (!connectionKind(draft.type).service) {
         const word = draft.type === "mongodb" ? "collection" : "table";
         if (table === void 0) return `Choose the log ${word}, or None.`;
         if (table && columnsState !== "ready") return `Reading ${table}\u2026`;
@@ -5378,7 +5477,7 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
       saving = true;
       saveError = "";
       updateFooter();
-      const chosen = draft.type === "datadog" || !table ? null : { table, ...mapping };
+      const chosen = connectionKind(draft.type).service || !table ? null : { table, ...mapping };
       api.postMessage({ type: "save", draft, mapping: chosen });
     }
     function receive(update) {
@@ -5414,7 +5513,7 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
             const again = table === null ? void 0 : table ?? savedMapping?.table;
             if (again && tables.includes(again)) chooseTable(again);
             else if (table && !tables.includes(table)) chooseTable(void 0);
-            else if (table === void 0 && !savedMapping && draft.type !== "datadog") table = null;
+            else if (table === void 0 && !savedMapping && !connectionKind(draft.type).service) table = null;
           }
           renderLogs();
           updateFooter();
@@ -5557,7 +5656,7 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
           key: connection.id,
           label: connection.label,
           status: connectionStatus(connection, (value) => numbers.format(value)),
-          icon: connection.type === "datadog" ? "cloud" : "database",
+          icon: connectionKind(connection.type).icon,
           selected: connection.id === editing,
           title: `Edit ${connection.label}`,
           actions: [

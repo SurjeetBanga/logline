@@ -24,7 +24,9 @@ import {
   type MongoConnection,
   type MysqlConnection,
   type PostgresConnection,
+  type SqliteConnection,
 } from '../core/connections';
+import { connectionKind, keepsSecret } from '../core/connection-types';
 import { parseDatadogLink } from '../core/datadog-query';
 import { slugify } from '../core/server-config';
 import type { Settings } from '../core/settings';
@@ -46,14 +48,18 @@ const AGENT_ACCESS_KEY = 'logline.agentConnections.v1';
 
 type Secrets = Pick<vscode.SecretStorage, 'get' | 'store' | 'delete'>;
 
-/** Whether a connection can be searched: Datadog always, a database once a log table is mapped. */
-const searchable = (connection: ConnectionConfig) => connection.type === 'datadog' || connection.logs !== undefined;
+/** Whether a connection can be searched: a log service always, a database once a log table is mapped. */
+const searchable = (connection: ConnectionConfig) =>
+  connectionKind(connection.type).service || connection.logs !== undefined;
 /** Whether a connection runs queries typed by a person: SQL on a database, a filter or pipeline on MongoDB. */
-const sqlCapable = (connection: ConnectionConfig) => connection.type !== 'datadog';
-type SqlConnection = Exclude<ConnectionConfig, DatadogConnection | MongoConnection>;
+const sqlCapable = (connection: ConnectionConfig) => connectionKind(connection.type).language !== undefined;
+type SqlConnection = PostgresConnection | MysqlConnection | SqliteConnection;
 /** A database that signs in with a user and a password, or an IAM token. */
 type ServerConnection = PostgresConnection | MysqlConnection;
 type PasswordConnection = ServerConnection | MongoConnection;
+const keepsPassword = (connection: ConnectionConfig): connection is PasswordConnection =>
+  connectionKind(connection.type).secret === 'password';
+type Opened = Connector & FormProbe;
 
 /** The server refused the user name or password: Postgres, MySQL, or MongoDB. */
 const authFailed = (error: unknown) => {
@@ -179,9 +185,10 @@ export class ConnectionManager implements vscode.Disposable {
     const now = Date.now();
     // A trace id is the store's own trace field: Datadog's trace_id, a mapped table's trace id column.
     const trace = input.traceId;
+    const traceQuery = connectionKind(connection.type).traceQuery;
     const info = await this.remote.fetch(await this.target(connection), {
-      query: trace && connection.type !== 'datadog' ? `traceId:${trace}` : input.query,
-      ...(trace && connection.type === 'datadog' ? { native: `trace_id:${trace}` } : {}),
+      query: trace && !traceQuery ? `traceId:${trace}` : input.query,
+      ...(trace && traceQuery ? { native: traceQuery(trace) } : {}),
       fromMs: now - (rangeMs(input.range) ?? 3600000),
       toMs: now,
       limit: input.limit,
@@ -219,7 +226,7 @@ export class ConnectionManager implements vscode.Disposable {
         type: connection.type,
         mapped: searchable(connection),
         sql: sqlCapable(connection),
-        ...(connection.type === 'mongodb' ? { language: 'mongo' as const } : {}),
+        ...(connectionKind(connection.type).language === 'mongo' ? { language: 'mongo' as const } : {}),
         watching: this.watched?.watching(connection.id) ?? [],
         agents: this.agentsAllowed(connection),
         tailing: this.remote.tailing(connection.id),
@@ -276,14 +283,44 @@ export class ConnectionManager implements vscode.Disposable {
     const open = this.open.get(connection.id);
     if (open?.key === key) return open.connector;
     if (open) void open.connector.dispose();
-    const connector =
-      connection.type === 'datadog'
-        ? new DatadogConnector(connection, await this.keys(connection), this.timeoutMs)
-        : connection.type === 'mongodb'
-          ? new MongoConnector(connection, await this.secrets?.get(secretKey(connection)), this.timeoutMs)
-          : new SqlConnector(connection, await this.driver(connection), this.timeoutMs);
+    const connector = await this.create(connection);
     this.open.set(connection.id, { key, connector });
     return connector;
+  }
+
+  /**
+   * How each kind of connection opens its store: with the secret typed in the form, or the saved one when
+   * no secret is given.
+   */
+  private readonly connectors: {
+    [T in ConnectionConfig['type']]: (
+      connection: Extract<ConnectionConfig, { type: T }>,
+      secret: FormSecret | undefined,
+    ) => Promise<Opened>;
+  } = {
+    datadog: async (connection, secret) =>
+      new DatadogConnector(connection, secret ? (secret.keys ?? {}) : await this.keys(connection), this.timeoutMs),
+    mongodb: async (connection, secret) =>
+      new MongoConnector(
+        connection,
+        secret ? secret.password : await this.secrets?.get(secretKey(connection)),
+        this.timeoutMs,
+      ),
+    postgres: async (connection, secret) => this.sql(connection, secret),
+    mysql: async (connection, secret) => this.sql(connection, secret),
+    sqlite: async (connection, secret) => this.sql(connection, secret),
+  };
+
+  private async sql(connection: SqlConnection, secret: FormSecret | undefined): Promise<Opened> {
+    return new SqlConnector(connection, await this.driver(connection, secret?.password), this.timeoutMs);
+  }
+
+  private create(connection: ConnectionConfig, secret?: FormSecret): Promise<Opened> {
+    const open = this.connectors[connection.type] as (
+      connection: ConnectionConfig,
+      secret: FormSecret | undefined,
+    ) => Promise<Opened>;
+    return open(connection, secret);
   }
 
   /** Forget an open connector, so the next query opens it again, such as with a new password. */
@@ -294,12 +331,13 @@ export class ConnectionManager implements vscode.Disposable {
   }
 
   private async target(connection: ConnectionConfig): Promise<RemoteTarget> {
+    const { maxRowsSetting } = connectionKind(connection.type);
     return {
       id: connection.id,
       sourceId: connectionSourceId(connection.id),
       label: connectionLabel(connection),
       connector: await this.connector(connection),
-      ...(connection.type === 'datadog' ? { maxRowsSetting: 'datadogMaxRows' } : {}),
+      ...(maxRowsSetting ? { maxRowsSetting } : {}),
     };
   }
 
@@ -506,7 +544,7 @@ export class ConnectionManager implements vscode.Disposable {
     const followed = (native ?? query).trim();
     // Every log of a Datadog organization can be thousands a minute: say so before tailing them all. A tail
     // already running stays when the answer is no.
-    if (connection.type === 'datadog' && (!followed || followed === '*')) {
+    if (connectionKind(connection.type).service && (!followed || followed === '*')) {
       const answer = await vscode.window.showWarningMessage(
         `Tail every log in ${connectionLabel(connection)}?`,
         {
@@ -689,7 +727,7 @@ export class ConnectionManager implements vscode.Disposable {
       );
       if (kept.length !== value.length) await settings.update('connections', kept, target);
     }
-    if (connection.type !== 'sqlite' && answer === forget) await this.secrets?.delete(secretKey(connection));
+    if (keepsSecret(connection) && answer === forget) await this.secrets?.delete(secretKey(connection));
     this.remote.stopConnection(connection.id);
     this.form?.removed(connection.id);
   }
@@ -723,7 +761,7 @@ export class ConnectionManager implements vscode.Disposable {
         }));
       },
       savedSecret: async (connection) => {
-        if (connection.type === 'sqlite') return undefined;
+        if (!keepsSecret(connection)) return undefined;
         if (connection.type === 'datadog') {
           const keys = await this.keys(connection);
           const complete = 'token' in keys ? keys.token : keys.apiKey && keys.appKey;
@@ -739,14 +777,12 @@ export class ConnectionManager implements vscode.Disposable {
         if (connection.type === 'datadog' && secret.keys)
           await this.secrets?.store(secretKey(connection), JSON.stringify(secret.keys));
         else if (
-          connection.type !== 'sqlite' &&
-          connection.type !== 'datadog' &&
+          keepsPassword(connection) &&
           !(connection.type !== 'mongodb' && connection.auth) &&
           secret.password !== undefined
         )
           await this.secrets?.store(secretKey(connection), secret.password);
-        else if (connection.type !== 'sqlite' && connection.type !== 'datadog' && secret.forget)
-          await this.secrets?.delete(secretKey(connection));
+        else if (keepsPassword(connection) && secret.forget) await this.secrets?.delete(secretKey(connection));
         // Agents' permission belongs to the database or API a connection opens, so an edit that points it
         // elsewhere does not take the permission along: the person allows that one on its own.
         const lostAgents =
@@ -765,10 +801,9 @@ export class ConnectionManager implements vscode.Disposable {
             .then((answer) => (answer === allow ? this.allowAgents(connection.id) : undefined));
           return;
         }
-        const next =
-          connection.type === 'datadog' || connection.logs
-            ? 'Pick a time range and press Run in the Logs panel.'
-            : `Use ${connection.type === 'mongodb' ? 'Run query' : 'Run SQL'} in the Logs panel to query it.`;
+        const next = searchable(connection)
+          ? 'Pick a time range and press Run in the Logs panel.'
+          : `Use ${connectionKind(connection.type).language === 'mongo' ? 'Run query' : 'Run SQL'} in the Logs panel to query it.`;
         void vscode.window.showInformationMessage(
           `${editing ? 'Saved' : 'Added'} ${connectionLabel(connection)}. ${editing ? '' : next}`.trim(),
         );
@@ -777,12 +812,8 @@ export class ConnectionManager implements vscode.Disposable {
   }
 
   /** A connector for a connection being added or edited, to test it and read its tables before it is saved. */
-  private async probe(connection: ConnectionConfig, secret: FormSecret): Promise<FormProbe> {
-    return connection.type === 'datadog'
-      ? new DatadogConnector(connection, secret.keys ?? {}, this.timeoutMs)
-      : connection.type === 'mongodb'
-        ? new MongoConnector(connection, secret.password, this.timeoutMs)
-        : new SqlConnector(connection, await this.driver(connection, secret.password), this.timeoutMs);
+  private probe(connection: ConnectionConfig, secret: FormSecret): Promise<FormProbe> {
+    return this.create(connection, secret);
   }
 
   /**

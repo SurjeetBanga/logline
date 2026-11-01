@@ -4454,8 +4454,9 @@ test('a Datadog connection lists its services to choose one, and can send a quer
   assert.equal(get('connectionNative').value, 'status:(error)');
   get('connectionNative').value = 'service:checkout @http.status_code:>=500';
   get('connectionNative').listeners.get('input')!();
-  assert.equal(savedStates.at(-1)?.datadogQuery, 'service:checkout @http.status_code:>=500');
-  assert.equal(savedStates.at(-1)?.datadogSyntax, true);
+  assert.deepEqual(plain(savedStates.at(-1)?.native), {
+    datadog: { query: 'service:checkout @http.status_code:>=500', on: true },
+  });
   assert.equal(get('connectionService').value, 'checkout', 'the list shows the service the Datadog query names');
   get('connectionRun').listeners.get('click')!();
   assert.deepEqual(plain(messages.at(-1)), {

@@ -1,3 +1,4 @@
+import { connectionKind, storeName } from '../../core/connection-types';
 import { queryTokens } from '../../core/query-tokens';
 import type { ConnectionView, HostMessage } from '../../protocol/messages';
 import type { getElements } from '../dom';
@@ -77,20 +78,23 @@ export function createConnectionBar(
   let servicesAsked = '';
   /** The services the list shows. */
   let listed: string[] = [];
-  /** The Datadog search the filter became, from the last preview. */
+  /** The search in the store's own syntax that the filter became, from the last preview. */
   let statement = '';
   const numbers = new Intl.NumberFormat();
   const selected = () => connections.find((connection) => connection.sourceId === state.selectedServer);
 
-  // A database has rows; Datadog has logs.
+  // A database has rows, MongoDB documents, and a log service logs.
   const noun = (connection: ConnectionView, count: number) =>
-    `${connection.language === 'mongo' ? 'document' : connection.sql ? 'row' : 'log'}${count === 1 ? '' : 's'}`;
+    `${connectionKind(connection.type).noun}${count === 1 ? '' : 's'}`;
 
-  /** Whether Run and Tail send the Datadog query as typed, rather than the filter. */
-  const native = (connection: ConnectionView) => connection.type === 'datadog' && state.datadogSyntax;
-  /** What Run and Tail search: the filter, or the Datadog query as typed (all logs when it is empty). */
+  /** Whether Run and Tail send the query typed in the store's own syntax, rather than the filter. */
+  const native = (connection: ConnectionView) =>
+    connectionKind(connection.type).native !== undefined && state.nativeOf(connection.type).on;
+  /** What Run and Tail search: the filter, or the store's query as typed (all logs when it is empty). */
   const search = (connection: ConnectionView) =>
-    native(connection) ? { query: query(), native: state.datadogQuery.trim() || '*' } : { query: query() };
+    native(connection)
+      ? { query: query(), native: state.nativeOf(connection.type).query.trim() || '*' }
+      : { query: query() };
   /** Whether the connection is tailing something other than what Run and Tail would search now. */
   const retargets = (connection: ConnectionView) => {
     const tail = connection.tail;
@@ -124,7 +128,7 @@ export function createConnectionBar(
     const of = last.total !== undefined && last.total > last.fetched ? ` of ${numbers.format(last.total)}` : '';
     const kept = last.kept < last.fetched ? ` · ${numbers.format(last.kept)} match the filter` : '';
     // Where the time went: waiting for the store, or showing what it returned.
-    const store = connection.type === 'datadog' ? 'Datadog' : connection.language === 'mongo' ? 'MongoDB' : 'database';
+    const store = storeName(connection.type);
     const ms = (value: number) => `${numbers.format(value)} ms`;
     const time = [
       last.elapsedMs !== undefined ? ` · ${store} ${ms(last.elapsedMs)}` : '',
@@ -180,13 +184,19 @@ export function createConnectionBar(
     elements.connectionLink.hidden = connection.type !== 'datadog';
     elements.connectionResult.title = connection.last?.statement ?? '';
     elements.connectionResult.classList[connection.last?.error ? 'add' : 'remove']('connection-error');
-    const datadog = connection.type === 'datadog' && connection.mapped;
-    elements.connectionSyntax.hidden = !datadog;
+    const kind = connectionKind(connection.type);
+    elements.connectionSyntax.hidden = !kind.native || !connection.mapped;
+    if (kind.native) {
+      elements.connectionSyntax.textContent = kind.native.label;
+      elements.connectionSyntax.title = kind.native.title;
+    }
     elements.connectionSyntax.setAttribute('aria-pressed', String(native(connection)));
     elements.connectionNative.hidden = !native(connection);
-    if (elements.connectionNative.value !== state.datadogQuery) elements.connectionNative.value = state.datadogQuery;
-    elements.connectionServiceLabel.hidden = !datadog;
-    if (datadog) {
+    const typed = state.nativeOf(connection.type).query;
+    if (elements.connectionNative.value !== typed) elements.connectionNative.value = typed;
+    const listsServices = kind.services && connection.mapped;
+    elements.connectionServiceLabel.hidden = !listsServices;
+    if (listsServices) {
       requestServices(connection);
       showService(connection);
     }
@@ -196,8 +206,7 @@ export function createConnectionBar(
       clearTimeout(previewTimer);
       previewKey = '';
       elements.connectionPreview.classList.remove('connection-error');
-      elements.connectionPreview.textContent =
-        'Run and Tail send the Datadog query as typed; the filter above narrows what is shown.';
+      elements.connectionPreview.textContent = `Run and Tail send the ${kind.label} query as typed; the filter above narrows what is shown.`;
       elements.connectionPreview.title = '';
     } else requestPreview(connection);
   }
@@ -235,7 +244,7 @@ export function createConnectionBar(
 
   /** Show the service the query names in the list; one the list lacks is added, so it still shows. */
   function showService(connection: ConnectionView): void {
-    const service = serviceOf(native(connection) ? state.datadogQuery : query());
+    const service = serviceOf(native(connection) ? state.nativeOf(connection.type).query : query());
     const select = elements.connectionService;
     if (service && !listed.includes(service)) {
       const option = document.createElement('option');
@@ -273,9 +282,10 @@ export function createConnectionBar(
       note.title = '';
       return;
     }
-    statement = connection.type === 'datadog' ? (preview.statement ?? '') : '';
+    const kind = connectionKind(connection.type);
+    statement = kind.native ? (preview.statement ?? '') : '';
     const local = preview.local.length ? ` · Filtered locally: ${preview.local.join(' ')}` : '';
-    const sends = connection.sql ? 'Runs as' : 'Datadog search';
+    const sends = connection.sql ? 'Runs as' : `${kind.label} search`;
     note.textContent = preview.statement ? `${sends}: ${preview.statement}${local}` : '';
     note.title = preview.statement
       ? `${preview.statement}${preview.local.length ? `\n\nTerms SQL cannot express are applied to the fetched rows: ${preview.local.join(' ')}` : ''}`
@@ -306,21 +316,26 @@ export function createConnectionBar(
     if (!connection) return;
     const service = elements.connectionService.value;
     if (native(connection)) {
-      state.datadogQuery = withService(state.datadogQuery, service);
+      state.setNative(connection.type, { query: withService(state.nativeOf(connection.type).query, service) });
       saveState();
       render();
     } else setQuery(withService(query(), service));
   });
   scope.listen(elements.connectionSyntax, 'click', () => {
-    state.datadogSyntax = !state.datadogSyntax;
-    // An empty Datadog query starts from what the filter searched, so turning it on keeps the same logs.
-    if (state.datadogSyntax && !state.datadogQuery.trim() && statement !== '*') state.datadogQuery = statement;
+    const connection = selected();
+    if (!connection) return;
+    const on = !state.nativeOf(connection.type).on;
+    // An empty query starts from what the filter searched, so turning it on keeps the same logs.
+    const start = on && !state.nativeOf(connection.type).query.trim() && statement !== '*' ? { query: statement } : {};
+    state.setNative(connection.type, { on, ...start });
     saveState();
     render();
-    if (state.datadogSyntax) elements.connectionNative.focus();
+    if (on) elements.connectionNative.focus();
   });
   scope.listen(elements.connectionNative, 'input', () => {
-    state.datadogQuery = elements.connectionNative.value.slice(0, 2048);
+    const connection = selected();
+    if (!connection) return;
+    state.setNative(connection.type, { query: elements.connectionNative.value.slice(0, 2048) });
     saveState();
     render();
   });

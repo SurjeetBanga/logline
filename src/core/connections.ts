@@ -1,6 +1,7 @@
 // Saved connections to log stores outside the editor: the `logline.connections`
 // setting. Secrets (passwords) never appear here; the VS Code adapter keeps
 // them in secret storage under `secretKey`.
+import { CONNECTION_KINDS } from './connection-types';
 
 export type ConnectionType = 'sqlite' | 'postgres' | 'mysql' | 'mongodb' | 'datadog';
 /** How a timestamp column stores time; `native` is a database date/time type. */
@@ -104,13 +105,6 @@ export function datadogApiBase(site: string): string | undefined {
 export const MAPPED_FIELDS = ['timestamp', 'level', 'message', 'service', 'traceId'] as const;
 export type MappedField = (typeof MAPPED_FIELDS)[number];
 
-const TYPE_NAMES: Record<ConnectionType, string> = {
-  sqlite: 'SQLite',
-  postgres: 'Postgres',
-  mysql: 'MySQL',
-  mongodb: 'MongoDB',
-  datadog: 'Datadog',
-};
 const SOURCE_PREFIX = 'conn:';
 
 /** The source id that a connection's runs are captured under. */
@@ -124,7 +118,7 @@ export function connectionIdOf(sourceId: string | undefined): string | undefined
 }
 
 export function connectionLabel(connection: Pick<ConnectionConfig, 'type' | 'label'>): string {
-  return `${TYPE_NAMES[connection.type]} · ${connection.label}`;
+  return `${CONNECTION_KINDS[connection.type].label} · ${connection.label}`;
 }
 
 /**
@@ -267,8 +261,8 @@ export function normalizeConnections(value: unknown): ConnectionConfig[] {
     }
     if (!connection) return [];
     seen.add(id);
-    // Datadog logs need no table mapping.
-    if (logs && connection.type !== 'datadog') connection.logs = logs;
+    // A log service's logs need no table mapping.
+    if (logs && !CONNECTION_KINDS[connection.type].service) connection.logs = logs;
     return [connection];
   });
 }
