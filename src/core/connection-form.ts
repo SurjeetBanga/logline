@@ -7,7 +7,10 @@ import {
   DATADOG_SITES,
   datadogApiBase,
   formatServerUrl,
+  isAwsRegion,
   isRdsHost,
+  logGroupIdentifier,
+  MAX_LOG_GROUPS,
   MAPPED_FIELDS,
   decodePart,
   mongoUrl,
@@ -52,7 +55,11 @@ export interface FormDraft {
   ssl: boolean;
   /** How Postgres or MySQL signs in: a password, or an AWS IAM token made with `profile` ('' for the default). */
   auth: 'password' | 'iam';
+  /** The AWS profile of an IAM sign-in or a CloudWatch connection; '' for the default credentials. */
   profile: string;
+  /** CloudWatch: the AWS region, and its log groups, one a line. */
+  region: string;
+  logGroups: string;
   /** A MongoDB URL, without its password. */
   url: string;
   /** A SQLite file, relative to the workspace when inside it. */
@@ -81,6 +88,8 @@ export function emptyDraft(type: ConnectionType = 'postgres'): FormDraft {
     ssl: false,
     auth: 'password',
     profile: '',
+    region: '',
+    logGroups: '',
     url: '',
     path: '',
     site: DATADOG_SITES[0],
@@ -120,12 +129,32 @@ export function draftFromConnection(connection: ConnectionConfig): FormDraft {
       return { ...draft, path: connection.path };
     case 'datadog':
       return { ...draft, site: connection.site };
+    case 'cloudwatch':
+      return {
+        ...draft,
+        region: connection.region,
+        profile: connection.profile ?? '',
+        logGroups: connection.logGroups.join('\n'),
+      };
   }
+}
+
+/** The log groups a CloudWatch draft names, one a line or between commas. */
+export function draftLogGroups(draft: Pick<FormDraft, 'logGroups'>): string[] {
+  return draft.logGroups
+    .split(/[\n,]+/)
+    .map((group) => group.trim())
+    .filter(Boolean);
 }
 
 /** The name a new connection is offered: its database, its file, or prod for Datadog. */
 export function suggestedLabel(draft: FormDraft): string {
   if (draft.type === 'datadog') return 'prod';
+  if (draft.type === 'cloudwatch') {
+    // The service of the first group: `/aws/lambda/checkout` is `checkout`.
+    const [first] = draftLogGroups(draft);
+    return first?.split(/[/:]/).filter(Boolean).at(-1) ?? '';
+  }
   if (draft.type === 'sqlite')
     return (
       draft.path
@@ -192,6 +221,9 @@ export function keepUnmodeled(next: ConnectionConfig, before?: ConnectionConfig)
   if (!before || before.type !== next.type) return next;
   if (next.type === 'datadog' && before.type === 'datadog' && before.indexes && !next.indexes)
     return { ...next, indexes: before.indexes };
+  // An endpoint is set in settings only, such as LocalStack's.
+  if (next.type === 'cloudwatch' && before.type === 'cloudwatch' && before.endpoint && !next.endpoint)
+    return { ...next, endpoint: before.endpoint };
   if (
     (next.type === 'postgres' || next.type === 'mysql') &&
     (before.type === 'postgres' || before.type === 'mysql') &&
@@ -289,6 +321,18 @@ export function readDraft(draft: FormDraft, saved: { secret?: boolean } = {}): D
           keys = { apiKey: draft.apiKey.trim(), appKey: draft.appKey.trim() };
       }
       break;
+    case 'cloudwatch': {
+      const region = draft.region.trim();
+      if (!region) errors.region = 'Enter the region, such as us-east-1';
+      else if (!isAwsRegion(region)) errors.region = 'A region such as us-east-1 or eu-west-2';
+      const groups = draftLogGroups(draft);
+      const wrong = groups.find((group) => !logGroupIdentifier(group));
+      if (!groups.length) errors.logGroups = 'Enter a log group, such as /aws/lambda/checkout';
+      else if (wrong) errors.logGroups = `${wrong} is not a log group name or ARN`;
+      else if (groups.length > MAX_LOG_GROUPS) errors.logGroups = `At most ${MAX_LOG_GROUPS} log groups`;
+      item = { type: 'cloudwatch', region, ...(draft.profile ? { profile: draft.profile } : {}), logGroups: groups };
+      break;
+    }
   }
   const [connection] = Object.keys(errors).length
     ? []
@@ -361,6 +405,8 @@ export function sampleText(rows: Record<string, unknown>[], max = 120): SampleRo
 export interface FormProfile {
   name: string;
   description: string;
+  /** The profile's region, which a CloudWatch connection starts from. */
+  region?: string;
 }
 
 /** What the form asks of the extension. */

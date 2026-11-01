@@ -1,7 +1,7 @@
 // What each kind of connection is, in one place: the editor, the Logs panel,
 // and the connection form ask this instead of testing for each type, so a new
 // kind of store is one entry here and one connector.
-import type { ConnectionConfig, ConnectionType, SqliteConnection } from './connections';
+import type { CloudWatchConnection, ConnectionConfig, ConnectionType, SqliteConnection } from './connections';
 
 export interface ConnectionKind {
   /** The store's name, as the panel says it. */
@@ -29,7 +29,7 @@ export interface ConnectionKind {
   /** Whether the store can list the services that logged in a range. */
   services: boolean;
   /** The setting that caps one search, when it is not `connectionMaxRows`. */
-  maxRowsSetting?: 'datadogMaxRows';
+  maxRowsSetting?: 'datadogMaxRows' | 'logServiceMaxRows';
   /** What is kept in secret storage: a password, or a service's keys. */
   secret: 'none' | 'password' | 'keys';
 }
@@ -48,6 +48,23 @@ export const CONNECTION_KINDS: Record<ConnectionType, ConnectionKind> = {
     services: true,
     maxRowsSetting: 'datadogMaxRows',
     secret: 'keys',
+  },
+  cloudwatch: {
+    label: 'CloudWatch',
+    description: 'Search the log groups of an AWS account',
+    service: true,
+    icon: 'cloud',
+    noun: 'log',
+    native: { label: 'Filter pattern', title: 'Type a CloudWatch filter pattern, sent as you type it' },
+    traceQuery: (traceId) => {
+      const id = JSON.stringify(traceId);
+      return `{ $.traceId = ${id} || $.trace_id = ${id} || $.trace.id = ${id} }`;
+    },
+    fields:
+      'Searches become CloudWatch filter patterns: a field such as level:error matches the fields of JSON logs, whole and with case, as CloudWatch does.',
+    services: true,
+    maxRowsSetting: 'logServiceMaxRows',
+    secret: 'none',
   },
   postgres: {
     label: 'Postgres',
@@ -102,6 +119,8 @@ export function storeName(type: ConnectionType): string {
 }
 
 /** A connection whose password or keys are kept in secret storage. */
-export function keepsSecret(connection: ConnectionConfig): connection is Exclude<ConnectionConfig, SqliteConnection> {
+export function keepsSecret(
+  connection: ConnectionConfig,
+): connection is Exclude<ConnectionConfig, SqliteConnection | CloudWatchConnection> {
   return CONNECTION_KINDS[connection.type].secret !== 'none';
 }

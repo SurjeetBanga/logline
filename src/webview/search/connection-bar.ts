@@ -230,14 +230,16 @@ export function createConnectionBar(
     const options = answer.services.map(({ name, count }) => {
       const option = document.createElement('option');
       option.value = name;
-      option.textContent = `${name} · ${numbers.format(count)}`;
+      option.textContent = count === undefined ? name : `${name} · ${numbers.format(count)}`;
       return option;
     });
     select.replaceChildren(any, ...options);
     listed = answer.services.map((service) => service.name);
     select.title = answer.error
       ? `Could not list services: ${answer.error}`
-      : "Search or tail one service's logs; services are listed by how many logs they had in the range";
+      : answer.services.some((service) => service.count === undefined)
+        ? "Search or tail one service's logs"
+        : "Search or tail one service's logs; services are listed by how many logs they had in the range";
     const connection = selected();
     if (connection) showService(connection);
   }

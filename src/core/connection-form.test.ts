@@ -390,3 +390,41 @@ test('keepUnmodeled keeps what the form does not show from the connection an edi
   assert.equal(keepUnmodeled(fresh), fresh);
   assert.deepEqual(keepUnmodeled(fromForm(other), datadog), fromForm(other));
 });
+
+test('a CloudWatch draft needs a region and log groups, and keeps an endpoint set in settings', () => {
+  const draft = {
+    ...emptyDraft('cloudwatch'),
+    region: 'us-east-1',
+    profile: 'work',
+    logGroups: '/aws/lambda/checkout\n /ecs/api ,',
+  };
+  const { connection, errors } = readDraft(draft);
+  assert.deepEqual(errors, {});
+  assert.deepEqual(connection, {
+    id: 'draft',
+    label: 'draft',
+    type: 'cloudwatch',
+    region: 'us-east-1',
+    profile: 'work',
+    logGroups: ['/aws/lambda/checkout', '/ecs/api'],
+  });
+  assert.equal(suggestedLabel(draft), 'checkout');
+  assert.deepEqual(readDraft({ ...draft, region: '', logGroups: '' }).errors, {
+    region: 'Enter the region, such as us-east-1',
+    logGroups: 'Enter a log group, such as /aws/lambda/checkout',
+  });
+  assert.equal(
+    readDraft({ ...draft, logGroups: 'two words' }).errors.logGroups,
+    'two words is not a log group name or ARN',
+  );
+  assert.equal(readDraft({ ...draft, region: 'Virginia' }).errors.region, 'A region such as us-east-1 or eu-west-2');
+  const saved = { ...connection!, endpoint: 'http://localhost:4566' };
+  assert.deepEqual(draftFromConnection(saved), {
+    ...emptyDraft('cloudwatch'),
+    label: 'draft',
+    region: 'us-east-1',
+    profile: 'work',
+    logGroups: '/aws/lambda/checkout\n/ecs/api',
+  });
+  assert.equal((keepUnmodeled(connection!, saved) as typeof saved).endpoint, 'http://localhost:4566');
+});

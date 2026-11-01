@@ -5,7 +5,7 @@ import { pushDown, termGroups, typedValue } from './pushdown';
 // A store that understands only field terms, and takes `last:` as its time range.
 const fieldsOnly = (input: string) =>
   pushDown(termGroups(input), (token, text) =>
-    token.canonical === 'last' ? 'time' : token.field !== undefined ? text.toUpperCase() : undefined,
+    token.canonical === 'last' ? 'taken' : token.field !== undefined ? text.toUpperCase() : undefined,
   );
 
 test('terms are grouped by OR as typed, with regular expressions kept without a token', () => {

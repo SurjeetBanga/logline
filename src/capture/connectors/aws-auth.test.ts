@@ -13,6 +13,7 @@ import {
   rdsAuthToken,
   resolveCredentials,
   signingKey,
+  signRequest,
   systemEnvironment,
 } from './aws-auth';
 
@@ -38,6 +39,39 @@ test('the signing key matches the derivation AWS documents', () => {
     signingKey(secret, '20120215', 'us-east-1', 'iam').toString('hex'),
     'f4780e2d9f65fa895f9c67b32ce1baf0b0d8a43505a000a1a9e090d414db404d',
   );
+});
+
+test('a request is signed as in AWS’s SigV4 test suite', () => {
+  // get-vanilla and post-vanilla from the suite AWS publishes, whose example key id is AKIDEXAMPLE.
+  const base = {
+    url: 'https://example.amazonaws.com/',
+    headers: {},
+    body: '',
+    region: 'us-east-1',
+    service: 'service',
+    credentials: { accessKeyId: ['AKID', 'EXAMPLE'].join(''), secretAccessKey: secret },
+    now: Date.parse('2015-08-30T12:36:00Z'),
+  };
+  const credential = 'Credential=AKIDEXAMPLE/20150830/us-east-1/service/aws4_request, SignedHeaders=host;x-amz-date';
+  assert.deepEqual(signRequest({ ...base, method: 'GET' }), {
+    'x-amz-date': '20150830T123600Z',
+    authorization: `AWS4-HMAC-SHA256 ${credential}, Signature=5fa00fa31553b73ebf1942676e86291e8372ff2a2260956d9b8aae1d763fbf31`,
+  });
+  assert.equal(
+    signRequest({ ...base, method: 'POST' }).authorization,
+    `AWS4-HMAC-SHA256 ${credential}, Signature=5da7c1a2acd57cee7505fc6676e4e544621c30862966e37dddb68e92efbe5d6b`,
+  );
+  // A session token is signed too, and the headers given are kept.
+  const temporary = signRequest({
+    ...base,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-amz-json-1.1' },
+    body: '{}',
+    credentials: { ...base.credentials, sessionToken: 'session' },
+  });
+  assert.equal(temporary['Content-Type'], 'application/x-amz-json-1.1');
+  assert.equal(temporary['x-amz-security-token'], 'session');
+  assert.match(temporary.authorization, /SignedHeaders=content-type;host;x-amz-date;x-amz-security-token,/);
 });
 
 test('an RDS token is a presigned connect URL for the user, valid 15 minutes, signed with the credentials', () => {

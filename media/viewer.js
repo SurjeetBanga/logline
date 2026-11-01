@@ -2042,6 +2042,22 @@ Trace ${trace.traceId}`;
       maxRowsSetting: "datadogMaxRows",
       secret: "keys"
     },
+    cloudwatch: {
+      label: "CloudWatch",
+      description: "Search the log groups of an AWS account",
+      service: true,
+      icon: "cloud",
+      noun: "log",
+      native: { label: "Filter pattern", title: "Type a CloudWatch filter pattern, sent as you type it" },
+      traceQuery: (traceId) => {
+        const id = JSON.stringify(traceId);
+        return `{ $.traceId = ${id} || $.trace_id = ${id} || $.trace.id = ${id} }`;
+      },
+      fields: "Searches become CloudWatch filter patterns: a field such as level:error matches the fields of JSON logs, whole and with case, as CloudWatch does.",
+      services: true,
+      maxRowsSetting: "logServiceMaxRows",
+      secret: "none"
+    },
     postgres: {
       label: "Postgres",
       description: "Also Aurora PostgreSQL, RDS, Cloud SQL",
@@ -2887,6 +2903,7 @@ Span ${call.spanId}`;
   }
 
   // src/core/connections.ts
+  var MAX_LOG_GROUPS = 10;
   var DATADOG_SITES = [
     "datadoghq.com",
     "us3.datadoghq.com",
@@ -2898,9 +2915,12 @@ Span ${call.spanId}`;
   ];
   function datadogApiBase(site) {
     if (DATADOG_SITES.includes(site)) return `https://api.${site}`;
+    return apiUrl(site);
+  }
+  function apiUrl(value) {
     let url;
     try {
-      url = new URL(site);
+      url = new URL(value);
     } catch {
       return void 0;
     }
@@ -2908,6 +2928,16 @@ Span ${call.spanId}`;
     if (url.protocol !== "https:" && !(url.protocol === "http:" && loopback)) return void 0;
     if (url.username || url.password || url.search || url.hash) return void 0;
     return `${url.origin}${url.pathname.replace(/\/+$/, "")}`;
+  }
+  var AWS_REGION = /^[a-z]{2}(?:-gov|-iso[a-z]?)?-[a-z]+-\d+$/;
+  function isAwsRegion(value) {
+    return AWS_REGION.test(value);
+  }
+  function logGroupIdentifier(value) {
+    const text2 = value.trim();
+    const arn = /^arn:aws(?:-[a-z-]+)?:logs:[a-z0-9-]+:\d{12}:log-group:([\w.\-/#]{1,512})(?::\*)?$/.exec(text2);
+    if (arn) return text2.replace(/:\*$/, "");
+    return /^[\w.\-/#]{1,512}$/.test(text2) ? text2 : void 0;
   }
   var MAPPED_FIELDS = ["timestamp", "level", "message", "service", "traceId"];
   var SOURCE_PREFIX = "conn:";
@@ -2954,7 +2984,7 @@ Span ${call.spanId}`;
     return {
       kind: "iam",
       ...profile ? { profile } : {},
-      ...region && /^[a-z]{2}(?:-gov)?-[a-z]+-\d+$/.test(region) ? { region } : {}
+      ...region && AWS_REGION.test(region) ? { region } : {}
     };
   }
   var text = (value, max = 512) => typeof value === "string" && value.trim() && value.length <= max && !value.includes("\0") ? value.trim() : void 0;
@@ -3015,6 +3045,29 @@ Span ${call.spanId}`;
           const indexes = Array.isArray(item.indexes) ? item.indexes.filter((index) => typeof index === "string" && !!index.trim()) : [];
           connection = { id, label, type: "datadog", site, ...indexes.length ? { indexes } : {} };
         }
+      } else if (item.type === "cloudwatch") {
+        const region = text(item.region, 32);
+        const profile = text(item.profile, 128);
+        const endpoint = typeof item.endpoint === "string" ? apiUrl(item.endpoint.trim()) : void 0;
+        const groups2 = Array.isArray(item.logGroups) ? item.logGroups : [];
+        const logGroups = [
+          ...new Set(
+            groups2.flatMap((group) => {
+              const identifier = typeof group === "string" ? logGroupIdentifier(group) : void 0;
+              return identifier ? [identifier] : [];
+            })
+          )
+        ].slice(0, MAX_LOG_GROUPS);
+        if (region && AWS_REGION.test(region) && logGroups.length)
+          connection = {
+            id,
+            label,
+            type: "cloudwatch",
+            region,
+            ...profile ? { profile } : {},
+            logGroups,
+            ...endpoint ? { endpoint } : {}
+          };
       }
       if (!connection) return [];
       seen.add(id);
@@ -3717,12 +3770,12 @@ ${answer.range}`;
       const options = answer.services.map(({ name, count }) => {
         const option = document.createElement("option");
         option.value = name;
-        option.textContent = `${name} \xB7 ${numbers.format(count)}`;
+        option.textContent = count === void 0 ? name : `${name} \xB7 ${numbers.format(count)}`;
         return option;
       });
       select.replaceChildren(any, ...options);
       listed = answer.services.map((service) => service.name);
-      select.title = answer.error ? `Could not list services: ${answer.error}` : "Search or tail one service's logs; services are listed by how many logs they had in the range";
+      select.title = answer.error ? `Could not list services: ${answer.error}` : answer.services.some((service) => service.count === void 0) ? "Search or tail one service's logs" : "Search or tail one service's logs; services are listed by how many logs they had in the range";
       const connection = selected();
       if (connection) showService(connection);
     }
@@ -4538,6 +4591,8 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
       ssl: false,
       auth: "password",
       profile: "",
+      region: "",
+      logGroups: "",
       url: "",
       path: "",
       site: DATADOG_SITES[0],
@@ -4549,8 +4604,15 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
       forgetSecret: false
     };
   }
+  function draftLogGroups(draft) {
+    return draft.logGroups.split(/[\n,]+/).map((group) => group.trim()).filter(Boolean);
+  }
   function suggestedLabel(draft) {
     if (draft.type === "datadog") return "prod";
+    if (draft.type === "cloudwatch") {
+      const [first] = draftLogGroups(draft);
+      return first?.split(/[/:]/).filter(Boolean).at(-1) ?? "";
+    }
     if (draft.type === "sqlite")
       return draft.path.split(/[\\/]/).pop()?.replace(/\.(?:db|sqlite3?|db3)$/i, "") ?? "";
     if (draft.type === "mongodb") return draft.database.trim() || (mongoUrl(draft.url)?.database ?? "");
@@ -4653,6 +4715,18 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
             keys = { apiKey: draft.apiKey.trim(), appKey: draft.appKey.trim() };
         }
         break;
+      case "cloudwatch": {
+        const region = draft.region.trim();
+        if (!region) errors.region = "Enter the region, such as us-east-1";
+        else if (!isAwsRegion(region)) errors.region = "A region such as us-east-1 or eu-west-2";
+        const groups2 = draftLogGroups(draft);
+        const wrong = groups2.find((group) => !logGroupIdentifier(group));
+        if (!groups2.length) errors.logGroups = "Enter a log group, such as /aws/lambda/checkout";
+        else if (wrong) errors.logGroups = `${wrong} is not a log group name or ARN`;
+        else if (groups2.length > MAX_LOG_GROUPS) errors.logGroups = `At most ${MAX_LOG_GROUPS} log groups`;
+        item = { type: "cloudwatch", region, ...draft.profile ? { profile: draft.profile } : {}, logGroups: groups2 };
+        break;
+      }
     }
     const [connection] = Object.keys(errors).length ? [] : (
       // The name is not part of what a test opens, so renaming after a test needs no new one.
@@ -4807,9 +4881,9 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
       }
     }
     function field(name, label, options = {}) {
-      const input = h("input", {
+      const input = h(options.rows ? "textarea" : "input", {
         id: `field-${name}`,
-        type: options.type ?? "text",
+        ...options.rows ? { rows: options.rows } : { type: options.type ?? "text" },
         value: String(draft[name] ?? ""),
         placeholder: options.placeholder,
         spellcheck: "false",
@@ -4826,7 +4900,7 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
           updateErrors();
         },
         onkeydown: (event) => {
-          if (event.key === "Enter") runTest();
+          if (event.key === "Enter" && !options.rows) runTest();
         }
       });
       return h(
@@ -4837,6 +4911,58 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
         options.hint ? h("div", { className: "hint" }, options.hint) : void 0,
         h("div", { className: "error", id: `error-${name}`, "data-error-for": name, hidden: true })
       );
+    }
+    function profileField(label, hint, onChange) {
+      return h(
+        "div",
+        { className: "field" },
+        h("label", { for: "field-profile" }, label),
+        h(
+          "select",
+          {
+            id: "field-profile",
+            onchange: (event) => {
+              draft.profile = event.target.value;
+              onChange?.(profiles.find((profile) => profile.name === draft.profile));
+              changed();
+            }
+          },
+          h("option", { value: "" }, "Default credentials (environment, AWS_PROFILE, or default)"),
+          ...profiles.map(
+            (profile) => h(
+              "option",
+              { value: profile.name, ...profile.name === draft.profile ? { selected: true } : {} },
+              profile.description ? `${profile.name} \xB7 ${profile.description}` : profile.name
+            )
+          )
+        ),
+        h("div", { className: "hint" }, hint)
+      );
+    }
+    function cloudwatchDetails() {
+      return [
+        h(
+          "div",
+          { className: "grid" },
+          profileField(
+            "AWS profile",
+            "Its keys, credential_process, or SSO session from aws sso login. Nothing is stored.",
+            (profile) => {
+              if (profile?.region && !draft.region.trim()) {
+                draft.region = profile.region;
+                renderDetails();
+              }
+            }
+          ),
+          field("region", "Region", { placeholder: "us-east-1" }),
+          field("logGroups", "Log groups", {
+            rows: 3,
+            wide: true,
+            placeholder: "/aws/lambda/checkout",
+            hint: `Names or ARNs, one a line, up to ${MAX_LOG_GROUPS}. Searches use FilterLogEvents rather than Logs Insights, and need logs:FilterLogEvents and logs:DescribeLogGroups.`
+          })
+        )
+      ];
     }
     function secretField(name, label, hint) {
       const element2 = field(name, label, {
@@ -4953,6 +5079,9 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
         case "datadog":
           children.push(...datadogDetails());
           break;
+        case "cloudwatch":
+          children.push(...cloudwatchDetails());
+          break;
       }
       details2.replaceChildren(...children.filter((child) => !!child));
       updateErrors();
@@ -5036,33 +5165,9 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
         draft[key] = value;
         refresh();
       }
-      const auth = draft.auth === "iam" ? h(
-        "div",
-        { className: "field" },
-        h("label", { for: "field-profile" }, "AWS profile that signs the token"),
-        h(
-          "select",
-          {
-            id: "field-profile",
-            onchange: (event) => {
-              draft.profile = event.target.value;
-              changed();
-            }
-          },
-          h("option", { value: "" }, "Default credentials (environment, AWS_PROFILE, or default)"),
-          ...profiles.map(
-            (profile) => h(
-              "option",
-              { value: profile.name, ...profile.name === draft.profile ? { selected: true } : {} },
-              profile.description ? `${profile.name} \xB7 ${profile.description}` : profile.name
-            )
-          )
-        ),
-        h(
-          "div",
-          { className: "hint" },
-          "A 15-minute token is made for each connection, so no password is stored. TLS is required."
-        )
+      const auth = draft.auth === "iam" ? profileField(
+        "AWS profile that signs the token",
+        "A 15-minute token is made for each connection, so no password is stored. TLS is required."
       ) : secretField(
         "password",
         "Password",

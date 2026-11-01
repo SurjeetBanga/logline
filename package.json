@@ -997,7 +997,7 @@
           "logline.connections": {
             "type": "array",
             "default": [],
-            "markdownDescription": "Datadog organizations, Postgres and MySQL servers (Aurora and RDS too), MongoDB deployments, and SQLite files whose logs Logline can search and tail. Add one with [Add Connection](command:logline.addConnection). Passwords and keys are kept in VS Code secret storage, never here.",
+            "markdownDescription": "Datadog organizations, CloudWatch log groups, Postgres and MySQL servers (Aurora and RDS too), MongoDB deployments, and SQLite files whose logs Logline can search and tail. Add one with [Add Connection](command:logline.addConnection). Passwords and keys are kept in VS Code secret storage, never here.",
             "items": {
               "type": "object",
               "properties": {
@@ -1016,7 +1016,8 @@
                     "postgres",
                     "mysql",
                     "mongodb",
-                    "datadog"
+                    "datadog",
+                    "cloudwatch"
                   ]
                 },
                 "path": {
@@ -1055,6 +1056,26 @@
                     "type": "string"
                   },
                   "description": "Datadog: log indexes to search. All indexes when left out."
+                },
+                "region": {
+                  "type": "string",
+                  "description": "CloudWatch: the AWS region of the log groups, such as us-east-1."
+                },
+                "profile": {
+                  "type": "string",
+                  "description": "CloudWatch: the AWS profile in ~/.aws whose credentials sign requests. The environment, AWS_PROFILE, or the default profile when left out."
+                },
+                "logGroups": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  },
+                  "maxItems": 10,
+                  "description": "CloudWatch: log group names or ARNs to search, up to 10."
+                },
+                "endpoint": {
+                  "type": "string",
+                  "description": "CloudWatch: a CloudWatch Logs API in place of the region's, such as LocalStack at http://localhost:4566. Plain http only on this machine."
                 },
                 "logs": {
                   "type": "object",
@@ -1150,12 +1171,20 @@
             "description": "Most logs one search fetches from a Datadog connection, and one tail read. The newest matching logs are kept, and the result line says how many matched in all.",
             "order": 3
           },
+          "logline.logServiceMaxRows": {
+            "type": "integer",
+            "default": 1000,
+            "minimum": 100,
+            "maximum": 50000,
+            "description": "Most logs one search fetches from a CloudWatch connection, and one tail read. The newest matching logs are kept.",
+            "order": 4
+          },
           "logline.connectionPollSeconds": {
             "type": "integer",
             "default": 2,
             "minimum": 1,
             "maximum": 300,
-            "order": 4,
+            "order": 5,
             "markdownDescription": "How often a tailed connection is read for new rows. Datadog is read as often as its rate limit allows, and never more often than this."
           },
           "logline.connectionTimeoutSeconds": {
@@ -1164,7 +1193,7 @@
             "minimum": 1,
             "maximum": 300,
             "description": "Longest a query on a connection may run before it is stopped.",
-            "order": 5
+            "order": 6
           }
         }
       },

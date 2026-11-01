@@ -4,6 +4,11 @@ All notable changes to Logline are documented in this file.
 
 ## Unreleased
 
+### Changes
+
+- **CloudWatch Logs**: search and tail up to 10 CloudWatch log groups from the Logs panel, read with an AWS profile as the AWS CLI reads it, including SSO sessions from `aws sso login`, so nothing is stored. The search box's filters become a CloudWatch filter pattern, shown before you press Run: fields compare the fields of JSON logs, words match the message, and `service:` chooses the log groups read. **Filter pattern** sends a pattern as typed. Searches use FilterLogEvents rather than Logs Insights, newest logs first, and agents you allow can fetch from a CloudWatch connection like any other. See [CloudWatch Logs](docs/usage.md#cloudwatch-logs).
+- **`logline.logServiceMaxRows`** (default 1,000) limits the logs one CloudWatch search, or one tail read, fetches.
+
 ### Fixes
 
 - A Datadog tail no longer shows logs again when a read goes back further than the one before it, such as every tenth read or after a late log.

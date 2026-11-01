@@ -4188,6 +4188,7 @@ body:not([data-view='logs']) .match-count {
 }
 .connection-view input[type='text'],
 .connection-view input[type='password'],
+.connection-view textarea,
 .connection-view select {
   width: 100%;
   min-height: 28px;
@@ -4197,15 +4198,22 @@ body:not([data-view='logs']) .match-count {
   background: var(--input);
   color: var(--vscode-input-foreground, inherit);
 }
-.connection-view input::placeholder {
+.connection-view textarea {
+  resize: vertical;
+  font-family: var(--vscode-editor-font-family, monospace);
+}
+.connection-view input::placeholder,
+.connection-view textarea::placeholder {
   color: var(--vscode-input-placeholderForeground, var(--muted));
 }
 .connection-view input:focus,
+.connection-view textarea:focus,
 .connection-view select:focus {
   outline: 1px solid var(--accent);
   outline-offset: -1px;
 }
-.connection-view input[aria-invalid='true'] {
+.connection-view input[aria-invalid='true'],
+.connection-view textarea[aria-invalid='true'] {
   border-color: var(--vscode-inputValidation-errorBorder, var(--error));
 }
 .connection-view .inline {

@@ -1,5 +1,4 @@
-import { createServer, type IncomingMessage } from 'node:http';
-import type { AddressInfo } from 'node:net';
+import { startFakeHttp, type FakeAnswer, type FakeRequest } from './fake-http';
 
 /** A log as the Logs Search API returns it. */
 export interface FakeLog {
@@ -120,23 +119,16 @@ export function queryMatches(log: FakeLog, query: string): boolean {
 
 // --- The server. ---
 
-async function body(request: IncomingMessage): Promise<Json> {
-  const chunks: Buffer[] = [];
-  for await (const chunk of request) chunks.push(chunk as Buffer);
-  const text = Buffer.concat(chunks).toString('utf8');
-  return text ? (JSON.parse(text) as Json) : {};
-}
-
 /** A Datadog API on 127.0.0.1 for tests and local trials: logs search, counts, and metric queries. */
 export async function startFakeDatadog(options: FakeDatadogOptions = {}) {
   const state = {
     logs: options.logs ?? [],
     series: options.series ?? [],
-    requests: [] as { path: string; body: Json; headers: Record<string, string | string[] | undefined> }[],
+    requests: [] as FakeRequest[],
     /** Answer the next requests with 429. */
     rateLimited: 0,
   };
-  const authorized = (request: IncomingMessage) =>
+  const authorized = (request: FakeRequest) =>
     options.token
       ? request.headers.authorization === `Bearer ${options.token}`
       : (!options.apiKey || request.headers['dd-api-key'] === options.apiKey) &&
@@ -145,95 +137,84 @@ export async function startFakeDatadog(options: FakeDatadogOptions = {}) {
     const time = Date.parse(log.timestamp);
     return time >= Number(filter.from ?? 0) && time <= Number(filter.to ?? Infinity);
   };
-  const server = createServer((request, response) => {
-    void (async () => {
-      const url = new URL(request.url ?? '/', 'http://127.0.0.1');
-      const json = request.method === 'POST' ? await body(request) : {};
-      state.requests.push({ path: url.pathname, body: json, headers: request.headers });
-      const send = (status: number, payload: unknown, headers: Record<string, string> = {}) => {
-        response.writeHead(status, { 'content-type': 'application/json', ...headers });
-        response.end(JSON.stringify(payload));
-      };
-      if (state.rateLimited > 0) {
-        state.rateLimited--;
-        return send(429, { errors: ['Too many requests'] }, { 'x-ratelimit-reset': '7' });
-      }
-      if (!authorized(request)) return send(403, { errors: ['Forbidden'] });
-      if (url.pathname === '/api/v2/logs/events/search' || url.pathname === '/api/v2/logs/analytics/aggregate') {
-        const filter = (json.filter ?? {}) as Json;
-        const matching = state.logs
-          .filter((log) => inRange(log, filter) && queryMatches(log, String(filter.query ?? '*')))
-          .sort((a, b) => Date.parse(a.timestamp) - Date.parse(b.timestamp));
-        if (url.pathname.endsWith('aggregate')) {
-          // Grouped by service: a bucket per service, in no particular order.
-          if (Array.isArray(json.group_by) && json.group_by.length) {
-            const counts = new Map<string, number>();
-            for (const log of matching) if (log.service) counts.set(log.service, (counts.get(log.service) ?? 0) + 1);
-            return send(200, {
-              data: {
-                buckets: [...counts].map(([service, count]) => ({ by: { service }, computes: { c0: count } })),
-              },
-              meta: { status: 'done' },
-            });
-          }
+  const send = (status: number, payload: unknown, headers: Record<string, string> = {}): FakeAnswer => ({
+    status,
+    payload,
+    headers,
+  });
+  const fake = await startFakeHttp((request) => {
+    const { url, body: json } = request;
+    if (state.rateLimited > 0) {
+      state.rateLimited--;
+      return send(429, { errors: ['Too many requests'] }, { 'x-ratelimit-reset': '7' });
+    }
+    if (!authorized(request)) return send(403, { errors: ['Forbidden'] });
+    if (url.pathname === '/api/v2/logs/events/search' || url.pathname === '/api/v2/logs/analytics/aggregate') {
+      const filter = (json.filter ?? {}) as Json;
+      const matching = state.logs
+        .filter((log) => inRange(log, filter) && queryMatches(log, String(filter.query ?? '*')))
+        .sort((a, b) => Date.parse(a.timestamp) - Date.parse(b.timestamp));
+      if (url.pathname.endsWith('aggregate')) {
+        // Grouped by service: a bucket per service, in no particular order.
+        if (Array.isArray(json.group_by) && json.group_by.length) {
+          const counts = new Map<string, number>();
+          for (const log of matching) if (log.service) counts.set(log.service, (counts.get(log.service) ?? 0) + 1);
           return send(200, {
-            data: { buckets: [{ by: {}, computes: { c0: matching.length } }] },
+            data: {
+              buckets: [...counts].map(([service, count]) => ({ by: { service }, computes: { c0: count } })),
+            },
             meta: { status: 'done' },
           });
         }
-        if (json.sort === '-timestamp') matching.reverse();
-        const page = (json.page ?? {}) as Json;
-        const start = Number(page.cursor ?? 0);
-        const limit = Number(page.limit ?? 10);
-        const slice = matching.slice(start, start + limit);
-        const next = start + limit < matching.length ? String(start + limit) : undefined;
         return send(200, {
-          data: slice.map((log) => ({
-            id: log.id,
-            type: 'log',
-            attributes: {
-              timestamp: log.timestamp,
-              status: log.status,
-              message: log.message,
-              service: log.service,
-              host: log.host,
-              tags: log.tags ?? [],
-              attributes: log.attributes ?? {},
-            },
-          })),
-          meta: { page: next ? { after: next } : {}, status: 'done' },
+          data: { buckets: [{ by: {}, computes: { c0: matching.length } }] },
+          meta: { status: 'done' },
         });
       }
-      if (url.pathname === '/api/v1/query') {
-        const query = url.searchParams.get('query') ?? '';
-        const from = Number(url.searchParams.get('from')) * 1000;
-        const to = Number(url.searchParams.get('to')) * 1000;
-        const name = query.replace(/^[a-z]+:/, '').split('{')[0];
-        const series = state.series
-          .filter((candidate) => candidate.metric === name)
-          .map((candidate) => ({
-            metric: candidate.metric,
-            display_name: candidate.metric,
-            scope: candidate.scope,
-            expression: query,
-            pointlist: candidate.points.filter(([time]) => time >= from && time <= to),
-            unit: candidate.unit ? [{ short_name: candidate.unit, family: 'time' }, null] : null,
-          }));
-        return send(200, { status: 'ok', query, series });
-      }
-      if (url.pathname === '/api/v1/metrics')
-        return send(200, { metrics: [...new Set(state.series.map((series) => series.metric))] });
-      send(404, { errors: ['Not found'] });
-    })().catch((error: unknown) => {
-      response.writeHead(500);
-      response.end(String(error));
-    });
+      if (json.sort === '-timestamp') matching.reverse();
+      const page = (json.page ?? {}) as Json;
+      const start = Number(page.cursor ?? 0);
+      const limit = Number(page.limit ?? 10);
+      const slice = matching.slice(start, start + limit);
+      const next = start + limit < matching.length ? String(start + limit) : undefined;
+      return send(200, {
+        data: slice.map((log) => ({
+          id: log.id,
+          type: 'log',
+          attributes: {
+            timestamp: log.timestamp,
+            status: log.status,
+            message: log.message,
+            service: log.service,
+            host: log.host,
+            tags: log.tags ?? [],
+            attributes: log.attributes ?? {},
+          },
+        })),
+        meta: { page: next ? { after: next } : {}, status: 'done' },
+      });
+    }
+    if (url.pathname === '/api/v1/query') {
+      const query = url.searchParams.get('query') ?? '';
+      const from = Number(url.searchParams.get('from')) * 1000;
+      const to = Number(url.searchParams.get('to')) * 1000;
+      const name = query.replace(/^[a-z]+:/, '').split('{')[0];
+      const series = state.series
+        .filter((candidate) => candidate.metric === name)
+        .map((candidate) => ({
+          metric: candidate.metric,
+          display_name: candidate.metric,
+          scope: candidate.scope,
+          expression: query,
+          pointlist: candidate.points.filter(([time]) => time >= from && time <= to),
+          unit: candidate.unit ? [{ short_name: candidate.unit, family: 'time' }, null] : null,
+        }));
+      return send(200, { status: 'ok', query, series });
+    }
+    if (url.pathname === '/api/v1/metrics')
+      return send(200, { metrics: [...new Set(state.series.map((series) => series.metric))] });
+    return send(404, { errors: ['Not found'] });
   });
-  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
-  const { port } = server.address() as AddressInfo;
-  return {
-    url: `http://127.0.0.1:${port}`,
-    state,
-    close: () => new Promise<void>((resolve) => server.close(() => resolve())),
-  };
+  state.requests = fake.requests;
+  return { url: fake.url, state, close: fake.close };
 }

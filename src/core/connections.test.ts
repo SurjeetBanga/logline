@@ -1,10 +1,12 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import {
+  cloudwatchEndpoint,
   connectionIdOf,
   connectionLabel,
   connectionSourceId,
   normalizeConnections,
+  logGroupIdentifier,
   rangeMs,
   secretKey,
   suggestMapping,
@@ -149,4 +151,57 @@ test('MySQL and MongoDB connections are kept, IAM sign-in turns on TLS, and each
   assert.equal(isRdsHost('db.example.com'), false);
   assert.equal(rdsRegion('billing.cluster-ro-c9.eu-central-1.rds.amazonaws.com'), 'eu-central-1');
   assert.equal(mongoUrl('https://example.com'), undefined);
+});
+
+test('a CloudWatch connection needs a region and log groups, keeps up to 10, and reads its region’s API', () => {
+  const groups = Array.from({ length: 12 }, (_, i) => `/aws/lambda/fn-${i}`);
+  const [cloudwatch, chinese, local] = normalizeConnections([
+    {
+      id: 'prod',
+      type: 'cloudwatch',
+      region: 'us-east-1',
+      profile: 'work',
+      logGroups: [...groups, groups[0], 'not a group!'],
+    },
+    { id: 'cn', type: 'cloudwatch', region: 'cn-north-1', logGroups: ['/ecs/api'] },
+    { id: 'stack', type: 'cloudwatch', region: 'us-east-1', logGroups: ['/x'], endpoint: 'http://localhost:4566' },
+    {
+      type: 'cloudwatch',
+      region: 'us-east-1',
+      logGroups: ['/x'],
+      endpoint: 'http://logs.example.com',
+    },
+  ]);
+  assert.equal(cloudwatch.type === 'cloudwatch' && cloudwatch.logGroups.length, 10);
+  assert.equal(cloudwatch.type === 'cloudwatch' && cloudwatch.profile, 'work');
+  assert.equal(connectionLabel(cloudwatch), 'CloudWatch · prod');
+  assert.equal(cloudwatchEndpoint({ region: 'us-east-1' }), 'https://logs.us-east-1.amazonaws.com');
+  assert.equal(
+    chinese.type === 'cloudwatch' && cloudwatchEndpoint(chinese),
+    'https://logs.cn-north-1.amazonaws.com.cn',
+  );
+  assert.equal(local.type === 'cloudwatch' && cloudwatchEndpoint(local), 'http://localhost:4566');
+  // A connection without groups or with a malformed region is dropped; an endpoint over plain http elsewhere is ignored.
+  const all = normalizeConnections([
+    { id: 'no-groups', type: 'cloudwatch', region: 'us-east-1', logGroups: [] },
+    { id: 'bad-region', type: 'cloudwatch', region: 'useast1', logGroups: ['/x'] },
+    {
+      id: 'remote-http',
+      type: 'cloudwatch',
+      region: 'us-east-1',
+      logGroups: ['/x'],
+      endpoint: 'http://logs.example.com',
+    },
+  ]);
+  assert.deepEqual(
+    all.map((connection) => connection.id),
+    ['remote-http'],
+  );
+  assert.equal(all[0].type === 'cloudwatch' && all[0].endpoint, undefined);
+  // An ARN copied from the console loses its `:*`.
+  assert.equal(
+    logGroupIdentifier('arn:aws:logs:us-east-1:123456789012:log-group:/aws/lambda/pay:*'),
+    'arn:aws:logs:us-east-1:123456789012:log-group:/aws/lambda/pay',
+  );
+  assert.equal(logGroupIdentifier('two words'), undefined);
 });

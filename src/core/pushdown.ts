@@ -56,14 +56,14 @@ export interface Pushdown<T> {
 }
 
 /**
- * Translate each term with `emit`, which returns the store's term, `'time'`
- * for a time term the caller has taken as its range, or undefined when the
- * store cannot say. A time term narrows a search only without OR, since in
- * one branch it would narrow every branch.
+ * Translate each term with `emit`, which returns the store's term, `'taken'`
+ * for a term the caller applies another way, such as a time term taken as its
+ * range, or undefined when the store cannot say. A taken term narrows a search
+ * only without OR, since in one branch it would narrow every branch.
  */
 export function pushDown<T>(
   groups: TypedTerm[][],
-  emit: (token: Token, text: string, branches: number) => T | 'time' | undefined,
+  emit: (token: Token, text: string, branches: number) => T | 'taken' | undefined,
 ): Pushdown<T> {
   const pushed = new Set<string>();
   const local = new Set<string>();
@@ -74,10 +74,10 @@ export function pushDown<T>(
     let narrowed = false;
     for (const { text, token } of group) {
       const result = token && emit(token, text, groups.length);
-      if (result === 'time' && groups.length === 1) {
+      if (result === 'taken' && groups.length === 1) {
         pushed.add(text);
         narrowed = true;
-      } else if (result !== undefined && result !== 'time') {
+      } else if (result !== undefined && result !== 'taken') {
         terms.push(result);
         pushed.add(text);
         narrowed = true;

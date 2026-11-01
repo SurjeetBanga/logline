@@ -315,8 +315,8 @@ export type HostMessage =
       type: 'connectionServices';
       connectionId: string;
       range: string;
-      /** The services that logged in the range, most logs first. */
-      services: { name: string; count: number }[];
+      /** The services that logged in the range, most logs first; without counts from a store that cannot count them. */
+      services: { name: string; count?: number }[];
       error?: string;
     }
   | { type: 'connectionForm'; session: number; update: FormUpdate }

@@ -247,6 +247,35 @@ timed('datadog-logs', 'Turn 5,000 Datadog search results, with tags and colored 
       });
   };
 });
+timed('cloudwatch-logs', 'Turn 5,000 CloudWatch events, JSON and plain text, into events', async () => {
+  const { LogStore } = await load('core/log-store.js');
+  const { Ingestion } = await load('capture/ingestion.js');
+  const { cloudwatchLine } = await load('capture/connectors/cloudwatch.js');
+  const events = Array.from({ length: 5000 }, (_, i) => ({
+    timestamp: receivedAt.getTime() + i * 10,
+    // Lambda writes its own START, END, and REPORT lines as text beside the function's JSON logs.
+    message:
+      i % 5
+        ? JSON.stringify({
+            level: i % 10 ? 'info' : 'error',
+            msg: `request ${i} took ${i % 900} ms`,
+            traceId: `${i % 100}`,
+            user_id: i % 97,
+          })
+        : `REPORT RequestId: ${i} Duration: ${i % 900}.00 ms Billed Duration: ${i % 900} ms\n`,
+    logStreamName: `2026/10/30/[$LATEST]${i % 4}`,
+    eventId: `${36000000 + i}`,
+  }));
+  return () => {
+    const ingestion = new Ingestion(new LogStore(10000, 100 * 1024 * 1024), () => {});
+    for (const event of events)
+      ingestion.accept(cloudwatchLine(event, '/aws/lambda/checkout').line, 'remote', {
+        serverId: 'conn:prod',
+        server: 'CloudWatch · prod',
+        sessionId: 'run',
+      });
+  };
+});
 timed('remote-sql', 'Turn 1,000 searches into SQL for a log table', async () => {
   const { buildSqlLogQuery } = await load('core/remote-query.js');
   const table = {

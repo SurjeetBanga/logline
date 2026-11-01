@@ -141,7 +141,7 @@ test('a Postgres URL fills the form, a test unlocks the tables, and Save waits f
   assert.equal(form.steps()[0].hidden, true, 'nothing shows before the extension fills it in');
   form.init();
   assert.equal(form.steps()[0].hidden, false);
-  assert.equal(form.root().querySelectorAll('.type-card').length, 5);
+  assert.equal(form.root().querySelectorAll('.type-card').length, 6);
   assert.ok(form.$('.type-card.selected').textContent.startsWith('Postgres'));
   assert.equal(form.save().disabled, true);
   assert.equal(form.note(), 'Test the connection to continue.');
@@ -272,7 +272,7 @@ test('editing tests the saved connection at once, keeps its type, and chooses it
   assert.equal(form.$('h1').textContent, 'Edit Billing');
   assert.equal(form.save().textContent, 'Save changes');
   assert.equal(form.$('#field-password').getAttribute('placeholder'), 'Saved · leave empty to keep');
-  assert.equal(form.root().querySelectorAll('.type-card.disabled').length, 4, 'only MySQL can be chosen');
+  assert.equal(form.root().querySelectorAll('.type-card.disabled').length, 5, 'only MySQL can be chosen');
   assert.equal(form.sent.at(-1)?.type, 'test');
   form.receive({ type: 'tested', ok: true, detail: 'MySQL 8 · 2 tables', tables: ['logs', 'users'] });
   assert.deepEqual(form.sent.at(-1), { type: 'table', table: 'logs' });
@@ -402,6 +402,29 @@ test('Datadog needs no table, SQLite browses for its file, and Cancel asks to cl
   assert.match(form.$('.details').textContent, /outside the workspace/);
   form.button(/Cancel/).fire('click');
   assert.deepEqual(form.sent.at(-1), { type: 'cancel' });
+});
+
+test('CloudWatch takes a profile, its region, and log groups one a line, and needs no table', () => {
+  const form = setup();
+  form.init({ profiles: [{ name: 'work', description: 'SSO · eu-west-1', region: 'eu-west-1' }] });
+  form.radio('type', 'cloudwatch').fire('change');
+  assert.ok(form.$('.type-card.selected').textContent.startsWith('CloudWatch'));
+  assert.equal(form.$('#field-logGroups').tagName.toLowerCase(), 'textarea');
+  // Choosing a profile fills in its region.
+  form.choose('#field-profile', 'work');
+  assert.equal(form.$('#field-region').value, 'eu-west-1');
+  form.type('#field-logGroups', '/aws/lambda/checkout\n/aws/lambda/api');
+  assert.equal(form.$('#field-label').value, 'checkout');
+  form.button(/Test connection/).fire('click');
+  const test = form.sent.at(-1) as Extract<FormRequest, { type: 'test' }>;
+  assert.equal(test.draft.region, 'eu-west-1');
+  assert.equal(test.draft.profile, 'work');
+  form.receive({ type: 'tested', ok: true, detail: 'CloudWatch · 2 log groups readable in eu-west-1' });
+  assert.match(
+    form.$('.logs').textContent,
+    /CloudWatch logs need no table\. Searches become CloudWatch filter patterns/,
+  );
+  assert.equal(form.save().disabled, false);
 });
 
 test('a field changed while a test runs makes its answer stale, and a name does not', () => {

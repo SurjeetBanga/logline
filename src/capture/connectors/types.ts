@@ -65,8 +65,11 @@ export interface RemoteConnector {
   readonly tailLagMs?: number;
   /** The shortest time between a tail's reads, for stores that limit how often they are searched; read before each one. */
   readonly tailPollMs?: number;
-  /** The services that logged in a window, most logs first; only stores that know services have it. */
-  services?(fromMs: number, toMs: number, signal?: AbortSignal): Promise<{ name: string; count: number }[]>;
+  /**
+   * The services that logged in a window, most logs first; only stores that know services have it. A store
+   * that cannot count them for free lists its services without a count.
+   */
+  services?(fromMs: number, toMs: number, signal?: AbortSignal): Promise<{ name: string; count?: number }[]>;
 }
 
 export interface MetricResult {
