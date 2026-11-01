@@ -1,3 +1,4 @@
+import { connectionKind } from '../../core/connection-types';
 import type { MetricSeriesView } from '../../core/metrics';
 import type { ConnectionView } from '../../protocol/messages';
 import type { Elements } from '../dom';
@@ -220,7 +221,7 @@ export function createMetricList(
         kind: 'item',
         key: `connection:${connection.id}`,
         label: connection.label,
-        icon: connection.type === 'datadog' ? 'cloud' : 'database',
+        icon: connectionKind(connection.type).icon,
         meta: connection.watching.length ? `${connection.watching.length} watched` : undefined,
         title: `Query metrics from ${connection.label}`,
         onSelect: () => actions.queryConnection?.(connection.id),

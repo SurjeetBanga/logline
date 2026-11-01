@@ -48,3 +48,17 @@ test('sort switches to a fixed capture boundary and toggles the same field', () 
   state.checkedLevels.clear();
   assert.deepEqual(state.currentLevels(), []);
 });
+
+test('a query typed in a store’s own syntax is kept per kind of connection, and one saved for Datadog carries over', () => {
+  const state = new ViewerState({ datadogQuery: 'service:checkout', datadogSyntax: true });
+  assert.deepEqual(state.nativeOf('datadog'), { query: 'service:checkout', on: true });
+  assert.deepEqual(state.nativeOf('postgres'), { query: '', on: false });
+  assert.deepEqual(state.persist('').native, { datadog: { query: 'service:checkout', on: true } });
+  state.setNative('datadog', { on: false });
+  assert.deepEqual(state.persist('').native, { datadog: { query: 'service:checkout' } });
+  state.setNative('datadog', { query: '' });
+  assert.equal(state.persist('').native, undefined);
+  // What is saved under the new name wins over the old one.
+  const both = new ViewerState({ datadogQuery: 'old', native: { datadog: { query: 'new' } } });
+  assert.equal(both.nativeOf('datadog').query, 'new');
+});

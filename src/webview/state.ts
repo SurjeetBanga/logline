@@ -1,6 +1,7 @@
 import type { ExceptionBlock } from '../core/exceptions';
 import type { DetailLinks } from '../protocol/messages';
-import { RANGE_CHOICES } from '../core/connections';
+import { RANGE_CHOICES, type ConnectionType } from '../core/connections';
+import { CONNECTION_KINDS } from '../core/connection-types';
 export const LEVELS = ['trace', 'debug', 'info', 'warn', 'error', 'fatal', 'unclassified'];
 export interface PersistedState {
   query?: string;
@@ -19,7 +20,9 @@ export interface PersistedState {
   view?: string;
   /** The time range searched on connections. */
   range?: string;
-  /** A Datadog query typed in Datadog's own syntax, and whether Run and Tail send it. */
+  /** A query typed in each kind of connection's own syntax, and whether Run and Tail send it. */
+  native?: Partial<Record<string, { query?: string; on?: boolean }>>;
+  /** What `native.datadog` was called before other connections had a syntax of their own. */
   datadogQuery?: string;
   datadogSyntax?: boolean;
   /** Whether the Sources rail was collapsed or opened by hand. */
@@ -61,9 +64,8 @@ export class ViewerState {
   view: string;
   /** The time range a connection search covers, such as `1h`. */
   connectionRange: string;
-  /** A query in Datadog's own syntax, and whether Run and Tail on a Datadog connection send it as typed. */
-  datadogQuery: string;
-  datadogSyntax: boolean;
+  /** A query in each kind of connection's own syntax, and whether Run and Tail send it as typed. */
+  native: Partial<Record<ConnectionType, { query: string; on: boolean }>> = {};
   /** The Sources rail's state when set by hand; undefined follows the panel's width. */
   railCollapsed?: boolean;
   /** The rails' width when resized by hand; undefined keeps the default. */
@@ -74,8 +76,16 @@ export class ViewerState {
       this.railWidth = saved.railWidth;
     this.view = typeof saved.view === 'string' ? saved.view : 'logs';
     this.connectionRange = typeof saved.range === 'string' && RANGE_CHOICES.includes(saved.range) ? saved.range : '1h';
-    this.datadogQuery = typeof saved.datadogQuery === 'string' ? saved.datadogQuery.slice(0, 2048) : '';
-    this.datadogSyntax = saved.datadogSyntax === true;
+    const native: Partial<Record<string, { query?: unknown; on?: unknown }>> = {
+      datadog: { query: saved.datadogQuery, on: saved.datadogSyntax },
+      ...saved.native,
+    };
+    for (const type of Object.keys(CONNECTION_KINDS) as ConnectionType[]) {
+      const entry = native[type];
+      if (!entry || typeof entry !== 'object') continue;
+      const query = typeof entry.query === 'string' ? entry.query.slice(0, 2048) : '';
+      if (query || entry.on === true) this.native[type] = { query, on: entry.on === true };
+    }
     this.following = !saved.sort;
     this.cellHintDismissed = saved.cellHintDismissed === true;
     this.rowHintDismissed = saved.rowHintDismissed === true;
@@ -161,10 +171,29 @@ export class ViewerState {
       ...(this.rowHintDismissed ? { rowHintDismissed: true } : {}),
       ...(this.view !== 'logs' ? { view: this.view } : {}),
       ...(this.connectionRange !== '1h' ? { range: this.connectionRange } : {}),
-      ...(this.datadogQuery ? { datadogQuery: this.datadogQuery } : {}),
-      ...(this.datadogSyntax ? { datadogSyntax: true } : {}),
+      ...(Object.keys(this.native).length ? { native: this.persistedNative() } : {}),
       ...(this.railCollapsed !== undefined ? { rail: this.railCollapsed ? 'collapsed' : 'open' } : {}),
       ...(this.railWidth !== undefined ? { railWidth: this.railWidth } : {}),
     };
+  }
+
+  /** The query typed in a kind of connection's own syntax, and whether Run and Tail send it. */
+  nativeOf(type: ConnectionType): { query: string; on: boolean } {
+    return this.native[type] ?? { query: '', on: false };
+  }
+
+  setNative(type: ConnectionType, change: Partial<{ query: string; on: boolean }>): void {
+    const next = { ...this.nativeOf(type), ...change };
+    if (next.query || next.on) this.native[type] = next;
+    else delete this.native[type];
+  }
+
+  private persistedNative(): Record<string, { query?: string; on?: boolean }> {
+    return Object.fromEntries(
+      Object.entries(this.native).map(([type, entry]) => [
+        type,
+        { ...(entry.query ? { query: entry.query } : {}), ...(entry.on ? { on: true } : {}) },
+      ]),
+    );
   }
 }

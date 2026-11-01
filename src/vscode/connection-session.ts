@@ -1,3 +1,4 @@
+import { connectionKind, keepsSecret } from '../core/connection-types';
 import { errorText } from '../capture/connectors/types';
 import {
   draftFromConnection,
@@ -143,11 +144,11 @@ export class ConnectionSession {
           type: 'init',
           mode: this.editing ? 'edit' : 'add',
           draft: this.lastDraft ?? (this.editing ? draftFromConnection(this.editing) : emptyDraft()),
-          ...(this.editing && this.editing.type !== 'datadog' && this.editing.logs
+          ...(this.editing && !connectionKind(this.editing.type).service && this.editing.logs
             ? { mapping: this.editing.logs }
             : {}),
           secret: this.savedSecret !== undefined,
-          ...(this.savedSecret && this.editing && this.editing.type !== 'sqlite'
+          ...(this.savedSecret && this.editing && keepsSecret(this.editing)
             ? { secretKey: secretKey(this.editing) }
             : {}),
           profiles: this.host.profiles(),
@@ -184,7 +185,7 @@ export class ConnectionSession {
       this.savedSecret !== undefined &&
       !draft.forgetSecret &&
       this.editing !== undefined &&
-      this.editing.type !== 'sqlite' &&
+      keepsSecret(this.editing) &&
       draftSecretKey(draft) === secretKey(this.editing);
     const saved = keeps ? this.savedSecret : undefined;
     const read = readDraft(draft, { secret: keeps });
@@ -282,13 +283,13 @@ export class ConnectionSession {
     const label = draft.label.trim();
     if (!label) return fail('Give the connection a name.');
     let logs: LogTableMapping | null | undefined = null;
-    if (connection.type !== 'datadog') {
+    if (!connectionKind(connection.type).service) {
       const table =
         mappingValue && typeof mappingValue === 'object' ? (mappingValue as { table?: unknown }).table : undefined;
       logs = normalizeMapping(mappingValue, typeof table === 'string' ? (this.columns.get(table) ?? []) : []);
       if (logs === undefined) return fail('Choose the log table and its time column, or No log table.');
       // A time format set by hand in settings stays while the table and time column do.
-      const before = this.editing?.type !== 'datadog' ? this.editing?.logs : undefined;
+      const before = this.editing && !connectionKind(this.editing.type).service ? this.editing.logs : undefined;
       if (logs && before?.timestampFormat && before.table === logs.table && before.timestamp === logs.timestamp)
         logs.timestampFormat = before.timestampFormat;
     }

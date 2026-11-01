@@ -1,3 +1,4 @@
+import { connectionKind } from '../../core/connection-types';
 import { connectionIdOf } from '../../core/connections';
 import type { ConnectionView, Snapshot } from '../../protocol/messages';
 import type { Elements } from '../dom';
@@ -288,7 +289,7 @@ export function createSourceRail(
     return row({
       id: connection.sourceId,
       name: connection.label,
-      icon: connection.type === 'datadog' ? 'cloud' : 'database',
+      icon: connectionKind(connection.type).icon,
       title: `${connection.label} · ${status}`,
       status,
       statusClass: connection.tailing ? 'live' : connection.last?.error ? 'error' : undefined,
