@@ -17,6 +17,27 @@ export interface GuideRelease {
 
 export const GUIDE_RELEASES: GuideRelease[] = [
   {
+    version: '1.19.0',
+    date: '2026-11-01',
+    highlights: [
+      {
+        title: 'Four more log stores',
+        text: 'Search and tail CloudWatch Logs, Grafana Loki, Elasticsearch and OpenSearch, and Google Cloud Logging next to your local runs. Add one with Add connection, or type a query in the store’s own syntax.',
+        section: 'connections',
+      },
+      {
+        title: 'Tell us what to build',
+        text: 'More actions → Suggest a feature or Vote on what’s next opens a short form in the panel. Logline now also sends anonymous usage counts, never log content, searches, paths, or names. It follows VS Code’s telemetry setting; logline.telemetry.enabled turns it off.',
+        section: 'settings',
+      },
+      {
+        title: 'Ask Copilot works again',
+        text: 'Ask Copilot and Fix with Copilot open the Copilot built into current VS Code, and value suggestions after field: keep up while logs stream in.',
+        section: 'share',
+      },
+    ],
+  },
+  {
     version: '1.18.0',
     date: '2026-10-26',
     highlights: [
