@@ -541,3 +541,23 @@ test('closing twice sends one summary, and Show Usage Data keeps it until the la
   await usage.close();
   assert.equal(sent.filter((item) => item.event === 'session_summary').length, 1);
 });
+
+test('a window left open sends a summary every day, and sends batches every minute', async (t) => {
+  t.mock.timers.enable({ apis: ['setInterval'] });
+  const { usage, sent } = setup();
+  usage.start();
+  usage.search(['field'], ['level']);
+  t.mock.timers.tick(60_000);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.ok(
+    sent.some((item) => item.event === 'activated'),
+    'the minute’s batch went out',
+  );
+  assert.equal(sent.filter((item) => item.event === 'session_summary').length, 0);
+  t.mock.timers.tick(24 * 60 * 60 * 1000);
+  await new Promise((resolve) => setImmediate(resolve));
+  const summaries = sent.filter((item) => item.event === 'session_summary');
+  assert.equal(summaries.length, 1, 'one summary a day');
+  assert.equal(summaries[0].properties.searches, '1-9');
+  usage.dispose();
+});

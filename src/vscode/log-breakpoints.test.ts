@@ -135,6 +135,12 @@ test('breakpoints go on the statement that logged an event, and matching debug o
   );
   const lens = { enabled: true, siteUri: () => Uri.file('/w/src/pay.ts') };
   const shown: number[] = [];
+  const counted: string[] = [];
+  const usage = {
+    record: (event: string, properties: { step?: string } = {}) => counted.push(`${event}:${properties.step}`),
+    milestone: (name: string) => counted.push(name),
+    command: (id: string) => counted.push(id),
+  };
   const controller = new LogBreakpoints({
     store,
     index,
@@ -142,6 +148,7 @@ test('breakpoints go on the statement that logged an event, and matching debug o
     showEvent: async (id) => {
       shown.push(id);
     },
+    usage: usage as never,
   });
 
   store.add(event(1, '{"level":"error","msg":"payment failed for order 7"}'));
@@ -153,8 +160,20 @@ test('breakpoints go on the statement that logged an event, and matching debug o
   await controller.breakOnEvent(1);
   assert.equal(breakpoints.length, 1, 'an existing breakpoint is not duplicated');
 
+  assert.deepEqual(
+    counted.slice(0, 2),
+    ['log_breakpoint:set', 'first_log_breakpoint'],
+    'a breakpoint from an event counts',
+  );
+  counted.length = 0;
+
   // A search breaks on the statements that logged matches and watches debug output.
   await commands.get('logline.breakOnMatchingLogs')!('timeout', []);
+  assert.deepEqual(
+    counted,
+    ['logline.breakOnMatchingLogs', 'log_breakpoint:set', 'first_log_breakpoint'],
+    'one from the Command Palette counts too',
+  );
   assert.equal(status.shown, true);
   assert.match(status.text, /Break on log/);
   let pauses = 0;

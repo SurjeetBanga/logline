@@ -656,8 +656,6 @@ export class LogsController {
       void vscode.window.showInformationMessage('Log breakpoints need a VS Code host with debugging support.');
       return;
     }
-    this.usage?.record('log_breakpoint', { step: 'set' });
-    this.usage?.milestone('first_log_breakpoint');
     await this.breakpoints.breakOnEvent(id);
   }
   async breakOnQuery(query: string, levels: string[]): Promise<void> {
@@ -665,8 +663,6 @@ export class LogsController {
       void vscode.window.showInformationMessage('Log breakpoints need a VS Code host with debugging support.');
       return;
     }
-    this.usage?.record('log_breakpoint', { step: 'set' });
-    this.usage?.milestone('first_log_breakpoint');
     await this.breakpoints.breakOnMatchingLogs(query, levels);
   }
   clear(): void {
