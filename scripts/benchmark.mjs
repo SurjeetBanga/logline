@@ -276,6 +276,31 @@ timed('cloudwatch-logs', 'Turn 5,000 CloudWatch events, JSON and plain text, int
       });
   };
 });
+timed('loki-logs', 'Turn 5,000 Loki lines, JSON and plain text, into events', async () => {
+  const { LogStore } = await load('core/log-store.js');
+  const { Ingestion } = await load('capture/ingestion.js');
+  const { lokiLine } = await load('capture/connectors/loki.js');
+  const labels = { service_name: 'checkout', env: 'prod', detected_level: 'info' };
+  const values = Array.from({ length: 5000 }, (_, i) => [
+    `${receivedAt.getTime() + i * 10}${String(i % 1000000).padStart(6, '0')}`,
+    i % 5
+      ? JSON.stringify({
+          level: i % 10 ? 'info' : 'error',
+          msg: `request ${i} took ${i % 900} ms`,
+          traceId: `${i % 100}`,
+        })
+      : `GET /orders/${i} 200 ${i % 900}ms`,
+  ]);
+  return () => {
+    const ingestion = new Ingestion(new LogStore(10000, 100 * 1024 * 1024), () => {});
+    for (const [ns, line] of values)
+      ingestion.accept(lokiLine(labels, ns, line).line, 'remote', {
+        serverId: 'conn:prod',
+        server: 'Loki · prod',
+        sessionId: 'run',
+      });
+  };
+});
 timed('remote-sql', 'Turn 1,000 searches into SQL for a log table', async () => {
   const { buildSqlLogQuery } = await load('core/remote-query.js');
   const table = {

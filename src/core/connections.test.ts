@@ -205,3 +205,34 @@ test('a CloudWatch connection needs a region and log groups, keeps up to 10, and
   );
   assert.equal(logGroupIdentifier('two words'), undefined);
 });
+
+test('a Loki connection needs an https URL, or http on this machine, and keeps a selector only when it is one', () => {
+  const [cloud, local] = normalizeConnections([
+    {
+      id: 'grafana',
+      type: 'loki',
+      url: 'https://logs-prod-012.grafana.net/',
+      user: '12345',
+      tenant: 'a',
+      selector: '{job="api"}',
+    },
+    { id: 'local', type: 'loki', url: 'http://localhost:3100', selector: 'job=api' },
+    { id: 'remote-http', type: 'loki', url: 'http://loki.example.com' },
+  ]);
+  assert.deepEqual(cloud, {
+    id: 'grafana',
+    label: 'grafana',
+    type: 'loki',
+    url: 'https://logs-prod-012.grafana.net',
+    user: '12345',
+    tenant: 'a',
+    selector: '{job="api"}',
+  });
+  assert.deepEqual(local, { id: 'local', label: 'local', type: 'loki', url: 'http://localhost:3100' });
+  assert.equal(normalizeConnections([{ id: 'remote-http', type: 'loki', url: 'http://loki.example.com' }]).length, 0);
+  // The token is kept for the URL, tenant, and user it opens.
+  assert.equal(
+    cloud.type === 'loki' && secretKey(cloud),
+    'logline.connection.loki:https://logs-prod-012.grafana.net/a/12345',
+  );
+});

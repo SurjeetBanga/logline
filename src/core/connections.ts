@@ -3,7 +3,7 @@
 // them in secret storage under `secretKey`.
 import { CONNECTION_KINDS } from './connection-types';
 
-export type ConnectionType = 'sqlite' | 'postgres' | 'mysql' | 'mongodb' | 'datadog' | 'cloudwatch';
+export type ConnectionType = 'sqlite' | 'postgres' | 'mysql' | 'mongodb' | 'datadog' | 'cloudwatch' | 'loki';
 /** How a timestamp column stores time; `native` is a database date/time type. */
 export type TimeEncoding = 'iso' | 'epoch_s' | 'epoch_ms' | 'native';
 
@@ -80,8 +80,26 @@ export interface CloudWatchConnection extends BaseConnection {
   /** A CloudWatch Logs API in place of the region's, such as LocalStack on this machine. */
   endpoint?: string;
 }
+/** A Grafana Loki API, self-hosted or Grafana Cloud's. */
+export interface LokiConnection extends BaseConnection {
+  type: 'loki';
+  /** The API's URL, such as `https://logs-prod-012.grafana.net` or `http://localhost:3100`. */
+  url: string;
+  /** The tenant of a multi-tenant Loki, sent as X-Scope-OrgID. */
+  tenant?: string;
+  /** With a password or token, signs in with basic auth; a token alone is a bearer token. */
+  user?: string;
+  /** The streams a search reads when it names no service. */
+  selector?: string;
+}
 export type ConnectionConfig =
-  SqliteConnection | PostgresConnection | MysqlConnection | MongoConnection | DatadogConnection | CloudWatchConnection;
+  | SqliteConnection
+  | PostgresConnection
+  | MysqlConnection
+  | MongoConnection
+  | DatadogConnection
+  | CloudWatchConnection
+  | LokiConnection;
 
 /** The most log groups one connection searches. */
 export const MAX_LOG_GROUPS = 10;
@@ -130,6 +148,17 @@ export function isAwsRegion(value: string): boolean {
   return AWS_REGION.test(value);
 }
 
+/** The streams a Loki search reads when it names no service: every stream with a service name. */
+export const LOKI_SELECTOR = '{service_name=~".+"}';
+
+const SELECTOR_MATCHER = String.raw`\s*[A-Za-z_]\w*\s*(?:=~|!~|!=|=)\s*"(?:\\.|[^"\\])*"\s*`;
+const SELECTOR = new RegExp(`^\\{${SELECTOR_MATCHER}(?:,${SELECTOR_MATCHER})*\\}$`);
+
+/** Whether text is a LogQL stream selector, such as `{job="api"}`. */
+export function isLokiSelector(value: string): boolean {
+  return SELECTOR.test(value.trim());
+}
+
 /** The CloudWatch Logs API a connection reads: its endpoint, or its region's. */
 export function cloudwatchEndpoint(connection: Pick<CloudWatchConnection, 'region' | 'endpoint'>): string {
   if (connection.endpoint) return connection.endpoint;
@@ -171,6 +200,8 @@ export function connectionLabel(connection: Pick<ConnectionConfig, 'type' | 'lab
  * points a connection elsewhere never receives them.
  */
 export function secretKey(connection: Exclude<ConnectionConfig, SqliteConnection | CloudWatchConnection>): string {
+  if (connection.type === 'loki')
+    return `logline.connection.loki:${apiUrl(connection.url) ?? connection.url}/${encodeURIComponent(connection.tenant ?? '')}/${encodeURIComponent(connection.user ?? '')}`;
   if (connection.type === 'datadog')
     return `logline.connection.datadog:${datadogApiBase(connection.site) ?? connection.site}`;
   if (connection.type === 'mongodb') {
@@ -302,6 +333,21 @@ export function normalizeConnections(value: unknown): ConnectionConfig[] {
           : [];
         connection = { id, label, type: 'datadog', site, ...(indexes.length ? { indexes } : {}) };
       }
+    } else if (item.type === 'loki') {
+      const url = typeof item.url === 'string' ? apiUrl(item.url.trim()) : undefined;
+      const tenant = text(item.tenant, 256);
+      const user = text(item.user, 256);
+      const selector = text(item.selector, 1024);
+      if (url)
+        connection = {
+          id,
+          label,
+          type: 'loki',
+          url,
+          ...(tenant ? { tenant } : {}),
+          ...(user ? { user } : {}),
+          ...(selector && isLokiSelector(selector) ? { selector } : {}),
+        };
     } else if (item.type === 'cloudwatch') {
       const region = text(item.region, 32);
       const profile = text(item.profile, 128);

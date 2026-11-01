@@ -997,7 +997,7 @@
           "logline.connections": {
             "type": "array",
             "default": [],
-            "markdownDescription": "Datadog organizations, CloudWatch log groups, Postgres and MySQL servers (Aurora and RDS too), MongoDB deployments, and SQLite files whose logs Logline can search and tail. Add one with [Add Connection](command:logline.addConnection). Passwords and keys are kept in VS Code secret storage, never here.",
+            "markdownDescription": "Datadog organizations, CloudWatch log groups, Grafana Loki, Postgres and MySQL servers (Aurora and RDS too), MongoDB deployments, and SQLite files whose logs Logline can search and tail. Add one with [Add Connection](command:logline.addConnection). Passwords and keys are kept in VS Code secret storage, never here.",
             "items": {
               "type": "object",
               "properties": {
@@ -1017,7 +1017,8 @@
                     "mysql",
                     "mongodb",
                     "datadog",
-                    "cloudwatch"
+                    "cloudwatch",
+                    "loki"
                   ]
                 },
                 "path": {
@@ -1039,7 +1040,7 @@
                 },
                 "user": {
                   "type": "string",
-                  "description": "Postgres and MySQL: user name."
+                  "description": "Postgres and MySQL: user name. Loki: the user for basic auth, such as a Grafana Cloud user id."
                 },
                 "ssl": {
                   "type": "boolean",
@@ -1076,6 +1077,14 @@
                 "endpoint": {
                   "type": "string",
                   "description": "CloudWatch: a CloudWatch Logs API in place of the region's, such as LocalStack at http://localhost:4566. Plain http only on this machine."
+                },
+                "tenant": {
+                  "type": "string",
+                  "description": "Loki: the tenant of a multi-tenant Loki, sent as X-Scope-OrgID."
+                },
+                "selector": {
+                  "type": "string",
+                  "description": "Loki: the stream selector a search reads when it names no service, such as {job=\"api\"}. Every stream with a service name when left out."
                 },
                 "logs": {
                   "type": "object",
@@ -1145,7 +1154,7 @@
                 },
                 "url": {
                   "type": "string",
-                  "description": "MongoDB: a mongodb:// or mongodb+srv:// URL without a password, such as mongodb+srv://reader@cluster0.example.mongodb.net/app."
+                  "description": "MongoDB: a mongodb:// or mongodb+srv:// URL without a password, such as mongodb+srv://reader@cluster0.example.mongodb.net/app. Loki: the URL of the Loki API, such as http://localhost:3100."
                 }
               },
               "required": [
@@ -1176,7 +1185,7 @@
             "default": 1000,
             "minimum": 100,
             "maximum": 50000,
-            "description": "Most logs one search fetches from a CloudWatch connection, and one tail read. The newest matching logs are kept.",
+            "description": "Most logs one search fetches from a CloudWatch or Loki connection, and one tail read. The newest matching logs are kept.",
             "order": 4
           },
           "logline.connectionPollSeconds": {

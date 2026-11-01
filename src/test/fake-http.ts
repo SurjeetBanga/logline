@@ -16,6 +16,7 @@ export interface FakeRequest {
 
 export interface FakeAnswer {
   status: number;
+  /** JSON, or text sent as it is. */
   payload: unknown;
   headers?: Record<string, string>;
 }
@@ -48,8 +49,10 @@ export async function startFakeHttp(answer: (request: FakeRequest) => FakeAnswer
       };
       requests.push(request);
       const { status, payload, headers } = await answer(request);
-      response.writeHead(status, { 'content-type': 'application/json', ...headers });
-      response.end(JSON.stringify(payload));
+      // Text is sent as it is, as services do with plain-text errors; anything else as JSON.
+      const raw = typeof payload === 'string';
+      response.writeHead(status, { 'content-type': raw ? 'text/plain' : 'application/json', ...headers });
+      response.end(raw ? payload : JSON.stringify(payload));
     })().catch((error: unknown) => {
       response.writeHead(500);
       response.end(String(error));

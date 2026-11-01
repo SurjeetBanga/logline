@@ -3,6 +3,7 @@ import * as vscode from 'vscode';
 import { CloudWatchConnector } from '../capture/connectors/cloudwatch';
 import { DatadogConnector, type DatadogKeys } from '../capture/connectors/datadog';
 import { iamPassword, listProfiles } from '../capture/connectors/aws-auth';
+import { LokiConnector } from '../capture/connectors/loki';
 import { MongoConnector } from '../capture/connectors/mongo';
 import { MysqlDriver } from '../capture/connectors/mysql-driver';
 import { PostgresDriver } from '../capture/connectors/postgres-driver';
@@ -24,6 +25,7 @@ import {
   type ConnectionConfig,
   type DatadogConnection,
   type MongoConnection,
+  type LokiConnection,
   type MysqlConnection,
   type PostgresConnection,
   type SqliteConnection,
@@ -58,7 +60,8 @@ const sqlCapable = (connection: ConnectionConfig) => connectionKind(connection.t
 type SqlConnection = PostgresConnection | MysqlConnection | SqliteConnection;
 /** A database that signs in with a user and a password, or an IAM token. */
 type ServerConnection = PostgresConnection | MysqlConnection;
-type PasswordConnection = ServerConnection | MongoConnection;
+/** A connection that signs in with a password kept in secret storage, or a Loki token. */
+type PasswordConnection = ServerConnection | MongoConnection | LokiConnection;
 const keepsPassword = (connection: ConnectionConfig): connection is PasswordConnection =>
   connectionKind(connection.type).secret === 'password';
 type Opened = Connector & FormProbe;
@@ -304,6 +307,12 @@ export class ConnectionManager implements vscode.Disposable {
     ) => Promise<Opened>;
   } = {
     cloudwatch: async (connection) => new CloudWatchConnector(connection, this.timeoutMs),
+    loki: async (connection, secret) =>
+      new LokiConnector(
+        connection,
+        secret ? secret.password : await this.secrets?.get(secretKey(connection)),
+        this.timeoutMs,
+      ),
     datadog: async (connection, secret) =>
       new DatadogConnector(connection, secret ? (secret.keys ?? {}) : await this.keys(connection), this.timeoutMs),
     mongodb: async (connection, secret) =>
@@ -394,13 +403,18 @@ export class ConnectionManager implements vscode.Disposable {
     const signsInWithPassword =
       (connection.type === 'postgres' || connection.type === 'mysql') && !connection.auth
         ? true
-        : connection.type === 'mongodb' && mongoUrl(connection.url)?.user !== undefined;
-    if (signsInWithPassword && (authFailed(cause) || /password|authentication failed/i.test(error))) {
+        : connection.type === 'loki' || (connection.type === 'mongodb' && mongoUrl(connection.url)?.user !== undefined);
+    if (
+      signsInWithPassword &&
+      (authFailed(cause) || /password|authentication failed|refused the credentials/i.test(error))
+    ) {
       const target = connection as PasswordConnection;
       const saved = (await this.secrets?.get(secretKey(target))) !== undefined;
       const user = target.type === 'mongodb' ? mongoUrl(target.url)?.user : target.user;
       const choice = await vscode.window.showErrorMessage(
-        `${connectionLabel(connection)}: the server ${saved ? 'refused the saved password' : 'needs a password'} for ${user} (${error}).`,
+        target.type === 'loki'
+          ? `${connectionLabel(connection)}: ${error}`
+          : `${connectionLabel(connection)}: the server ${saved ? 'refused the saved password' : 'needs a password'} for ${user} (${error}).`,
         'Enter Password…',
       );
       if (choice) await this.askPassword(target);
@@ -454,9 +468,11 @@ export class ConnectionManager implements vscode.Disposable {
 
   private async askPassword(connection: PasswordConnection): Promise<void> {
     const where =
-      connection.type === 'mongodb'
-        ? `${mongoUrl(connection.url)?.user}@${mongoUrl(connection.url)?.hosts}/${connection.database}`
-        : `${connection.user}@${connection.host}/${connection.database}`;
+      connection.type === 'loki'
+        ? `${connection.user ? `${connection.user}@` : ''}${new URL(connection.url).host}`
+        : connection.type === 'mongodb'
+          ? `${mongoUrl(connection.url)?.user}@${mongoUrl(connection.url)?.hosts}/${connection.database}`
+          : `${connection.user}@${connection.host}/${connection.database}`;
     const password = await vscode.window.showInputBox({
       title: `Password for ${where}`,
       password: true,
@@ -704,7 +720,7 @@ export class ConnectionManager implements vscode.Disposable {
     if (!connection) return;
     // The password or keys are kept by what they open, for every workspace that connects there.
     const secret =
-      connection.type === 'sqlite' ||
+      !keepsSecret(connection) ||
       ((connection.type === 'postgres' || connection.type === 'mysql') && connection.auth) ||
       (connection.type === 'mongodb' && !mongoUrl(connection.url)?.user)
         ? undefined
@@ -790,7 +806,7 @@ export class ConnectionManager implements vscode.Disposable {
           await this.secrets?.store(secretKey(connection), JSON.stringify(secret.keys));
         else if (
           keepsPassword(connection) &&
-          !(connection.type !== 'mongodb' && connection.auth) &&
+          !((connection.type === 'postgres' || connection.type === 'mysql') && connection.auth) &&
           secret.password !== undefined
         )
           await this.secrets?.store(secretKey(connection), secret.password);
