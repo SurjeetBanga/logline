@@ -362,24 +362,88 @@ test('page and all restrict results to one capture session', () => {
   assert.equal(store.page({ sessionId: 'nope' }).matched, 0);
 });
 
+/** The 20 most frequent values of `field` among retained events that start with `prefix`, ties first seen first. */
+function bruteSuggestions(store: LogStore, field: string, prefix: string, serverId?: string) {
+  const counts = new Map<string, number>();
+  for (const event of store.all())
+    if (serverId === undefined || event.serverId?.toLowerCase() === serverId.toLowerCase()) {
+      const value = event.fields?.[field];
+      if (value !== undefined) counts.set(String(value), (counts.get(String(value)) ?? 0) + 1);
+    }
+  return [...counts]
+    .filter(([value]) => value.toLowerCase().startsWith(prefix))
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 20)
+    .map(([value, count]) => ({ value, count }));
+}
+
 test('value suggestions are the 20 most frequent matches, equal counts in the order first seen', () => {
   const store = new LogStore(10000, 100 * 1024 * 1024);
   // Values seen in a scattered order with counts that tie, so order and ties both matter.
-  const counts = new Map<string, number>();
   for (let i = 0; i < 3000; i++) {
     const name = `${['alpha', 'Beta', 'gamma'][i % 3]}-${(i * 7919) % 97}`;
-    counts.set(name, (counts.get(name) ?? 0) + 1);
     store.add({ id: i + 1, level: 'info', message: 'x', fields: { service: name } });
   }
-  const firstSeen = [...counts.keys()];
-  const expected = (prefix: string) =>
-    firstSeen
-      .filter((name) => name.toLowerCase().startsWith(prefix))
-      .sort((a, b) => counts.get(b)! - counts.get(a)!)
-      .slice(0, 20)
-      .map((value) => ({ value, count: counts.get(value)! }));
-  for (const prefix of ['', 'b', 'beta-1', 'gamma-9', 'nothing'])
-    assert.deepEqual(store.fieldSuggestions(`service:${prefix}`).values, expected(prefix), prefix);
+  // Each prefix twice: once just after the counts were taken, once ranked with nothing new.
+  for (const prefix of ['', 'b', 'beta-1', 'gamma-9', 'nothing', 'nothing', 'b', ''])
+    assert.deepEqual(
+      store.fieldSuggestions(`service:${prefix}`).values,
+      bruteSuggestions(store, 'service', prefix),
+      prefix,
+    );
+});
+
+test('value suggestions follow logs as they stream in and are evicted', () => {
+  const store = new LogStore(500, 100 * 1024 * 1024);
+  // Counts that never tie: value v appears with weight v, so the expected order is unambiguous.
+  const valueOf = (i: number) => `req-${Math.floor(Math.sqrt(i * 2.3)) % 60}`;
+  let id = 0;
+  const add = () => store.add({ id: ++id, level: 'info', message: 'x', fields: { requestId: valueOf(id) } });
+  for (let i = 0; i < 400; i++) add();
+  const same = (prefix: string) => {
+    const got = store.fieldSuggestions(`requestId:${prefix}`).values;
+    const want = bruteSuggestions(store, 'requestId', prefix);
+    assert.deepEqual(
+      new Map(got.map((item) => [item.value, item.count])),
+      new Map(want.map((item) => [item.value, item.count])),
+    );
+    assert.deepEqual(
+      got.map((item) => item.count),
+      want.map((item) => item.count),
+      'most frequent first',
+    );
+  };
+  for (let round = 0; round < 40; round++) {
+    for (let i = 0; i < 37; i++) add(); // past the ring's 500, so values are evicted too
+    for (const prefix of ['r', 'req-1', 'req-4']) same(prefix);
+  }
+  // A ring's worth of logs with no one asking drops the counts; they are taken again when asked.
+  for (let i = 0; i < 1200; i++) add();
+  same('req-');
+  // Removing a source or clearing takes its values with it.
+  store.removeSessions(new Set(['none']));
+  store.clear();
+  assert.deepEqual(store.fieldSuggestions('requestId:').values, []);
+});
+
+test('value suggestions of one source match its id without case, and leave other sources out', () => {
+  const store = new LogStore(1000, 100 * 1024 * 1024);
+  let id = 0;
+  for (let i = 0; i < 300; i++)
+    for (const serverId of ['Api', 'api', 'worker'])
+      store.add({
+        id: ++id,
+        serverId,
+        level: 'info',
+        message: 'x',
+        fields: { route: `${serverId}-${i % (7 + serverId.length)}` },
+      });
+  assert.deepEqual(store.fieldSuggestions('route:', 'API').values, bruteSuggestions(store, 'route', '', 'API'));
+  assert.ok(store.fieldSuggestions('route:', 'API').values.every((item) => !item.value.startsWith('worker')));
+  store.removeSource('worker');
+  store.add({ id: ++id, serverId: 'api', level: 'info', message: 'x', fields: { route: 'api-new' } });
+  assert.deepEqual(store.fieldSuggestions('route:api-n', 'api').values, [{ value: 'api-new', count: 1 }]);
+  assert.deepEqual(store.fieldSuggestions('route:worker').values, [], 'a removed source leaves no values');
 });
 
 test('fieldSuggestions autocompletes a value for the field typed before the colon', () => {

@@ -251,6 +251,39 @@ const BUILTIN_FIELDS = [
 const fieldCollator = new Intl.Collator(undefined, { numeric: true });
 
 // Approximate UTF-16 storage plus per-record overhead, not total process RSS.
+/** A value of the autocompleted field, how many retained events have it, and its lowercase text. */
+interface TalliedValue {
+  text: string;
+  lower: string;
+  count: number;
+}
+/** One field's values across retained events, of every source or of one (lowercase). */
+interface ValueTally {
+  field: string;
+  server: string | undefined;
+  /** In the order first seen. */
+  counts: Map<string, TalliedValue>;
+  /** Whether a count changed since the last suggestions. */
+  changed: boolean;
+  /** `counts`, most frequent first and equal counts first seen first; only while no count changed. */
+  ranked?: TalliedValue[];
+  /** Events added or evicted since the last suggestions. */
+  untouched: number;
+}
+
+function tallyEvent(tally: ValueTally, event: LogEvent, delta: 1 | -1): void {
+  if (tally.server !== undefined && event.serverId?.toLowerCase() !== tally.server) return;
+  const value = fieldValue(event, tally.field);
+  if (value === undefined) return;
+  const text = String(value);
+  const entry = tally.counts.get(text);
+  if (delta > 0) {
+    if (entry) entry.count++;
+    else tally.counts.set(text, { text, lower: text.toLowerCase(), count: 1 });
+  } else if (entry && --entry.count === 0) tally.counts.delete(text);
+  tally.changed = true;
+}
+
 export class LogStore {
   maxRows: number;
   maxBytes: number;
@@ -272,8 +305,8 @@ export class LogStore {
   serverIndex!: Map<string, ServerIndex>;
   private pageCache: PageCache | undefined;
   private sortedCache?: SortedCache;
-  /** A field's distinct values in the order first seen, with their counts and lowercase text for prefix matching. */
-  private suggestionCache?: { key: string; values: { text: string; lower: string; count: number }[] };
+  /** The values of the field being autocompleted, counted as events come and go. */
+  private valueTally?: ValueTally;
   /** JSON error id to the id of the crash attached to it, while both are retained. */
   private attached!: Map<number, number>;
   /** Which events came from changed code; without one, none did. */
@@ -301,12 +334,13 @@ export class LogStore {
     this.serverIndex = new Map();
     this.pageCache = undefined;
     this.sortedCache = undefined;
-    this.suggestionCache = undefined;
+    this.valueTally = undefined;
     this.attached = new Map();
   }
 
   private evictOldest(): void {
     const evicted = this.slots[this.head]!;
+    if (this.valueTally) this.noteTally(evicted.event, -1);
     this.bytes -= evicted.bytes;
     const serverId = evicted.event.serverId;
     const index = serverId === undefined ? undefined : this.serverIndex.get(serverId);
@@ -354,6 +388,14 @@ export class LogStore {
     if (slot.event.attachedTo !== undefined) this.attached.set(slot.event.attachedTo, slot.event.id);
     this.size++;
     this.bytes += slot.bytes;
+    if (this.valueTally) this.noteTally(slot.event, 1);
+  }
+
+  /** Keep the autocompleted field's counts current; drop them once a ring's worth of events passed unasked. */
+  private noteTally(event: LogEvent, delta: 1 | -1): void {
+    const tally = this.valueTally!;
+    if (++tally.untouched > this.maxRows) this.valueTally = undefined;
+    else tallyEvent(tally, event, delta);
   }
 
   /** The shape of an event's fields: one of its source's recent ones, a known one, or a new one. */
@@ -937,7 +979,7 @@ export class LogStore {
   /** Field names and the most common values for the current search input. */
   fieldSuggestions(input = '', serverId?: string): { fields: string[]; values: SuggestedValue[] } {
     const fields = new Set(BUILTIN_FIELDS);
-    const values = new Map<string, number>();
+    const top: TalliedValue[] = [];
     const target = completionTarget(input);
     const fieldPrefix = (target.field ?? target.value).toLowerCase();
     const valuePrefix = target.field ? target.value.toLowerCase() : '';
@@ -946,46 +988,41 @@ export class LogStore {
     const wantedServer = serverId?.toLowerCase();
     for (const key of this.columnKeys(serverId)) fields.add(key);
     if (target.field) {
-      // Every keystroke after `field:` asks for the same field, so count each
-      // distinct value once per retained set and filter the counts by prefix.
-      // `total` and `discarded` change on every add and eviction, and events
-      // are never mutated after insertion, so together they version the ring.
-      const key = JSON.stringify([target.field, wantedServer ?? null, this.total, this.discarded]);
-      let seen = this.suggestionCache?.key === key ? this.suggestionCache.values : undefined;
-      if (!seen) {
-        const tally = new Map<string, number>();
-        const count = (event: LogEvent) => {
-          const value = fieldValue(event, target.field!);
-          if (value !== undefined) {
-            const text = String(value);
-            tally.set(text, (tally.get(text) ?? 0) + 1);
-          }
+      // Every keystroke after `field:` asks for the same field, so its values are
+      // counted once and then kept current as events are added and evicted.
+      let tally = this.valueTally;
+      if (!tally || tally.field !== target.field || tally.server !== wantedServer) {
+        tally = this.valueTally = {
+          field: target.field,
+          server: wantedServer,
+          counts: new Map(),
+          changed: false,
+          untouched: 0,
         };
-        if (wantedServer === undefined) {
-          for (let i = 0; i < this.size; i++) count(this.slots[(this.head + i) % this.maxRows]!.event);
-        } else
-          for (const [id, index] of this.serverIndex) {
-            if (id.toLowerCase() !== wantedServer) continue;
-            for (let i = index.start; i < index.items.length; i++) count(index.items[i]!.event);
-          }
-        // Most frequent first, equal counts in the order first seen, so a keystroke stops at its 20th match.
-        // Grouping by count, rather than sorting every value, keeps this linear while logs stream in.
-        const byCount = new Map<number, { text: string; lower: string; count: number }[]>();
-        for (const [text, count] of tally) {
-          let group = byCount.get(count);
-          if (!group) byCount.set(count, (group = []));
-          group.push({ text, lower: text.toLowerCase(), count });
-        }
-        seen = [];
-        for (const count of [...byCount.keys()].sort((a, b) => b - a))
-          for (const entry of byCount.get(count)!) seen.push(entry);
-        this.suggestionCache = { key, values: seen };
+        for (let i = 0; i < this.size; i++) tallyEvent(tally, this.slots[(this.head + i) % this.maxRows]!.event, 1);
       }
-      // The 20 most frequent matches: the first 20 in this order.
-      for (const entry of seen) {
-        if (!entry.lower.startsWith(valuePrefix)) continue;
-        values.set(entry.text, entry.count);
-        if (values.size === 20) break;
+      tally.untouched = 0;
+      const wanted = (entry: TalliedValue) => entry.lower.startsWith(valuePrefix);
+      if (tally.changed) {
+        // Counts moved since the last keystroke, as while logs stream in: one pass keeps the 20 most
+        // frequent matches, equal counts in the order first seen.
+        for (const entry of tally.counts.values()) {
+          if (!wanted(entry) || (top.length === 20 && entry.count <= top[19].count)) continue;
+          let at = top.length;
+          while (at > 0 && top[at - 1].count < entry.count) at--;
+          top.splice(at, 0, entry);
+          if (top.length > 20) top.pop();
+        }
+        tally.changed = false;
+        tally.ranked = undefined;
+      } else {
+        // Typing with nothing new: rank once, then each keystroke stops at its 20th match.
+        tally.ranked ??= [...tally.counts.values()].sort((a, b) => b.count - a.count);
+        for (const entry of tally.ranked) {
+          if (!wanted(entry)) continue;
+          top.push(entry);
+          if (top.length === 20) break;
+        }
       }
     }
     return {
@@ -993,10 +1030,7 @@ export class LogStore {
         .filter((field) => field.toLowerCase().startsWith(fieldPrefix))
         .sort()
         .slice(0, 40),
-      values: [...values.entries()]
-        .sort((a, b) => b[1] - a[1])
-        .slice(0, 20)
-        .map(([value, count]) => ({ value, count })),
+      values: top.map((entry) => ({ value: entry.text, count: entry.count })),
     };
   }
 
