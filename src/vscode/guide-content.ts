@@ -470,6 +470,23 @@ export const GUIDE_CARDS: GuideCard[] = [
   },
   {
     section: 'connections',
+    title: 'Choose a Datadog service',
+    where: ['Connection controls', 'Service'],
+    text: 'Lists the services that logged in the range, by how many logs. Choosing one sets the service: term of the filter, so Run and Tail follow that service.',
+    target: 'connectionService',
+    fallback: 'sourceRail',
+  },
+  {
+    section: 'connections',
+    title: 'Type Datadog syntax',
+    where: ['Connection controls', 'Datadog syntax'],
+    text: 'Type a query in Datadog’s own syntax, which Run and Tail send as typed; the search box then only narrows what is shown.',
+    example: 'service:(checkout OR payments) @http.status_code:>=500',
+    target: 'connectionSyntax',
+    fallback: 'sourceRail',
+  },
+  {
+    section: 'connections',
     title: 'Run SQL',
     where: ['Connection controls', 'Run SQL…'],
     text: 'Run a read-only SELECT on a database. Columns named like a time, level, or message are read as those.',

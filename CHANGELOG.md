@@ -2,6 +2,14 @@
 
 All notable changes to Logline are documented in this file.
 
+## Unreleased
+
+### Fixes
+
+- A Datadog tail no longer shows logs again when a read goes back further than the one before it, such as every tenth read or after a late log.
+- Pressing **Run** on a connection no longer stops a fetch an agent or a Log Explorer link started, and two searches sent at once no longer both run.
+- **Run SQL…** reads SQLite names in brackets, such as `[a'b]`, and Postgres `E'…'` strings correctly when it checks that a query is one read-only statement, and refuses MySQL `SELECT … INTO OUTFILE` and `INTO DUMPFILE`, which write a file on the server.
+
 ## 1.18.0 — 2026-10-26
 
 ### Changes
