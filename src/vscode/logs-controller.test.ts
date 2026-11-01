@@ -319,6 +319,10 @@ test('a search counts once it stops changing, not once a keystroke, and the summ
     capture() {},
     milestone() {},
   } as any;
+  // A search the panel restores when it opens was not typed now.
+  controller.snapshot({ type: 'snapshot', query: 'service:api', limit: 50 } as any);
+  t.mock.timers.tick(1500);
+  assert.deepEqual(searches, [], 'the restored search is not counted');
   for (const query of ['l', 'le', 'level:', 'level:er', 'level:error'])
     controller.snapshot({ type: 'snapshot', query, limit: 50 } as any);
   t.mock.timers.tick(1500);

@@ -132,6 +132,7 @@ export class Usage implements vscode.Disposable {
   private id = '';
   private summarySource?: UsageSummarySource;
   private disposed = false;
+  private closing?: Promise<void>;
   // This session's counts, sent as one summary.
   private readonly activeMinutes = new Set<number>();
   private readonly views = new Set<string>();
@@ -548,11 +549,13 @@ export class Usage implements vscode.Disposable {
   /** Send the session summary and what is queued; deactivation waits for it. */
   close(): Promise<void> {
     if (this.disposed) return Promise.resolve();
-    this.sharingStopped();
-    this.sendSummary();
-    const last = this.flush();
-    this.dispose();
-    return last;
+    if (!this.closing) {
+      this.sharingStopped();
+      this.sendSummary();
+      // Disposed once the last batch is out, so Show Usage Data still lists it.
+      this.closing = this.flush().finally(() => this.dispose());
+    }
+    return this.closing;
   }
 
   dispose(): void {

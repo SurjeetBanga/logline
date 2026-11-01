@@ -101,14 +101,30 @@ export function agentsWithSkills(directory: (agent: Agent) => string = (agent) =
     .map((agent) => AGENT_NAMES[agent]);
 }
 
+// Whether VS Code's built-in chat can open, as `refreshCopilot` last found.
+let builtInChat = false;
+
 /**
- * Whether GitHub Copilot Chat is installed; Ask Copilot and Fix with Copilot
- * need it. Editors such as Cursor, Windsurf, and Kiro ship their own agent
- * instead. A host that cannot list extensions is given the benefit of the doubt.
+ * Whether GitHub Copilot Chat is there; Ask Copilot and Fix with Copilot need
+ * it. It is an extension in older VS Code; newer VS Code builds it in and runs
+ * it outside the extension host, where only its chat command shows it.
+ * Editors such as Cursor, Windsurf, and Kiro ship their own agent instead. A
+ * host that cannot list extensions is given the benefit of the doubt.
  */
 export function copilotAvailable(): boolean {
   const getExtension = vscode.extensions?.getExtension;
-  return typeof getExtension !== 'function' || Boolean(getExtension('GitHub.copilot-chat'));
+  return typeof getExtension !== 'function' || Boolean(getExtension('GitHub.copilot-chat')) || builtInChat;
+}
+
+/** Look for VS Code's built-in chat: only in VS Code itself, whose chat is Copilot. */
+export async function refreshCopilot(): Promise<void> {
+  if (!/visual studio code/i.test(vscode.env?.appName ?? '') || typeof vscode.commands?.getCommands !== 'function')
+    return;
+  try {
+    builtInChat = (await vscode.commands.getCommands(true)).includes('workbench.action.chat.open');
+  } catch {
+    builtInChat = false;
+  }
 }
 
 /** How a user starts an installed skill in each agent. */

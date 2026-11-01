@@ -523,3 +523,21 @@ test('after Ask Copilot, whether it helped is asked at most once a week and thre
   assert.equal(asked, 3);
   assert.deepEqual(answers, [true, false, true]);
 });
+
+test('closing twice sends one summary, and Show Usage Data keeps it until the last batch is out', async () => {
+  const { usage, sent } = setup();
+  usage.start();
+  usage.showData();
+  host.lines.length = 0;
+  const first = usage.close();
+  const second = usage.close();
+  assert.equal(first, second);
+  await first;
+  assert.equal(sent.filter((item) => item.event === 'session_summary').length, 1);
+  assert.ok(
+    host.lines.some((line) => /session_summary/.test(line)),
+    'the summary reached the output channel',
+  );
+  await usage.close();
+  assert.equal(sent.filter((item) => item.event === 'session_summary').length, 1);
+});
