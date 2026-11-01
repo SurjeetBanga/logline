@@ -38,7 +38,7 @@ Run your app the way you already do: in a terminal, with F5, as a task, in Docke
 
 ![Compare: production errors from Datadog lined up with local runs, marked Reproduced, Fixed locally, Not seen locally, or New, with both sides of one error shown](media/readme/compare.webp)
 
-- **Connections** search and tail Datadog, CloudWatch, Grafana Loki, Elasticsearch and OpenSearch, Postgres, MySQL and Aurora (with AWS IAM sign-in), MongoDB, and SQLite logs, read-only, beside your local runs. Add one in a form that tests it and previews its log table first; **Edit** changes it later.
+- **Connections** search and tail Datadog, CloudWatch, Grafana Loki, Elasticsearch and OpenSearch, Google Cloud Logging, Postgres, MySQL and Aurora (with AWS IAM sign-in), MongoDB, and SQLite logs, read-only, beside your local runs. Add one in a form that tests it and previews its log table first; **Edit** changes it later.
 - **Compare** lines production errors up with your newest local runs: is it reproduced, and is your fix working? Errors from code you changed are tagged.
 - **Metrics** chart a connection's queries; drag across a spike to fetch the logs from that window.
 

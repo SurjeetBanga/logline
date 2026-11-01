@@ -326,6 +326,29 @@ export function createConnectionForm(api: FormApi, root: HTMLElement) {
     ];
   }
 
+  function gcpDetails(): Child[] {
+    return [
+      h(
+        'div',
+        { className: 'grid' },
+        field('project', 'Project', {
+          placeholder: 'shop-prod-1234',
+          hint: 'The Google Cloud project id, as gcloud config get-value project prints it.',
+        }),
+        field('filter', 'Narrow every search to', {
+          wide: true,
+          placeholder: 'resource.type="cloud_run_revision"',
+          hint: 'Optional: a query in the Logging query language that every search adds.',
+        }),
+      ),
+      h(
+        'div',
+        { className: 'hint' },
+        'Signs in with Application Default Credentials: run gcloud auth application-default login, or set GOOGLE_APPLICATION_CREDENTIALS to a service account key. Reading logs needs the Logs Viewer role. Nothing is stored.',
+      ),
+    ];
+  }
+
   function elasticDetails(): Child[] {
     const iamHint = h(
       'div',
@@ -549,6 +572,9 @@ export function createConnectionForm(api: FormApi, root: HTMLElement) {
         break;
       case 'elasticsearch':
         children.push(...elasticDetails());
+        break;
+      case 'gcp':
+        children.push(...gcpDetails());
         break;
     }
     details.replaceChildren(...children.filter((child): child is Node | string => !!child));

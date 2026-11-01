@@ -4,7 +4,7 @@
 import { CONNECTION_KINDS } from './connection-types';
 
 export type ConnectionType =
-  'sqlite' | 'postgres' | 'mysql' | 'mongodb' | 'datadog' | 'cloudwatch' | 'loki' | 'elasticsearch';
+  'sqlite' | 'postgres' | 'mysql' | 'mongodb' | 'datadog' | 'cloudwatch' | 'loki' | 'elasticsearch' | 'gcp';
 /** How a timestamp column stores time; `native` is a database date/time type. */
 export type TimeEncoding = 'iso' | 'epoch_s' | 'epoch_ms' | 'native';
 
@@ -106,7 +106,19 @@ export interface ElasticConnection extends BaseConnection {
   /** Amazon OpenSearch Service, signed with AWS credentials instead of a password. */
   auth?: IamAuth;
 }
+/** The logs of a Google Cloud project, read with Application Default Credentials. */
+export interface GcpConnection extends BaseConnection {
+  type: 'gcp';
+  project: string;
+  /** A Logging query every search is narrowed by, such as `resource.type="cloud_run_revision"`. */
+  filter?: string;
+  /** The field of a log entry that names its service; `resource.labels.service_name` when left out. */
+  serviceField?: string;
+  /** A Cloud Logging API in place of Google's, on this machine, for tests. */
+  endpoint?: string;
+}
 export type ConnectionConfig =
+  | GcpConnection
   | ElasticConnection
   | SqliteConnection
   | PostgresConnection
@@ -189,6 +201,11 @@ export function openSearchService(url: string): { region?: string; service: 'es'
     : { service: 'es' };
 }
 
+/** Whether text is a Google Cloud project id, such as `shop-prod-1234`, or a domain-scoped one. */
+export function isGcpProject(value: string): boolean {
+  return /^(?:[a-z0-9.-]+:)?[a-z][a-z0-9-]{4,28}[a-z0-9]$/.test(value);
+}
+
 /** The CloudWatch Logs API a connection reads: its endpoint, or its region's. */
 export function cloudwatchEndpoint(connection: Pick<CloudWatchConnection, 'region' | 'endpoint'>): string {
   if (connection.endpoint) return connection.endpoint;
@@ -229,7 +246,9 @@ export function connectionLabel(connection: Pick<ConnectionConfig, 'type' | 'lab
  * open, so the same one is shared across workspaces, and a workspace that
  * points a connection elsewhere never receives them.
  */
-export function secretKey(connection: Exclude<ConnectionConfig, SqliteConnection | CloudWatchConnection>): string {
+export function secretKey(
+  connection: Exclude<ConnectionConfig, SqliteConnection | CloudWatchConnection | GcpConnection>,
+): string {
   if (connection.type === 'elasticsearch')
     return `logline.connection.elasticsearch:${apiUrl(connection.url) ?? connection.url}/${encodeURIComponent(connection.user ?? '')}`;
   if (connection.type === 'loki')
@@ -365,6 +384,22 @@ export function normalizeConnections(value: unknown): ConnectionConfig[] {
           : [];
         connection = { id, label, type: 'datadog', site, ...(indexes.length ? { indexes } : {}) };
       }
+    } else if (item.type === 'gcp') {
+      const project = text(item.project, 64);
+      const filter = text(item.filter, 4096);
+      const serviceField = text(item.serviceField, 256);
+      // Only a Cloud Logging API on this machine stands in for Google's: requests carry a token for the project.
+      const endpoint = typeof item.endpoint === 'string' ? apiUrl(item.endpoint.trim()) : undefined;
+      if (project && isGcpProject(project))
+        connection = {
+          id,
+          label,
+          type: 'gcp',
+          project,
+          ...(filter ? { filter } : {}),
+          ...(serviceField && /^[A-Za-z_][\w.]*$/.test(serviceField) ? { serviceField } : {}),
+          ...(endpoint && /^http:\/\/(?:127\.0\.0\.1|localhost|\[::1\])[:/]/.test(`${endpoint}/`) ? { endpoint } : {}),
+        };
     } else if (item.type === 'elasticsearch') {
       const url = typeof item.url === 'string' ? apiUrl(item.url.trim()) : undefined;
       const user = text(item.user, 256);

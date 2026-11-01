@@ -997,7 +997,7 @@
           "logline.connections": {
             "type": "array",
             "default": [],
-            "markdownDescription": "Datadog organizations, CloudWatch log groups, Grafana Loki, Elasticsearch and OpenSearch clusters, Postgres and MySQL servers (Aurora and RDS too), MongoDB deployments, and SQLite files whose logs Logline can search and tail. Add one with [Add Connection](command:logline.addConnection). Passwords and keys are kept in VS Code secret storage, never here.",
+            "markdownDescription": "Datadog organizations, CloudWatch log groups, Grafana Loki, Elasticsearch and OpenSearch clusters, Google Cloud projects, Postgres and MySQL servers (Aurora and RDS too), MongoDB deployments, and SQLite files whose logs Logline can search and tail. Add one with [Add Connection](command:logline.addConnection). Passwords and keys are kept in VS Code secret storage, never here.",
             "items": {
               "type": "object",
               "properties": {
@@ -1019,7 +1019,8 @@
                     "datadog",
                     "cloudwatch",
                     "loki",
-                    "elasticsearch"
+                    "elasticsearch",
+                    "gcp"
                   ]
                 },
                 "path": {
@@ -1077,7 +1078,7 @@
                 },
                 "endpoint": {
                   "type": "string",
-                  "description": "CloudWatch: a CloudWatch Logs API in place of the region's, such as LocalStack at http://localhost:4566. Plain http only on this machine."
+                  "description": "CloudWatch: a CloudWatch Logs API in place of the region's, such as LocalStack at http://localhost:4566. Plain http only on this machine. Cloud Logging: a Cloud Logging API on this machine, for tests."
                 },
                 "tenant": {
                   "type": "string",
@@ -1086,6 +1087,18 @@
                 "selector": {
                   "type": "string",
                   "description": "Loki: the stream selector a search reads when it names no service, such as {job=\"api\"}. Every stream with a service name when left out."
+                },
+                "project": {
+                  "type": "string",
+                  "description": "Cloud Logging: the Google Cloud project id, such as shop-prod-1234."
+                },
+                "filter": {
+                  "type": "string",
+                  "description": "Cloud Logging: a query in the Logging query language that every search adds, such as resource.type=\"cloud_run_revision\"."
+                },
+                "serviceField": {
+                  "type": "string",
+                  "description": "Cloud Logging: the field of a log entry that names its service. resource.labels.service_name when left out."
                 },
                 "logs": {
                   "type": "object",
@@ -1186,7 +1199,7 @@
             "default": 1000,
             "minimum": 100,
             "maximum": 50000,
-            "description": "Most logs one search fetches from a CloudWatch, Loki, or Elasticsearch connection, and one tail read. The newest matching logs are kept.",
+            "description": "Most logs one search fetches from a CloudWatch, Loki, Elasticsearch, or Cloud Logging connection, and one tail read. The newest matching logs are kept.",
             "order": 4
           },
           "logline.connectionPollSeconds": {

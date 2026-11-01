@@ -9,6 +9,7 @@ import {
   formatServerUrl,
   apiUrl,
   isAwsRegion,
+  isGcpProject,
   isLokiSelector,
   isRdsHost,
   logGroupIdentifier,
@@ -65,6 +66,9 @@ export interface FormDraft {
   /** Loki: the tenant of a multi-tenant Loki, and the streams a search reads when it names no service. */
   tenant: string;
   selector: string;
+  /** Cloud Logging: the Google Cloud project, and a query every search is narrowed by. */
+  project: string;
+  filter: string;
   /** A MongoDB URL, without its password. */
   url: string;
   /** A SQLite file, relative to the workspace when inside it. */
@@ -97,6 +101,8 @@ export function emptyDraft(type: ConnectionType = 'postgres'): FormDraft {
     logGroups: '',
     tenant: '',
     selector: '',
+    project: '',
+    filter: '',
     url: '',
     path: '',
     site: DATADOG_SITES[0],
@@ -136,6 +142,8 @@ export function draftFromConnection(connection: ConnectionConfig): FormDraft {
       return { ...draft, path: connection.path };
     case 'datadog':
       return { ...draft, site: connection.site };
+    case 'gcp':
+      return { ...draft, project: connection.project, filter: connection.filter ?? '' };
     case 'elasticsearch':
       return {
         ...draft,
@@ -173,6 +181,7 @@ export function draftLogGroups(draft: Pick<FormDraft, 'logGroups'>): string[] {
 /** The name a new connection is offered: its database, its file, or prod for Datadog. */
 export function suggestedLabel(draft: FormDraft): string {
   if (draft.type === 'datadog') return 'prod';
+  if (draft.type === 'gcp') return draft.project.trim();
   if (draft.type === 'loki' || draft.type === 'elasticsearch')
     return /\/\/(?:localhost|127\.0\.0\.1|\[::1\])[:/]?/.test(draft.url) ? 'local' : 'prod';
   if (draft.type === 'cloudwatch') {
@@ -246,6 +255,13 @@ export function keepUnmodeled(next: ConnectionConfig, before?: ConnectionConfig)
   if (!before || before.type !== next.type) return next;
   if (next.type === 'datadog' && before.type === 'datadog' && before.indexes && !next.indexes)
     return { ...next, indexes: before.indexes };
+  // A service field and an endpoint are set in settings only.
+  if (next.type === 'gcp' && before.type === 'gcp')
+    return {
+      ...next,
+      ...(before.serviceField && !next.serviceField ? { serviceField: before.serviceField } : {}),
+      ...(before.endpoint && !next.endpoint ? { endpoint: before.endpoint } : {}),
+    };
   // An endpoint is set in settings only, such as LocalStack's.
   if (next.type === 'cloudwatch' && before.type === 'cloudwatch' && before.endpoint && !next.endpoint)
     return { ...next, endpoint: before.endpoint };
@@ -349,6 +365,14 @@ export function readDraft(draft: FormDraft, saved: { secret?: boolean } = {}): D
           keys = { apiKey: draft.apiKey.trim(), appKey: draft.appKey.trim() };
       }
       break;
+    case 'gcp': {
+      const project = draft.project.trim();
+      if (!project) errors.project = 'Enter the project id, such as shop-prod-1234';
+      else if (!isGcpProject(project))
+        errors.project = 'A project id: lowercase letters, digits, and dashes, such as shop-prod-1234';
+      item = { type: 'gcp', project, ...(draft.filter.trim() ? { filter: draft.filter.trim() } : {}) };
+      break;
+    }
     case 'elasticsearch': {
       const url = draft.url.trim();
       const iam = draft.auth === 'iam';

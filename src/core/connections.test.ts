@@ -297,3 +297,37 @@ test('an Elasticsearch connection needs a URL, signs in with AWS only over https
     { timestamp: '@timestamp', level: 'log.level', message: 'message', service: 'service.name', traceId: 'trace.id' },
   );
 });
+
+test('a Cloud Logging connection needs a project id, and takes another API only on this machine', () => {
+  const [project, local] = normalizeConnections([
+    {
+      id: 'prod',
+      type: 'gcp',
+      project: 'shop-prod-1234',
+      filter: 'resource.type="k8s_container"',
+      serviceField: 'resource.labels.container_name',
+    },
+    { id: 'fake', type: 'gcp', project: 'example.com:shop-prod', endpoint: 'http://127.0.0.1:8085' },
+    { id: 'bad', type: 'gcp', project: 'Shop Prod' },
+  ]);
+  assert.deepEqual(project, {
+    id: 'prod',
+    label: 'prod',
+    type: 'gcp',
+    project: 'shop-prod-1234',
+    filter: 'resource.type="k8s_container"',
+    serviceField: 'resource.labels.container_name',
+  });
+  assert.deepEqual(local, {
+    id: 'fake',
+    label: 'fake',
+    type: 'gcp',
+    project: 'example.com:shop-prod',
+    endpoint: 'http://127.0.0.1:8085',
+  });
+  const [remote] = normalizeConnections([
+    { id: 'x', type: 'gcp', project: 'shop-prod-1234', endpoint: 'https://logging.example.com' },
+  ]);
+  assert.equal(remote.type === 'gcp' && remote.endpoint, undefined);
+  assert.equal(normalizeConnections([{ id: 'bad', type: 'gcp', project: 'Shop Prod' }]).length, 0);
+});

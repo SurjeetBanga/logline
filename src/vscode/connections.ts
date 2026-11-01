@@ -4,6 +4,7 @@ import { CloudWatchConnector } from '../capture/connectors/cloudwatch';
 import { DatadogConnector, type DatadogKeys } from '../capture/connectors/datadog';
 import { iamPassword, listProfiles } from '../capture/connectors/aws-auth';
 import { ElasticConnector } from '../capture/connectors/elastic';
+import { GcpConnector } from '../capture/connectors/gcp';
 import { LokiConnector } from '../capture/connectors/loki';
 import { MongoConnector } from '../capture/connectors/mongo';
 import { MysqlDriver } from '../capture/connectors/mysql-driver';
@@ -119,6 +120,9 @@ export class ConnectionManager implements vscode.Disposable {
   /** What a connection opens: the same database or API, whatever a workspace calls it. */
   private identity(connection: ConnectionConfig): string {
     if (connection.type === 'sqlite') return `sqlite:${this.resolvePath(connection.path)}`;
+    // The project's logs, narrowed the same way; another filter is another permission.
+    if (connection.type === 'gcp')
+      return `gcp:${connection.endpoint ?? ''}/${connection.project}/${connection.filter ?? ''}`;
     // The same groups read with the same credentials; other groups are another permission.
     if (connection.type === 'cloudwatch')
       return `cloudwatch:${cloudwatchEndpoint(connection)}/${connection.profile ?? ''}/${[...connection.logGroups].sort().join(',')}`;
@@ -313,6 +317,7 @@ export class ConnectionManager implements vscode.Disposable {
     ) => Promise<Opened>;
   } = {
     cloudwatch: async (connection) => new CloudWatchConnector(connection, this.timeoutMs),
+    gcp: async (connection) => new GcpConnector(connection, this.timeoutMs),
     elasticsearch: async (connection, secret) =>
       new ElasticConnector(
         connection,
@@ -401,7 +406,9 @@ export class ConnectionManager implements vscode.Disposable {
             ? connection.site
             : connection.type === 'cloudwatch'
               ? `${connection.region} · ${connection.logGroups.join(', ')}`
-              : connection.logs?.table,
+              : connection.type === 'gcp'
+                ? connection.project
+                : connection.logs?.table,
         connection,
       })),
       { title },

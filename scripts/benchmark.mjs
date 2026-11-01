@@ -336,6 +336,32 @@ timed('elastic-logs', 'Turn 5,000 Elasticsearch hits in the Elastic Common Schem
       });
   };
 });
+timed('gcp-logs', 'Turn 5,000 Cloud Logging entries, JSON and text, into events', async () => {
+  const { LogStore } = await load('core/log-store.js');
+  const { Ingestion } = await load('capture/ingestion.js');
+  const { gcpLine } = await load('capture/connectors/gcp.js');
+  const entries = Array.from({ length: 5000 }, (_, i) => ({
+    timestamp: new Date(receivedAt.getTime() + i * 10).toISOString(),
+    severity: i % 10 ? 'INFO' : 'ERROR',
+    ...(i % 5
+      ? { jsonPayload: { message: `request ${i} took ${i % 900} ms`, orderId: `o-${i}`, user: { id: i % 97 } } }
+      : { textPayload: `GET /orders/${i} 200` }),
+    httpRequest: i % 2 ? { requestMethod: 'POST', status: 200, latency: '0.120s' } : undefined,
+    trace: `projects/shop-prod/traces/${i % 100}`,
+    resource: { type: 'cloud_run_revision', labels: { service_name: 'checkout', revision_name: 'checkout-0042' } },
+    logName: 'projects/shop-prod/logs/run.googleapis.com%2Fstdout',
+    insertId: `id-${i}`,
+  }));
+  return () => {
+    const ingestion = new Ingestion(new LogStore(10000, 100 * 1024 * 1024), () => {});
+    for (const entry of entries)
+      ingestion.accept(gcpLine(entry).line, 'remote', {
+        serverId: 'conn:prod',
+        server: 'Cloud Logging · prod',
+        sessionId: 'run',
+      });
+  };
+});
 timed('remote-sql', 'Turn 1,000 searches into SQL for a log table', async () => {
   const { buildSqlLogQuery } = await load('core/remote-query.js');
   const table = {
