@@ -31,7 +31,7 @@ Log content. Search text or queries, including SQL, Datadog, and other connectio
 
 ## Suggestions and votes
 
-**Suggest a feature…** and **Vote on what's next…**, in **More actions** in the Logs panel or the Command Palette, open a short form in the panel. Nothing is sent until you press **Send**, and a suggestion shows exactly what will be sent. Before it leaves, Logline replaces credentials, email addresses, phone and long numbers, IP addresses, host names, URLs, and file paths, as you see in the form. Still, leave out anything that identifies you or your company. A suggestion and a vote are the only text Logline sends, and they carry your anonymous ID like other events.
+**Suggest a feature…** and **Vote on what's next…**, in **More actions** in the Logs panel or the Command Palette, open a short form in the panel. Nothing is sent until you press **Send**, and a suggestion shows exactly what will be sent. Before it leaves, Logline replaces credentials, email addresses, phone and long numbers, IP addresses, host names, URLs, and file paths, as you see in the form. Still, leave out anything that identifies you or your company. A suggestion and a vote are the only text Logline sends, and each is sent under a one-time ID of its own, so it cannot be tied to your anonymous ID or your usage counts.
 
 With usage counts off, or if sending fails, the form offers a GitHub issue instead. A GitHub issue is public and shows your GitHub account, so read it before you submit it.
 
@@ -41,8 +41,8 @@ Events are sent in batches about once a minute over HTTPS to [PostHog](https://p
 
 ## Turning it off
 
-Usage counts follow VS Code's `telemetry.telemetryLevel`: they need `all`, and error codes need `error` or `all`. To turn them off for Logline only, set `logline.telemetry.enabled` to `false` in your user settings. `DO_NOT_TRACK=1` in the environment turns them off too. Turning them off drops anything not yet sent.
+Usage counts follow VS Code's `telemetry.telemetryLevel`: they need `all`, and error codes need `error` or `all`. To turn them off for Logline only, set `logline.telemetry.enabled` to `false` in your user settings; a workspace or folder's settings cannot turn them back on. `DO_NOT_TRACK=1` in the environment turns them off too. Turning them off drops anything not yet sent.
 
 ## Deleting your data
 
-Run **Logline: Show Usage Data** to see your anonymous ID, and email it to logline.dev@icloud.com, privately rather than in a public issue, asking for its data to be deleted. Its events are deleted where PostHog allows, and otherwise excluded from every report and left to expire with the rest after 12 months. **Logline: Reset Usage ID** starts a new ID, so later events cannot be tied to earlier ones.
+Run **Logline: Show Usage Data** to see your anonymous ID, and email it to logline.dev@icloud.com, privately rather than in a public issue, asking for its data to be deleted. Its events are deleted where PostHog allows, and otherwise excluded from every report and left to expire with the rest after 12 months. To remove a suggestion you sent, quote it in the email: suggestions do not carry your anonymous ID. **Logline: Reset Usage ID** starts a new ID, so later events cannot be tied to earlier ones.

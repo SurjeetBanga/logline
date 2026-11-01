@@ -581,7 +581,7 @@
     },
     "surjeetbanga.logline/survey sent": {
       "owner": "SurjeetBanga",
-      "comment": "Answers to Suggest a feature or Vote on what's next, sent only when the person presses Send in the Logs panel's form after seeing them. The only text Logline sends; credentials, email addresses, phone and long numbers, IP addresses, host names, URLs, and paths are replaced first.",
+      "comment": "Answers to Suggest a feature or Vote on what's next, sent only when the person presses Send in the Logs panel's form after seeing them. The only text Logline sends; credentials, email addresses, phone and long numbers, IP addresses, host names, URLs, and paths are replaced first. Sent under a one-time ID, not the install\u2019s anonymous ID.",
       "$survey_id": {
         "classification": "SystemMetaData",
         "purpose": "FeatureInsight",

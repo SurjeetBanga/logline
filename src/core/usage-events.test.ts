@@ -5,6 +5,7 @@ import { test } from 'node:test';
 import { parseQuery } from './query';
 import {
   agentClient,
+  bytesBucket,
   commonProperties,
   countBucket,
   cpusBucket,
@@ -216,4 +217,86 @@ test('telemetry.json lists every event and property, so code --telemetry shows w
     Object.entries(USAGE_EVENTS).map(([name, properties]) => [name, Object.keys(properties).sort()]),
   );
   assert.deepEqual(documented, schema, 'update telemetry.json with the event schema');
+});
+
+test('every property of every event can only carry Logline’s own names or buckets, whatever it is given', () => {
+  // Everything that may come out: the schema's own choices, the manifest's names, buckets, and versions.
+  const allowed = new Set<string>(['custom']);
+  for (const schema of Object.values(USAGE_EVENTS))
+    for (const rule of Object.values(schema) as { kind: string; values?: unknown }[])
+      if (Array.isArray(rule.values)) for (const value of rule.values) allowed.add(value);
+  for (const set of [vocabulary.commands, vocabulary.guideSections, new Set(vocabulary.settings.keys())])
+    for (const value of set) allowed.add(value);
+  for (const rule of vocabulary.settings.values())
+    if (Array.isArray(rule)) for (const value of rule) allowed.add(value);
+  for (let n = -1; n < 1e10; n = n < 1 ? n + 1 : n * 1.37)
+    for (const bucket of [countBucket, msBucket, durationBucket]) allowed.add(bucket(n));
+  for (const size of [0, 1023, 1024, 9000, 40000]) allowed.add(bytesBucket(size));
+  const version = /^\d{1,4}\.\d{1,4}\.\d{1,6}(?:-insider)?$/;
+
+  const token = ['ghp', 'Q'.repeat(36)].join('_');
+  const hostile: unknown[] = [
+    'jane.doe@acme.com',
+    '/Users/jane/work/payments',
+    'C:\\Users\\jane\\app.log',
+    'db-prod-3.acme.internal',
+    '10.2.3.4',
+    'level:error user_id:42',
+    `token ${token}`,
+    'Jane Doe',
+    '1.0.0-janedoe',
+    'INVALID_INPUT here',
+    'prodhost',
+    ['jane.doe@acme.com', 'logs', 'Jane Doe'],
+    { name: 'Jane Doe', email: 'jane.doe@acme.com' },
+    [{ path: '/Users/jane' }],
+    123456789012,
+    -5,
+    Number.NaN,
+    true,
+    null,
+    undefined,
+  ];
+  for (const [event, schema] of Object.entries(USAGE_EVENTS))
+    for (const key of Object.keys(schema))
+      for (const value of hostile) {
+        // The setting rule reads the key beside it: try a real key and a hostile one.
+        for (const extra of [{}, { key: 'source' }, { key: 'redactionFields' }]) {
+          const clean = sanitizeUsage(event, { ...extra, [key]: value, unknownExtra: value }, vocabulary)!;
+          assert.ok(!Object.hasOwn(clean, 'unknownExtra'), `${event} keeps only its own properties`);
+          for (const [name, out] of Object.entries(clean))
+            for (const item of Array.isArray(out) ? out : [out]) {
+              if (typeof item === 'boolean') continue;
+              assert.ok(
+                allowed.has(String(item)) || version.test(String(item)),
+                `${event}.${name} let ${JSON.stringify(item)} through from ${JSON.stringify(value)}`,
+              );
+            }
+        }
+      }
+});
+
+test('the editor and machine are named only from short lists and ranges', () => {
+  const props = commonProperties({
+    version: '1.19.0-janedoe',
+    vscode: '1.105.0-insider',
+    appName: 'Jane’s Custom IDE',
+    uiKind: 'desktop',
+    remoteName: 'ssh-remote+jane-laptop.local',
+    platform: 'darwin',
+    arch: 'arm64',
+    cpus: 12,
+    totalMemory: 32 * 1024 ** 3,
+  });
+  assert.deepEqual(props, {
+    version: 'unknown',
+    vscode: '1.105.0-insider',
+    host: 'other',
+    ui: 'desktop',
+    remote: 'other',
+    os: 'darwin',
+    arch: 'arm64',
+    cpus: '9-16',
+    ram_gb: '32+',
+  });
 });

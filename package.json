@@ -1275,6 +1275,7 @@
           "logline.telemetry.enabled": {
             "type": "boolean",
             "default": true,
+            "scope": "application",
             "order": 5,
             "tags": [
               "telemetry",

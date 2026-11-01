@@ -576,3 +576,78 @@ test('events are timed to the minute, no finer', async () => {
   for (const item of sent as unknown as { timestamp: string }[]) assert.match(item.timestamp, /:00\.000Z$/);
   usage.dispose();
 });
+
+test('what goes over the wire is the api key and anonymous events, nothing else', async () => {
+  const { usage, bodies } = setup();
+  const pii = 'jane.doe@acme.com /Users/jane db-prod-3.acme.internal';
+  usage.start({
+    eventsCaptured: () => 5,
+    sources: () => 1,
+    memoryMb: () => 3,
+    trimmed: () => false,
+    connections: () => ({ datadog: 1, [pii]: 2 }),
+  });
+  usage.command(pii);
+  usage.view(pii);
+  usage.capture(pii);
+  usage.search(['field'], [pii, 'level'], 12);
+  usage.shared('all', 1, 10);
+  usage.agentConnected(pii);
+  usage.agentTool({
+    tool: pii,
+    via: 'mcp',
+    client: pii,
+    ok: false,
+    code: pii,
+    ms: 3,
+    resultSize: 10,
+    truncated: false,
+  });
+  usage.findings([pii, 'secret']);
+  usage.findingHelpful(pii, true);
+  usage.record('error', { area: 'bridge', code: pii, message: pii });
+  await usage.survey('survey-1', { q1: 'Search' });
+  await usage.close();
+
+  const common = ['version', 'vscode', 'host', 'ui', 'remote', 'os', 'arch', 'cpus', 'ram_gb'];
+  const flags = ['$process_person_profile', '$geoip_disable'];
+  for (const body of bodies) {
+    const parsed = JSON.parse(body) as { api_key: string; batch: Record<string, unknown>[] };
+    assert.deepEqual(Object.keys(parsed).sort(), ['api_key', 'batch'], 'only the key and the events');
+    for (const item of parsed.batch) {
+      assert.deepEqual(Object.keys(item).sort(), ['distinct_id', 'event', 'properties', 'timestamp']);
+      assert.match(
+        String(item.distinct_id),
+        /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
+        'a random id',
+      );
+      const properties = item.properties as Record<string, unknown>;
+      assert.equal(properties.$process_person_profile, false, 'no person profile');
+      assert.equal(properties.$geoip_disable, true, 'no location');
+      const own = item.event === 'survey sent' ? [] : Object.keys(USAGE_EVENTS[String(item.event)] ?? {});
+      for (const key of Object.keys(properties))
+        assert.ok(
+          common.includes(key) || flags.includes(key) || own.includes(key) || key.startsWith('$survey_'),
+          `${String(item.event)} carried ${key}`,
+        );
+    }
+  }
+  const text = bodies.join('\n');
+  for (const part of pii.split(' ')) assert.ok(!text.includes(part), `${part} was sent`);
+  const events = bodies.flatMap(
+    (body) => (JSON.parse(body) as { batch: { event: string; distinct_id: string }[] }).batch,
+  );
+  const survey = events.find((item) => item.event === 'survey sent')!;
+  assert.notEqual(survey.distinct_id, usage.usageId, 'an answer cannot be tied to the install’s usage counts');
+  assert.ok(events.filter((item) => item.event !== 'survey sent').every((item) => item.distinct_id === usage.usageId));
+});
+
+test('only the person’s own settings can turn usage counts on: a workspace cannot override the switch', () => {
+  const sections = (
+    manifest as { contributes: { configuration: { properties: Record<string, { scope?: string }> }[] } }
+  ).contributes.configuration;
+  const setting = sections.find((section) => section.properties['logline.telemetry.enabled'])!.properties[
+    'logline.telemetry.enabled'
+  ];
+  assert.equal(setting.scope, 'application');
+});

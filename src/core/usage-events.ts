@@ -320,7 +320,8 @@ export function commonProperties(env: UsageEnvironment): UsageProperties {
   };
 }
 
-const VERSION = /^\d{1,4}\.\d{1,4}\.\d{1,6}(?:-[0-9A-Za-z.]{1,20})?$/;
+// Numbers only, and VS Code Insiders' own suffix: a free-form pre-release tag could carry anything.
+const VERSION = /^\d{1,4}\.\d{1,4}\.\d{1,6}(?:-insider)?$/;
 
 function settingValue(rule: 'boolean' | 'number' | 'custom' | readonly string[], value: unknown): UsageValue {
   if (rule === 'boolean') return typeof value === 'boolean' ? value : 'custom';

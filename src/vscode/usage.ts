@@ -63,6 +63,8 @@ interface QueuedEvent {
   event: string;
   properties: UsageProperties;
   timestamp: string;
+  /** Its own one-time id instead of the install's, for answers a person wrote. */
+  distinctId?: string;
 }
 
 /** Sends one batch and says whether it was accepted; the default posts it to PostHog. */
@@ -391,8 +393,9 @@ export class Usage implements vscode.Disposable {
 
   /**
    * Answers to a PostHog survey, which the person wrote and chose to send. The only
-   * text Logline ever sends; returns false when usage counts are off or the answers
-   * could not be delivered, so the caller offers another way.
+   * text Logline ever sends, under a one-time id rather than the install's; returns
+   * false when usage counts are off or the answers could not be delivered, so the
+   * caller offers another way.
    */
   async survey(surveyId: string, responses: Record<string, string | string[]>): Promise<boolean> {
     if (this.disposed || !this.enabled || !surveyId) return false;
@@ -406,7 +409,8 @@ export class Usage implements vscode.Disposable {
         ? answer.map((item) => item.slice(0, 200))
         : answer.slice(0, SURVEY_TEXT_LIMIT);
     const timestamp = this.minute();
-    this.queue.push({ event: 'survey sent', properties, timestamp });
+    // A one-time id of its own: what someone wrote is never tied to their usage counts.
+    this.queue.push({ event: 'survey sent', properties, timestamp, distinctId: randomUUID() });
     return this.flush();
   }
 
@@ -502,7 +506,7 @@ export class Usage implements vscode.Disposable {
       api_key: this.projectKey,
       batch: batch.map((item) => ({
         event: item.event,
-        distinct_id: this.id,
+        distinct_id: item.distinctId ?? this.id,
         timestamp: item.timestamp,
         properties: { ...this.common, ...item.properties, $process_person_profile: false, $geoip_disable: true },
       })),
