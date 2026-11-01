@@ -291,10 +291,20 @@ export function checkReadOnlySql(input: string, dialect: SqlDialect): { sql: str
       const end = input.indexOf('*/', index + 2);
       index = end === -1 ? input.length : end + 2;
       code += ' ';
+    } else if (character === '[' && dialect === 'sqlite') {
+      // SQLite also quotes a name in brackets, as in [a'b], and nothing escapes its end.
+      const end = input.indexOf(']', index + 1);
+      index = end === -1 ? input.length : end + 1;
+      code += ' x ';
     } else if (character === "'" || character === '"' || character === '`') {
       let end = index + 1;
-      // MySQL strings also escape with a backslash, as in 'it\'s'.
-      const backslash = dialect === 'mysql' && character !== '`';
+      // MySQL strings also escape with a backslash, as in 'it\'s', and so do Postgres E'…' strings.
+      const backslash =
+        (dialect === 'mysql' && character !== '`') ||
+        (dialect === 'postgres' &&
+          character === "'" &&
+          /^[Ee]$/.test(input[index - 1] ?? '') &&
+          !/[A-Za-z0-9_$]/.test(input[index - 2] ?? ''));
       while (end < input.length && !(input[end] === character && input[end + 1] !== character)) {
         end += input[end] === character || (backslash && input[end] === '\\') ? 2 : 1;
       }
@@ -320,6 +330,9 @@ export function checkReadOnlySql(input: string, dialect: SqlDialect): { sql: str
   if (!statement.trim()) return { error: 'Enter a SELECT query.' };
   if (statement.includes(';')) return { error: 'Run one statement at a time.' };
   if (!/^[\s(]*(?:select|with|values)\b/i.test(statement)) return { error: 'Only SELECT queries can run here.' };
+  // A read-only transaction does not stop MySQL writing a file on the server.
+  if (dialect === 'mysql' && /\binto\s+(?:outfile|dumpfile)\b/i.test(statement))
+    return { error: 'SELECT … INTO OUTFILE cannot run here.' };
   return { sql: input.trim().replace(/;\s*$/, '') };
 }
 

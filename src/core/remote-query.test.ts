@@ -198,6 +198,16 @@ test('typed SQL must be one read-only query', () => {
   const hidden = 'SELECT 1 AS x WHERE $a$ IS NULL) AS t;\n.shell touch pwned\nSELECT * FROM (SELECT $a$';
   assert.deepEqual(checkReadOnlySql(hidden, 'sqlite'), { error: 'Run one statement at a time.' });
   assert.deepEqual(checkReadOnlySql('SELECT $a$;$a$', 'postgres'), { sql: 'SELECT $a$;$a$' });
+  // Nor can a name in brackets, which SQLite ends at the first ], whatever quote is inside it.
+  const bracketed = "SELECT 1 AS [a']);\n.shell touch pwned\nSELECT ('x";
+  assert.deepEqual(checkReadOnlySql(bracketed, 'sqlite'), { error: 'Run one statement at a time.' });
+  assert.deepEqual(checkReadOnlySql('SELECT 1 AS [a;b]', 'sqlite'), { sql: 'SELECT 1 AS [a;b]' });
+  // A backslash escapes a quote in a Postgres E'…' string, but not in a plain one.
+  assert.deepEqual(checkReadOnlySql("SELECT E'\\'' ; DELETE FROM logs; SELECT '", 'postgres'), {
+    error: 'Run one statement at a time.',
+  });
+  assert.deepEqual(checkReadOnlySql("SELECT '\\', 'a;b'", 'postgres'), { sql: "SELECT '\\', 'a;b'" });
+  assert.deepEqual(checkReadOnlySql("SELECT one'\\', ';'", 'postgres'), { sql: "SELECT one'\\', ';'" });
   // A trailing comment cannot swallow the wrapper that limits the rows.
   assert.deepEqual(limitedSql('SELECT 1 -- note', 'sqlite', 5), {
     sql: 'SELECT * FROM (\nSELECT 1 -- note\n) AS logline_query LIMIT ?',
@@ -322,6 +332,12 @@ test('MySQL quotes with backticks, casts to CHAR, escapes LIKE with !, and compa
 
 test('typed MySQL is one read-only statement, with # comments read as comments', () => {
   assert.deepEqual(checkReadOnlySql('SELECT 1 # ; DROP TABLE x', 'mysql'), { sql: 'SELECT 1 # ; DROP TABLE x' });
+  assert.deepEqual(checkReadOnlySql("SELECT * FROM logs INTO OUTFILE '/tmp/logs.csv'", 'mysql'), {
+    error: 'SELECT … INTO OUTFILE cannot run here.',
+  });
+  assert.deepEqual(checkReadOnlySql("SELECT 'into outfile' AS note", 'mysql'), {
+    sql: "SELECT 'into outfile' AS note",
+  });
   assert.deepEqual(checkReadOnlySql('SELECT 1; DELETE FROM logs', 'mysql'), { error: 'Run one statement at a time.' });
   assert.deepEqual(checkReadOnlySql("SELECT 'it\\'s; DROP TABLE x'", 'mysql'), {
     sql: "SELECT 'it\\'s; DROP TABLE x'",

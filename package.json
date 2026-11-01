@@ -1329,6 +1329,7 @@
     "re2-wasm": "^1.0.2"
   },
   "overrides": {
+    "minimatch": "^11.0.1",
     "ovsx": {
       "@vscode/vsce": "$@vscode/vsce"
     },

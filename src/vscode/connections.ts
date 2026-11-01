@@ -438,8 +438,6 @@ export class ConnectionManager implements vscode.Disposable {
     const utc = this.config.get<string>('timezone', 'local') === 'utc';
     const time = (ms: number) =>
       utc ? new Date(ms).toISOString().slice(11, 19) : new Date(ms).toTimeString().slice(0, 8);
-    // A search still running is replaced by this one, rather than waited for.
-    this.remote.cancelFetches(connection.id);
     try {
       const info = await this.remote.fetch(await this.target(connection), {
         query,
@@ -449,6 +447,8 @@ export class ConnectionManager implements vscode.Disposable {
         title: `${(native ?? query).trim() || 'All rows'} · ${window ? `${time(window.fromMs)}–${time(window.toMs)}${utc ? ' UTC' : ''}` : `last ${range}`}`,
         // The panel shows the new run, not every earlier one of the same search, with that search.
         started: (runId) => void this.showSource(connectionSourceId(connection.id), runId, query),
+        // A search still running is replaced by this one, rather than waited for.
+        replace: true,
       });
       await this.failed(connection, info.error);
     } catch (error) {

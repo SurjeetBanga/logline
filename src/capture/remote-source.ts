@@ -59,6 +59,11 @@ export interface FetchOptions {
   started?(sessionId: string): void;
   /** Sees the fetched records before they are filtered and ingested. */
   inspect?(records: RemoteRecord[]): void;
+  /**
+   * A search from the panel: it replaces the connection's earlier one still running. Other fetches, such as an
+   * agent's or a link's, are neither replaced nor replace one.
+   */
+  replace?: boolean;
 }
 
 interface Run {
@@ -67,6 +72,8 @@ interface Run {
   info: RemoteRunInfo;
   abort: AbortController;
   stopped: boolean;
+  /** A panel search, which a newer one replaces. */
+  replaceable?: boolean;
   // Tails only.
   query?: string;
   /** A query in the store's own syntax, followed instead of `query`. */
@@ -174,7 +181,10 @@ export class RemoteSource {
 
   /** Fetch the newest rows that match a search (or a typed query) into a new run. */
   async fetch(target: RemoteTarget, options: FetchOptions): Promise<RemoteRunInfo> {
+    // Replaced here, as the new run starts, so two searches sent at once cannot both run.
+    if (options.replace) this.cancelFetches(target.id);
     const run = this.start(target, options.sql === undefined ? 'fetch' : 'sql', options.title);
+    run.replaceable = options.replace === true;
     this.state.status = `Fetching from ${target.label}…`;
     this.state.notify();
     options.started?.(run.record.id);
@@ -347,7 +357,9 @@ export class RemoteSource {
     }
     // An empty table starts the tail now, so its first rows are not read as history.
     if (first && run.watermark === undefined) run.watermark = Date.now();
-    const keepFrom = Math.min(run.watermark! - lag, run.catchUp ?? Infinity);
+    // Lines are kept over the store's whole lag, not this read's: a later read can go back further, every
+    // tenth read or once a row was late, and must not show again what an earlier read showed.
+    const keepFrom = Math.min(run.watermark! - (run.target.connector.tailLagMs ?? 0), run.catchUp ?? Infinity);
     for (const [line, time] of seen) if (time < keepFrom) seen.delete(line);
     Object.assign(run.info, {
       fetched: run.info.fetched + fresh.length,
@@ -434,13 +446,13 @@ export class RemoteSource {
   }
 
   /**
-   * Stop a connection's searches that are still running and drop the rows they showed, since a newer search
-   * replaces them. Tails go on.
+   * Stop a connection's panel searches that are still running and drop the rows they showed, since a newer
+   * search replaces them. Tails, and fetches an agent or a link started, go on.
    */
   cancelFetches(connectionId: string): void {
     const replaced = new Set<string>();
     for (const run of [...this.runs.values()])
-      if (run.target.id === connectionId && run.info.kind === 'fetch') {
+      if (run.target.id === connectionId && run.replaceable) {
         this.halt(run);
         replaced.add(run.record.id);
       }
