@@ -362,6 +362,26 @@ test('page and all restrict results to one capture session', () => {
   assert.equal(store.page({ sessionId: 'nope' }).matched, 0);
 });
 
+test('value suggestions are the 20 most frequent matches, equal counts in the order first seen', () => {
+  const store = new LogStore(10000, 100 * 1024 * 1024);
+  // Values seen in a scattered order with counts that tie, so order and ties both matter.
+  const counts = new Map<string, number>();
+  for (let i = 0; i < 3000; i++) {
+    const name = `${['alpha', 'Beta', 'gamma'][i % 3]}-${(i * 7919) % 97}`;
+    counts.set(name, (counts.get(name) ?? 0) + 1);
+    store.add({ id: i + 1, level: 'info', message: 'x', fields: { service: name } });
+  }
+  const firstSeen = [...counts.keys()];
+  const expected = (prefix: string) =>
+    firstSeen
+      .filter((name) => name.toLowerCase().startsWith(prefix))
+      .sort((a, b) => counts.get(b)! - counts.get(a)!)
+      .slice(0, 20)
+      .map((value) => ({ value, count: counts.get(value)! }));
+  for (const prefix of ['', 'b', 'beta-1', 'gamma-9', 'nothing'])
+    assert.deepEqual(store.fieldSuggestions(`service:${prefix}`).values, expected(prefix), prefix);
+});
+
 test('fieldSuggestions autocompletes a value for the field typed before the colon', () => {
   const store = new LogStore();
   store.add({ id: 1, level: 'info', message: 'x', fields: { service: 'api' } });
