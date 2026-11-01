@@ -17,7 +17,7 @@ All notable changes to Logline are documented in this file.
 
 ### Fixes
 
-- Suggesting a field's values as you type after `field:` no longer looks through every value it has seen on each keystroke, so suggestions keep up with large captures and streaming logs.
+- Suggesting a field's values as you type after `field:` is faster with large captures: the values are counted once and kept up to date as logs arrive and are dropped, rather than counted again from every retained log whenever new ones come in, and typing with nothing new stops at the 20 most frequent matches.
 - A Datadog tail no longer shows logs again when a read goes back further than the one before it, such as every tenth read or after a late log.
 - Pressing **Run** on a connection no longer stops a fetch an agent or a Log Explorer link started, and two searches sent at once no longer both run.
 - **Run SQL…** reads SQLite names in brackets, such as `[a'b]`, and Postgres `E'…'` strings correctly when it checks that a query is one read-only statement, and refuses MySQL `SELECT … INTO OUTFILE` and `INTO DUMPFILE`, which write a file on the server.
