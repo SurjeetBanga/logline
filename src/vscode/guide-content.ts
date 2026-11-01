@@ -768,7 +768,7 @@ export const GUIDE_CARDS: GuideCard[] = [
     section: 'settings',
     title: 'Suggest a feature',
     where: ['More actions', 'Suggest a feature…'],
-    text: 'Tell the Logline developers what to build, or vote on what comes next. What you write is redacted and shown to you before it is sent; with usage counts off, it opens a GitHub issue instead.',
+    text: 'Tell the Logline developers what to build, or vote on what comes next, in a short form in the panel. You see exactly what will be sent, with credentials and personal details such as email addresses replaced; with usage counts off, it offers a GitHub issue instead.',
     target: 'suggestFeature',
     command: 'logline.suggestFeature',
   },

@@ -16,11 +16,17 @@ import {
 } from '../core/usage-events';
 import type { TelemetryCode } from '../core/telemetry-findings';
 import type { FindingCode } from './log-doctor';
+import type { AgentErrorCode } from './agent-access';
+import type { AGENT_ERROR_CODES } from '../core/usage-events';
 
 // Every kind of Log Doctor finding is one usage counts can name; a new kind fails to compile until it is added.
 type UncountedFinding = Exclude<FindingCode | TelemetryCode, (typeof DOCTOR_CODES)[number]>;
 const doctorCodesComplete: [UncountedFinding] extends [never] ? true : never = true;
 void doctorCodesComplete;
+// Every agent error code is one usage counts can name; a new one fails to compile until it is added.
+type UncountedAgentError = Exclude<AgentErrorCode, (typeof AGENT_ERROR_CODES)[number]>;
+const agentCodesComplete: [UncountedAgentError] extends [never] ? true : never = true;
+void agentCodesComplete;
 
 // Where anonymous usage counts go. The project key can only write events, so it is
 // safe to ship; with no key, nothing is sent and Show Usage Data still lists events.
@@ -57,6 +63,8 @@ interface QueuedEvent {
   event: string;
   properties: UsageProperties;
   timestamp: string;
+  /** Its own one-time id instead of the install's, for answers a person wrote. */
+  distinctId?: string;
 }
 
 /** Sends one batch and says whether it was accepted; the default posts it to PostHog. */
@@ -274,7 +282,12 @@ export class Usage implements vscode.Disposable {
     for (const [key, value] of Object.entries(data ?? {}))
       if (Object.hasOwn(schema, key)) properties[key] = value as UsageProperties[string];
     if (this.queue.length >= QUEUE_LIMIT) this.queue.shift();
-    this.queue.push({ event, properties, timestamp: new Date(this.now()).toISOString() });
+    this.queue.push({ event, properties, timestamp: this.minute() });
+  }
+
+  /** When an event happened, to the minute: nothing Logline counts needs it finer. */
+  private minute(): string {
+    return new Date(Math.floor(this.now() / 60_000) * 60_000).toISOString();
   }
 
   /** Something the person did, for active days and active minutes. */
@@ -380,8 +393,9 @@ export class Usage implements vscode.Disposable {
 
   /**
    * Answers to a PostHog survey, which the person wrote and chose to send. The only
-   * text Logline ever sends; returns false when usage counts are off or the answers
-   * could not be delivered, so the caller offers another way.
+   * text Logline ever sends, under a one-time id rather than the install's; returns
+   * false when usage counts are off or the answers could not be delivered, so the
+   * caller offers another way.
    */
   async survey(surveyId: string, responses: Record<string, string | string[]>): Promise<boolean> {
     if (this.disposed || !this.enabled || !surveyId) return false;
@@ -394,8 +408,9 @@ export class Usage implements vscode.Disposable {
       properties[`$survey_response_${question}`] = Array.isArray(answer)
         ? answer.map((item) => item.slice(0, 200))
         : answer.slice(0, SURVEY_TEXT_LIMIT);
-    const timestamp = new Date(this.now()).toISOString();
-    this.queue.push({ event: 'survey sent', properties, timestamp });
+    const timestamp = this.minute();
+    // A one-time id of its own: what someone wrote is never tied to their usage counts.
+    this.queue.push({ event: 'survey sent', properties, timestamp, distinctId: randomUUID() });
     return this.flush();
   }
 
@@ -491,7 +506,7 @@ export class Usage implements vscode.Disposable {
       api_key: this.projectKey,
       batch: batch.map((item) => ({
         event: item.event,
-        distinct_id: this.id,
+        distinct_id: item.distinctId ?? this.id,
         timestamp: item.timestamp,
         properties: { ...this.common, ...item.properties, $process_person_profile: false, $geoip_disable: true },
       })),

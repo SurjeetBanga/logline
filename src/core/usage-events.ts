@@ -24,7 +24,6 @@ type Rule =
   | { kind: 'duration' }
   | { kind: 'bytes' }
   | { kind: 'version' }
-  | { kind: 'code' }
   | { kind: 'setting' };
 
 const oneOf = (...values: string[]): Rule => ({ kind: 'enum', values });
@@ -93,6 +92,21 @@ export const MILESTONES = [
   'first_log_breakpoint',
 ] as const;
 export type Milestone = (typeof MILESTONES)[number];
+/** Why an agent tool call failed: its error code, never its message. */
+export const AGENT_ERROR_CODES = [
+  'NOT_SHARED',
+  'SHARE_CHANGED',
+  'INVALID_INPUT',
+  'EVENT_UNAVAILABLE',
+  'CANCELLED',
+  'BUSY',
+  'CONNECTION_UNAVAILABLE',
+  'RANGE_TOO_LARGE',
+  'REMOTE_ERROR',
+  'RESULT_TOO_LARGE',
+] as const;
+/** What failed inside Logline, by area, as one of these codes. */
+export const ERROR_CODES = ['start_failed'] as const;
 /** What Log Doctor finds: its own checks and the OpenTelemetry conventions. */
 export const DOCTOR_CODES = [
   'secret',
@@ -142,7 +156,7 @@ export const USAGE_EVENTS: Record<string, Record<string, Rule>> = {
     via: oneOf('copilot', 'mcp'),
     client: oneOf(...AGENT_CLIENTS),
     ok: BOOL,
-    code: { kind: 'code' },
+    code: oneOf(...AGENT_ERROR_CODES),
     ms: MS,
     result_size: { kind: 'bytes' },
     truncated: BOOL,
@@ -161,7 +175,7 @@ export const USAGE_EVENTS: Record<string, Record<string, Rule>> = {
   log_lens_clicked: {},
   log_breakpoint: { step: oneOf('set', 'hit') },
   compare_production: { ok: BOOL },
-  error: { area: oneOf('bridge', 'otlp', 'connection', 'import', 'export', 'capture'), code: { kind: 'code' } },
+  error: { area: oneOf('bridge', 'otlp', 'connection', 'import', 'export', 'capture'), code: oneOf(...ERROR_CODES) },
   session_summary: {
     active_minutes: DURATION,
     searches: COUNT,
@@ -306,9 +320,8 @@ export function commonProperties(env: UsageEnvironment): UsageProperties {
   };
 }
 
-const VERSION = /^\d{1,4}\.\d{1,4}\.\d{1,6}(?:-[0-9A-Za-z.]{1,20})?$/;
-/** An error or failure code Logline names itself, never a message. */
-const CODE = /^[A-Za-z][A-Za-z0-9_]{0,39}$/;
+// Numbers only, and VS Code Insiders' own suffix: a free-form pre-release tag could carry anything.
+const VERSION = /^\d{1,4}\.\d{1,4}\.\d{1,6}(?:-insider)?$/;
 
 function settingValue(rule: 'boolean' | 'number' | 'custom' | readonly string[], value: unknown): UsageValue {
   if (rule === 'boolean') return typeof value === 'boolean' ? value : 'custom';
@@ -346,8 +359,6 @@ function check(
       return typeof value === 'number' ? bytesBucket(value) : undefined;
     case 'version':
       return typeof value === 'string' && VERSION.test(value) ? value : undefined;
-    case 'code':
-      return typeof value === 'string' && CODE.test(value) ? value : undefined;
     case 'setting': {
       const key = properties.key;
       const setting = typeof key === 'string' ? vocabulary.settings.get(key) : undefined;

@@ -269,7 +269,7 @@
       "code": {
         "classification": "SystemMetaData",
         "purpose": "FeatureInsight",
-        "comment": "A code Logline names, such as INVALID_INPUT."
+        "comment": "One of: NOT_SHARED, SHARE_CHANGED, INVALID_INPUT, EVENT_UNAVAILABLE, CANCELLED, BUSY, CONNECTION_UNAVAILABLE, RANGE_TOO_LARGE, REMOTE_ERROR, RESULT_TOO_LARGE."
       },
       "ms": {
         "classification": "SystemMetaData",
@@ -417,7 +417,7 @@
       "code": {
         "classification": "SystemMetaData",
         "purpose": "FeatureInsight",
-        "comment": "A code Logline names, such as INVALID_INPUT."
+        "comment": "One of: start_failed."
       }
     },
     "surjeetbanga.logline/session_summary": {
@@ -581,7 +581,7 @@
     },
     "surjeetbanga.logline/survey sent": {
       "owner": "SurjeetBanga",
-      "comment": "Answers to Suggest a Feature or Vote on What's Next, sent only when the person presses Send after seeing them. The only text Logline sends; it is redacted first.",
+      "comment": "Answers to Suggest a feature or Vote on what's next, sent only when the person presses Send in the Logs panel's form after seeing them. The only text Logline sends; credentials, email addresses, phone and long numbers, IP addresses, host names, URLs, and paths are replaced first. Sent under a one-time ID, not the install\u2019s anonymous ID.",
       "$survey_id": {
         "classification": "SystemMetaData",
         "purpose": "FeatureInsight",
