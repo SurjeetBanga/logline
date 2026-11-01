@@ -491,11 +491,11 @@ test('More actions supports keyboard navigation and restores focus on dismissal'
   assert.equal(dom.activeElement, get('copyResults'));
   const key = (value: string) => get('actionsMenu').listeners.get('keydown')!({ key: value, preventDefault() {} });
   key('ArrowUp');
-  assert.equal(dom.activeElement, get('takeTour'));
+  assert.equal(dom.activeElement, get('voteOnNext'));
   key('ArrowDown');
   assert.equal(dom.activeElement, get('copyResults'));
   key('End');
-  assert.equal(dom.activeElement, get('takeTour'));
+  assert.equal(dom.activeElement, get('voteOnNext'));
   key('Home');
   assert.equal(dom.activeElement, get('copyResults'));
   key('ArrowDown');
@@ -504,7 +504,7 @@ test('More actions supports keyboard navigation and restores focus on dismissal'
   assert.equal(get('actionsMenu').hidden, true);
   assert.equal(dom.activeElement, get('moreActions'));
   get('moreActions').listeners.get('keydown')!({ key: 'ArrowUp', preventDefault() {} });
-  assert.equal(dom.activeElement, get('takeTour'));
+  assert.equal(dom.activeElement, get('voteOnNext'));
   dom.listeners.get('keydown')!({ key: 'Escape' });
   assert.equal(get('actionsMenu').hidden, true);
   assert.equal(dom.activeElement, get('moreActions'));
@@ -518,6 +518,8 @@ test('More actions preserves commands and closes after selection or an outside c
     ['manage', 'manageServers'],
     ['config', 'config'],
     ['help', 'showGuide'],
+    ['suggestFeature', 'suggestFeature'],
+    ['voteOnNext', 'voteOnNext'],
   ]) {
     get('actionsMenu').hidden = true;
     get('moreActions').listeners.get('click')!({ stopPropagation() {} });
@@ -4515,4 +4517,91 @@ test('a Datadog connection lists its services to choose one, and can send a quer
   get('connectionSyntax').listeners.get('click')!();
   assert.equal(get('connectionNative').hidden, true);
   assert.equal(get('connectionTail').textContent, 'Stop tail');
+});
+
+test('Suggest a feature and Vote on what’s next are a dialog in the panel that shows what it will send', () => {
+  const { get, receive, messages, flushFrames } = viewer();
+  const snapshot = (openFeedback: unknown) => ({
+    type: 'snapshot',
+    generation: 1,
+    newest: 0,
+    total: 0,
+    retained: 0,
+    discarded: 0,
+    bytes: 0,
+    maxBytes: 1,
+    truncated: 0,
+    events: [],
+    columns: [],
+    page: 0,
+    pages: 1,
+    matched: 0,
+    openFeedback,
+  });
+  receive(snapshot({ mode: 'suggest', sendable: true }));
+  flushFrames();
+  assert.equal(get('feedbackDialog').open, true, 'the Command Palette or More actions opens it');
+  assert.equal(get('feedbackSuggest').hidden, false);
+  assert.equal(get('feedbackVote').hidden, true);
+  assert.equal(get('feedbackArea').children.length, 6);
+  assert.equal(get('feedbackChoices').children.length, 5);
+  assert.equal(get('feedbackSend').disabled, true, 'nothing to send yet');
+  assert.match(get('feedbackNote').textContent, /Sent anonymously/);
+
+  // What it will send, redacted, as it is typed.
+  const token = ['ghp', 'Z'.repeat(36)].join('_');
+  get('feedbackArea').value = 'Search';
+  get('feedbackText').value = `Group errors by route, my token ${token}`;
+  get('feedbackText').listeners.get('input')!();
+  assert.equal(get('feedbackPreview').hidden, false);
+  assert.equal(get('feedbackPreview').textContent, 'Sent as: Group errors by route, my token [REDACTED]');
+  assert.equal(get('feedbackSend').disabled, false);
+  get('feedbackForm').listeners.get('submit')!({ preventDefault() {} });
+  assert.deepEqual(JSON.parse(JSON.stringify(messages.at(-1))), {
+    type: 'feedbackSend',
+    mode: 'suggest',
+    area: 'Search',
+    text: `Group errors by route, my token ${token}`,
+    github: false,
+  });
+  assert.equal(get('feedbackStatus').textContent, 'Sending…');
+  receive({ type: 'feedbackResult', ok: true, via: 'posthog' });
+  assert.equal(get('feedbackStatus').textContent, 'Thanks, your suggestion was sent.');
+  assert.equal(get('feedbackSend').hidden, true);
+  assert.equal(get('feedbackCancel').textContent, 'Close');
+  get('feedbackCancel').listeners.get('click')!();
+  assert.equal(get('feedbackDialog').open, false);
+
+  // With usage counts off, a vote opens a GitHub issue.
+  receive(snapshot({ mode: 'vote', sendable: false }));
+  flushFrames();
+  assert.equal(get('feedbackVote').hidden, false);
+  assert.match(get('feedbackNote').textContent, /Usage counts are off/);
+  assert.equal(get('feedbackSend').textContent, 'Open GitHub issue');
+  assert.equal(get('feedbackGithub').hidden, true, 'one way to send it, not two');
+  const choice = get('feedbackChoices').children[2].children[0];
+  choice.checked = true;
+  choice.listeners.get('change')!();
+  get('feedbackForm').listeners.get('submit')!({ preventDefault() {} });
+  assert.deepEqual(JSON.parse(JSON.stringify(messages.at(-1))), {
+    type: 'feedbackSend',
+    mode: 'vote',
+    picks: ['Share a captured session with a teammate'],
+    github: true,
+  });
+  receive({ type: 'feedbackResult', ok: true, via: 'github' });
+  assert.match(get('feedbackStatus').textContent, /Opened a GitHub issue/);
+
+  // A vote that could not be sent keeps its picks and offers a GitHub issue.
+  receive(snapshot({ mode: 'vote', sendable: true }));
+  flushFrames();
+  assert.equal(get('feedbackStatus').textContent, '', 'a new form starts clean');
+  const again = get('feedbackChoices').children[0].children[0];
+  again.checked = true;
+  again.listeners.get('change')!();
+  get('feedbackForm').listeners.get('submit')!({ preventDefault() {} });
+  receive({ type: 'feedbackResult', ok: false, via: 'posthog' });
+  assert.match(get('feedbackStatus').textContent, /couldn't send it/);
+  assert.equal(get('feedbackSend').textContent, 'Open GitHub issue');
+  assert.equal(again.checked, true);
 });

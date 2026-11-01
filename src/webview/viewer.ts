@@ -21,6 +21,7 @@ import { createConnectionTab } from './connection-tab';
 import { createRailResize } from './rail-resize';
 import { createTabRail } from './tab-rail';
 import { createTour } from './tour';
+import { createFeedbackForm } from './feedback-form';
 import { createCompare } from './inspection/compare';
 import { createMetricQuery } from './inspection/metric-query';
 import { ViewerState } from './state';
@@ -288,6 +289,10 @@ export function createViewer(api: WebviewApi) {
       connectionTab.receive(data);
       return;
     }
+    if (data.type === 'feedbackResult') {
+      feedback.receive(data);
+      return;
+    }
     if (data.type === 'guideStatus') {
       updateGuideStatus(data);
       return;
@@ -387,6 +392,8 @@ export function createViewer(api: WebviewApi) {
     }
     if (data.openTrace) traceView.show(data.openTrace);
     if (data.startTour) scope.frame(() => startTour());
+    const openFeedback = data.openFeedback;
+    if (openFeedback) scope.frame(() => feedback.open(openFeedback));
     // The guide's Show me: point at the control once this snapshot is on screen.
     const reveal = data.reveal;
     if (reveal) scope.frame(() => revealControl(reveal.target, reveal.fallback));
@@ -858,6 +865,8 @@ export function createViewer(api: WebviewApi) {
     elements.config,
     elements.help,
     elements.takeTour,
+    elements.suggestFeature,
+    elements.voteOnNext,
   ];
   // Copy filtered results is hidden without a filter; keyboard navigation skips it.
   const shownActions = () => actionItems.filter((item) => !item.hidden);
@@ -919,6 +928,29 @@ export function createViewer(api: WebviewApi) {
   scope.listen(elements.statusIcon, 'click', () => api.postMessage({ type: 'showStatus' }));
 
   // The tour: one stop per area of the panel, from the menu, the guide, or the first-run welcome.
+  // Suggest a feature and Vote on what's next, from More actions or the Command Palette.
+  const feedback = createFeedbackForm(
+    {
+      dialog: elements.feedbackDialog,
+      form: elements.feedbackForm,
+      cancel: elements.feedbackCancel,
+      suggestTab: elements.feedbackSuggestTab,
+      voteTab: elements.feedbackVoteTab,
+      suggest: elements.feedbackSuggest,
+      vote: elements.feedbackVote,
+      area: elements.feedbackArea,
+      text: elements.feedbackText,
+      count: elements.feedbackCount,
+      preview: elements.feedbackPreview,
+      choices: elements.feedbackChoices,
+      note: elements.feedbackNote,
+      status: elements.feedbackStatus,
+      send: elements.feedbackSend,
+      github: elements.feedbackGithub,
+    },
+    api,
+    scope,
+  );
   const tour = createTour(scope, {
     prepare: () => {
       if (views.active() !== 'logs') views.show('logs');
@@ -1120,6 +1152,8 @@ export function createViewer(api: WebviewApi) {
   scope.listen(elements.export, 'click', () => exportRequest('export'));
 
   scope.listen(elements.import, 'click', () => api.postMessage({ type: 'import' }));
+  scope.listen(elements.suggestFeature, 'click', () => api.postMessage({ type: 'suggestFeature' }));
+  scope.listen(elements.voteOnNext, 'click', () => api.postMessage({ type: 'voteOnNext' }));
   scope.listen(elements.breakOnLogs, 'click', () =>
     api.postMessage({ type: 'breakOnQuery', query: search.query(), levels: state.currentLevels() }),
   );

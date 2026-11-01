@@ -26,7 +26,6 @@ void doctorCodesComplete;
 // safe to ship; with no key, nothing is sent and Show Usage Data still lists events.
 export const USAGE_HOST = 'https://eu.i.posthog.com';
 export const USAGE_PROJECT_KEY = 'phc_Amvwr7HmP3SzK8uTELYNuC7joo6jKtC8X9TvovZW37b2';
-export const USAGE_DOCS_URL = 'https://github.com/SurjeetBanga/logline/blob/main/PRIVACY.md';
 
 const ID_KEY = 'logline.usage.id';
 const STATE_KEY = 'logline.usage.state';
@@ -52,7 +51,6 @@ interface UsageState {
   /** The local date of the last `active_day`. */
   activeDay?: string;
   milestones?: string[];
-  noticeShown?: boolean;
 }
 
 interface QueuedEvent {
@@ -61,8 +59,8 @@ interface QueuedEvent {
   timestamp: string;
 }
 
-/** Sends one batch; the default posts it to PostHog. */
-export type UsageTransport = (body: string) => Promise<void>;
+/** Sends one batch and says whether it was accepted; the default posts it to PostHog. */
+export type UsageTransport = (body: string) => Promise<boolean>;
 
 /** What a session summary reads from the rest of Logline when it is sent. */
 export interface UsageSummarySource {
@@ -89,7 +87,7 @@ type TelemetryLoggerLike = Pick<
 > &
   Partial<Pick<vscode.TelemetryLogger, 'dispose' | 'onDidChangeEnableStates'>>;
 
-function postBatch(body: string): Promise<void> {
+function postBatch(body: string): Promise<boolean> {
   return new Promise((resolve) => {
     // node:https, not fetch: the extension host routes it through the editor's proxy settings.
     const req = request(
@@ -97,12 +95,13 @@ function postBatch(body: string): Promise<void> {
       { method: 'POST', headers: { 'content-type': 'application/json' }, timeout: 5000 },
       (res) => {
         res.resume();
-        res.on('end', () => resolve());
-        res.on('error', () => resolve());
+        const ok = (res.statusCode ?? 0) >= 200 && (res.statusCode ?? 0) < 300;
+        res.on('end', () => resolve(ok));
+        res.on('error', () => resolve(false));
       },
     );
     req.on('timeout', () => req.destroy());
-    req.on('error', () => resolve());
+    req.on('error', () => resolve(false));
     req.end(body);
   });
 }
@@ -223,7 +222,6 @@ export class Usage implements vscode.Disposable {
           if (!this.logger?.isUsageEnabled) this.queue = [];
         }),
       );
-    void this.showNotice();
   }
 
   /** Whether events are recorded at all: VS Code's telemetry level, then Logline's own switch. */
@@ -382,8 +380,8 @@ export class Usage implements vscode.Disposable {
 
   /**
    * Answers to a PostHog survey, which the person wrote and chose to send. The only
-   * text Logline ever sends; returns false when usage counts are off, so the caller
-   * offers another way.
+   * text Logline ever sends; returns false when usage counts are off or the answers
+   * could not be delivered, so the caller offers another way.
    */
   async survey(surveyId: string, responses: Record<string, string | string[]>): Promise<boolean> {
     if (this.disposed || !this.enabled || !surveyId) return false;
@@ -398,8 +396,7 @@ export class Usage implements vscode.Disposable {
         : answer.slice(0, SURVEY_TEXT_LIMIT);
     const timestamp = new Date(this.now()).toISOString();
     this.queue.push({ event: 'survey sent', properties, timestamp });
-    await this.flush();
-    return true;
+    return this.flush();
   }
 
   /** What Log Doctor found, each kind once a session. */
@@ -478,35 +475,18 @@ export class Usage implements vscode.Disposable {
     });
   }
 
-  /** Tell people once, before anything is sent, and let them turn it off. */
-  private async showNotice(): Promise<void> {
-    if (!this.enabled || this.state.noticeShown) return;
-    this.saveState({ noticeShown: true });
-    const answer = await vscode.window.showInformationMessage(
-      'Logline sends anonymous usage counts, such as which features are used, to help decide what to improve. It never sends log content, searches, paths, or names.',
-      'Turn off',
-      'Learn more',
-    );
-    if (answer === 'Turn off')
-      await vscode.workspace
-        .getConfiguration('logline')
-        .update('telemetry.enabled', false, vscode.ConfigurationTarget.Global);
-    else if (answer === 'Learn more') await vscode.env.openExternal(vscode.Uri.parse(USAGE_DOCS_URL));
-  }
-
-  /** Send what is queued. Nothing is sent before the notice has shown, or once usage counts are off. */
-  async flush(): Promise<void> {
-    if (!this.queue.length) return;
+  /** Send what is queued, unless usage counts were turned off; returns whether it was delivered. */
+  async flush(): Promise<boolean> {
+    if (!this.queue.length) return true;
     if (!this.enabled) {
       this.queue = [];
-      return;
+      return false;
     }
-    if (!this.state.noticeShown) return;
     const batch = this.queue;
     this.queue = [];
     for (const item of batch)
       this.remember(`${item.timestamp.slice(11, 19)}  ${item.event.padEnd(22)} ${describe(item.properties)}`);
-    if (!this.production || !this.projectKey || this.debug) return;
+    if (!this.production || !this.projectKey || this.debug) return true;
     const body = JSON.stringify({
       api_key: this.projectKey,
       batch: batch.map((item) => ({
@@ -516,7 +496,7 @@ export class Usage implements vscode.Disposable {
         properties: { ...this.common, ...item.properties, $process_person_profile: false, $geoip_disable: true },
       })),
     });
-    await this.transport(body).catch(() => undefined);
+    return this.transport(body).catch(() => false);
   }
 
   private remember(line: string): void {
@@ -553,7 +533,10 @@ export class Usage implements vscode.Disposable {
       this.sharingStopped();
       this.sendSummary();
       // Disposed once the last batch is out, so Show Usage Data still lists it.
-      this.closing = this.flush().finally(() => this.dispose());
+      this.closing = this.flush().then(
+        () => this.dispose(),
+        () => this.dispose(),
+      );
     }
     return this.closing;
   }

@@ -6,7 +6,6 @@ import type { LogsController } from './logs-controller';
 import { convertTask } from './tasks/conversion';
 import { showStatus } from './status';
 import { counted, type Usage } from './usage';
-import { suggestFeature, voteOnNext } from './feedback';
 
 export function registerCommands(
   controller: LogsController,
@@ -179,8 +178,8 @@ export function registerCommands(
     }),
     registerCommand('logline.showUsageData', () => usage?.showData()),
     registerCommand('logline.resetUsageId', () => usage?.resetId()),
-    registerCommand('logline.suggestFeature', () => suggestFeature(usage)),
-    registerCommand('logline.voteOnNext', () => voteOnNext(usage)),
+    registerCommand('logline.suggestFeature', () => controller.openFeedback('suggest')),
+    registerCommand('logline.voteOnNext', () => controller.openFeedback('vote')),
     registerCommand('logline.manageTerminalCapture', async () => {
       const terminals = controller.terminalCapture.availableTerminals();
       const choice = await vscode.window.showQuickPick(

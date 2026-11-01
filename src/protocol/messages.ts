@@ -14,6 +14,7 @@ import type { RemoteRunInfo } from '../capture/remote-source';
 import { RANGE_CHOICES, type ConnectionType } from '../core/connections';
 import type { SignatureRow } from '../core/signature-compare';
 import type { MetricSeriesData } from '../core/metric-query';
+import { FEEDBACK_TEXT_LIMIT, type FeedbackOpen, type FeedbackRequest, type FeedbackResult } from '../core/feedback';
 
 export interface Filter {
   query?: string;
@@ -100,7 +101,11 @@ export type ViewRequest =
   | { type: 'connectionAgents'; connectionId: string; enabled: boolean }
   | ({ type: 'compare' } & CompareRequest)
   | { type: 'config'; setting?: string }
-  | { type: 'import' | 'clear' | 'manageServers' | 'addConnection' };
+  | { type: 'import' | 'clear' | 'manageServers' | 'addConnection' }
+  /** Suggest a feature or vote on what's next, from the More actions menu. */
+  | { type: 'suggestFeature' | 'voteOnNext' }
+  /** What the feedback form submitted. */
+  | ({ type: 'feedbackSend' } & FeedbackRequest);
 
 /** Production (a run fetched from a connection, or an imported file) against a local source's newest runs. */
 export interface CompareRequest {
@@ -207,6 +212,8 @@ export interface Snapshot extends Stats {
   reveal?: { target: string; fallback?: string };
   /** Start the guided tour of the panel, applied once. */
   startTour?: boolean;
+  /** Open the feedback form, applied once. */
+  openFeedback?: FeedbackOpen;
   /** Open the Connection form as a tab, applied once; its messages carry `session`. */
   openConnectionForm?: { session: number; title: string; connectionId?: string };
   otlp?: ReceiverStatus;
@@ -286,6 +293,7 @@ export interface GuideStatus {
 }
 export type HostMessage =
   | Snapshot
+  | ({ type: 'feedbackResult' } & FeedbackResult)
   | { type: 'snapshotError'; requestId?: number; message: string }
   | { type: 'update' | 'serversChanged' }
   | ({ type: 'guideStatus' } & GuideStatus)
@@ -570,6 +578,24 @@ export function parseViewRequest(value: unknown): ViewRequest | undefined {
     case 'clear':
     case 'manageServers':
     case 'addConnection':
+    case 'suggestFeature':
+    case 'voteOnNext':
       return { type: msg.type };
+    case 'feedbackSend': {
+      const github = msg.github === true;
+      if (msg.mode === 'suggest') {
+        const area = string('area')?.slice(0, 60);
+        const text = string('text')?.slice(0, FEEDBACK_TEXT_LIMIT * 2);
+        return area !== undefined && text ? { type: msg.type, mode: 'suggest', area, text, github } : undefined;
+      }
+      if (msg.mode === 'vote') {
+        const picks = (Array.isArray(msg.picks) ? msg.picks : [])
+          .filter((pick): pick is string => typeof pick === 'string')
+          .slice(0, 10)
+          .map((pick) => pick.slice(0, 200));
+        return picks.length ? { type: msg.type, mode: 'vote', picks, github } : undefined;
+      }
+      return undefined;
+    }
   }
 }

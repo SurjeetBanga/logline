@@ -1919,6 +1919,113 @@ select {
   justify-content: flex-end;
   margin-top: 12px;
 }
+.feedback-dialog {
+  width: min(460px, 94vw);
+  padding: 14px;
+  color: inherit;
+  background: var(--vscode-editor-background, #1e1e1e);
+  border: 1px solid var(--vscode-panel-border, #555);
+  border-radius: 6px;
+}
+.feedback-dialog::backdrop {
+  background: rgba(0, 0, 0, 0.5);
+}
+.feedback-dialog label {
+  display: block;
+  margin: 10px 0 4px;
+  font-size: 12px;
+  color: var(--vscode-descriptionForeground, #aaa);
+}
+.feedback-dialog select,
+.feedback-dialog textarea {
+  width: 100%;
+  box-sizing: border-box;
+}
+.feedback-dialog textarea {
+  resize: vertical;
+  min-height: 72px;
+  padding: 6px 10px;
+  font: inherit;
+  color: var(--vscode-input-foreground, #ddd);
+  background: var(--vscode-input-background, #333);
+  border: 1px solid var(--vscode-input-border, #555);
+  border-radius: 3px;
+}
+.feedback-dialog textarea:focus {
+  outline: 1px solid var(--vscode-focusBorder, #007fd4);
+  outline-offset: -1px;
+}
+.feedback-choices input[type='checkbox'] {
+  margin: 0;
+  width: auto;
+  height: auto;
+  padding: 0;
+  border: none;
+  background: none;
+}
+.feedback-modes {
+  display: flex;
+  gap: 4px;
+  margin-top: 10px;
+  border-bottom: 1px solid var(--vscode-panel-border, #555);
+}
+.feedback-modes button {
+  padding: 4px 8px 6px;
+  color: var(--vscode-descriptionForeground, #aaa);
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
+}
+.feedback-modes button[aria-selected='true'] {
+  color: var(--vscode-foreground, inherit);
+  border-bottom-color: var(--vscode-focusBorder, #007fd4);
+}
+.feedback-meta {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 4px;
+  font-size: 11px;
+  color: var(--vscode-descriptionForeground, #aaa);
+}
+.feedback-preview {
+  overflow-wrap: anywhere;
+}
+.feedback-hint {
+  margin: 10px 0 6px;
+  font-size: 12px;
+  color: var(--vscode-descriptionForeground, #aaa);
+}
+.feedback-choices label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  padding: 3px 0;
+  font-size: 13px;
+  color: inherit;
+}
+.feedback-note,
+.feedback-status {
+  margin: 10px 0 0;
+  font-size: 12px;
+  color: var(--vscode-descriptionForeground, #aaa);
+}
+.feedback-status:empty {
+  display: none;
+}
+.feedback-actions {
+  gap: 6px;
+}
+#feedbackSend:not(:disabled) {
+  border-color: transparent;
+  color: var(--vscode-button-foreground, #fff);
+  background: var(--vscode-button-background, #0e639c);
+}
+#feedbackSend:not(:disabled):hover {
+  background: var(--vscode-button-hoverBackground, #1177bb);
+}
 .analysis-content {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
@@ -3476,7 +3583,9 @@ th[data-column='base:message'] .column-label {
   margin-left: 4px;
 }
 .doctor-action.doctor-vote {
-  padding: 2px 4px;
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 5px;
 }
 .doctor-thanks {
   margin-left: 4px;

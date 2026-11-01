@@ -865,6 +865,8 @@
       actionsMenu: element("actionsMenu"),
       help: element("help"),
       takeTour: element("takeTour"),
+      suggestFeature: element("suggestFeature"),
+      voteOnNext: element("voteOnNext"),
       welcomeDialog: element("welcomeDialog"),
       welcomeTour: element("welcomeTour"),
       welcomeExplore: element("welcomeExplore"),
@@ -964,6 +966,22 @@
       traceFilter: element("traceFilter"),
       breakOnLogs: element("breakOnLogs"),
       saveSearchDialog: element("saveSearchDialog"),
+      feedbackDialog: element("feedbackDialog"),
+      feedbackForm: element("feedbackForm"),
+      feedbackCancel: element("feedbackCancel"),
+      feedbackSuggestTab: element("feedbackSuggestTab"),
+      feedbackVoteTab: element("feedbackVoteTab"),
+      feedbackSuggest: element("feedbackSuggest"),
+      feedbackVote: element("feedbackVote"),
+      feedbackArea: element("feedbackArea"),
+      feedbackText: element("feedbackText"),
+      feedbackCount: element("feedbackCount"),
+      feedbackPreview: element("feedbackPreview"),
+      feedbackChoices: element("feedbackChoices"),
+      feedbackNote: element("feedbackNote"),
+      feedbackStatus: element("feedbackStatus"),
+      feedbackSend: element("feedbackSend"),
+      feedbackGithub: element("feedbackGithub"),
       saveSearchForm: element("saveSearchForm"),
       saveSearchName: element("saveSearchName"),
       saveSearchCancel: element("saveSearchCancel"),
@@ -1138,14 +1156,14 @@
     const group = document.createElement("span");
     group.className = "doctor-feedback";
     group.dataset.code = code;
-    for (const [helpful, label, title] of [
-      [true, "\u{1F44D}", "This kind of finding is useful"],
-      [false, "\u{1F44E}", "This kind of finding is not useful"]
+    for (const [helpful, name, title] of [
+      [true, "thumbsUp", "This kind of finding is useful"],
+      [false, "thumbsDown", "This kind of finding is not useful"]
     ]) {
       const button = document.createElement("button");
       button.type = "button";
       button.className = "doctor-action doctor-vote";
-      button.textContent = label;
+      button.append(icon(name));
       button.title = title;
       button.setAttribute("aria-label", title);
       button.dataset.doctorFeedback = String(helpful);
@@ -1327,6 +1345,15 @@
       ["circle", { cx: "8", cy: "11.6", r: ".4", fill: "currentColor" }]
     ],
     attached: [["path", { d: "M4 2.5v6h8M9.5 6 12 8.5 9.5 11" }]],
+    // A thumb and its cuff; down is up mirrored.
+    thumbsUp: [
+      ["path", { d: "M2.5 7h2.5v6.5H2.5z" }],
+      ["path", { d: "M5 7l2.6-4.5c.9 0 1.6.8 1.4 1.7L8.6 6.5h3.9c.8 0 1.4.8 1.2 1.6l-1 4.4c-.2.6-.7 1-1.3 1H5" }]
+    ],
+    thumbsDown: [
+      ["path", { d: "M2.5 2.5h2.5V9H2.5z" }],
+      ["path", { d: "M5 9l2.6 4.5c.9 0 1.6-.8 1.4-1.7L8.6 9.5h3.9c.8 0 1.4-.8 1.2-1.6l-1-4.4c-.2-.6-.7-1-1.3-1H5" }]
+    ],
     information: [
       ["circle", { cx: "8", cy: "8", r: "6" }],
       ["path", { d: "M8 7.5v4" }],
@@ -4394,7 +4421,7 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
       button.id = "railAddConnection";
       button.className = "rail-action rail-add";
       button.setAttribute("aria-label", "Add connection");
-      button.title = "Add a Datadog, Postgres, MySQL, MongoDB, or SQLite connection";
+      button.title = "Add a connection to a log service or a database";
       button.append(icon2("add", 13));
       scope.listen(button, "click", () => api.postMessage({ type: "addConnection" }));
       return button;
@@ -4431,7 +4458,7 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
         const empty = document.createElement("div");
         empty.className = "rail-empty";
         const text2 = document.createElement("p");
-        text2.textContent = "Search Datadog, Postgres, MySQL, MongoDB, or SQLite logs next to your local runs.";
+        text2.textContent = "Search Datadog, CloudWatch, Loki, Elasticsearch, Cloud Logging, or a database next to your local runs.";
         const button = document.createElement("button");
         button.type = "button";
         button.className = "rail-empty-add";
@@ -6553,6 +6580,357 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
     };
   }
 
+  // src/core/feedback.ts
+  var FEEDBACK_AREAS = ["Capture", "Search", "Views", "Connections", "Agents", "Something else"];
+  var ROADMAP = [
+    "More log stores and services",
+    "Alerts when a log pattern appears",
+    "Share a captured session with a teammate",
+    "Saved panel layouts and views",
+    "Deeper agent investigations"
+  ];
+  var FEEDBACK_TEXT_LIMIT = 500;
+
+  // src/core/redaction.ts
+  var DEFAULT_REPLACEMENT = "[REDACTED]";
+  var SENSITIVE_KEY = /(?:password|passwd|passphrase|secret|token|api[-_ ]?key|authorization|cookie|private[-_ ]?key|access[-_ ]?key|credential|(?:^|[-_. ])pwd$)/i;
+  var NOT_SENSITIVE_KEY = /(?:count|limit|ttl|expires?|duration|(?:input|output|prompt|completion|cached|reasoning|total|max)[-_.]?tokens)$/i;
+  var SECRET_VALUES = [
+    {
+      hint: "PRIVATE KEY",
+      pattern: /-----BEGIN [A-Z ]{0,20}PRIVATE KEY-----[A-Za-z0-9+/=\s\\]*(?:-----END [A-Z ]{0,20}PRIVATE KEY-----)?/g
+    },
+    { hint: "eyJ", pattern: /\beyJ[A-Za-z0-9_-]{8,}\.eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}/g },
+    { hint: "earer ", pattern: /\b([Bb]earer )[A-Za-z0-9._~+/-]{16,}=*/g, keep: 1 },
+    { hint: "IA", pattern: /\b(?:AKIA|ASIA)[A-Z0-9]{16}\b/g },
+    { hint: "gh", pattern: /\b(?:gh[pousr]_[A-Za-z0-9]{36,}|github_pat_[A-Za-z0-9_]{40,})/g },
+    { hint: "xox", pattern: /\bxox[abprs]-[A-Za-z0-9-]{10,}/g },
+    { hint: "AIza", pattern: /\bAIza[0-9A-Za-z_-]{35}\b/g },
+    { hint: "_live_", pattern: /\b[rs]k_live_[0-9A-Za-z]{16,}/g },
+    // The password in `scheme://user:password@host`.
+    { hint: "://", pattern: /(\b[a-z][a-z0-9+.-]{0,30}:\/\/[^\s:/@"']{1,256}:)[^\s/@"']{1,256}(?=@)/gi, keep: 1 }
+  ];
+  var ANY_SECRET = /PRIVATE KEY|eyJ|earer |AKIA|ASIA|gh[pousr]_|github_pat_|xox[abprs]-|AIza|_live_|:\/\//;
+  function redactSecretValues(text2, replacement) {
+    if (!ANY_SECRET.test(text2)) return text2;
+    for (const { hint, pattern, keep } of SECRET_VALUES) {
+      if (!text2.includes(hint)) continue;
+      text2 = text2.replace(
+        pattern,
+        (match, prefix) => match.includes(replacement) ? match : (keep && typeof prefix === "string" ? prefix : "") + replacement
+      );
+    }
+    return text2;
+  }
+  function normalizedKey(key) {
+    return key.toLowerCase().replace(/[^a-z0-9]/g, "");
+  }
+  function isSensitiveKey(key, fields = []) {
+    const normalized = normalizedKey(key);
+    if (fields.some((field) => normalizedKey(field) === normalized)) return true;
+    return SENSITIVE_KEY.test(key) && !NOT_SENSITIVE_KEY.test(key);
+  }
+  function isKeyCharacter(value) {
+    return value !== void 0 && /[A-Za-z0-9_.-]/.test(value);
+  }
+  function redactAssignments(text2, replacement, sensitive, depth = 0) {
+    let output = "";
+    let cursor = 0;
+    let index = 0;
+    let bareEnd = 0;
+    while (index < text2.length) {
+      const start = index;
+      let key;
+      let keyEnd = index;
+      if ((text2[index] === '"' || text2[index] === "'") && !isKeyCharacter(text2[index - 1])) {
+        const quote2 = text2[index++];
+        const keyStart = index;
+        let escaped = false;
+        while (index < text2.length) {
+          const char = text2[index++];
+          if (escaped) {
+            escaped = false;
+            continue;
+          }
+          if (char === "\\") {
+            escaped = true;
+            continue;
+          }
+          if (char === quote2) {
+            key = text2.slice(keyStart, index - 1);
+            keyEnd = index;
+            break;
+          }
+        }
+      } else if (isKeyCharacter(text2[index]) && !isKeyCharacter(text2[index - 1])) {
+        while (isKeyCharacter(text2[index])) index++;
+        key = text2.slice(start, index);
+        keyEnd = index;
+      } else {
+        index++;
+        continue;
+      }
+      const quotedKey = text2[start] === '"' || text2[start] === "'";
+      if (key === void 0) {
+        index = start + 1;
+        continue;
+      }
+      let separatorEnd = keyEnd;
+      while (/\s/.test(text2[separatorEnd] ?? "")) separatorEnd++;
+      if (text2[separatorEnd] !== ":" && text2[separatorEnd] !== "=") {
+        index = quotedKey ? start + 1 : Math.max(index, keyEnd);
+        continue;
+      }
+      separatorEnd++;
+      while (/\s/.test(text2[separatorEnd] ?? "")) separatorEnd++;
+      const valueStart = separatorEnd;
+      let valueEnd = valueStart;
+      const quote = text2[valueStart] === '"' || text2[valueStart] === "'" ? text2[valueStart] : void 0;
+      if (quote) {
+        valueEnd++;
+        let escaped = false;
+        while (valueEnd < text2.length) {
+          const char = text2[valueEnd++];
+          if (escaped) escaped = false;
+          else if (char === "\\") escaped = true;
+          else if (char === quote) break;
+        }
+      } else {
+        valueEnd = Math.max(valueStart, bareEnd);
+        while (valueEnd < text2.length && !/[\s,;\]}]/.test(text2[valueEnd])) valueEnd++;
+        bareEnd = valueEnd;
+        const scheme = valueEnd - valueStart <= 6 ? text2.slice(valueStart, valueEnd).toLowerCase() : "";
+        if (scheme === "bearer" || scheme === "basic") {
+          while (/\s/.test(text2[valueEnd] ?? "")) valueEnd++;
+          while (valueEnd < text2.length && !/[\s,;\]}]/.test(text2[valueEnd])) valueEnd++;
+          bareEnd = valueEnd;
+        }
+        const last = text2[valueEnd - 1];
+        if (valueEnd - valueStart > 1 && (last === '"' || last === "'")) valueEnd--;
+      }
+      if (valueEnd === valueStart) {
+        index = Math.max(index, keyEnd);
+        continue;
+      }
+      if (!sensitive(key)) {
+        if (quote && depth < 4) {
+          const encoded = text2.slice(valueStart, valueEnd);
+          let decoded;
+          try {
+            decoded = quote === '"' ? JSON.parse(encoded) : encoded.slice(1, -1);
+          } catch {
+          }
+          if (typeof decoded === "string") {
+            const redacted = redactAssignments(decoded, replacement, sensitive, depth + 1);
+            if (redacted !== decoded) {
+              output += text2.slice(cursor, valueStart) + (quote === '"' ? JSON.stringify(redacted) : quote + redacted + quote);
+              cursor = valueEnd;
+            }
+          }
+        }
+        index = quote ? valueEnd : valueStart;
+        continue;
+      }
+      output += text2.slice(cursor, valueStart);
+      if (quote) output += quote + replacement + (text2[valueEnd - 1] === quote ? quote : "");
+      else output += replacement;
+      cursor = valueEnd;
+      index = valueEnd;
+    }
+    return cursor === 0 ? text2 : output + text2.slice(cursor);
+  }
+  function redactFields(fields, replacement, configuredFields, redactText2) {
+    const sensitivePaths = /* @__PURE__ */ new Map();
+    for (const [key, value] of Object.entries(fields)) {
+      const parts = key.split(".");
+      const sensitivePath = isSensitiveKey(key, configuredFields) || parts.slice(0, -1).some((_part, index) => isSensitiveKey(parts.slice(0, index + 1).join("."), configuredFields));
+      if (sensitivePath) sensitivePaths.set(value, [...sensitivePaths.get(value) ?? [], key]);
+    }
+    const redacted = {};
+    for (const [key, value] of Object.entries(fields)) {
+      const sensitive = isSensitiveKey(key, configuredFields) || (sensitivePaths.get(value)?.some((path) => path === key || path.endsWith("." + key)) ?? false);
+      const safeValue = typeof value === "string" ? redactText2(value) : value;
+      if (sensitive) {
+        if (key === "__proto__")
+          Object.defineProperty(redacted, key, {
+            value: replacement,
+            enumerable: true,
+            writable: true,
+            configurable: true
+          });
+        else redacted[key] = replacement;
+      } else if (key === "__proto__")
+        Object.defineProperty(redacted, key, { value: safeValue, enumerable: true, writable: true, configurable: true });
+      else redacted[key] = safeValue;
+    }
+    return redacted;
+  }
+  function createRedactor(options = {}) {
+    const enabled = options.enabled !== false;
+    const replacement = options.replacement ?? DEFAULT_REPLACEMENT;
+    const configuredFields = [...options.fields ?? []];
+    const redactTextInternal = (text2) => enabled ? redactSecretValues(
+      redactAssignments(text2, replacement, (key) => isSensitiveKey(key, configuredFields)),
+      replacement
+    ) : text2;
+    const redactValueInternal = (value, key) => {
+      if (!enabled) return value;
+      if (key !== void 0 && isSensitiveKey(key, configuredFields))
+        return value === void 0 || value === null ? value : replacement;
+      if (typeof value === "string") return redactTextInternal(value);
+      if (Array.isArray(value)) return value.map((item) => redactValueInternal(item));
+      if (!value || typeof value !== "object") return value;
+      return Object.fromEntries(
+        Object.entries(value).map(([entryKey, entryValue]) => [entryKey, redactValueInternal(entryValue, entryKey)])
+      );
+    };
+    const redactEventInternal = (event) => {
+      if (!enabled) return { ...event };
+      const redacted = {
+        ...event,
+        fields: event.fields ? redactFields(event.fields, replacement, configuredFields, redactTextInternal) : event.fields,
+        message: event.message === void 0 ? event.message : redactTextInternal(event.message)
+      };
+      for (const key of [
+        "timestamp",
+        "stream",
+        "serverId",
+        "server",
+        "sessionId",
+        "taskName",
+        "taskType",
+        "taskState",
+        "dependencyState",
+        "exitReason",
+        "command",
+        "cwd",
+        "captureReason"
+      ]) {
+        const value = redacted[key];
+        if (typeof value === "string") redacted[key] = redactTextInternal(value);
+      }
+      if (Array.isArray(redacted.dependencies))
+        redacted.dependencies = redacted.dependencies.map((value) => redactTextInternal(value));
+      if (event.raw !== void 0) {
+        let value;
+        try {
+          value = JSON.parse(event.raw);
+        } catch {
+          redacted.raw = redactTextInternal(event.raw);
+          return redacted;
+        }
+        try {
+          redacted.raw = JSON.stringify(redactValueInternal(value));
+        } catch {
+          redacted.raw = replacement;
+        }
+      }
+      return redacted;
+    };
+    return { text: redactTextInternal, value: redactValueInternal, event: redactEventInternal };
+  }
+  function redactText(text2, options = {}) {
+    return createRedactor(options).text(text2);
+  }
+
+  // src/webview/feedback-form.ts
+  function createFeedbackForm(elements, api, scope) {
+    let mode = "suggest";
+    let sendable = true;
+    let state = "editing";
+    const checks = [];
+    for (const area of FEEDBACK_AREAS) {
+      const option = document.createElement("option");
+      option.value = area;
+      option.textContent = area;
+      elements.area.append(option);
+    }
+    for (const [index, choice] of ROADMAP.entries()) {
+      const label = document.createElement("label");
+      const check = document.createElement("input");
+      check.type = "checkbox";
+      check.value = choice;
+      check.id = `feedbackChoice${index}`;
+      const text2 = document.createElement("span");
+      text2.textContent = choice;
+      label.append(check, text2);
+      elements.choices.append(label);
+      checks.push(check);
+      scope.listen(check, "change", () => update());
+    }
+    function show(next) {
+      mode = next;
+      elements.suggest.hidden = mode !== "suggest";
+      elements.vote.hidden = mode !== "vote";
+      elements.suggestTab.setAttribute("aria-selected", String(mode === "suggest"));
+      elements.voteTab.setAttribute("aria-selected", String(mode === "vote"));
+      update();
+    }
+    function request(github) {
+      if (mode === "suggest") {
+        const text2 = elements.text.value.trim();
+        return text2 ? { mode, area: elements.area.value, text: text2, github } : void 0;
+      }
+      const picks = checks.filter((check) => check.checked).map((check) => check.value);
+      return picks.length ? { mode, picks, github } : void 0;
+    }
+    function update() {
+      const text2 = elements.text.value.trim();
+      elements.count.textContent = `${elements.text.value.length} / ${FEEDBACK_TEXT_LIMIT}`;
+      const redacted = text2 ? redactText(text2) : "";
+      elements.preview.hidden = redacted === text2;
+      elements.preview.textContent = redacted === text2 ? "" : `Sent as: ${redacted}`;
+      const ready = request(false) !== void 0 && state !== "sending";
+      elements.send.disabled = !ready || state === "done";
+      elements.github.disabled = !ready || state === "done";
+      elements.send.hidden = state === "done";
+      elements.github.hidden = state === "done" || !sendable;
+      elements.send.textContent = sendable ? "Send" : "Open GitHub issue";
+      elements.cancel.textContent = state === "done" ? "Close" : "Cancel";
+      elements.note.textContent = sendable ? "Sent anonymously to the Logline developers, with your other usage counts." : "Usage counts are off, so this opens a GitHub issue with it instead.";
+    }
+    function submit(github) {
+      const body = request(github || !sendable);
+      if (!body || state !== "editing") return;
+      state = "sending";
+      elements.status.textContent = body.github ? "Opening a GitHub issue\u2026" : "Sending\u2026";
+      update();
+      api.postMessage({ type: "feedbackSend", ...body });
+    }
+    function open(request2) {
+      sendable = request2.sendable;
+      state = "editing";
+      elements.text.value = "";
+      for (const check of checks) check.checked = false;
+      elements.status.textContent = "";
+      show(request2.mode);
+      if (!elements.dialog.open) elements.dialog.showModal();
+      (mode === "suggest" ? elements.text : checks[0])?.focus?.();
+    }
+    function receive(result) {
+      if (state !== "sending") return;
+      if (result.ok) {
+        state = "done";
+        elements.status.textContent = result.via === "github" ? "Opened a GitHub issue in your browser. Thanks!" : mode === "suggest" ? "Thanks, your suggestion was sent." : "Thanks, your vote was counted.";
+      } else {
+        state = "editing";
+        sendable = false;
+        elements.status.textContent = "Logline couldn't send it. You can open a GitHub issue with it instead.";
+      }
+      update();
+    }
+    scope.listen(elements.suggestTab, "click", () => show("suggest"));
+    scope.listen(elements.voteTab, "click", () => show("vote"));
+    scope.listen(elements.text, "input", () => update());
+    scope.listen(elements.cancel, "click", () => elements.dialog.close());
+    scope.listen(elements.github, "click", () => submit(true));
+    scope.listen(elements.form, "submit", (event) => {
+      event.preventDefault();
+      submit(false);
+    });
+    return { open, receive };
+  }
+
   // src/webview/inspection/compare.ts
   var STATUS = {
     reproduced: {
@@ -8337,6 +8715,10 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
         connectionTab.receive(data);
         return;
       }
+      if (data.type === "feedbackResult") {
+        feedback.receive(data);
+        return;
+      }
       if (data.type === "guideStatus") {
         updateGuideStatus(data);
         return;
@@ -8430,6 +8812,8 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
       }
       if (data.openTrace) traceView.show(data.openTrace);
       if (data.startTour) scope.frame(() => startTour());
+      const openFeedback = data.openFeedback;
+      if (openFeedback) scope.frame(() => feedback.open(openFeedback));
       const reveal = data.reveal;
       if (reveal) scope.frame(() => revealControl(reveal.target, reveal.fallback));
       if (data.applySource && data.servers?.some((server) => server.id === data.applySource) && (data.applySource !== state.selectedServer || (data.applyRun ?? "") !== state.selectedSession)) {
@@ -8790,7 +9174,9 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
       elements.manage,
       elements.config,
       elements.help,
-      elements.takeTour
+      elements.takeTour,
+      elements.suggestFeature,
+      elements.voteOnNext
     ];
     const shownActions = () => actionItems.filter((item) => !item.hidden);
     scope.listen(elements.moreActions, "click", () => {
@@ -8838,6 +9224,28 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
       sharePanel.open();
     });
     scope.listen(elements.statusIcon, "click", () => api.postMessage({ type: "showStatus" }));
+    const feedback = createFeedbackForm(
+      {
+        dialog: elements.feedbackDialog,
+        form: elements.feedbackForm,
+        cancel: elements.feedbackCancel,
+        suggestTab: elements.feedbackSuggestTab,
+        voteTab: elements.feedbackVoteTab,
+        suggest: elements.feedbackSuggest,
+        vote: elements.feedbackVote,
+        area: elements.feedbackArea,
+        text: elements.feedbackText,
+        count: elements.feedbackCount,
+        preview: elements.feedbackPreview,
+        choices: elements.feedbackChoices,
+        note: elements.feedbackNote,
+        status: elements.feedbackStatus,
+        send: elements.feedbackSend,
+        github: elements.feedbackGithub
+      },
+      api,
+      scope
+    );
     const tour = createTour(scope, {
       prepare: () => {
         if (views.active() !== "logs") views.show("logs");
@@ -9019,6 +9427,8 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
     }
     scope.listen(elements.export, "click", () => exportRequest("export"));
     scope.listen(elements.import, "click", () => api.postMessage({ type: "import" }));
+    scope.listen(elements.suggestFeature, "click", () => api.postMessage({ type: "suggestFeature" }));
+    scope.listen(elements.voteOnNext, "click", () => api.postMessage({ type: "voteOnNext" }));
     scope.listen(
       elements.breakOnLogs,
       "click",

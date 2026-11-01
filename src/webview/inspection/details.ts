@@ -24,6 +24,15 @@ const ICONS: Record<string, IconPart[]> = {
     ['circle', { cx: '8', cy: '11.6', r: '.4', fill: 'currentColor' }],
   ],
   attached: [['path', { d: 'M4 2.5v6h8M9.5 6 12 8.5 9.5 11' }]],
+  // A thumb and its cuff; down is up mirrored.
+  thumbsUp: [
+    ['path', { d: 'M2.5 7h2.5v6.5H2.5z' }],
+    ['path', { d: 'M5 7l2.6-4.5c.9 0 1.6.8 1.4 1.7L8.6 6.5h3.9c.8 0 1.4.8 1.2 1.6l-1 4.4c-.2.6-.7 1-1.3 1H5' }],
+  ],
+  thumbsDown: [
+    ['path', { d: 'M2.5 2.5h2.5V9H2.5z' }],
+    ['path', { d: 'M5 9l2.6 4.5c.9 0 1.6-.8 1.4-1.7L8.6 9.5h3.9c.8 0 1.4-.8 1.2-1.6l-1-4.4c-.2-.6-.7-1-1.3-1H5' }],
+  ],
   information: [
     ['circle', { cx: '8', cy: '8', r: '6' }],
     ['path', { d: 'M8 7.5v4' }],

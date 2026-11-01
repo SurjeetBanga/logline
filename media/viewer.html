@@ -361,6 +361,25 @@
                 <span id="helpLabel">Help</span><span id="helpBadge" class="new-badge" hidden>New</span>
               </button>
               <button id="takeTour" type="button" role="menuitem" tabindex="-1">Take the tour</button>
+              <div class="menu-separator" role="separator"></div>
+              <button
+                id="suggestFeature"
+                type="button"
+                role="menuitem"
+                tabindex="-1"
+                title="Tell the Logline developers what to build"
+              >
+                Suggest a feature…
+              </button>
+              <button
+                id="voteOnNext"
+                type="button"
+                role="menuitem"
+                tabindex="-1"
+                title="Pick what Logline should do next"
+              >
+                Vote on what's next…
+              </button>
             </div>
           </div>
         </div>
@@ -1302,6 +1321,46 @@
       <button id="tourHintStart" class="link-button" type="button">Start it now</button>
       <button id="tourHintDismiss" type="button">Got it</button>
     </div>
+    <dialog id="feedbackDialog" class="feedback-dialog" aria-labelledby="feedbackTitle">
+      <form id="feedbackForm">
+        <div class="context-header">
+          <strong id="feedbackTitle">Tell us what to build</strong
+          ><button id="feedbackCancel" type="button">Cancel</button>
+        </div>
+        <div class="feedback-modes" role="tablist" aria-label="Feedback">
+          <button id="feedbackSuggestTab" type="button" role="tab" aria-controls="feedbackSuggest">
+            Suggest a feature
+          </button>
+          <button id="feedbackVoteTab" type="button" role="tab" aria-controls="feedbackVote">
+            Vote on what's next
+          </button>
+        </div>
+        <div id="feedbackSuggest" role="tabpanel" aria-labelledby="feedbackSuggestTab">
+          <label for="feedbackArea">It's about</label>
+          <select id="feedbackArea"></select>
+          <label for="feedbackText">What should Logline do?</label>
+          <textarea
+            id="feedbackText"
+            rows="4"
+            maxlength="500"
+            placeholder="Describe the problem or the idea. Don't paste logs or secrets."
+          ></textarea>
+          <div class="feedback-meta">
+            <span id="feedbackPreview" class="feedback-preview" hidden></span><span id="feedbackCount">0 / 500</span>
+          </div>
+        </div>
+        <div id="feedbackVote" role="tabpanel" aria-labelledby="feedbackVoteTab" hidden>
+          <p class="feedback-hint">Pick any that would help you.</p>
+          <div id="feedbackChoices" class="feedback-choices"></div>
+        </div>
+        <p id="feedbackNote" class="feedback-note"></p>
+        <p id="feedbackStatus" class="feedback-status" role="status" aria-live="polite"></p>
+        <div class="save-search-actions feedback-actions">
+          <button id="feedbackGithub" type="button" class="secondary">Open GitHub issue instead</button>
+          <button id="feedbackSend" type="submit">Send</button>
+        </div>
+      </form>
+    </dialog>
     <dialog id="saveSearchDialog" aria-labelledby="saveSearchTitle">
       <form id="saveSearchForm">
         <div class="context-header">

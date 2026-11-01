@@ -60,7 +60,11 @@ export function activate(context: vscode.ExtensionContext): { provider: LogsProv
   const logs = controller;
   const rating = new RatingPrompt(context.globalState, () => logs.store.total > 0);
   rating.start();
-  const feedback = new FeedbackPrompt(context.globalState, usage, () => logs.store.total > 0);
+  const feedback = new FeedbackPrompt(
+    context.globalState,
+    () => logs.openFeedback('vote'),
+    () => logs.store.total > 0,
+  );
   feedback.start();
   context.subscriptions.push(rating, feedback);
   // Editor surfaces are optional: hosts without CodeLens support still capture logs.
