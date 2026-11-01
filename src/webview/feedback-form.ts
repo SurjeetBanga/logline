@@ -5,8 +5,8 @@ import {
   type FeedbackOpen,
   type FeedbackRequest,
   type FeedbackResult,
+  scrubFeedback,
 } from '../core/feedback';
-import { redactText } from '../core/redaction';
 import type { EventScope } from './event-scope';
 import type { WebviewApi } from './types';
 
@@ -31,8 +31,8 @@ export interface FeedbackElements {
 
 /**
  * Suggest a feature and Vote on what's next, as a dialog in the Logs panel. A
- * suggestion is shown as it will be sent, redacted like an export; the editor
- * redacts it again before it leaves. With usage counts off it opens a GitHub issue.
+ * suggestion is shown as it will be sent, with credentials and personal details
+ * replaced; the editor scrubs it again before it leaves. With usage counts off it opens a GitHub issue.
  */
 export function createFeedbackForm(elements: FeedbackElements, api: WebviewApi, scope: EventScope) {
   let mode: FeedbackOpen['mode'] = 'suggest';
@@ -81,8 +81,8 @@ export function createFeedbackForm(elements: FeedbackElements, api: WebviewApi, 
   function update(): void {
     const text = elements.text.value.trim();
     elements.count.textContent = `${elements.text.value.length} / ${FEEDBACK_TEXT_LIMIT}`;
-    // Show what will be sent when redaction changed it.
-    const redacted = text ? redactText(text) : '';
+    // Show what will be sent when scrubbing changed it.
+    const redacted = text ? scrubFeedback(text) : '';
     elements.preview.hidden = redacted === text;
     elements.preview.textContent = redacted === text ? '' : `Sent as: ${redacted}`;
     const ready = request(false) !== undefined && state !== 'sending';

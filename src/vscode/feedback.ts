@@ -1,12 +1,5 @@
 import * as vscode from 'vscode';
-import {
-  FEEDBACK_AREAS,
-  FEEDBACK_TEXT_LIMIT,
-  ROADMAP,
-  type FeedbackRequest,
-  type FeedbackResult,
-} from '../core/feedback';
-import { redactText } from '../core/redaction';
+import { FEEDBACK_AREAS, ROADMAP, type FeedbackRequest, type FeedbackResult, scrubFeedback } from '../core/feedback';
 import type { Usage } from './usage';
 
 // PostHog surveys of type API: PostHog shows nothing, the Logs panel's form asks and
@@ -44,13 +37,13 @@ export function feedbackSendable(usage: Usage | undefined): boolean {
 /**
  * Send what the Logs panel's form submitted: to the developers as survey answers, or
  * as a GitHub issue when asked, when usage counts are off, or never in a form Logline
- * did not offer. A suggestion is redacted here too, whatever the form showed.
+ * did not offer. A suggestion is scrubbed here too, whatever the form showed.
  */
 export async function sendFeedback(usage: Usage | undefined, request: FeedbackRequest): Promise<FeedbackResult> {
   const github = request.github === true || !feedbackSendable(usage);
   if (request.mode === 'suggest') {
     const area = (FEEDBACK_AREAS as readonly string[]).includes(request.area) ? request.area : 'Something else';
-    const text = redactText(request.text.trim().slice(0, FEEDBACK_TEXT_LIMIT));
+    const text = scrubFeedback(request.text);
     if (!text) return { ok: false, via: github ? 'github' : 'posthog' };
     if (!github)
       return {

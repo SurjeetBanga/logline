@@ -354,8 +354,8 @@ Logline sends anonymous usage counts, such as which features are used, how often
 
 - Usage counts follow VS Code's `telemetry.telemetryLevel`, and `logline.telemetry.enabled` turns them off for Logline only. `DO_NOT_TRACK=1` turns them off too.
 - **Logline: Show Usage Data** shows every event sent from this window and your anonymous ID. **Logline: Reset Usage ID** starts a new one.
-- **Suggest a feature…** and **Vote on what's next…**, in **More actions** in the Logs panel or the Command Palette, open a short form in the Logs panel. A suggestion shows what it will send, redacted, before you press **Send**. With usage counts off, or when it cannot be sent, the form opens a GitHub issue instead. After two weeks of use, Logline asks once what it should do next.
-- In the **Issues** tab, 👍 and 👎 on a finding say whether that kind of finding helps you. A few minutes after **Ask Copilot**, Logline may ask whether the investigation helped, at most once a week and three times in all. Both are sent only while usage counts are on.
+- **Suggest a feature…** and **Vote on what's next…**, in **More actions** in the Logs panel or the Command Palette (**Logline: Suggest a Feature**, **Logline: Vote on What's Next**), open a short form in the Logs panel. A suggestion shows exactly what it will send, with credentials, email addresses, phone and long numbers, IP addresses, host names, URLs, and paths replaced, before you press **Send**. With usage counts off, or when it cannot be sent, the form offers a GitHub issue instead; GitHub issues are public. After two weeks of use, Logline asks once what it should do next.
+- In the **Issues** tab, thumbs up and down on a finding say whether that kind of finding helps you. A few minutes after **Ask Copilot**, Logline may ask whether the investigation helped, at most once a week and three times in all. Both are sent only while usage counts are on.
 
 ## Editors other than VS Code
 

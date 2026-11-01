@@ -566,3 +566,13 @@ test('a window left open sends a summary every day, and sends batches every minu
   assert.equal(summaries[0].properties.searches, '1-9');
   usage.dispose();
 });
+
+test('events are timed to the minute, no finer', async () => {
+  const { usage, sent, advance } = setup();
+  advance(37_123);
+  usage.start();
+  await usage.flush();
+  assert.ok(sent.length > 0);
+  for (const item of sent as unknown as { timestamp: string }[]) assert.match(item.timestamp, /:00\.000Z$/);
+  usage.dispose();
+});

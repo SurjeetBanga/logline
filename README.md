@@ -67,7 +67,10 @@ New to it? Logline offers a one-minute tour the first time, which **More actions
 | **Troubleshooting** | **Logline: Show Status** shows what is on, off, or broken, with the fix. |
 | **Feedback** | **More actions → Suggest a feature…** or **Vote on what's next…** tells us what to build. |
 
-Logline keeps your logs on your machine. Nothing from them leaves it unless you share it with an agent or query a connection you added. Logline sends anonymous usage counts, such as which features are used, never log content, searches, paths, or names; see [Privacy](PRIVACY.md) to see what is sent or turn it off.
+
+## Privacy
+
+Logline keeps your logs on your machine. Nothing from them leaves it unless you share it with an agent or query a connection you added. Logline does send anonymous usage counts, such as which features are used and how long they take, so we can see what to improve: never log content, searches, paths, or names. They follow VS Code's telemetry setting, and `logline.telemetry.enabled` turns them off for Logline only. [PRIVACY.md](PRIVACY.md) lists exactly what is sent.
 
 ## Learn more
 

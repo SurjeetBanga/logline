@@ -76,6 +76,11 @@ test('numbers leave as buckets, codes and versions only in their own shape', () 
     { area: 'bridge' },
     'a message is not a code',
   );
+  assert.deepEqual(
+    sanitizeUsage('agent_tool', { tool: 'logline_search_logs', code: 'prodhost' }, vocabulary),
+    { tool: 'logline_search_logs' },
+    'only codes Logline names, not any one word',
+  );
   assert.deepEqual(sanitizeUsage('updated', { from: '1.18.0' }, vocabulary), { from: '1.18.0' });
   assert.deepEqual(sanitizeUsage('updated', { from: 'C:\\Users\\me' }, vocabulary), {});
   assert.deepEqual(
