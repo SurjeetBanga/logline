@@ -37,9 +37,15 @@ test('a request that gets no answer says why', async () => {
   });
   const hang: Fetch = (_url, init) =>
     new Promise((_resolve, reject) => init.signal?.addEventListener('abort', () => reject(new Error('aborted'))));
-  await assert.rejects(requestJson({ ...base, timeoutMs: 10, url: 'x', headers: {}, fetcher: hang }), {
-    message: 'The query took longer than 10 ms and was stopped.',
-  });
+  // AbortSignal.timeout does not keep the process alive, as the editor does; this timer does, while it waits.
+  const alive = setTimeout(() => undefined, 5000);
+  try {
+    await assert.rejects(requestJson({ ...base, timeoutMs: 10, url: 'x', headers: {}, fetcher: hang }), {
+      message: 'The query took longer than 10 ms and was stopped.',
+    });
+  } finally {
+    clearTimeout(alive);
+  }
   const cancel = new AbortController();
   const cancelled = requestJson({ ...base, url: 'x', headers: {}, signal: cancel.signal, fetcher: hang });
   cancel.abort();
