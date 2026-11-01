@@ -90,6 +90,7 @@ export class LogBreakpoints implements vscode.Disposable {
       return;
     }
     const added = this.addBreakpoint(target.uri, target.line, target.site);
+    this.counted();
     const where = `${vscode.workspace.asRelativePath(target.uri)}:${target.line}`;
     await this.reveal(target.uri, target.line);
     void vscode.window.showInformationMessage(
@@ -97,6 +98,12 @@ export class LogBreakpoints implements vscode.Disposable {
         ? `Logline added a breakpoint at ${where}. The debugger stops there the next time this statement runs.`
         : `A breakpoint is already set at ${where}.`,
     );
+  }
+
+  /** A log breakpoint was set, from the panel, the Command Palette, or an event. */
+  private counted(): void {
+    this.sources.usage?.record('log_breakpoint', { step: 'set' });
+    this.sources.usage?.milestone('first_log_breakpoint');
   }
 
   /** Break on every statement that logged a matching event, and pause after any other matching output. */
@@ -109,6 +116,7 @@ export class LogBreakpoints implements vscode.Disposable {
       void vscode.window.showWarningMessage(`Logline: ${(error as Error).message}`);
       return;
     }
+    this.counted();
     let added = 0;
     if (this.sources.lens()?.enabled) {
       const sites = new Map<string, LogSite>();
