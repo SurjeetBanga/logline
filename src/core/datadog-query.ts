@@ -2,8 +2,8 @@
 // does: a field value is matched whole unless it has a `*`, and a word is a
 // word of the message. Fetched logs are filtered again with the whole search,
 // so terms Datadog cannot express (regular expressions, `changed:`) still apply.
-import { parseQuery, type Token } from './query';
-import { queryTokens } from './query-tokens';
+import { pushDown, termGroups, typedValue } from './pushdown';
+import type { Token } from './query';
 
 // Characters with a meaning in Datadog's search syntax, escaped in values.
 const SPECIAL = /[+\-=&|><!(){}[\]^"“”~*?:\\/\s]/g;
@@ -12,7 +12,6 @@ const escape = (value: string) => value.replace(SPECIAL, (character) => `\\${cha
 const pattern = (value: string) => value.replace(SPECIAL, (character) => (character === '*' ? '*' : `\\${character}`));
 // A Logline field that Datadog keeps as a reserved attribute rather than under `@`.
 const RESERVED: Record<string, string> = { service: 'service', host: 'host', source: 'source', traceId: 'trace_id' };
-const REGEX_TERM = /^-?(?:@?[A-Za-z_][A-Za-z0-9_.]*:(?!\/\/))?\/.+\/[dgimsuvy]*$/;
 const NUMBER = /^-?\d+(?:\.\d+)?$/;
 
 /**
@@ -44,23 +43,6 @@ const STATUSES: Record<string, string[]> = {
 function attribute(name: string): string {
   // An attribute name keeps its dots (`@http.url`) and loses anything that would end the term.
   return `@${name.replace(/[^A-Za-z0-9_.\-@]/g, '_')}`;
-}
-
-/**
- * The value as typed. The parser lowercases values because Logline compares
- * them without case, but Datadog compares attribute values with case.
- */
-function typedValue(text: string, token: Token): string {
-  let value = text.replace(/^-/, '');
-  if (token.field !== undefined) value = value.slice(value.indexOf(':') + 1);
-  if (value.startsWith('"') && value.endsWith('"')) {
-    try {
-      value = JSON.parse(value) as string;
-    } catch {
-      value = value.slice(1, -1);
-    }
-  }
-  return value.toLowerCase() === token.value ? value : token.value;
 }
 
 /**
@@ -117,37 +99,16 @@ export interface DatadogQuery {
 
 /** Translate a search into Datadog log search syntax; `*` when Datadog cannot narrow it. */
 export function datadogQuery(input: string): DatadogQuery {
-  const groups: { text: string; token?: Token }[][] = [[]];
-  for (const text of queryTokens(input.slice(0, 1024))) {
-    if (text === 'OR' || text === 'or') groups.push([]);
-    else if (REGEX_TERM.test(text)) groups.at(-1)!.push({ text });
-    else {
-      const token = parseQuery(text)[0]?.[0];
-      if (token) groups.at(-1)!.push({ text, token });
-    }
-  }
-  const pushed = new Set<string>();
-  const local = new Set<string>();
-  const alternatives: string[] = [];
-  let unrestricted = false;
-  for (const group of groups.filter((candidate) => candidate.length)) {
-    const terms: string[] = [];
-    for (const { text, token } of group) {
-      const translated = token && term(token, text);
-      if (translated) {
-        terms.push(translated);
-        pushed.add(text);
-      } else local.add(text);
-    }
-    if (!terms.length) unrestricted = true;
-    alternatives.push(terms.join(' '));
-  }
-  if (unrestricted || !alternatives.length)
-    return { query: '*', pushed: [], local: groups.flat().map((term) => term.text) };
+  const { branches, pushed, local, unrestricted } = pushDown(
+    termGroups(input),
+    (token, text) => term(token, text) || undefined,
+  );
+  if (unrestricted || !branches.length) return { query: '*', pushed: [], local };
+  const alternatives = branches.map((terms) => terms.join(' '));
   return {
     query: alternatives.length === 1 ? alternatives[0] : alternatives.map((terms) => `(${terms})`).join(' OR '),
-    pushed: [...pushed],
-    local: [...local],
+    pushed,
+    local,
   };
 }
 

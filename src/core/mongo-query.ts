@@ -3,8 +3,8 @@
 // search, never fewer: the fetched documents are filtered again with the full
 // search, so terms a filter cannot express, such as regular expressions, still apply.
 import type { ColumnInfo, LogTableMapping, MappedField } from './connections';
-import { parseQuery, type Token } from './query';
-import { queryTokens } from './query-tokens';
+import { pushDown, termGroups } from './pushdown';
+import type { Token } from './query';
 
 export type MongoFilter = Record<string, unknown>;
 
@@ -122,62 +122,24 @@ function condition(token: Token, request: MongoLogRequest, now: number, time: Ti
   return token.negate ? { $nor: [filter] } : filter;
 }
 
-const REGEX_TERM = /^-?(?:@?[A-Za-z_][A-Za-z0-9_.]*:(?!\/\/))?\/.+\/[dgimsuvy]*$/;
-
-/** The query's terms as typed, grouped like parseQuery groups them; regular expressions have no token. */
-function termGroups(input: string): { text: string; token?: Token }[][] {
-  const groups: { text: string; token?: Token }[][] = [[]];
-  for (const text of queryTokens(input)) {
-    if (text === 'OR' || text === 'or') groups.push([]);
-    else if (REGEX_TERM.test(text)) groups.at(-1)!.push({ text });
-    else {
-      const token = parseQuery(text)[0]?.[0];
-      if (token) groups.at(-1)!.push({ text, token });
-    }
-  }
-  return groups.filter((group) => group.length);
-}
-
 /** The filter for the documents of a mapped collection that can match a search. */
 export function buildMongoLogQuery(request: MongoLogRequest): MongoLogQuery {
   const now = request.now ?? Date.now();
-  const groups = termGroups(request.query.slice(0, 1024));
-  const pushed = new Set<string>();
-  const local = new Set<string>();
-  const alternatives: MongoFilter[][] = [];
   const time: Time = {};
-  let unrestricted = false;
-  for (const group of groups) {
-    const terms: MongoFilter[] = [];
-    let narrowed = false;
-    for (const { text, token } of group) {
-      // Time terms only narrow a search without OR: in an OR branch they would narrow every branch.
-      const branchTime: Time = {};
-      const result = token && condition(token, request, now, groups.length > 1 ? branchTime : time);
-      if (result === 'time' && groups.length === 1) {
-        pushed.add(text);
-        narrowed = true;
-      } else if (result && result !== 'time') {
-        terms.push(result);
-        pushed.add(text);
-        narrowed = true;
-      } else local.add(text);
-    }
-    if (!narrowed) unrestricted = true;
-    alternatives.push(terms);
-  }
-  if (unrestricted && groups.length > 1)
-    return { filter: {}, pushed: [], local: groups.flat().map((term) => term.text) };
+  const { branches, pushed, local, unrestricted } = pushDown(termGroups(request.query), (token, _text, count) =>
+    // An OR branch keeps its time terms to itself; they are applied to the fetched documents.
+    condition(token, request, now, count > 1 ? {} : time),
+  );
+  if (unrestricted && branches.length > 1) return { filter: {}, pushed, local };
   const and = (terms: MongoFilter[]): MongoFilter =>
     terms.length === 1 ? terms[0] : terms.length ? { $and: terms } : {};
-  const filter =
-    alternatives.length === 1 ? and(alternatives[0]) : alternatives.length ? { $or: alternatives.map(and) } : {};
+  const filter = branches.length === 1 ? and(branches[0]) : branches.length ? { $or: branches.map(and) } : {};
   return {
     filter,
     ...(time.fromMs !== undefined && Number.isFinite(time.fromMs) ? { fromMs: time.fromMs } : {}),
     ...(time.toMs !== undefined && Number.isFinite(time.toMs) ? { toMs: time.toMs } : {}),
-    pushed: [...pushed],
-    local: [...local],
+    pushed,
+    local,
   };
 }
 
