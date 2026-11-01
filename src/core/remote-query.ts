@@ -3,8 +3,8 @@
 // fewer: the fetched rows are then filtered again with the full search, so
 // terms SQL cannot express, such as regular expressions, still apply.
 import type { ColumnInfo, LogTableMapping, MappedField, TimeEncoding } from './connections';
+import { pushDown, termGroups } from './pushdown';
 import { parseQuery, type ParsedQuery, type Token } from './query';
-import { queryTokens } from './query-tokens';
 
 export type SqlDialect = 'sqlite' | 'postgres' | 'mysql';
 export type SqlValue = string | number | null;
@@ -192,24 +192,6 @@ function predicate(token: Token, request: SqlLogRequest, params: Params, now: nu
   return token.negate ? `(${name} IS NULL OR NOT ${condition})` : condition;
 }
 
-// A regular expression term, with or without a field: SQL never applies it, so
-// it is not parsed here, which would compile it for nothing.
-const REGEX_TERM = /^-?(?:@?[A-Za-z_][A-Za-z0-9_.]*:(?!\/\/))?\/.+\/[dgimsuvy]*$/;
-
-/** The query's terms as typed, grouped like parseQuery groups them; regular expressions have no token. */
-function termGroups(input: string): { text: string; token?: Token }[][] {
-  const groups: { text: string; token?: Token }[][] = [[]];
-  for (const text of queryTokens(input)) {
-    if (text === 'OR' || text === 'or') groups.push([]);
-    else if (REGEX_TERM.test(text)) groups.at(-1)!.push({ text });
-    else {
-      const token = parseQuery(text)[0]?.[0];
-      if (token) groups.at(-1)!.push({ text, token });
-    }
-  }
-  return groups.filter((group) => group.length);
-}
-
 /** Build the select for the newest (or, for tails, the next) rows of a mapped table that can match a search. */
 export function buildSqlLogQuery(request: SqlLogRequest): SqlLogQuery {
   const params = new Params(request.dialect);
@@ -219,29 +201,16 @@ export function buildSqlLogQuery(request: SqlLogRequest): SqlLogQuery {
   if (request.fromMs !== undefined && request.toMs !== undefined)
     conditions.push(`${time.column} BETWEEN ${time.at(request.fromMs)} AND ${time.at(request.toMs)}`);
   else if (request.fromMs !== undefined) conditions.push(`${time.column} >= ${time.at(request.fromMs)}`);
-  const pushed = new Set<string>();
-  const local = new Set<string>();
-  const groups = termGroups(request.query.slice(0, 1024));
-  const alternatives: string[] = [];
-  let unrestricted = false;
-  for (const group of groups) {
-    const terms: string[] = [];
-    for (const { text, token } of group) {
-      const condition = token && predicate(token, request, params, now);
-      if (condition) {
-        terms.push(condition);
-        pushed.add(text);
-      } else local.add(text);
-    }
-    // A branch SQL cannot narrow makes the whole OR unnarrowable.
-    if (!terms.length) unrestricted = true;
-    alternatives.push(terms.join(' AND '));
-  }
+  const { branches, pushed, local, unrestricted } = pushDown(
+    termGroups(request.query),
+    (token) => predicate(token, request, params, now) || undefined,
+  );
   if (unrestricted) {
     // Parameters already added for other branches are unused now; rebuild without them.
     const rebuilt = buildSqlLogQuery({ ...request, query: '' });
-    return { ...rebuilt, pushed: [], local: groups.flat().map((term) => term.text) };
+    return { ...rebuilt, pushed, local };
   }
+  const alternatives = branches.map((terms) => terms.join(' AND '));
   if (alternatives.length === 1) conditions.push(alternatives[0]);
   else if (alternatives.length) conditions.push(`(${alternatives.map((terms) => `(${terms})`).join(' OR ')})`);
   const where = conditions.length ? ` WHERE ${conditions.join(' AND ')}` : '';
@@ -252,8 +221,8 @@ export function buildSqlLogQuery(request: SqlLogRequest): SqlLogQuery {
   return {
     select: { sql: select, params: params.values },
     count: { sql: `SELECT COUNT(*) AS n ${from}`, params: countParams },
-    pushed: [...pushed],
-    local: [...local],
+    pushed,
+    local,
   };
 }
 
