@@ -348,6 +348,15 @@ Run **Logline: Show Status**, click the check mark at the right of the status ba
 
 Choose an item to run its fix, or **Copy status** for a bug report.
 
+## Usage data
+
+Logline sends anonymous usage counts, such as which features are used, how often, and how long they take, to help decide what to improve. It never sends log content, searches, file paths, names, or hosts. [PRIVACY.md](../PRIVACY.md) lists what is sent and what is never sent, and [telemetry.json](../telemetry.json) lists every event.
+
+- Usage counts follow VS Code's `telemetry.telemetryLevel`, and `logline.telemetry.enabled` turns them off for Logline only. `DO_NOT_TRACK=1` turns them off too. Logline says so the first time it runs, with **Turn off**.
+- **Logline: Show Usage Data** shows every event sent from this window and your anonymous ID. **Logline: Reset Usage ID** starts a new one.
+- **Logline: Suggest a Feature** and **Logline: Vote on What's Next** send what you write or pick, after you see it and press **Send**. A suggestion is redacted first. With usage counts off, they open a GitHub issue instead. After two weeks of use, Logline asks once what it should do next.
+- In the **Issues** tab, 👍 and 👎 on a finding say whether that kind of finding helps you. A few minutes after **Ask Copilot**, Logline may ask whether the investigation helped, at most once a week and three times in all. Both are sent only while usage counts are on.
+
 ## Editors other than VS Code
 
 Logline also runs in editors built on VS Code 1.99 or later, such as Cursor, Windsurf, and Kiro. Download `logline-<version>.vsix` from the [latest release](https://github.com/SurjeetBanga/logline/releases/latest) and run **Extensions: Install from VSIX…** in the editor. Capture, search, traces, metrics, log lenses, log doctor, and log breakpoints work the same. Copilot's Logline tools, **Ask Copilot**, and **Fix with Copilot** need GitHub Copilot Chat and are not offered without it; connect the editor's own agent, Claude Code, or Codex with **Logline: Connect Claude Code or Codex** instead. Without Copilot, an investigation prompt is copied to the clipboard for you to paste into your agent's chat.
@@ -406,6 +415,7 @@ Settings are grouped the same way in the Settings editor (**More actions → Set
 | `logline.redactExports` | `true` | Redact common credentials and secret-like fields in exports and **Copy filtered results**. Shared-agent results are always redacted. |
 | `logline.redactionFields` | `[]` | Additional field names to redact in exports, **Copy filtered results**, and shared-agent results. |
 | `logline.redactionReplacement` | `[REDACTED]` | Replacement text used for redacted exports, **Copy filtered results**, and shared-agent results. |
+| `logline.telemetry.enabled` | `true` | Send anonymous usage counts. Also follows VS Code's `telemetry.telemetryLevel`. See [Usage data](#usage-data). |
 
 ### OpenTelemetry
 

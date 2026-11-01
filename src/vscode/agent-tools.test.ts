@@ -3,7 +3,7 @@ import test from 'node:test';
 import { withVscode } from '../test/vscode-mock';
 
 const registrations = new Map<string, any>();
-const { registerAgentTools } = withVscode(
+const { registerAgentTools, runAgentTool } = withVscode(
   {
     lm: {
       registerTool: (name: string, tool: unknown) => {
@@ -86,4 +86,42 @@ test('agent tools register all actions, format bounded results, and translate va
   assert.match(calls.content[0].value, /"calls":\[\]/);
   for (const disposable of disposables) disposable.dispose();
   assert.equal(registrations.size, 0);
+});
+
+test('each tool call is counted by tool, route, client, and outcome, never by what it asked or returned', async () => {
+  registrations.clear();
+  const calls: Record<string, unknown>[] = [];
+  const usage = { agentTool: (call: Record<string, unknown>) => calls.push(call) } as any;
+  const access = {
+    status: () => ({ scope: 'all', sources: [] }),
+    search: () => ({ events: [{ id: 1, message: 'secret order 42' }], matched: 1 }),
+    trace: () => {
+      throw new Error('no such trace');
+    },
+  } as any;
+  registerAgentTools({} as any, access, usage);
+  await registrations.get('logline_search_logs').invoke({ input: { shareId: 'share', query: 'user:42' } });
+  const text = await runAgentTool(access, 'logline_get_trace', { shareId: 'share', traceId: 'abc' }, undefined, {
+    usage,
+    client: 'claude-code 2.1',
+  });
+  assert.match(text, /INVALID_INPUT/);
+  await runAgentTool(access, 'logline_search_logs', {}, undefined, { usage, client: 'some-bot' });
+  assert.deepEqual(
+    calls.map(({ tool, via, client, ok, code, truncated }) => ({ tool, via, client, ok, code, truncated })),
+    [
+      { tool: 'logline_search_logs', via: 'copilot', client: 'copilot', ok: true, code: undefined, truncated: false },
+      {
+        tool: 'logline_get_trace',
+        via: 'mcp',
+        client: 'claude-code',
+        ok: false,
+        code: 'INVALID_INPUT',
+        truncated: false,
+      },
+      { tool: 'logline_search_logs', via: 'mcp', client: 'other', ok: true, code: undefined, truncated: false },
+    ],
+  );
+  assert.ok(calls.every((call) => typeof call.ms === 'number' && typeof call.resultSize === 'number'));
+  assert.doesNotMatch(JSON.stringify(calls), /secret|user:42|abc/);
 });

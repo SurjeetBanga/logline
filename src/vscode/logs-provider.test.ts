@@ -82,3 +82,36 @@ test('webview provider initializes the bridge, forwards messages, and releases l
   disposed!();
   assert.equal(subscriptions, 0);
 });
+
+test('the panel’s first snapshot counts how long it took to show logs, once', async () => {
+  const recorded: { event: string; properties: Record<string, unknown> }[] = [];
+  let listener: ((message: unknown) => void) | undefined;
+  const controller = {
+    notifications: { subscribe: () => ({ dispose() {} }) },
+    guideStatus: () => ({ version: 'v1', unread: false }),
+    firstRun: () => false,
+    usage: { record: (event: string, properties: Record<string, unknown>) => recorded.push({ event, properties }) },
+    handleMessage: async (send: (message: unknown) => void, message: { type: string }) => send({ type: message.type }),
+  } as any;
+  const view = {
+    webview: {
+      cspSource: 'csp',
+      asWebviewUri: (uri: unknown) => uri,
+      postMessage: async () => true,
+      onDidReceiveMessage: (received: (message: unknown) => void) => {
+        listener = received;
+        return { dispose() {} };
+      },
+    },
+    onDidDispose: () => ({ dispose() {} }),
+  } as any;
+  new LogsProvider({ extensionUri: { fsPath: process.cwd() } } as any, controller).resolveWebviewView(view);
+  listener!({ type: 'autocomplete' });
+  listener!({ type: 'snapshot' });
+  listener!({ type: 'snapshot' });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(
+    recorded.map(({ event, properties }) => [event, properties.op, typeof properties.ms]),
+    [['perf', 'first_render', 'number']],
+  );
+});

@@ -1134,6 +1134,26 @@
     if (siteId !== void 0) button.dataset.siteId = siteId;
     return button;
   }
+  function feedbackButtons(code) {
+    const group = document.createElement("span");
+    group.className = "doctor-feedback";
+    group.dataset.code = code;
+    for (const [helpful, label, title] of [
+      [true, "\u{1F44D}", "This kind of finding is useful"],
+      [false, "\u{1F44E}", "This kind of finding is not useful"]
+    ]) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "doctor-action doctor-vote";
+      button.textContent = label;
+      button.title = title;
+      button.setAttribute("aria-label", title);
+      button.dataset.doctorFeedback = String(helpful);
+      button.dataset.code = code;
+      group.append(button);
+    }
+    return group;
+  }
   var DOCTOR_ACTION_TITLES = {
     fix: "Open the statement and show its quick fixes: lower the level, pass the exception, ignore the finding, or fix it with Copilot",
     showEvents: "Filter the Logs panel to the events this statement logged",
@@ -1142,6 +1162,7 @@
   function createDoctor(button, count, panel, list, api, scope, hostActionTaken, showExample = () => void 0, showTrace = () => void 0) {
     let revision;
     let findings = [];
+    const voted = /* @__PURE__ */ new Set();
     function receive(doctor) {
       button.hidden = !doctor;
       if (!doctor) {
@@ -1211,7 +1232,8 @@
       actions.className = "doctor-actions";
       actions.append(
         doctorButton("fix", "Fix\u2026", DOCTOR_ACTION_TITLES.fix, finding.siteId),
-        doctorButton("showEvents", "Show events", DOCTOR_ACTION_TITLES.showEvents, finding.siteId)
+        doctorButton("showEvents", "Show events", DOCTOR_ACTION_TITLES.showEvents, finding.siteId),
+        voted.has(finding.code) ? thanks() : feedbackButtons(finding.code)
       );
       row.append(location, message, actions);
       return row;
@@ -1239,10 +1261,28 @@
         trace.dataset.traceId = finding.traceId;
         actions.append(trace);
       }
+      actions.append(voted.has(finding.code) ? thanks() : feedbackButtons(finding.code));
       row.append(location, message, actions);
       return row;
     }
+    function handleFeedback(event) {
+      const target = event.target.closest("[data-doctor-feedback]");
+      const code = target?.dataset.code;
+      if (!target || !code) return false;
+      api.postMessage({ type: "doctorFeedback", code, helpful: target.dataset.doctorFeedback === "true" });
+      voted.add(code);
+      for (const other of panel.querySelectorAll(".doctor-feedback"))
+        if (other.dataset.code === code) other.replaceChildren(thanks());
+      return true;
+    }
+    function thanks() {
+      const text2 = document.createElement("span");
+      text2.className = "doctor-thanks";
+      text2.textContent = "Thanks";
+      return text2;
+    }
     function handleAction(event) {
+      if (handleFeedback(event)) return true;
       const target = event.target.closest("[data-doctor-action]");
       const action = target?.dataset.doctorAction;
       if (!target || !action) return false;
@@ -8803,7 +8843,7 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
         if (views.active() !== "logs") views.show("logs");
         for (const popover of popovers) popover.close();
       },
-      ended: () => void 0
+      ended: (finished) => api.postMessage({ type: "tourEnded", finished })
     });
     function startTour() {
       elements.tourHint.hidden = true;

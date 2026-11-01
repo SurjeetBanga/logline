@@ -110,8 +110,12 @@ test('log transfer covers provider export, markdown/context/copy actions, and no
   await service.exportContext([1]);
   assert.match(saved, /id,timestamp/);
   imported = [{ scheme: 'mem', path: '/import.jsonl', fsPath: '/import.jsonl' }];
+  const timed: [number, number][] = [];
+  service.imported = (ms, events) => timed.push([ms, events]);
   await service.importLogs();
   assert.equal(store.all().at(-1)?.message, 'imported');
+  assert.equal(timed.length, 1, 'how long it took is reported for usage counts');
+  assert.equal(timed[0][1], 1);
   failRead = true;
   await service.importLogs();
   assert.match(warnings.at(-1)!, /provider read failed/);

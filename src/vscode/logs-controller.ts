@@ -74,6 +74,9 @@ import type { AgentBridge } from './agent-bridge';
 import { agentLaunch, agentsWithSkills, connectAgent, copilotAvailable } from './agent-setup';
 import { mcpScriptPath } from '../protocol/agent-bridge';
 import { openSourceLocation } from './source-navigation';
+import { parseQuery } from '../core/query';
+import { CONNECTION_TYPES, queryFeatures } from '../core/usage-events';
+import type { Usage, UsageSummarySource } from './usage';
 
 const SHARE_ALL_CONFIRMED_KEY = 'logline.shareAllLogsConfirmed.v1';
 
@@ -170,6 +173,19 @@ export class LogsController {
   private readonly sharingSubscriptions: vscode.Disposable[];
   private disposing?: Promise<void>;
   private sharingRequest?: Promise<void>;
+  private usageCounter?: Usage;
+  /** The last search a snapshot was asked for, and the wait before it counts as one search rather than typing. */
+  private countedQuery = '';
+  private searchSettle?: ReturnType<typeof setTimeout>;
+  /** Anonymous usage counts; the connections count theirs too. */
+  get usage(): Usage | undefined {
+    return this.usageCounter;
+  }
+  set usage(usage: Usage | undefined) {
+    this.usageCounter = usage;
+    this.connections.usage = usage;
+    this.transfer.imported = usage && ((ms, events) => usage.record('perf', { op: 'import', ms, events }));
+  }
   private guideOpener?: (section: 'guide' | 'whatsNew') => void;
   readonly otel: OtelIntegration;
 
@@ -189,6 +205,7 @@ export class LogsController {
       (open, focus) => this.showConnectionForm(open, focus),
     );
     this.compare = new ProductionCompare(this.store, this.registry, (view) => void this.comparisonFinished(view));
+    this.registry.records.onStart = (record) => this.usage?.capture(captureKind(record));
     // Agents fetch from connections the user allowed, and compare with production, through the sharing boundary.
     this.agentAccess.production = {
       connections: () => this.connections.agentConnections(),
@@ -279,13 +296,29 @@ export class LogsController {
     this.pendingQuery = this.pendingTrace = this.pendingSource = this.pendingRun = this.pendingCompare = undefined;
     this.pendingReveal = this.pendingForm = undefined;
     // The guide's first steps tick off from what was done; a search is remembered once it happens.
-    if (request.query?.trim()) this.markProgress('searched');
+    const query = request.query?.trim() ?? '';
+    if (query) this.markProgress('searched');
+    const changed = query !== this.countedQuery && this.usage?.enabled;
+    const started = changed ? performance.now() : 0;
+    const snapshot = this.buildSnapshot(request);
+    if (changed) {
+      this.countedQuery = query;
+      clearTimeout(this.searchSettle);
+      const ms = performance.now() - started;
+      if (query) {
+        this.searchSettle = setTimeout(() => {
+          const { operators, fields } = queryFeatures(parseQuery(query));
+          this.usage?.search(operators, fields, ms);
+        }, SEARCH_SETTLE_MS);
+        this.searchSettle.unref?.();
+      }
+    }
     return {
       ...(openCompare ? { openCompare } : {}),
       ...(reveal ? { reveal } : {}),
       ...(openConnectionForm ? { openConnectionForm } : {}),
       ...(startTour ? { startTour } : {}),
-      ...this.buildSnapshot(request),
+      ...snapshot,
       ...(applyQuery !== undefined ? { applyQuery } : {}),
       ...(openTrace ? { openTrace } : {}),
       ...(applySource ? { applySource } : {}),
@@ -334,6 +367,7 @@ export class LogsController {
   }
   /** A new section of the guide was opened, so it stops being marked New. */
   async guideSectionSeen(id: string): Promise<void> {
+    this.usage?.record('guide_section', { section: id });
     const next = markSectionSeen(this.globalState.get<GuideSeen>(GUIDE_SEEN_KEY), id);
     if (next) await this.globalState.update(GUIDE_SEEN_KEY, next);
   }
@@ -347,6 +381,7 @@ export class LogsController {
   handleMessage(send: (message: HostMessage) => void, message: unknown): Promise<void> {
     return handleMessage(
       {
+        usage: this.usage,
         store: this.store,
         config: this.config,
         transfer: this.transfer,
@@ -397,6 +432,7 @@ export class LogsController {
   }
   /** A local run of the compared source finished: say what it means for the production errors. */
   private async comparisonFinished(view: CompareView): Promise<void> {
+    this.usage?.record('compare_production', { ok: true });
     const choice = await vscode.window.showInformationMessage(
       `${view.local.label} finished: ${view.summary}`,
       'Show Comparison',
@@ -467,6 +503,7 @@ export class LogsController {
   }
   /** Start the panel tour from the Command Palette or the guide, with the next snapshot like showQuery. */
   async startTour(): Promise<void> {
+    this.usage?.record('tour', { step: 'started' });
     this.pendingTour = true;
     await vscode.commands.executeCommand('logline.logs.focus');
     this.notifications.send({ type: 'update' });
@@ -606,6 +643,8 @@ export class LogsController {
       void vscode.window.showInformationMessage('Log doctor needs a VS Code host with diagnostics support.');
       return;
     }
+    this.usage?.record('doctor_action', { action });
+    this.usage?.milestone('first_doctor_action');
     await this.doctor.act(action, siteId);
   }
   async breakOnEvent(id: number): Promise<void> {
@@ -613,6 +652,8 @@ export class LogsController {
       void vscode.window.showInformationMessage('Log breakpoints need a VS Code host with debugging support.');
       return;
     }
+    this.usage?.record('log_breakpoint', { step: 'set' });
+    this.usage?.milestone('first_log_breakpoint');
     await this.breakpoints.breakOnEvent(id);
   }
   async breakOnQuery(query: string, levels: string[]): Promise<void> {
@@ -620,6 +661,8 @@ export class LogsController {
       void vscode.window.showInformationMessage('Log breakpoints need a VS Code host with debugging support.');
       return;
     }
+    this.usage?.record('log_breakpoint', { step: 'set' });
+    this.usage?.milestone('first_log_breakpoint');
     await this.breakpoints.breakOnMatchingLogs(query, levels);
   }
   clear(): void {
@@ -742,6 +785,7 @@ export class LogsController {
       if (this.disposing || revision !== this.agentAccess.status().revision) return;
       if (!chooseRuns) {
         this.agentAccess.shareAll();
+        this.countShare('all');
         this.notifications.send({ type: 'update' });
         this.notifySharing('all');
         return;
@@ -803,6 +847,7 @@ export class LogsController {
     }
     try {
       this.agentAccess.share(ids, anchor, runs);
+      this.countShare(anchor !== undefined ? 'event' : 'runs');
     } catch (error) {
       // Retention or clearing can invalidate a run while the picker is open.
       if (!(error instanceof AgentAccessError) || error.code !== 'INVALID_INPUT') throw error;
@@ -828,7 +873,16 @@ export class LogsController {
       if (action === 'Ask Copilot') void this.askCopilot();
     });
   }
+  private countShare(how: 'all' | 'runs' | 'event'): void {
+    const sources = this.agentAccess.status().sources;
+    this.usage?.shared(
+      how,
+      sources.length,
+      sources.reduce((sum, source) => sum + source.events, 0),
+    );
+  }
   stopSharing(): void {
+    this.usage?.sharingStopped();
     this.agentAccess.revoke();
     this.notifications.send({ type: 'update' });
   }
@@ -905,6 +959,7 @@ export class LogsController {
   async askCopilot(anchor?: number): Promise<boolean> {
     const status = this.agentAccess.status();
     if (!status.active || !status.shareId) return false;
+    this.usage?.record('ask_copilot');
     const prompt = [
       'Investigate the failure in the shared Logline command runs using the Logline tools. Search the logs, inspect relevant events and surrounding context, and distinguish evidence from hypotheses. After changes and reproduction, check fresh logs and report what was verified.',
       `Logline share id: ${status.shareId}.`,
@@ -914,7 +969,9 @@ export class LogsController {
     ]
       .filter(Boolean)
       .join('\n');
-    return this.openChat(prompt, 'investigation prompt');
+    const opened = await this.openChat(prompt, 'investigation prompt');
+    if (opened) this.usage?.askWhetherCopilotHelped();
+    return opened;
   }
   /** Open Copilot chat with a prompt, or copy the prompt for another agent when Copilot chat is unavailable. */
   async openChat(prompt: string, what = 'prompt'): Promise<boolean> {
@@ -967,10 +1024,26 @@ export class LogsController {
     }
     this.tasks.stop(serverId);
   }
+  /** What a usage summary reads when it is sent: sizes and counts only. */
+  usageSummary(): UsageSummarySource {
+    return {
+      eventsCaptured: () => this.store.total,
+      sources: () => new Set([...this.registry.records.values()].map((record) => record.serverId)).size,
+      memoryMb: () => this.store.bytes / (1024 * 1024),
+      trimmed: () => this.store.discarded > 0,
+      connections: () => {
+        const counts: Record<string, number> = {};
+        for (const connection of this.connections.list())
+          if (CONNECTION_TYPES.includes(connection.type)) counts[connection.type] = (counts[connection.type] ?? 0) + 1;
+        return counts;
+      },
+    };
+  }
   dispose(): Promise<void> {
     return (this.disposing ??= this.shutdown());
   }
   private async shutdown(): Promise<void> {
+    clearTimeout(this.searchSettle);
     this.agentAccess.revoke();
     this.configSubscription.dispose();
     for (const subscription of this.sharingSubscriptions) subscription.dispose();
@@ -986,5 +1059,23 @@ export class LogsController {
     // Closing streams may emit a final partial line; flush persistence afterwards.
     await this.runner.dispose();
     await this.persistence.dispose();
+  }
+}
+
+/** How long a search stays unchanged before it counts as one, so typing it is not many. */
+const SEARCH_SETTLE_MS = 1500;
+
+/** What kind of capture a run is, as usage counts name it. */
+function captureKind(record: SessionSummary): string {
+  switch (record.sourceKind) {
+    case 'process':
+    case undefined:
+      return record.serverId.startsWith('compose:') ? 'compose' : 'command';
+    case 'otel':
+      return 'otlp';
+    case 'remote':
+      return 'connection';
+    default:
+      return record.sourceKind;
   }
 }

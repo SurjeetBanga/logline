@@ -305,3 +305,64 @@ test('only a fresh install is welcomed, once, and a tour request reaches the pan
   assert.equal(first.snapshot({ type: 'snapshot' }).startTour, true);
   assert.equal(first.snapshot({ type: 'snapshot' }).startTour, undefined, 'applied once');
 });
+
+test('a search counts once it stops changing, not once a keystroke, and the summary reads the window', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const controller = setup(t);
+  const searches: { operators: string[]; fields: string[] }[] = [];
+  const recorded: string[] = [];
+  controller.usage = {
+    enabled: true,
+    search: (operators: Iterable<string>, fields: Iterable<string>) =>
+      searches.push({ operators: [...operators], fields: [...fields] }),
+    record: (event: string) => recorded.push(event),
+    capture() {},
+    milestone() {},
+  } as any;
+  for (const query of ['l', 'le', 'level:', 'level:er', 'level:error'])
+    controller.snapshot({ type: 'snapshot', query, limit: 50 } as any);
+  t.mock.timers.tick(1500);
+  controller.snapshot({ type: 'snapshot', query: 'level:error', limit: 50 } as any);
+  t.mock.timers.tick(1500);
+  assert.deepEqual(searches, [{ operators: ['field'], fields: ['level'] }]);
+  controller.snapshot({ type: 'snapshot', query: '', limit: 50 } as any);
+  t.mock.timers.tick(1500);
+  assert.equal(searches.length, 1, 'clearing the search is not one');
+  await controller.startTour();
+  assert.deepEqual(recorded, ['tour']);
+  const summary = controller.usageSummary();
+  assert.equal(summary.eventsCaptured(), 0);
+  assert.equal(summary.sources(), 0);
+  assert.equal(summary.trimmed(), false);
+  assert.deepEqual(summary.connections(), {});
+  assert.equal(typeof summary.memoryMb(), 'number');
+});
+
+test('each new run reports its kind of capture once, by kind only', (t) => {
+  const controller = setup(t);
+  const kinds: string[] = [];
+  controller.usage = { capture: (kind: string) => kinds.push(kind) } as any;
+  const run = (id: string, serverId: string, sourceKind?: string) =>
+    controller.registry.records.set(id, { id, serverId, sourceKind, status: 'running', startedAt: 0 } as any);
+  run('1', 'terminal:zsh', 'terminal');
+  run('1', 'terminal:zsh', 'terminal');
+  run('2', 'compose:/repo/compose.yaml', 'process');
+  run('3', 'custom');
+  run('4', 'otel:api', 'otel');
+  run('5', 'conn:prod', 'remote');
+  run('6', 'debug:1', 'debug');
+  assert.deepEqual(kinds, ['terminal', 'compose', 'command', 'otlp', 'connection', 'debug']);
+});
+
+test('Ask Copilot asks later whether it helped, only once the chat opened', async (t) => {
+  const controller = setup(t);
+  let followUps = 0;
+  controller.usage = { record() {}, askWhetherCopilotHelped: () => followUps++ } as any;
+  (controller.agentAccess as any).status = () => ({ active: true, shareId: 's1', sources: [] });
+  (controller as any).openChat = async () => false;
+  await controller.askCopilot();
+  assert.equal(followUps, 0, 'no chat, nothing to ask about');
+  (controller as any).openChat = async () => true;
+  await controller.askCopilot();
+  assert.equal(followUps, 1);
+});

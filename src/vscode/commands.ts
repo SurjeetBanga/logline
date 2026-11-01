@@ -5,14 +5,19 @@ import type { ServerConfig } from '../core/types';
 import type { LogsController } from './logs-controller';
 import { convertTask } from './tasks/conversion';
 import { showStatus } from './status';
+import { counted, type Usage } from './usage';
+import { suggestFeature, voteOnNext } from './feedback';
 
 export function registerCommands(
   controller: LogsController,
   openGuide?: (section: 'guide' | 'whatsNew') => void,
   version = '',
+  usage?: Usage,
 ): vscode.Disposable[] {
+  const registerCommand = (id: string, handler: (...args: any[]) => unknown) =>
+    vscode.commands.registerCommand(id, counted(usage, id, handler));
   return [
-    vscode.commands.registerCommand('logline.runCommand', async () => {
+    registerCommand('logline.runCommand', async () => {
       if (!vscode.workspace.isTrusted) {
         vscode.window.showWarningMessage('Trust this workspace before running a server command.');
         return;
@@ -32,7 +37,7 @@ export function registerCommands(
       controller.runner.run(command.trim(), folder?.uri.fsPath, { id: 'custom', label: command.trim() });
       await vscode.commands.executeCommand('logline.logs.focus');
     }),
-    vscode.commands.registerCommand('logline.followFile', async () => {
+    registerCommand('logline.followFile', async () => {
       if (!vscode.workspace.isTrusted) {
         vscode.window.showWarningMessage('Trust this workspace before following a log file.');
         return;
@@ -53,7 +58,7 @@ export function registerCommands(
       for (const uri of files) await controller.files.follow(uri.fsPath);
       if (files.length) await vscode.commands.executeCommand('logline.logs.focus');
     }),
-    vscode.commands.registerCommand('logline.followCompose', async () => {
+    registerCommand('logline.followCompose', async () => {
       if (!vscode.workspace.isTrusted) {
         vscode.window.showWarningMessage('Trust this workspace before following a Docker Compose project.');
         return;
@@ -91,46 +96,49 @@ export function registerCommands(
       );
       await vscode.commands.executeCommand('logline.logs.focus');
     }),
-    vscode.commands.registerCommand('logline.addConnection', () => controller.connections.add()),
-    vscode.commands.registerCommand('logline.searchConnection', (id?: unknown) =>
+    registerCommand('logline.addConnection', () => controller.connections.add()),
+    registerCommand('logline.searchConnection', (id?: unknown) =>
       controller.connections.query(typeof id === 'string' ? id : undefined),
     ),
-    vscode.commands.registerCommand('logline.runConnectionSql', (id?: unknown) =>
+    registerCommand('logline.runConnectionSql', (id?: unknown) =>
       controller.connections.runSql(typeof id === 'string' ? id : undefined),
     ),
-    vscode.commands.registerCommand('logline.openConnectionLink', (id?: unknown) =>
+    registerCommand('logline.openConnectionLink', (id?: unknown) =>
       controller.connections.openLink(typeof id === 'string' ? id : undefined),
     ),
-    vscode.commands.registerCommand('logline.allowAgentConnection', (id?: unknown) =>
+    registerCommand('logline.allowAgentConnection', (id?: unknown) =>
       controller.connections.allowAgents(typeof id === 'string' ? id : undefined),
     ),
-    vscode.commands.registerCommand('logline.revokeAgentConnection', (id?: unknown) =>
+    registerCommand('logline.revokeAgentConnection', (id?: unknown) =>
       controller.connections.revokeAgents(typeof id === 'string' ? id : undefined),
     ),
-    vscode.commands.registerCommand('logline.tailConnection', (id?: unknown) =>
+    registerCommand('logline.tailConnection', (id?: unknown) =>
       controller.connections.tail(typeof id === 'string' ? id : undefined, ''),
     ),
-    vscode.commands.registerCommand('logline.testConnection', (id?: unknown) =>
+    registerCommand('logline.testConnection', (id?: unknown) =>
       controller.connections.test(typeof id === 'string' ? id : undefined),
     ),
-    vscode.commands.registerCommand('logline.editConnection', (id?: unknown) =>
+    registerCommand('logline.editConnection', (id?: unknown) =>
       controller.connections.edit(typeof id === 'string' ? id : undefined),
     ),
-    vscode.commands.registerCommand('logline.removeConnection', (id?: unknown) =>
+    registerCommand('logline.removeConnection', (id?: unknown) =>
       controller.connections.remove(typeof id === 'string' ? id : undefined),
     ),
-    vscode.commands.registerCommand('logline.stopCommand', () => controller.stop()),
-    vscode.commands.registerCommand('logline.export', () => controller.transfer.exportLogs()),
-    vscode.commands.registerCommand('logline.import', () => controller.transfer.importLogs()),
-    vscode.commands.registerCommand('logline.exportForAI', () => controller.transfer.exportForAI()),
-    vscode.commands.registerCommand('logline.convertTask', () => convertTask()),
+    registerCommand('logline.stopCommand', () => controller.stop()),
+    registerCommand('logline.export', () => controller.transfer.exportLogs()),
+    registerCommand('logline.import', () => controller.transfer.importLogs()),
+    registerCommand('logline.exportForAI', () => {
+      usage?.record('exported_for_ai');
+      return controller.transfer.exportForAI();
+    }),
+    registerCommand('logline.convertTask', () => convertTask()),
     // Keep a task-oriented alias for command palettes and keybindings.
-    vscode.commands.registerCommand('logline.captureTask', () => convertTask()),
-    vscode.commands.registerCommand('logline.showGuide', () => openGuide?.('guide')),
-    vscode.commands.registerCommand('logline.showWhatsNew', () => openGuide?.('whatsNew')),
-    vscode.commands.registerCommand('logline.takeTour', () => controller.startTour()),
-    vscode.commands.registerCommand('logline.showLogs', () => vscode.commands.executeCommand('logline.logs.focus')),
-    vscode.commands.registerCommand('logline.enableTerminalCapture', async () => {
+    registerCommand('logline.captureTask', () => convertTask()),
+    registerCommand('logline.showGuide', () => openGuide?.('guide')),
+    registerCommand('logline.showWhatsNew', () => openGuide?.('whatsNew')),
+    registerCommand('logline.takeTour', () => controller.startTour()),
+    registerCommand('logline.showLogs', () => vscode.commands.executeCommand('logline.logs.focus')),
+    registerCommand('logline.enableTerminalCapture', async () => {
       await vscode.workspace
         .getConfiguration('logline')
         .update('captureTerminals', true, vscode.ConfigurationTarget.Workspace);
@@ -138,23 +146,23 @@ export function registerCommands(
         'Logline will capture the next command in a supported terminal. Output from commands already in progress cannot be recovered.',
       );
     }),
-    vscode.commands.registerCommand('logline.disableTerminalCapture', async () => {
+    registerCommand('logline.disableTerminalCapture', async () => {
       await vscode.workspace
         .getConfiguration('logline')
         .update('captureTerminals', false, vscode.ConfigurationTarget.Workspace);
       void vscode.window.showInformationMessage('Logline terminal capture is off. Running commands are not stopped.');
     }),
-    vscode.commands.registerCommand('logline.shareWithAgent', () => controller.shareWithAgent()),
-    vscode.commands.registerCommand('logline.shareSpecificRuns', () =>
+    registerCommand('logline.shareWithAgent', () => controller.shareWithAgent()),
+    registerCommand('logline.shareSpecificRuns', () =>
       controller.shareWithAgent(undefined, undefined, undefined, true),
     ),
-    vscode.commands.registerCommand('logline.stopSharing', () => controller.stopSharing()),
-    vscode.commands.registerCommand('logline.askCopilot', () => controller.askCopilot()),
-    vscode.commands.registerCommand('logline.connectAgent', () => controller.connectAgent()),
-    vscode.commands.registerCommand('logline.showStatus', () => showStatus(controller, version)),
-    vscode.commands.registerCommand('logline.startOtlpReceiver', () => controller.toggleOtlp(true)),
-    vscode.commands.registerCommand('logline.stopOtlpReceiver', () => controller.toggleOtlp(false)),
-    vscode.commands.registerCommand('logline.showTrace', async (value?: unknown) => {
+    registerCommand('logline.stopSharing', () => controller.stopSharing()),
+    registerCommand('logline.askCopilot', () => controller.askCopilot()),
+    registerCommand('logline.connectAgent', () => controller.connectAgent()),
+    registerCommand('logline.showStatus', () => showStatus(controller, version)),
+    registerCommand('logline.startOtlpReceiver', () => controller.toggleOtlp(true)),
+    registerCommand('logline.stopOtlpReceiver', () => controller.toggleOtlp(false)),
+    registerCommand('logline.showTrace', async (value?: unknown) => {
       const traceId =
         typeof value === 'string'
           ? value
@@ -169,7 +177,11 @@ export function registerCommands(
             });
       if (traceId?.trim() && /^[A-Za-z0-9_-]{1,128}$/.test(traceId.trim())) await controller.showTrace(traceId.trim());
     }),
-    vscode.commands.registerCommand('logline.manageTerminalCapture', async () => {
+    registerCommand('logline.showUsageData', () => usage?.showData()),
+    registerCommand('logline.resetUsageId', () => usage?.resetId()),
+    registerCommand('logline.suggestFeature', () => suggestFeature(usage)),
+    registerCommand('logline.voteOnNext', () => voteOnNext(usage)),
+    registerCommand('logline.manageTerminalCapture', async () => {
       const terminals = controller.terminalCapture.availableTerminals();
       const choice = await vscode.window.showQuickPick(
         terminals.map((item) => ({

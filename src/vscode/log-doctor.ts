@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import { counted, type Usage } from './usage';
 import { SENSITIVE_LABELS, uncaughtExceptionVariable, type SourceSensitive } from '../core/log-findings';
 import { siteQuery, type LogSite, type LogSiteIndex, type LogSiteTracker, type SiteStats } from '../core/log-sites';
 import type { Settings } from '../core/settings';
@@ -28,6 +29,7 @@ export interface Finding {
 }
 
 export interface DoctorSources {
+  usage?: Usage;
   config: Settings;
   index: LogSiteIndex;
   tracker: LogSiteTracker;
@@ -291,13 +293,17 @@ export class LogDoctor implements vscode.Disposable, vscode.CodeActionProvider {
       vscode.languages.registerCodeActionsProvider({ scheme: 'file' }, this, {
         providedCodeActionKinds: LogDoctor.kinds as vscode.CodeActionKind[],
       }),
-      vscode.commands.registerCommand('logline.showLogHealth', () => this.showHealth()),
+      vscode.commands.registerCommand(
+        'logline.showLogHealth',
+        counted(sources.usage, 'logline.showLogHealth', () => this.showHealth()),
+      ),
       vscode.commands.registerCommand(
         'logline.fixLogStatementWithCopilot',
-        (uri: vscode.Uri, line: number, message: string) =>
+        counted(sources.usage, 'logline.fixLogStatementWithCopilot', (uri: vscode.Uri, line: number, message: string) =>
           sources.askCopilot(
             `Fix the log statement at ${vscode.workspace.asRelativePath(uri)}:${line}. Logline reported: ${message} Change only what is needed, keep the log useful, and follow the logging style of the file.`,
           ),
+        ),
       ),
       vscode.workspace.onDidChangeConfiguration((event) => {
         if (event.affectsConfiguration('logline.logDoctor')) this.apply();

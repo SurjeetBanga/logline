@@ -1,5 +1,6 @@
 import * as path from 'node:path';
 import * as vscode from 'vscode';
+import type { Usage } from './usage';
 import { CloudWatchConnector } from '../capture/connectors/cloudwatch';
 import { DatadogConnector, type DatadogKeys } from '../capture/connectors/datadog';
 import { iamPassword, listProfiles } from '../capture/connectors/aws-auth';
@@ -93,6 +94,8 @@ const authFailed = (error: unknown) => {
  */
 export class ConnectionManager implements vscode.Disposable {
   private readonly open = new Map<string, { key: string; connector: Connector }>();
+  /** Counts what is done with connections, by type only. */
+  usage?: Usage;
 
   constructor(
     private readonly config: Settings,
@@ -149,6 +152,7 @@ export class ConnectionManager implements vscode.Disposable {
     if (answer !== 'Allow') return;
     const allowed = this.consent.get<string[]>(AGENT_ACCESS_KEY, []);
     await this.consent.update(AGENT_ACCESS_KEY, [...new Set([...allowed, this.identity(connection)])]);
+    this.usage?.record('connection_agent_allowed', { type: connection.type });
   }
 
   async revokeAgents(id?: string): Promise<void> {
@@ -523,6 +527,9 @@ export class ConnectionManager implements vscode.Disposable {
     const utc = this.config.get<string>('timezone', 'local') === 'utc';
     const time = (ms: number) =>
       utc ? new Date(ms).toISOString().slice(11, 19) : new Date(ms).toTimeString().slice(0, 8);
+    const started = performance.now();
+    const count = (ok: boolean, rows = 0) =>
+      this.usage?.record('connection_searched', { type: connection.type, ok, ms: performance.now() - started, rows });
     try {
       const info = await this.remote.fetch(await this.target(connection), {
         query,
@@ -535,8 +542,10 @@ export class ConnectionManager implements vscode.Disposable {
         // A search still running is replaced by this one, rather than waited for.
         replace: true,
       });
+      count(!info.error, info.kept);
       await this.failed(connection, info.error);
     } catch (error) {
+      count(false);
       await this.failed(connection, errorText(error), error);
     }
   }
@@ -569,8 +578,10 @@ export class ConnectionManager implements vscode.Disposable {
         // The SQL chose the rows, so the panel's search is cleared rather than left to hide some of them.
         started: (runId) => void this.showSource(connectionSourceId(connection.id), runId, ''),
       });
+      this.usage?.record('connection_sql_run', { type: connection.type, ok: !info.error });
       await this.failed(connection, info.error);
     } catch (error) {
+      this.usage?.record('connection_sql_run', { type: connection.type, ok: false });
       await this.failed(connection, errorText(error), error);
     }
   }
@@ -607,6 +618,7 @@ export class ConnectionManager implements vscode.Disposable {
     this.remote.stopTails(connection.id);
     try {
       const runId = this.remote.tail(await this.target(connection), query, `Tail: ${followed || 'all rows'}`, native);
+      this.usage?.record('connection_tailed', { type: connection.type });
       await this.showSource(connectionSourceId(connection.id), runId);
     } catch (error) {
       await this.failed(connection, errorText(error), error);
@@ -729,8 +741,10 @@ export class ConnectionManager implements vscode.Disposable {
         { location: vscode.ProgressLocation.Notification, title: `Connecting to ${connectionLabel(connection)}…` },
         async () => (await this.connector(connection)).test(),
       );
+      this.usage?.record('connection_tested', { type: connection.type, ok: true });
       void vscode.window.showInformationMessage(`${connectionLabel(connection)}: connected · ${detail}`);
     } catch (error) {
+      this.usage?.record('connection_tested', { type: connection.type, ok: false });
       await this.failed(connection, errorText(error), error);
     }
   }
@@ -888,6 +902,11 @@ export class ConnectionManager implements vscode.Disposable {
     const current =
       target === vscode.ConfigurationTarget.Workspace ? inspected?.workspaceValue : inspected?.globalValue;
     await settings.update('connections', [...(Array.isArray(current) ? current : []), connection], target);
+    this.usage?.record('connection_added', {
+      type: connection.type,
+      auth: signsInWithIam(connection) ? 'iam' : keepsPassword(connection) ? 'password' : 'other',
+    });
+    this.usage?.milestone('first_connection');
   }
 
   private uniqueId(label: string): string {

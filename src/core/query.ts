@@ -84,6 +84,11 @@ type FieldValue = string | number | boolean | undefined;
 
 // Fields whose values are not text to match, so `*` in them is not a wildcard.
 const SPECIAL_FIELDS = new Set(['exists', 'last', 'timestamp', 'time', 'changed']);
+/** Logline's own field names, as `canonicalField` gives them: the only field names usage counts may mention. */
+export const BUILT_IN_FIELDS: ReadonlySet<string> = new Set([
+  ...FIELD_GROUPS.map((names) => names[0]),
+  ...SPECIAL_FIELDS,
+]);
 
 function groupFor(field: string): string[] | undefined {
   const lower = String(field).toLowerCase();

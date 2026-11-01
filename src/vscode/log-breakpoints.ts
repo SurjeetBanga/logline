@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import { counted, type Usage } from './usage';
 import type { DebugSessionInfo } from '../capture/debug-capture';
 import { describeRule, LogBreakpointRules } from '../core/log-breakpoints';
 import type { LogSite, LogSiteIndex } from '../core/log-sites';
@@ -14,6 +15,7 @@ export interface LogBreakpointSources {
   lens(): LogLens | undefined;
   /** Show one event in the Logs panel. */
   showEvent(id: number): Promise<void>;
+  usage?: Usage;
 }
 
 // Statements to stop at when breaking on a search; more is rarely a useful debugging session.
@@ -39,20 +41,26 @@ export class LogBreakpoints implements vscode.Disposable {
       this.status.command = 'logline.manageLogBreakpoints';
     }
     this.disposables.push(
-      vscode.commands.registerCommand('logline.breakOnMatchingLogs', async (query?: unknown, levels?: unknown) =>
-        this.breakOnMatchingLogs(
-          typeof query === 'string'
-            ? query
-            : await vscode.window.showInputBox({
-                title: 'Break on matching logs',
-                prompt: 'Pause debug sessions when they log an event matching this search',
-                placeHolder: 'level:error "payment failed"',
-                ignoreFocusOut: true,
-              }),
-          Array.isArray(levels) ? levels.filter((level): level is string => typeof level === 'string') : [],
+      vscode.commands.registerCommand(
+        'logline.breakOnMatchingLogs',
+        counted(sources.usage, 'logline.breakOnMatchingLogs', async (query?: unknown, levels?: unknown) =>
+          this.breakOnMatchingLogs(
+            typeof query === 'string'
+              ? query
+              : await vscode.window.showInputBox({
+                  title: 'Break on matching logs',
+                  prompt: 'Pause debug sessions when they log an event matching this search',
+                  placeHolder: 'level:error "payment failed"',
+                  ignoreFocusOut: true,
+                }),
+            Array.isArray(levels) ? levels.filter((level): level is string => typeof level === 'string') : [],
+          ),
         ),
       ),
-      vscode.commands.registerCommand('logline.manageLogBreakpoints', () => this.manage()),
+      vscode.commands.registerCommand(
+        'logline.manageLogBreakpoints',
+        counted(sources.usage, 'logline.manageLogBreakpoints', () => this.manage()),
+      ),
     );
     const debug = vscode.debug as Partial<typeof vscode.debug> | undefined;
     if (debug?.onDidChangeBreakpoints)
@@ -140,6 +148,7 @@ export class LogBreakpoints implements vscode.Disposable {
     void session.pause().then(
       (paused) => {
         if (!paused) return;
+        this.sources.usage?.record('log_breakpoint', { step: 'hit' });
         const message = (event.message ?? '').slice(0, 120);
         void vscode.window
           .showInformationMessage(

@@ -66,12 +66,13 @@ New to it? Logline offers a one-minute tour the first time, which **More actions
 | **Retention** | Keeps the newest logs within a memory budget you set, optionally written to disk. |
 | **Troubleshooting** | **Logline: Show Status** shows what is on, off, or broken, with the fix. |
 
-Logline keeps everything on your machine. Nothing leaves it unless you share it with an agent or query a connection you added.
+Logline keeps your logs on your machine. Nothing from them leaves it unless you share it with an agent or query a connection you added. Logline sends anonymous usage counts, such as which features are used, never log content, searches, paths, or names; see [Privacy](PRIVACY.md) to see what is sent or turn it off.
 
 ## Learn more
 
 - [Usage reference](docs/usage.md): every feature, setting, and query.
 - [Changelog](CHANGELOG.md): what changed in each release.
+- [Privacy](PRIVACY.md): the anonymous usage counts Logline sends, and how to turn them off.
 - [Contributing](CONTRIBUTING.md) and [architecture](ARCHITECTURE.md): build, test, and send a pull request.
 
 ## License

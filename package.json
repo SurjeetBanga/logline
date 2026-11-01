@@ -267,6 +267,26 @@
         "category": "Logline"
       },
       {
+        "command": "logline.suggestFeature",
+        "title": "Suggest a Feature",
+        "category": "Logline"
+      },
+      {
+        "command": "logline.voteOnNext",
+        "title": "Vote on What's Next",
+        "category": "Logline"
+      },
+      {
+        "command": "logline.showUsageData",
+        "title": "Show Usage Data",
+        "category": "Logline"
+      },
+      {
+        "command": "logline.resetUsageId",
+        "title": "Reset Usage ID",
+        "category": "Logline"
+      },
+      {
         "command": "logline.askCopilot",
         "title": "Ask Copilot to Investigate Logs",
         "category": "Logline"
@@ -1251,6 +1271,16 @@
             "default": "[REDACTED]",
             "description": "Replacement text used for redacted values in exports, Copy filtered results, and shared-agent results.",
             "order": 4
+          },
+          "logline.telemetry.enabled": {
+            "type": "boolean",
+            "default": true,
+            "order": 5,
+            "tags": [
+              "telemetry",
+              "usesOnlineServices"
+            ],
+            "markdownDescription": "Send anonymous usage counts, such as which features are used and how often, to help decide what to improve. Logline never sends log content, searches, file paths, names, or hosts. Follows VS Code's `#telemetry.telemetryLevel#` too: usage counts need `all`, and error codes need `error` or `all`. See [what is sent](https://github.com/SurjeetBanga/logline/blob/main/PRIVACY.md) and [Show Usage Data](command:logline.showUsageData)."
           }
         }
       },

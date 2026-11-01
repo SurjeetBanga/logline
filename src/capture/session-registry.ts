@@ -21,8 +21,19 @@ export interface ServerSummary {
   canStop?: boolean;
 }
 
+/** Runs by id. A new id is a run that started, which `onStart` hears about. */
+export class Runs extends Map<string, SessionSummary> {
+  onStart?: (record: SessionSummary) => void;
+  override set(id: string, record: SessionSummary): this {
+    const added = !this.has(id);
+    super.set(id, record);
+    if (added) this.onStart?.(record);
+    return this;
+  }
+}
+
 export class SessionRegistry {
-  readonly records = new Map<string, SessionSummary>();
+  readonly records = new Runs();
   clearCompleted(): void {
     for (const [id, record] of this.records)
       if (record.status !== 'running' && record.status !== 'stopping') this.records.delete(id);

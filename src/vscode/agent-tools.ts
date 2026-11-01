@@ -1,6 +1,8 @@
 import * as vscode from 'vscode';
 import type { AgentAiCallsInput, AgentLogAccess, AgentSearchInput, ProductionFetchInput } from './agent-access';
 import { AgentAccessError } from './agent-access';
+import { agentClient } from '../core/usage-events';
+import type { Usage } from './usage';
 
 const MAX_BYTES = 64 * 1024;
 type ToolInput = Record<string, unknown>;
@@ -33,8 +35,7 @@ export function boundedText(value: unknown): string {
   return text;
 }
 
-const textResult = (value: unknown) => {
-  const text = boundedText(value);
+const textResult = (text: string) => {
   const Result = runtimeVscode.LanguageModelToolResult;
   const TextPart = runtimeVscode.LanguageModelTextPart;
   return Result
@@ -48,7 +49,37 @@ function inputOf(options: unknown): ToolInput {
   return input && typeof input === 'object' && !Array.isArray(input) ? (input as ToolInput) : {};
 }
 
-function invoke(access: AgentLogAccess, callback: ToolCallback, name = '') {
+/** Count one tool call: which tool, how it went, and how long it took, never its input or result. */
+async function counted(
+  usage: Usage | undefined,
+  tool: string,
+  via: 'copilot' | 'mcp',
+  client: string | undefined,
+  run: () => Promise<string>,
+): Promise<string> {
+  if (!usage) return run();
+  const started = performance.now();
+  const text = await run();
+  let result: { error?: unknown; truncated?: unknown } = {};
+  try {
+    result = JSON.parse(text) as typeof result;
+  } catch {
+    /* counted as it is */
+  }
+  usage.agentTool({
+    tool,
+    via,
+    client: via === 'copilot' ? 'copilot' : agentClient(client),
+    ok: result.error === undefined,
+    ...(typeof result.error === 'string' ? { code: result.error } : {}),
+    ms: performance.now() - started,
+    resultSize: Buffer.byteLength(text, 'utf8'),
+    truncated: result.truncated === true,
+  });
+  return text;
+}
+
+function invoke(access: AgentLogAccess, callback: ToolCallback, name = '', usage?: Usage) {
   return {
     async prepareInvocation(options: unknown) {
       const MarkdownString = runtimeVscode.MarkdownString;
@@ -85,7 +116,10 @@ function invoke(access: AgentLogAccess, callback: ToolCallback, name = '') {
       };
     },
     async invoke(options: unknown, token?: CancellationTokenLike) {
-      return textResult(await callTool(callback, inputOf(options), token));
+      const text = await counted(usage, name, 'copilot', undefined, async () =>
+        boundedText(await callTool(callback, inputOf(options), token)),
+      );
+      return textResult(text);
     },
   };
 }
@@ -153,18 +187,25 @@ export async function runAgentTool(
   name: string,
   input: unknown,
   token?: CancellationTokenLike,
+  counting: { usage?: Usage; client?: string } = {},
 ): Promise<string> {
   const callback = agentToolHandlers(access).get(name);
   if (!callback) return boundedText({ error: 'INVALID_INPUT', message: `Unknown Logline tool: ${name}` });
   const args = input && typeof input === 'object' && !Array.isArray(input) ? (input as ToolInput) : {};
-  return boundedText(await callTool(callback, args, token));
+  return counted(counting.usage, name, 'mcp', counting.client, async () =>
+    boundedText(await callTool(callback, args, token)),
+  );
 }
 
-export function registerAgentTools(context: vscode.ExtensionContext, access: AgentLogAccess): vscode.Disposable[] {
+export function registerAgentTools(
+  context: vscode.ExtensionContext,
+  access: AgentLogAccess,
+  usage?: Usage,
+): vscode.Disposable[] {
   void context;
   const lm = runtimeVscode.lm;
   if (!lm?.registerTool) return [];
   return [...agentToolHandlers(access)].map(([name, callback]) =>
-    lm.registerTool(name, invoke(access, callback, name)),
+    lm.registerTool(name, invoke(access, callback, name, usage)),
   );
 }

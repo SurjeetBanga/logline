@@ -1,0 +1,525 @@
+import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { test } from 'node:test';
+import { withVscode } from '../test/vscode-mock';
+import { USAGE_EVENTS, type UsageEnvironment } from '../core/usage-events';
+
+const host = {
+  usageEnabled: true,
+  errorsEnabled: true,
+  settings: new Map<string, unknown>(),
+  messages: [] as string[],
+  answer: undefined as string | undefined,
+  opened: [] as string[],
+  lines: [] as string[],
+  configListener: undefined as ((event: { affectsConfiguration(key: string): boolean }) => void) | undefined,
+  stateListener: undefined as (() => void) | undefined,
+};
+const mock = {
+  ExtensionMode: { Production: 1, Development: 2, Test: 3 },
+  ConfigurationTarget: { Global: 1 },
+  UIKind: { Desktop: 1, Web: 2 },
+  version: '1.105.1',
+  Uri: { parse: (value: string) => ({ toString: () => value }) },
+  env: {
+    appName: 'Visual Studio Code',
+    uiKind: 1,
+    openExternal: async (uri: { toString(): string }) => void host.opened.push(uri.toString()),
+    createTelemetryLogger(
+      sender: { sendEventData(name: string, data?: Record<string, unknown>): void },
+      options: { ignoreBuiltInCommonProperties?: boolean },
+    ) {
+      assert.equal(options.ignoreBuiltInCommonProperties, true, 'no machine or session ids from VS Code');
+      return {
+        get isUsageEnabled() {
+          return host.usageEnabled;
+        },
+        get isErrorsEnabled() {
+          return host.errorsEnabled;
+        },
+        logUsage: (name: string, data: Record<string, unknown>) => {
+          if (host.usageEnabled) sender.sendEventData(`surjeetbanga.logline/${name}`, data);
+        },
+        logError: (name: string, data: Record<string, unknown>) => {
+          if (host.errorsEnabled) sender.sendEventData(`surjeetbanga.logline/${name}`, data);
+        },
+        onDidChangeEnableStates: (listener: () => void) => {
+          host.stateListener = listener;
+          return { dispose() {} };
+        },
+        dispose() {},
+      };
+    },
+  },
+  workspace: {
+    getConfiguration: () => ({
+      get: (key: string, fallback: unknown) => (host.settings.has(key) ? host.settings.get(key) : fallback),
+      update: async (key: string, value: unknown) => void host.settings.set(key, value),
+    }),
+    onDidChangeConfiguration: (listener: typeof host.configListener) => {
+      host.configListener = listener;
+      return { dispose() {} };
+    },
+  },
+  window: {
+    showInformationMessage: async (message: string) => {
+      host.messages.push(message);
+      return host.answer;
+    },
+    createOutputChannel: () => ({
+      appendLine: (line: string) => void host.lines.push(line),
+      clear: () => void (host.lines.length = 0),
+      show() {},
+      dispose() {},
+    }),
+  },
+  commands: { registerCommand: () => ({ dispose() {} }) },
+};
+const { Usage, counted, usageVocabulary, usageEnvironment, HELPFUL_DELAY_MS } = withVscode(
+  mock,
+  () => require('./usage') as typeof import('./usage'),
+);
+
+const environment: UsageEnvironment = {
+  version: '1.19.0',
+  vscode: '1.105.1',
+  appName: 'Visual Studio Code',
+  uiKind: 'desktop',
+  platform: 'linux',
+  arch: 'x64',
+  cpus: 8,
+  totalMemory: 16 * 1024 ** 3,
+};
+const manifest = JSON.parse(readFileSync(join(__dirname, '..', '..', 'package.json'), 'utf8')) as unknown;
+const vocabulary = usageVocabulary(manifest, ['capture', 'search']);
+
+function memento(initial: Record<string, unknown> = {}) {
+  const stored = new Map<string, unknown>(Object.entries(initial));
+  return {
+    stored,
+    get: <T>(key: string, fallback?: T) => (stored.has(key) ? (stored.get(key) as T) : fallback),
+    update: async (key: string, value: unknown) => void stored.set(key, value),
+    keys: () => [...stored.keys()],
+  };
+}
+
+function setup(
+  options: { mode?: number; env?: NodeJS.ProcessEnv; state?: ReturnType<typeof memento>; key?: string } = {},
+) {
+  Object.assign(host, { usageEnabled: true, errorsEnabled: true, answer: undefined, messages: [], opened: [] });
+  host.settings.clear();
+  const sent: { event: string; distinct_id: string; properties: Record<string, unknown> }[] = [];
+  const bodies: string[] = [];
+  let now = Date.UTC(2026, 10, 2, 9, 0, 0);
+  const globalState = options.state ?? memento();
+  const usage = new Usage({ globalState, extensionMode: options.mode ?? 1 } as any, {
+    vocabulary,
+    environment,
+    env: options.env ?? {},
+    projectKey: options.key ?? 'test-project',
+    now: () => now,
+    transport: async (body) => {
+      bodies.push(body);
+      const parsed = JSON.parse(body) as { batch: typeof sent };
+      sent.push(...parsed.batch);
+    },
+  });
+  return {
+    usage,
+    sent,
+    bodies,
+    globalState,
+    advance: (ms: number) => (now += ms),
+    events: () => sent.map((item) => item.event),
+  };
+}
+
+test('a new install says so once, asks before sending, and sends batches with only coarse common properties', async () => {
+  const { usage, sent, bodies, events, globalState } = setup();
+  usage.start();
+  assert.equal(host.messages.length, 1, 'the notice shows first');
+  assert.match(host.messages[0], /never sends log content/);
+  usage.command('logline.showLogs');
+  await usage.flush();
+  assert.deepEqual(events(), ['installed', 'activated', 'active_day', 'command']);
+  const id = sent[0].distinct_id;
+  assert.match(id, /^[0-9a-f-]{36}$/);
+  assert.ok(sent.every((item) => item.distinct_id === id));
+  assert.deepEqual(sent[3].properties, {
+    version: '1.19.0',
+    vscode: '1.105.1',
+    host: 'vscode',
+    ui: 'desktop',
+    remote: 'none',
+    os: 'linux',
+    arch: 'x64',
+    cpus: '5-8',
+    ram_gb: '16-31',
+    id: 'logline.showLogs',
+    $process_person_profile: false,
+    $geoip_disable: true,
+  });
+  assert.equal(JSON.parse(bodies[0]).api_key, 'test-project');
+  assert.doesNotMatch(bodies.join(''), /machineid|sessionid/i);
+  usage.dispose();
+
+  // The next window keeps the id and says nothing again.
+  const next = setup({ state: globalState });
+  next.usage.start();
+  await next.usage.flush();
+  assert.deepEqual(next.events(), ['activated']);
+  assert.equal(next.sent[0].distinct_id, id);
+  assert.equal(host.messages.length, 0);
+  next.usage.dispose();
+});
+
+test('Turn off in the notice turns usage counts off before anything is sent', async () => {
+  const { usage, sent } = setup();
+  host.answer = 'Turn off';
+  usage.start();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(host.settings.get('telemetry.enabled'), false);
+  host.configListener?.({ affectsConfiguration: (key) => key === 'logline.telemetry.enabled' });
+  usage.command('logline.showLogs');
+  await usage.flush();
+  assert.deepEqual(sent, []);
+  usage.dispose();
+});
+
+test('nothing is recorded when VS Code telemetry, Logline’s setting, or DO_NOT_TRACK says no', async () => {
+  for (const turnOff of [() => (host.usageEnabled = false), () => host.settings.set('telemetry.enabled', false)]) {
+    const { usage, sent } = setup();
+    turnOff();
+    usage.start();
+    usage.command('logline.showLogs');
+    await usage.flush();
+    assert.deepEqual(sent, []);
+    assert.equal(host.messages.length, 0, 'and no notice');
+    usage.dispose();
+  }
+  const { usage, sent } = setup({ env: { DO_NOT_TRACK: '1' } });
+  usage.start();
+  await usage.flush();
+  assert.deepEqual(sent, []);
+  usage.dispose();
+});
+
+test('errors follow the error level; usage counts need all', async () => {
+  const { usage, events } = setup();
+  usage.start();
+  host.usageEnabled = true;
+  host.errorsEnabled = false;
+  usage.record('error', { area: 'bridge', code: 'start_failed' });
+  host.errorsEnabled = true;
+  usage.record('error', { area: 'bridge', code: 'start_failed', message: 'EADDRINUSE 127.0.0.1:4318' });
+  await usage.flush();
+  assert.deepEqual(events(), ['installed', 'activated', 'error']);
+  usage.dispose();
+});
+
+test('turning usage counts off drops what is queued', async () => {
+  const { usage, sent } = setup();
+  usage.start();
+  usage.command('logline.showLogs');
+  host.settings.set('telemetry.enabled', false);
+  host.configListener?.({ affectsConfiguration: (key) => key === 'logline.telemetry.enabled' });
+  host.settings.delete('telemetry.enabled');
+  await usage.flush();
+  assert.deepEqual(sent, []);
+  usage.command('logline.showLogs');
+  host.usageEnabled = false;
+  host.stateListener?.();
+  host.usageEnabled = true;
+  await usage.flush();
+  assert.deepEqual(sent, [], 'and so does VS Code turning telemetry off');
+  usage.dispose();
+});
+
+test('development hosts and builds without a project key list events but never send them', async () => {
+  for (const options of [{ mode: 2 }, { key: '' }, { env: { LOGLINE_USAGE_DEBUG: '1' } }]) {
+    const { usage, sent } = setup(options);
+    usage.start();
+    await usage.flush();
+    assert.deepEqual(sent, []);
+    usage.showData();
+    assert.match(host.lines.join('\n'), /activated/);
+    assert.match(host.lines[0], /not sent from this build|usage counts on/);
+    usage.dispose();
+  }
+});
+
+test('someone who used Logline before is not a new install, and an upgrade says where from', async () => {
+  const state = memento({ 'logline.rating': { sessions: 4 } });
+  const first = setup({ state });
+  first.usage.start();
+  first.usage.capture('terminal');
+  first.usage.search(['field'], ['level']);
+  await first.usage.flush();
+  assert.deepEqual(first.events(), ['activated', 'capture_started', 'active_day'], 'no install, and no firsts');
+  first.usage.dispose();
+
+  await state.update('logline.usage.state', { ...(state.get('logline.usage.state') as object), version: '1.18.0' });
+  const second = setup({ state });
+  second.usage.start();
+  await second.usage.flush();
+  assert.deepEqual(second.events(), ['updated', 'activated']);
+  assert.equal(second.sent[0].properties.from, '1.18.0');
+  second.usage.dispose();
+});
+
+test('firsts are sent once with how long after installing; active days once a day', async () => {
+  const { usage, sent, events, advance, globalState } = setup();
+  usage.start();
+  advance(3 * 60_000);
+  usage.capture('terminal');
+  usage.capture('terminal');
+  usage.capture('debug');
+  usage.search(['field', 'negation'], ['level']);
+  usage.search([], []);
+  usage.view('traces');
+  usage.view('traces');
+  advance(60 * 60_000);
+  usage.touch();
+  await usage.flush();
+  assert.deepEqual(events(), [
+    'installed',
+    'activated',
+    'milestone',
+    'capture_started',
+    'capture_started',
+    'active_day',
+    'milestone',
+    'milestone',
+    'milestone',
+    'view_opened',
+  ]);
+  assert.deepEqual(
+    sent.filter((item) => item.event === 'milestone').map((item) => [item.properties.name, item.properties.after]),
+    [
+      ['first_capture', '1-5m'],
+      ['first_search', '1-5m'],
+      ['first_filtered_search', '1-5m'],
+      ['first_view_switch', '1-5m'],
+    ],
+  );
+  usage.dispose();
+  const tomorrow = setup({ state: globalState });
+  tomorrow.advance(24 * 60 * 60_000);
+  tomorrow.usage.start();
+  tomorrow.usage.touch();
+  tomorrow.usage.touch();
+  await tomorrow.usage.flush();
+  assert.deepEqual(tomorrow.events(), ['activated', 'active_day']);
+  tomorrow.usage.dispose();
+});
+
+test('searches are timed for the first few, then sampled; the summary counts what they used', async () => {
+  const { usage, sent } = setup();
+  usage.start();
+  for (let i = 0; i < 60; i++) usage.search(i % 2 ? ['regex'] : ['field'], ['level', 'service'], 30);
+  usage.shared('all', 2, 1200);
+  usage.agentTool({
+    tool: 'logline_search_logs',
+    via: 'mcp',
+    client: 'claude-code',
+    ok: true,
+    ms: 40,
+    resultSize: 2048,
+    truncated: false,
+  });
+  await usage.close();
+  assert.equal(sent.filter((item) => item.event === 'perf').length, 6);
+  const summary = sent.find((item) => item.event === 'session_summary')!.properties;
+  assert.equal(summary.searches, '10-99');
+  assert.equal(summary.op_field, '10-99');
+  assert.equal(summary.op_regex, '10-99');
+  assert.deepEqual(summary.fields, ['level', 'service']);
+  assert.equal(summary.shares, '1-9');
+  assert.equal(summary.tool_calls, '1-9');
+  assert.equal(summary.unused_shares, '0');
+  assert.deepEqual(summary.clients_used, ['claude-code']);
+  assert.deepEqual(summary.features_used, ['logline_search_logs']);
+  assert.ok(sent.some((item) => item.event === 'sharing_stopped'));
+  const after = sent.find((item) => item.event === 'first_tool_after_share')!;
+  assert.equal(after.properties.after, '<1m');
+});
+
+test('a share no agent used is counted as unused', async () => {
+  const { usage, sent } = setup();
+  usage.start();
+  usage.shared('runs', 1, 40);
+  usage.sharingStopped();
+  usage.shared('event', 1, 1);
+  await usage.close();
+  assert.equal(sent.find((item) => item.event === 'session_summary')!.properties.unused_shares, '1-9');
+  assert.deepEqual(
+    sent.filter((item) => item.event === 'shared_with_agent').map((item) => item.properties.how),
+    ['runs', 'event'],
+  );
+});
+
+test('the summary reads sizes and connection counts from the rest of Logline', async () => {
+  const { usage, sent, advance } = setup();
+  let captured = 0;
+  usage.start({
+    eventsCaptured: () => captured,
+    sources: () => 3,
+    memoryMb: () => 42,
+    trimmed: () => true,
+    connections: () => ({ datadog: 1, postgres: 2 }),
+  });
+  usage.sampleRate();
+  captured = 7200;
+  advance(60_000);
+  usage.sampleRate();
+  captured = 12_000;
+  advance(60_000);
+  usage.sampleRate();
+  await usage.close();
+  const summary = sent.find((item) => item.event === 'session_summary')!.properties;
+  assert.equal(summary.events_captured, '10k-100k');
+  assert.equal(summary.sources, '1-9');
+  assert.equal(summary.memory_mb, '10-99');
+  assert.equal(summary.trimmed, true);
+  assert.equal(summary.peak_events_per_sec, '100-999');
+  assert.equal(summary.conn_datadog, '1-9');
+  assert.equal(summary.conn_postgres, '1-9');
+});
+
+test('the queue holds at most 500 events', async () => {
+  const { usage, sent } = setup();
+  usage.start();
+  for (let i = 0; i < 700; i++) usage.record('log_lens_clicked');
+  await usage.flush();
+  assert.equal(sent.length, 500);
+  usage.dispose();
+});
+
+test('a changed setting is sent by name, with its value only when it is a choice', async () => {
+  const { usage, sent } = setup();
+  usage.start();
+  host.settings.set('captureTerminals', true);
+  host.settings.set('redactionFields', ['customer_email']);
+  host.configListener?.({ affectsConfiguration: (key) => key === 'logline.captureTerminals' });
+  host.configListener?.({ affectsConfiguration: (key) => key === 'logline.redactionFields' });
+  await usage.flush();
+  assert.deepEqual(
+    sent.filter((item) => item.event === 'setting_changed').map((item) => [item.properties.key, item.properties.value]),
+    [
+      ['captureTerminals', true],
+      ['redactionFields', 'custom'],
+    ],
+  );
+  usage.dispose();
+});
+
+test('nothing a person typed or captured reaches a batch, however a caller passes it', async () => {
+  const leaks = ['/Users/someone/secret-project', 'db-prod-3.acme.internal', 'level:error user_id:42', 'Payments EU'];
+  const { usage, bodies } = setup();
+  usage.start();
+  for (const event of Object.keys(USAGE_EVENTS)) {
+    const properties: Record<string, unknown> = {};
+    for (const key of Object.keys(USAGE_EVENTS[event])) properties[key] = leaks[key.length % leaks.length];
+    usage.record(event, { ...properties, message: leaks[0], label: leaks[3], query: leaks[2], host: leaks[1] });
+  }
+  usage.view(leaks[1]);
+  usage.capture(leaks[0]);
+  usage.search([], [leaks[2]]);
+  usage.command(leaks[0]);
+  await usage.close();
+  const text = bodies.join('\n');
+  for (const leak of leaks) assert.ok(!text.includes(leak), `${leak} was sent`);
+});
+
+test('survey answers are the only text sent, and only while usage counts are on', async () => {
+  const { usage, sent } = setup();
+  usage.start();
+  assert.equal(await usage.survey('survey-1', { q1: 'Search', q2: 'x'.repeat(900) }), true);
+  const answer = sent.find((item) => item.event === 'survey sent')!;
+  assert.equal(answer.properties.$survey_id, 'survey-1');
+  assert.equal(answer.properties.$survey_response_q1, 'Search');
+  assert.equal((answer.properties.$survey_response_q2 as string).length, 500);
+  assert.equal(answer.properties.$survey_completed, true);
+  host.settings.set('telemetry.enabled', false);
+  assert.equal(await usage.survey('survey-1', { q1: 'Search' }), false);
+  assert.equal(await usage.survey('', { q1: 'Search' }), false);
+  usage.dispose();
+});
+
+test('a reset id stops later events being tied to earlier ones', async () => {
+  const { usage, sent } = setup();
+  usage.start();
+  await usage.flush();
+  const before = usage.usageId;
+  await usage.resetId();
+  usage.command('logline.showLogs');
+  await usage.flush();
+  assert.notEqual(usage.usageId, before);
+  assert.equal(sent.at(-1)!.distinct_id, usage.usageId);
+  usage.dispose();
+});
+
+test('a counted command records its id, never its arguments, and returns what the handler does', () => {
+  const recorded: string[] = [];
+  const usage = { command: (id: string) => recorded.push(id) } as any;
+  const handler = counted(usage, 'logline.showTrace', (traceId: string, extra: number) => `${traceId}:${extra}`);
+  assert.equal(handler('abc123', 2), 'abc123:2');
+  assert.deepEqual(recorded, ['logline.showTrace']);
+  assert.equal(counted(undefined, 'logline.showTrace', () => 5)(), 5);
+});
+
+test('the vocabulary reads commands and setting kinds from the manifest', () => {
+  assert.ok(vocabulary.commands.has('logline.showLogs'));
+  assert.ok(!vocabulary.commands.has('workbench.action.reloadWindow'));
+  assert.equal(vocabulary.settings.get('captureTerminals'), 'boolean');
+  assert.deepEqual(vocabulary.settings.get('source'), ['both', 'stdout', 'stderr']);
+  assert.equal(vocabulary.settings.get('maxEvents'), 'number');
+  assert.equal(vocabulary.settings.get('redactionFields'), 'custom');
+  assert.equal(usageEnvironment('1.19.0').vscode, '1.105.1');
+});
+
+test('what Log Doctor finds counts once per kind, and a vote on a kind says whether it helps', async () => {
+  const { usage, sent } = setup();
+  usage.start();
+  usage.findings(['secret', 'noisy', 'secret']);
+  usage.findings(['noisy', 'made-up', 'unit-in-name']);
+  usage.findingHelpful('noisy', false);
+  await usage.flush();
+  assert.deepEqual(
+    sent.filter((item) => item.event === 'doctor_finding').map((item) => item.properties.code),
+    ['secret', 'noisy', 'unit-in-name'],
+  );
+  const vote = sent.find((item) => item.event === 'feedback')!.properties;
+  assert.equal(vote.surface, 'doctor');
+  assert.equal(vote.code, 'noisy');
+  assert.equal(vote.helpful, false);
+  usage.dispose();
+});
+
+test('after Ask Copilot, whether it helped is asked at most once a week and three times in all', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const state = memento();
+  let asked = 0;
+  const answers: unknown[] = [];
+  for (let week = 0; week < 5; week++) {
+    const window = setup({ state });
+    window.advance(week * 7 * 24 * 60 * 60 * 1000);
+    window.usage.start();
+    host.messages.length = 0;
+    host.answer = week % 2 ? 'No' : 'Yes';
+    window.usage.askWhetherCopilotHelped();
+    window.usage.askWhetherCopilotHelped();
+    t.mock.timers.tick(HELPFUL_DELAY_MS);
+    await new Promise((resolve) => setImmediate(resolve));
+    asked += host.messages.length;
+    await window.usage.flush();
+    answers.push(...window.sent.filter((item) => item.event === 'feedback').map((item) => item.properties.helpful));
+    // Asked again in the same week: no.
+    window.usage.askWhetherCopilotHelped();
+    t.mock.timers.tick(HELPFUL_DELAY_MS);
+    window.usage.dispose();
+  }
+  assert.equal(asked, 3);
+  assert.deepEqual(answers, [true, false, true]);
+});
