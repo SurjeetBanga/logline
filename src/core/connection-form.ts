@@ -7,7 +7,9 @@ import {
   DATADOG_SITES,
   datadogApiBase,
   formatServerUrl,
+  apiUrl,
   isAwsRegion,
+  isLokiSelector,
   isRdsHost,
   logGroupIdentifier,
   MAX_LOG_GROUPS,
@@ -60,6 +62,9 @@ export interface FormDraft {
   /** CloudWatch: the AWS region, and its log groups, one a line. */
   region: string;
   logGroups: string;
+  /** Loki: the tenant of a multi-tenant Loki, and the streams a search reads when it names no service. */
+  tenant: string;
+  selector: string;
   /** A MongoDB URL, without its password. */
   url: string;
   /** A SQLite file, relative to the workspace when inside it. */
@@ -90,6 +95,8 @@ export function emptyDraft(type: ConnectionType = 'postgres'): FormDraft {
     profile: '',
     region: '',
     logGroups: '',
+    tenant: '',
+    selector: '',
     url: '',
     path: '',
     site: DATADOG_SITES[0],
@@ -129,6 +136,14 @@ export function draftFromConnection(connection: ConnectionConfig): FormDraft {
       return { ...draft, path: connection.path };
     case 'datadog':
       return { ...draft, site: connection.site };
+    case 'loki':
+      return {
+        ...draft,
+        url: connection.url,
+        tenant: connection.tenant ?? '',
+        user: connection.user ?? '',
+        selector: connection.selector ?? '',
+      };
     case 'cloudwatch':
       return {
         ...draft,
@@ -150,6 +165,7 @@ export function draftLogGroups(draft: Pick<FormDraft, 'logGroups'>): string[] {
 /** The name a new connection is offered: its database, its file, or prod for Datadog. */
 export function suggestedLabel(draft: FormDraft): string {
   if (draft.type === 'datadog') return 'prod';
+  if (draft.type === 'loki') return /\/\/(?:localhost|127\.0\.0\.1|\[::1\])[:/]?/.test(draft.url) ? 'local' : 'prod';
   if (draft.type === 'cloudwatch') {
     // The service of the first group: `/aws/lambda/checkout` is `checkout`.
     const [first] = draftLogGroups(draft);
@@ -321,6 +337,21 @@ export function readDraft(draft: FormDraft, saved: { secret?: boolean } = {}): D
           keys = { apiKey: draft.apiKey.trim(), appKey: draft.appKey.trim() };
       }
       break;
+    case 'loki': {
+      const url = draft.url.trim();
+      const selector = draft.selector.trim();
+      if (!url) errors.url = 'Enter the URL of the Loki API, such as http://localhost:3100';
+      else if (!apiUrl(url)) errors.url = 'An https URL, or http on this machine, without a password or query';
+      if (selector && !isLokiSelector(selector)) errors.selector = 'A stream selector such as {job="api"}';
+      item = {
+        type: 'loki',
+        url,
+        ...(draft.tenant.trim() ? { tenant: draft.tenant.trim() } : {}),
+        ...(draft.user.trim() ? { user: draft.user.trim() } : {}),
+        ...(selector ? { selector } : {}),
+      };
+      break;
+    }
     case 'cloudwatch': {
       const region = draft.region.trim();
       if (!region) errors.region = 'Enter the region, such as us-east-1';

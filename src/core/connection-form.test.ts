@@ -428,3 +428,26 @@ test('a CloudWatch draft needs a region and log groups, and keeps an endpoint se
   });
   assert.equal((keepUnmodeled(connection!, saved) as typeof saved).endpoint, 'http://localhost:4566');
 });
+
+test('a Loki draft needs a URL, keeps its token as the password, and checks its selector', () => {
+  const draft = { ...emptyDraft('loki'), url: 'http://localhost:3100', password: ['glc', 'x'].join('_') };
+  const result = readDraft(draft);
+  assert.deepEqual(result.connection, { id: 'draft', label: 'draft', type: 'loki', url: 'http://localhost:3100' });
+  assert.equal(result.password, draft.password);
+  assert.equal(suggestedLabel(draft), 'local');
+  assert.equal(suggestedLabel({ ...draft, url: 'https://logs-prod-012.grafana.net' }), 'prod');
+  assert.equal(
+    readDraft({ ...draft, url: '' }).errors.url,
+    'Enter the URL of the Loki API, such as http://localhost:3100',
+  );
+  assert.equal(readDraft({ ...draft, selector: 'job=api' }).errors.selector, 'A stream selector such as {job="api"}');
+  const saved = { ...result.connection!, user: 'me', tenant: 't', selector: '{job="api"}' } as const;
+  assert.deepEqual(draftFromConnection(saved), {
+    ...emptyDraft('loki'),
+    label: 'draft',
+    url: 'http://localhost:3100',
+    user: 'me',
+    tenant: 't',
+    selector: '{job="api"}',
+  });
+});

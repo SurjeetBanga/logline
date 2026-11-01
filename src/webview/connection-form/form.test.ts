@@ -1,6 +1,12 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { draftSecretKey, emptyDraft, type FormRequest, type FormUpdate } from '../../core/connection-form';
+import {
+  CONNECTION_TYPES,
+  draftSecretKey,
+  emptyDraft,
+  type FormRequest,
+  type FormUpdate,
+} from '../../core/connection-form';
 
 // A minimal DOM adapter, enough for the form's elements, events, and selectors. It does not
 // simulate layout; the page's look still needs a real webview.
@@ -141,7 +147,7 @@ test('a Postgres URL fills the form, a test unlocks the tables, and Save waits f
   assert.equal(form.steps()[0].hidden, true, 'nothing shows before the extension fills it in');
   form.init();
   assert.equal(form.steps()[0].hidden, false);
-  assert.equal(form.root().querySelectorAll('.type-card').length, 6);
+  assert.equal(form.root().querySelectorAll('.type-card').length, CONNECTION_TYPES.length);
   assert.ok(form.$('.type-card.selected').textContent.startsWith('Postgres'));
   assert.equal(form.save().disabled, true);
   assert.equal(form.note(), 'Test the connection to continue.');
@@ -272,7 +278,11 @@ test('editing tests the saved connection at once, keeps its type, and chooses it
   assert.equal(form.$('h1').textContent, 'Edit Billing');
   assert.equal(form.save().textContent, 'Save changes');
   assert.equal(form.$('#field-password').getAttribute('placeholder'), 'Saved · leave empty to keep');
-  assert.equal(form.root().querySelectorAll('.type-card.disabled').length, 5, 'only MySQL can be chosen');
+  assert.equal(
+    form.root().querySelectorAll('.type-card.disabled').length,
+    CONNECTION_TYPES.length - 1,
+    'only MySQL can be chosen',
+  );
   assert.equal(form.sent.at(-1)?.type, 'test');
   form.receive({ type: 'tested', ok: true, detail: 'MySQL 8 · 2 tables', tables: ['logs', 'users'] });
   assert.deepEqual(form.sent.at(-1), { type: 'table', table: 'logs' });

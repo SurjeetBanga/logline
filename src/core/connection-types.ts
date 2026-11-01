@@ -66,6 +66,24 @@ export const CONNECTION_KINDS: Record<ConnectionType, ConnectionKind> = {
     maxRowsSetting: 'logServiceMaxRows',
     secret: 'none',
   },
+  loki: {
+    label: 'Loki',
+    description: 'Search the logs of Grafana Loki or Grafana Cloud',
+    service: true,
+    icon: 'cloud',
+    noun: 'log',
+    native: {
+      label: 'LogQL',
+      title: "Type a LogQL query, sent as you type it; one that starts with | reads the connection's streams",
+    },
+    // Pipeline stages alone run on the connection's selector.
+    traceQuery: (traceId) => `|= ${JSON.stringify(traceId)}`,
+    fields:
+      'Searches become LogQL: words match a line without case, and fields are read from JSON lines and stream labels.',
+    services: true,
+    maxRowsSetting: 'logServiceMaxRows',
+    secret: 'password',
+  },
   postgres: {
     label: 'Postgres',
     description: 'Also Aurora PostgreSQL, RDS, Cloud SQL',

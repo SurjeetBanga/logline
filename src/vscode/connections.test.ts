@@ -23,6 +23,8 @@ const ui = {
   inputs: [] as (string | undefined)[],
   file: undefined as string | undefined,
   modal: undefined as string | undefined,
+  /** The buttons the last warning offered. */
+  buttons: [] as unknown[],
   errorChoice: undefined as string | undefined,
   messages: [] as string[],
 };
@@ -95,6 +97,7 @@ const mock = {
     showOpenDialog: async () => (ui.file ? [{ scheme: 'file', fsPath: ui.file }] : undefined),
     showWarningMessage: async (message: string, ...rest: unknown[]) => {
       ui.messages.push(`warning: ${message}`);
+      ui.buttons = rest.slice(1);
       return typeof rest[0] === 'object' ? ui.modal : undefined;
     },
     showInformationMessage: async (message: string) => ui.messages.push(`info: ${message}`),
@@ -408,6 +411,11 @@ test('removing a connection takes it out of settings, and forgets its password w
   await manager.remove('orders');
   assert.deepEqual(raw.workspace, []);
   assert.equal(secrets.size, 0);
+  // A connection that keeps no secret has nothing to forget.
+  raw.workspace = [{ id: 'aws', type: 'cloudwatch', region: 'us-east-1', logGroups: ['/ecs/api'] }];
+  ui.modal = undefined;
+  await manager.remove('aws');
+  assert.deepEqual(ui.buttons, ['Remove']);
 });
 
 const appConnection = {

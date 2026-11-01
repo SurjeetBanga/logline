@@ -326,6 +326,33 @@ export function createConnectionForm(api: FormApi, root: HTMLElement) {
     ];
   }
 
+  function lokiDetails(): Child[] {
+    return [
+      h(
+        'div',
+        { className: 'grid' },
+        field('url', 'URL', {
+          wide: true,
+          placeholder: 'http://localhost:3100',
+          hint: 'The Loki API, such as https://logs-prod-012.grafana.net for Grafana Cloud.',
+        }),
+        field('user', 'User', {
+          hint: 'For basic auth, such as a Grafana Cloud user id. Leave empty for a bearer token.',
+        }),
+        secretField(
+          'password',
+          'Password or token',
+          'Leave empty if Loki needs none. Kept in VS Code secret storage, never in settings.',
+        ),
+        field('tenant', 'Tenant', { hint: 'For a multi-tenant Loki: sent as X-Scope-OrgID.' }),
+        field('selector', 'Streams', {
+          placeholder: '{service_name=~".+"}',
+          hint: 'The stream selector a search reads when it names no service.',
+        }),
+      ),
+    ];
+  }
+
   function secretField(name: 'password' | 'apiKey' | 'appKey' | 'token', label: string, hint?: string): HTMLElement {
     const element = field(name, label, {
       type: 'password',
@@ -463,6 +490,9 @@ export function createConnectionForm(api: FormApi, root: HTMLElement) {
         break;
       case 'cloudwatch':
         children.push(...cloudwatchDetails());
+        break;
+      case 'loki':
+        children.push(...lokiDetails());
         break;
     }
     details.replaceChildren(...children.filter((child): child is Node | string => !!child));

@@ -2058,6 +2058,23 @@ Trace ${trace.traceId}`;
       maxRowsSetting: "logServiceMaxRows",
       secret: "none"
     },
+    loki: {
+      label: "Loki",
+      description: "Search the logs of Grafana Loki or Grafana Cloud",
+      service: true,
+      icon: "cloud",
+      noun: "log",
+      native: {
+        label: "LogQL",
+        title: "Type a LogQL query, sent as you type it; one that starts with | reads the connection's streams"
+      },
+      // Pipeline stages alone run on the connection's selector.
+      traceQuery: (traceId) => `|= ${JSON.stringify(traceId)}`,
+      fields: "Searches become LogQL: words match a line without case, and fields are read from JSON lines and stream labels.",
+      services: true,
+      maxRowsSetting: "logServiceMaxRows",
+      secret: "password"
+    },
     postgres: {
       label: "Postgres",
       description: "Also Aurora PostgreSQL, RDS, Cloud SQL",
@@ -2933,6 +2950,11 @@ Span ${call.spanId}`;
   function isAwsRegion(value) {
     return AWS_REGION.test(value);
   }
+  var SELECTOR_MATCHER = String.raw`\s*[A-Za-z_]\w*\s*(?:=~|!~|!=|=)\s*"(?:\\.|[^"\\])*"\s*`;
+  var SELECTOR = new RegExp(`^\\{${SELECTOR_MATCHER}(?:,${SELECTOR_MATCHER})*\\}$`);
+  function isLokiSelector(value) {
+    return SELECTOR.test(value.trim());
+  }
   function logGroupIdentifier(value) {
     const text2 = value.trim();
     const arn = /^arn:aws(?:-[a-z-]+)?:logs:[a-z0-9-]+:\d{12}:log-group:([\w.\-/#]{1,512})(?::\*)?$/.exec(text2);
@@ -2945,6 +2967,8 @@ Span ${call.spanId}`;
     return sourceId?.startsWith(SOURCE_PREFIX) ? sourceId.slice(SOURCE_PREFIX.length) : void 0;
   }
   function secretKey(connection) {
+    if (connection.type === "loki")
+      return `logline.connection.loki:${apiUrl(connection.url) ?? connection.url}/${encodeURIComponent(connection.tenant ?? "")}/${encodeURIComponent(connection.user ?? "")}`;
     if (connection.type === "datadog")
       return `logline.connection.datadog:${datadogApiBase(connection.site) ?? connection.site}`;
     if (connection.type === "mongodb") {
@@ -3045,6 +3069,21 @@ Span ${call.spanId}`;
           const indexes = Array.isArray(item.indexes) ? item.indexes.filter((index) => typeof index === "string" && !!index.trim()) : [];
           connection = { id, label, type: "datadog", site, ...indexes.length ? { indexes } : {} };
         }
+      } else if (item.type === "loki") {
+        const url = typeof item.url === "string" ? apiUrl(item.url.trim()) : void 0;
+        const tenant = text(item.tenant, 256);
+        const user = text(item.user, 256);
+        const selector = text(item.selector, 1024);
+        if (url)
+          connection = {
+            id,
+            label,
+            type: "loki",
+            url,
+            ...tenant ? { tenant } : {},
+            ...user ? { user } : {},
+            ...selector && isLokiSelector(selector) ? { selector } : {}
+          };
       } else if (item.type === "cloudwatch") {
         const region = text(item.region, 32);
         const profile = text(item.profile, 128);
@@ -4593,6 +4632,8 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
       profile: "",
       region: "",
       logGroups: "",
+      tenant: "",
+      selector: "",
       url: "",
       path: "",
       site: DATADOG_SITES[0],
@@ -4609,6 +4650,7 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
   }
   function suggestedLabel(draft) {
     if (draft.type === "datadog") return "prod";
+    if (draft.type === "loki") return /\/\/(?:localhost|127\.0\.0\.1|\[::1\])[:/]?/.test(draft.url) ? "local" : "prod";
     if (draft.type === "cloudwatch") {
       const [first] = draftLogGroups(draft);
       return first?.split(/[/:]/).filter(Boolean).at(-1) ?? "";
@@ -4715,6 +4757,21 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
             keys = { apiKey: draft.apiKey.trim(), appKey: draft.appKey.trim() };
         }
         break;
+      case "loki": {
+        const url = draft.url.trim();
+        const selector = draft.selector.trim();
+        if (!url) errors.url = "Enter the URL of the Loki API, such as http://localhost:3100";
+        else if (!apiUrl(url)) errors.url = "An https URL, or http on this machine, without a password or query";
+        if (selector && !isLokiSelector(selector)) errors.selector = 'A stream selector such as {job="api"}';
+        item = {
+          type: "loki",
+          url,
+          ...draft.tenant.trim() ? { tenant: draft.tenant.trim() } : {},
+          ...draft.user.trim() ? { user: draft.user.trim() } : {},
+          ...selector ? { selector } : {}
+        };
+        break;
+      }
       case "cloudwatch": {
         const region = draft.region.trim();
         if (!region) errors.region = "Enter the region, such as us-east-1";
@@ -4964,6 +5021,32 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
         )
       ];
     }
+    function lokiDetails() {
+      return [
+        h(
+          "div",
+          { className: "grid" },
+          field("url", "URL", {
+            wide: true,
+            placeholder: "http://localhost:3100",
+            hint: "The Loki API, such as https://logs-prod-012.grafana.net for Grafana Cloud."
+          }),
+          field("user", "User", {
+            hint: "For basic auth, such as a Grafana Cloud user id. Leave empty for a bearer token."
+          }),
+          secretField(
+            "password",
+            "Password or token",
+            "Leave empty if Loki needs none. Kept in VS Code secret storage, never in settings."
+          ),
+          field("tenant", "Tenant", { hint: "For a multi-tenant Loki: sent as X-Scope-OrgID." }),
+          field("selector", "Streams", {
+            placeholder: '{service_name=~".+"}',
+            hint: "The stream selector a search reads when it names no service."
+          })
+        )
+      ];
+    }
     function secretField(name, label, hint) {
       const element2 = field(name, label, {
         type: "password",
@@ -5081,6 +5164,9 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
           break;
         case "cloudwatch":
           children.push(...cloudwatchDetails());
+          break;
+        case "loki":
+          children.push(...lokiDetails());
           break;
       }
       details2.replaceChildren(...children.filter((child) => !!child));
