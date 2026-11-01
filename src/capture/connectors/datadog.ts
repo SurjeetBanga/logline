@@ -1,16 +1,10 @@
 import { datadogApiBase, type DatadogConnection } from '../../core/connections';
 import { datadogQuery } from '../../core/datadog-query';
-import { stripAnsi } from '../../core/log-event';
 import { boundSeries, datadogSeries } from '../../core/metric-query';
-import {
-  errorText,
-  timedOut,
-  type Connector,
-  type FetchRequest,
-  type FetchResult,
-  type MetricResult,
-  type RemoteRecord,
-} from './types';
+import { object, requestJson, retryAfter, type Fetch, type Json } from './http';
+import { readPages } from './paging';
+import { LogFields } from './record';
+import type { Connector, FetchRequest, FetchResult, MetricResult, RemoteRecord } from './types';
 
 /** API and application keys, or an access token, kept in secret storage. */
 export interface DatadogKeys {
@@ -18,9 +12,6 @@ export interface DatadogKeys {
   appKey?: string;
   token?: string;
 }
-
-type Json = Record<string, unknown>;
-type Fetch = (url: string, init: RequestInit) => Promise<Response>;
 
 // The most the Logs Search API returns in one page: a default fetch is one request.
 const PAGE = 5000;
@@ -30,8 +21,6 @@ const FIRST_PAGE = 200;
 const RESERVED = new Set(['timestamp', 'level', 'message', 'service', 'host', 'traceId', 'tags', 'datadog.id']);
 
 const SEARCH = '/api/v2/logs/events/search';
-const object = (value: unknown): Json =>
-  value && typeof value === 'object' && !Array.isArray(value) ? (value as Json) : {};
 
 /** One log from the Logs Search API as a JSON log line. This runs for every fetched log. */
 export function datadogLine(item: unknown): RemoteRecord {
@@ -41,34 +30,28 @@ export function datadogLine(item: unknown): RemoteRecord {
   const dd = object(custom.dd);
   const ddTraceId = dd.trace_id;
   const traceId = ddTraceId ?? custom.trace_id ?? custom.traceId;
-  const fields: Json = {};
-  const put = (name: string, value: unknown) => {
-    if (value !== undefined && value !== null) fields[name] = value;
-  };
-  put('timestamp', attributes.timestamp);
-  put('level', attributes.status);
-  // Colors a service printed reach Datadog as escape codes; the message keeps its text.
-  put('message', typeof attributes.message === 'string' ? stripAnsi(attributes.message) : attributes.message);
-  put('service', attributes.service);
-  put('host', attributes.host);
-  if (traceId !== undefined) put('traceId', String(traceId));
+  const fields = new LogFields(RESERVED);
+  fields.put('timestamp', attributes.timestamp);
+  fields.put('level', attributes.status);
+  fields.message(attributes.message);
+  fields.put('service', attributes.service);
+  fields.put('host', attributes.host);
+  if (traceId !== undefined) fields.put('traceId', String(traceId));
   for (const name in custom) {
     if (!Object.hasOwn(custom, name)) continue;
     // The trace id is already the event's traceId; keep the rest of `dd`, such as its span id.
     if (name === 'dd' && ddTraceId !== undefined) {
       const { trace_id: _, ...rest } = dd;
-      if (Object.keys(rest).length) fields.dd = rest;
+      if (Object.keys(rest).length) fields.put('dd', rest);
       continue;
     }
-    put(RESERVED.has(name) ? `attributes.${name}` : name, custom[name]);
+    fields.attribute(name, custom[name]);
   }
   // A filter finds a tag such as `env:prod` here as the field `env`.
-  if (Array.isArray(attributes.tags) && attributes.tags.length) fields.tags = attributes.tags.join(',');
-  if (typeof log.id === 'string') fields['datadog.id'] = log.id;
-  const time = typeof attributes.timestamp === 'string' ? Date.parse(attributes.timestamp) : NaN;
-  const record: RemoteRecord = { line: JSON.stringify(fields) };
-  if (Number.isFinite(time)) record.timeMs = time;
-  return record;
+  if (Array.isArray(attributes.tags) && attributes.tags.length) fields.put('tags', attributes.tags.join(','));
+  if (typeof log.id === 'string') fields.put('datadog.id', log.id);
+  // Datadog sends its time as ISO text.
+  return fields.record(typeof attributes.timestamp === 'string' ? attributes.timestamp : undefined);
 }
 
 function problem(status: number, headers: Headers, body: Json | undefined, text: string, token: boolean): Error {
@@ -81,9 +64,10 @@ function problem(status: number, headers: Headers, body: Json | undefined, text:
     const reset = Number(headers.get('x-ratelimit-reset'));
     const known = Number.isFinite(reset) && reset > 0;
     // Tails wait this long before reading again.
-    return Object.assign(new Error(`Datadog's rate limit was reached${known ? `; try again in ${reset} s` : ''}.`), {
-      retryAfterMs: (known ? reset : 60) * 1000,
-    });
+    return retryAfter(
+      `Datadog's rate limit was reached${known ? `; try again in ${reset} s` : ''}.`,
+      (known ? reset : 60) * 1000,
+    );
   }
   return new Error(`Datadog answered ${status}${errors ? `: ${errors}` : ''}.`);
 }
@@ -113,35 +97,23 @@ export class DatadogConnector implements Connector {
 
   private async request(method: 'GET' | 'POST', path: string, body?: unknown, signal?: AbortSignal): Promise<Json> {
     if (!this.base) throw new Error(`${this.connection.site} is not a Datadog site.`);
-    const headers: Record<string, string> = { accept: 'application/json' };
-    if (body !== undefined) headers['content-type'] = 'application/json';
+    const headers: Record<string, string> = {};
     if (this.keys.token) headers.authorization = `Bearer ${this.keys.token}`;
     else {
       if (this.keys.apiKey) headers['DD-API-KEY'] = this.keys.apiKey;
       if (this.keys.appKey) headers['DD-APPLICATION-KEY'] = this.keys.appKey;
     }
-    const limit = this.timeoutMs();
-    const timeout = AbortSignal.timeout(limit);
-    let response: Response;
-    try {
-      response = await this.fetcher(`${this.base}${path}`, {
-        method,
-        headers,
-        ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
-        signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
-      });
-    } catch (error) {
-      if (signal?.aborted) throw new Error('The query was cancelled.');
-      if (timeout.aborted) throw timedOut(limit);
-      throw new Error(`Could not reach Datadog at ${this.base}: ${errorText(error)}`);
-    }
-    const text = await response.text();
-    let json: Json | undefined;
-    try {
-      json = text ? object(JSON.parse(text)) : {};
-    } catch {
-      json = undefined;
-    }
+    const response = await requestJson({
+      service: `Datadog at ${this.base}`,
+      url: `${this.base}${path}`,
+      method,
+      headers,
+      body,
+      timeoutMs: this.timeoutMs(),
+      signal,
+      fetcher: this.fetcher,
+    });
+    const { json, text } = response;
     if (path === SEARCH) this.pace(response.headers);
     if (!response.ok) throw problem(response.status, response.headers, json, text, !!this.keys.token);
     if (!json) throw new Error('Datadog returned a response that is not JSON.');
@@ -199,32 +171,30 @@ export class DatadogConnector implements Connector {
     // The total is counted once the first page shows there are more logs than it held, while the rest are read;
     // a failed count leaves it unknown.
     let counting: Promise<number | undefined> | undefined;
-    const records: RemoteRecord[] = [];
-    let cursor: string | undefined;
-    let early = request.firstPage !== undefined && request.limit > FIRST_PAGE;
-    do {
-      const page = await this.request(
-        'POST',
-        SEARCH,
-        {
-          filter,
-          sort: request.order === 'desc' ? '-timestamp' : 'timestamp',
-          page: {
-            limit: Math.min(early ? FIRST_PAGE : PAGE, request.limit - records.length),
-            ...(cursor ? { cursor } : {}),
+    const records: RemoteRecord[] = await readPages<string>({
+      limit: request.limit,
+      pageSize: PAGE,
+      firstPageSize: FIRST_PAGE,
+      ...(request.firstPage ? { firstPage: request.firstPage } : {}),
+      onMore: () => {
+        if (request.countTotal) counting = this.count(filter, signal).catch(() => undefined);
+      },
+      fetchPage: async (size, cursor) => {
+        const page = await this.request(
+          'POST',
+          SEARCH,
+          {
+            filter,
+            sort: request.order === 'desc' ? '-timestamp' : 'timestamp',
+            page: { limit: size, ...(cursor ? { cursor } : {}) },
           },
-        },
-        signal,
-      );
-      const data = Array.isArray(page.data) ? page.data : [];
-      records.push(...data.map(datadogLine));
-      const after = object(object(page.meta).page).after;
-      cursor = typeof after === 'string' && after && data.length ? after : undefined;
-      if (request.countTotal && cursor && !counting) counting = this.count(filter, signal).catch(() => undefined);
-      // Only a first page with more to follow is worth showing early.
-      if (early && cursor) request.firstPage!([...records]);
-      early = false;
-    } while (cursor && records.length < request.limit);
+          signal,
+        );
+        const data = Array.isArray(page.data) ? page.data : [];
+        const after = object(object(page.meta).page).after;
+        return { records: data.map(datadogLine), ...(typeof after === 'string' && after ? { next: after } : {}) };
+      },
+    });
     // Every match was read when the limit did not cut the result short: the count is not waited for.
     const total = records.length >= request.limit ? await counting : undefined;
     return {

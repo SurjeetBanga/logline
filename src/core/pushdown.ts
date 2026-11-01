@@ -1,7 +1,7 @@
 // What every connection's translation shares: a search split into its OR
 // branches, each term either pushed to the store or left for Logline to apply
 // to the fetched logs. A store may match more than the search, never fewer.
-import { parseQuery, type Token } from './query';
+import { parseToken, type Token } from './query';
 import { queryTokens } from './query-tokens';
 
 // A regular expression term, with or without a field: this loop never pushes
@@ -20,10 +20,8 @@ export function termGroups(input: string): TypedTerm[][] {
   for (const text of queryTokens(input.slice(0, 1024))) {
     if (text === 'OR' || text === 'or') groups.push([]);
     else if (REGEX_TERM.test(text)) groups.at(-1)!.push({ text });
-    else {
-      const token = parseQuery(text)[0]?.[0];
-      if (token) groups.at(-1)!.push({ text, token });
-    }
+    // The text is one token already, so it is parsed as one rather than tokenized again.
+    else groups.at(-1)!.push({ text, token: parseToken(text) });
   }
   return groups.filter((group) => group.length);
 }
