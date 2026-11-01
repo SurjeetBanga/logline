@@ -74,7 +74,7 @@ By contributing, you agree that your contributions are licensed under the [MIT L
 
 ## Releases
 
-To release, open a pull request that sets the new version in `package.json` (`npm version <version> --no-git-tag-version`), renames `## Unreleased` in `CHANGELOG.md` to `## <version> — <date>`, and updates the guide's cards and the release highlights in `src/vscode/guide-content.ts` (keep their section IDs aligned with the guide). When the panel looks different, refresh the README's images in `media/readme/`. After it merges, tag the merge commit and push the tag:
+To release, open a pull request that sets the new version in `package.json` (`npm version <version> --no-git-tag-version`), renames `## Unreleased` in `CHANGELOG.md` to `## <version> — <date>`, and updates the guide's cards and the release highlights in `src/vscode/guide-content.ts` (keep their section IDs aligned with the guide). When the panel looks different, refresh the README's images in `media/readme/`. Merge it last, after every other pull request for the release, so the commit the tag points to is the release's own merge. After it merges, tag the merge commit and push the tag:
 
 ```sh
 git tag v<version> origin/main
