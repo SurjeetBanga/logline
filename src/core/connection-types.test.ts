@@ -26,8 +26,10 @@ test('a kind says how its connections are searched, named, and kept', () => {
     ConnectionType,
     (typeof CONNECTION_KINDS)[ConnectionType],
   ][]) {
-    // A log service is searched as it is, so it needs no typed query language; a database is queried.
-    assert.equal(kind.service, kind.language === undefined, type);
+    // A log service is searched as it is, so it needs no typed query language; a database without one is only
+    // searched, so it needs its logs mapped.
+    if (kind.service) assert.equal(kind.language, undefined, type);
+    else if (kind.language === undefined) assert.equal(kind.mappingRequired, true, type);
     assert.equal(CONNECTION_TYPES.find((entry) => entry.type === type)?.kind, kind.service ? 'logs' : 'database');
   }
   assert.equal(storeName('datadog'), 'Datadog');

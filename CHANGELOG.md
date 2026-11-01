@@ -6,9 +6,10 @@ All notable changes to Logline are documented in this file.
 
 ### Changes
 
+- **Elasticsearch and OpenSearch**: search and tail an index pattern, data stream, or alias in Elasticsearch, Elastic Cloud, OpenSearch, or Amazon OpenSearch Service, signed in with a user and password, an API key, or AWS credentials. **Add Connection** lists the cluster's data streams and index patterns and suggests the fields that hold the time, level, and message, including the Elastic Common Schema's. The search box's filters become a query built by each field's type, shown before you press Run, and **Lucene** sends a query as typed. See [Elasticsearch and OpenSearch](docs/usage.md#elasticsearch-and-opensearch).
 - **Grafana Loki**: search and tail a Loki, self-hosted or Grafana Cloud, from the Logs panel, signed in with a user and a password or token kept in secret storage, or a bearer token. The search box's filters become LogQL, shown before you press Run: words match lines without case, fields are read from JSON lines and stream labels, and `service:` chooses the streams read. Searches read newest first and count every match when the limit cuts them short, the Service list shows services by volume, and **LogQL** sends a query as typed. See [Grafana Loki](docs/usage.md#grafana-loki).
 - **CloudWatch Logs**: search and tail up to 10 CloudWatch log groups from the Logs panel, read with an AWS profile as the AWS CLI reads it, including SSO sessions from `aws sso login`, so nothing is stored. The search box's filters become a CloudWatch filter pattern, shown before you press Run: fields compare the fields of JSON logs, words match the message, and `service:` chooses the log groups read. **Filter pattern** sends a pattern as typed. Searches use FilterLogEvents rather than Logs Insights, newest logs first, and agents you allow can fetch from a CloudWatch connection like any other. See [CloudWatch Logs](docs/usage.md#cloudwatch-logs).
-- **`logline.logServiceMaxRows`** (default 1,000) limits the logs one CloudWatch or Loki search, or one tail read, fetches.
+- **`logline.logServiceMaxRows`** (default 1,000) limits the logs one CloudWatch, Loki, or Elasticsearch search, or one tail read, fetches.
 
 ### Fixes
 

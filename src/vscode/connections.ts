@@ -3,6 +3,7 @@ import * as vscode from 'vscode';
 import { CloudWatchConnector } from '../capture/connectors/cloudwatch';
 import { DatadogConnector, type DatadogKeys } from '../capture/connectors/datadog';
 import { iamPassword, listProfiles } from '../capture/connectors/aws-auth';
+import { ElasticConnector } from '../capture/connectors/elastic';
 import { LokiConnector } from '../capture/connectors/loki';
 import { MongoConnector } from '../capture/connectors/mongo';
 import { MysqlDriver } from '../capture/connectors/mysql-driver';
@@ -25,6 +26,7 @@ import {
   type ConnectionConfig,
   type DatadogConnection,
   type MongoConnection,
+  type ElasticConnection,
   type LokiConnection,
   type MysqlConnection,
   type PostgresConnection,
@@ -61,7 +63,11 @@ type SqlConnection = PostgresConnection | MysqlConnection | SqliteConnection;
 /** A database that signs in with a user and a password, or an IAM token. */
 type ServerConnection = PostgresConnection | MysqlConnection;
 /** A connection that signs in with a password kept in secret storage, or a Loki token. */
-type PasswordConnection = ServerConnection | MongoConnection | LokiConnection;
+type PasswordConnection = ServerConnection | MongoConnection | LokiConnection | ElasticConnection;
+/** A connection that signs in with AWS IAM instead of a password. */
+const signsInWithIam = (connection: ConnectionConfig) =>
+  (connection.type === 'postgres' || connection.type === 'mysql' || connection.type === 'elasticsearch') &&
+  connection.auth !== undefined;
 const keepsPassword = (connection: ConnectionConfig): connection is PasswordConnection =>
   connectionKind(connection.type).secret === 'password';
 type Opened = Connector & FormProbe;
@@ -307,6 +313,12 @@ export class ConnectionManager implements vscode.Disposable {
     ) => Promise<Opened>;
   } = {
     cloudwatch: async (connection) => new CloudWatchConnector(connection, this.timeoutMs),
+    elasticsearch: async (connection, secret) =>
+      new ElasticConnector(
+        connection,
+        connection.auth ? undefined : secret ? secret.password : await this.secrets?.get(secretKey(connection)),
+        this.timeoutMs,
+      ),
     loki: async (connection, secret) =>
       new LokiConnector(
         connection,
@@ -401,18 +413,19 @@ export class ConnectionManager implements vscode.Disposable {
   private async failed(connection: ConnectionConfig, error: string | undefined, cause?: unknown): Promise<void> {
     if (!error) return;
     const signsInWithPassword =
-      (connection.type === 'postgres' || connection.type === 'mysql') && !connection.auth
-        ? true
+      connection.type === 'postgres' || connection.type === 'mysql' || connection.type === 'elasticsearch'
+        ? !signsInWithIam(connection)
         : connection.type === 'loki' || (connection.type === 'mongodb' && mongoUrl(connection.url)?.user !== undefined);
     if (
       signsInWithPassword &&
-      (authFailed(cause) || /password|authentication failed|refused the credentials/i.test(error))
+      (authFailed(cause) ||
+        /password|authentication failed|refused the credentials|refused the request \(401/i.test(error))
     ) {
       const target = connection as PasswordConnection;
       const saved = (await this.secrets?.get(secretKey(target))) !== undefined;
       const user = target.type === 'mongodb' ? mongoUrl(target.url)?.user : target.user;
       const choice = await vscode.window.showErrorMessage(
-        target.type === 'loki'
+        target.type === 'loki' || target.type === 'elasticsearch'
           ? `${connectionLabel(connection)}: ${error}`
           : `${connectionLabel(connection)}: the server ${saved ? 'refused the saved password' : 'needs a password'} for ${user} (${error}).`,
         'Enter Password…',
@@ -468,7 +481,7 @@ export class ConnectionManager implements vscode.Disposable {
 
   private async askPassword(connection: PasswordConnection): Promise<void> {
     const where =
-      connection.type === 'loki'
+      connection.type === 'loki' || connection.type === 'elasticsearch'
         ? `${connection.user ? `${connection.user}@` : ''}${new URL(connection.url).host}`
         : connection.type === 'mongodb'
           ? `${mongoUrl(connection.url)?.user}@${mongoUrl(connection.url)?.hosts}/${connection.database}`
@@ -721,7 +734,7 @@ export class ConnectionManager implements vscode.Disposable {
     // The password or keys are kept by what they open, for every workspace that connects there.
     const secret =
       !keepsSecret(connection) ||
-      ((connection.type === 'postgres' || connection.type === 'mysql') && connection.auth) ||
+      signsInWithIam(connection) ||
       (connection.type === 'mongodb' && !mongoUrl(connection.url)?.user)
         ? undefined
         : connection.type === 'datadog'
@@ -804,11 +817,7 @@ export class ConnectionManager implements vscode.Disposable {
       save: async (connection, secret, editing) => {
         if (connection.type === 'datadog' && secret.keys)
           await this.secrets?.store(secretKey(connection), JSON.stringify(secret.keys));
-        else if (
-          keepsPassword(connection) &&
-          !((connection.type === 'postgres' || connection.type === 'mysql') && connection.auth) &&
-          secret.password !== undefined
-        )
+        else if (keepsPassword(connection) && !signsInWithIam(connection) && secret.password !== undefined)
           await this.secrets?.store(secretKey(connection), secret.password);
         else if (keepsPassword(connection) && secret.forget) await this.secrets?.delete(secretKey(connection));
         // Agents' permission belongs to the database or API a connection opens, so an edit that points it

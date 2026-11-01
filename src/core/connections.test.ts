@@ -7,6 +7,7 @@ import {
   connectionSourceId,
   normalizeConnections,
   logGroupIdentifier,
+  openSearchService,
   rangeMs,
   secretKey,
   suggestMapping,
@@ -234,5 +235,65 @@ test('a Loki connection needs an https URL, or http on this machine, and keeps a
   assert.equal(
     cloud.type === 'loki' && secretKey(cloud),
     'logline.connection.loki:https://logs-prod-012.grafana.net/a/12345',
+  );
+});
+
+test('an Elasticsearch connection needs a URL, signs in with AWS only over https, and knows Amazon OpenSearch endpoints', () => {
+  const [local, aws] = normalizeConnections([
+    {
+      id: 'local',
+      type: 'elasticsearch',
+      url: 'http://localhost:9200',
+      user: 'elastic',
+      logs: { table: 'logs-*', timestamp: '@timestamp' },
+    },
+    {
+      id: 'aws',
+      type: 'elasticsearch',
+      url: 'https://search-logs-abc.eu-west-1.es.amazonaws.com',
+      user: 'ignored',
+      auth: { kind: 'iam', profile: 'work' },
+    },
+    { id: 'aws-http', type: 'elasticsearch', url: 'http://localhost:9200', auth: { kind: 'iam' } },
+  ]);
+  assert.deepEqual(local, {
+    id: 'local',
+    label: 'local',
+    type: 'elasticsearch',
+    url: 'http://localhost:9200',
+    user: 'elastic',
+    logs: { table: 'logs-*', timestamp: '@timestamp' },
+  });
+  assert.deepEqual(aws, {
+    id: 'aws',
+    label: 'aws',
+    type: 'elasticsearch',
+    url: 'https://search-logs-abc.eu-west-1.es.amazonaws.com',
+    auth: { kind: 'iam', profile: 'work' },
+  });
+  assert.equal(
+    normalizeConnections([{ id: 'x', type: 'elasticsearch', url: 'http://localhost:9200', auth: { kind: 'iam' } }])
+      .length,
+    0,
+  );
+  assert.deepEqual(openSearchService('https://search-logs-abc.eu-west-1.es.amazonaws.com'), {
+    region: 'eu-west-1',
+    service: 'es',
+  });
+  assert.deepEqual(openSearchService('https://abc123.us-east-1.aoss.amazonaws.com'), {
+    region: 'us-east-1',
+    service: 'aoss',
+  });
+  assert.deepEqual(openSearchService('https://my-deployment.es.io'), { service: 'es' });
+  // The Elastic Common Schema's names are suggested for the mapping.
+  assert.deepEqual(
+    suggestMapping([
+      { name: '@timestamp', type: 'date' },
+      { name: 'log.level', type: 'keyword' },
+      { name: 'message', type: 'text' },
+      { name: 'service.name', type: 'keyword' },
+      { name: 'trace.id', type: 'keyword' },
+    ]),
+    { timestamp: '@timestamp', level: 'log.level', message: 'message', service: 'service.name', traceId: 'trace.id' },
   );
 });

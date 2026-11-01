@@ -326,6 +326,59 @@ export function createConnectionForm(api: FormApi, root: HTMLElement) {
     ];
   }
 
+  function elasticDetails(): Child[] {
+    const iamHint = h(
+      'div',
+      { className: 'hint callout', hidden: !(suggestsIam(draft) && draft.auth === 'password') },
+      'This is an Amazon OpenSearch endpoint: it can sign requests with AWS credentials instead.',
+    );
+    return [
+      h(
+        'div',
+        { className: 'grid' },
+        field('url', 'URL', {
+          wide: true,
+          placeholder: 'http://localhost:9200',
+          hint: 'The cluster’s URL: Elasticsearch, Elastic Cloud, OpenSearch, or Amazon OpenSearch Service.',
+          onInput: (value) => {
+            draft.url = value;
+            iamHint.hidden = !(suggestsIam(draft) && draft.auth === 'password');
+          },
+        }),
+      ),
+      iamHint,
+      choice(
+        'auth',
+        'Sign in with',
+        draft.auth,
+        [
+          { value: 'password', label: 'User or API key' },
+          { value: 'iam', label: 'AWS credentials', hint: 'For Amazon OpenSearch Service' },
+        ],
+        (value) => {
+          draft.auth = value;
+          renderDetails();
+          changed();
+        },
+      ),
+      draft.auth === 'iam'
+        ? profileField(
+            'AWS profile that signs requests',
+            'Its keys, credential_process, or SSO session from aws sso login. The region is read from the URL.',
+          )
+        : h(
+            'div',
+            { className: 'grid' },
+            field('user', 'User', { hint: 'For basic auth. Leave empty to sign in with an API key.' }),
+            secretField(
+              'password',
+              'Password or API key',
+              'Without a user, the encoded API key from Kibana or the API. Kept in VS Code secret storage, never in settings.',
+            ),
+          ),
+    ];
+  }
+
   function lokiDetails(): Child[] {
     return [
       h(
@@ -493,6 +546,9 @@ export function createConnectionForm(api: FormApi, root: HTMLElement) {
         break;
       case 'loki':
         children.push(...lokiDetails());
+        break;
+      case 'elasticsearch':
+        children.push(...elasticDetails());
         break;
     }
     details.replaceChildren(...children.filter((child): child is Node | string => !!child));
@@ -825,7 +881,7 @@ export function createConnectionForm(api: FormApi, root: HTMLElement) {
     logsStep.classList.toggle('locked', !ready);
     nameStep.classList.toggle('locked', !ready);
     labelInput.disabled = !ready;
-    const word = draft.type === 'mongodb' ? 'collection' : 'table';
+    const word = kind.container ?? 'table';
     logsHeading.textContent = kind.service ? 'Logs' : `Log ${word}`;
     if (kind.service) {
       logs.replaceChildren(
@@ -843,18 +899,24 @@ export function createConnectionForm(api: FormApi, root: HTMLElement) {
     }
     const query = draft.type === 'mongodb' ? 'queries' : 'SQL';
     const tables = test.tables ?? [];
+    const required = kind.mappingRequired === true;
     const select = h(
       'select',
       {
         id: 'field-table',
         onchange: () => chooseTable(select.value === '\0none' ? null : select.value || undefined),
       },
-      table === undefined ? h('option', { value: '', selected: true }, `Choose a ${word}…`) : undefined,
-      h(
-        'option',
-        { value: '\0none', ...(table === null ? { selected: true } : {}) },
-        `None: only run ${query} you type`,
-      ),
+      table === undefined
+        ? h('option', { value: '', selected: true }, `Choose ${/^[aeiou]/.test(word) ? 'an' : 'a'} ${word}…`)
+        : undefined,
+      // A store that is only searched has nothing to run without its logs.
+      required
+        ? undefined
+        : h(
+            'option',
+            { value: '\0none', ...(table === null ? { selected: true } : {}) },
+            `None: only run ${query} you type`,
+          ),
       ...tables.map((name) => h('option', { value: name, ...(name === table ? { selected: true } : {}) }, name)),
     );
     const children: Child[] = [
@@ -865,15 +927,19 @@ export function createConnectionForm(api: FormApi, root: HTMLElement) {
           'label',
           { for: 'field-table' },
           h('span', {}, `Log ${word}`),
-          h('span', { className: 'required' }, ' optional'),
+          required ? undefined : h('span', { className: 'required' }, ' optional'),
         ),
         select,
         h(
           'div',
           { className: 'hint' },
-          tables.length
-            ? `The connection runs the ${query} you type. If a ${word} holds one ${draft.type === 'mongodb' ? 'document' : 'row'} per log event, choose it to also search and tail it like logs.`
-            : `This database has no ${word}s Logline can read; it can still run the ${query} you type.`,
+          required
+            ? tables.length
+              ? `Choose the data stream, index pattern, or index whose documents are log events, then the fields that hold their time, level, and message.`
+              : `This cluster has no indices Logline can read.`
+            : tables.length
+              ? `The connection runs the ${query} you type. If a ${word} holds one ${kind.noun} per log event, choose it to also search and tail it like logs.`
+              : `This database has no ${word}s Logline can read; it can still run the ${query} you type.`,
         ),
       ),
     ];
@@ -1018,9 +1084,11 @@ export function createConnectionForm(api: FormApi, root: HTMLElement) {
   function missing(): string | undefined {
     if (test.state === 'running') return 'Testing the connection…';
     if (test.state !== 'ok') return 'Test the connection to continue.';
-    if (!connectionKind(draft.type).service) {
-      const word = draft.type === 'mongodb' ? 'collection' : 'table';
-      if (table === undefined) return `Choose the log ${word}, or None.`;
+    const kind = connectionKind(draft.type);
+    if (!kind.service) {
+      const word = kind.container ?? 'table';
+      if (table === undefined || (table === null && kind.mappingRequired))
+        return `Choose the log ${word}${kind.mappingRequired ? '' : ', or None'}.`;
       if (table && columnsState !== 'ready') return `Reading ${table}…`;
       if (table && !mapping.timestamp) return 'Choose the time column.';
     }
@@ -1093,7 +1161,13 @@ export function createConnectionForm(api: FormApi, root: HTMLElement) {
           if (again && tables.includes(again)) chooseTable(again);
           else if (table && !tables.includes(table)) chooseTable(undefined);
           // A database needs no log table: unless one was saved, it starts as None.
-          else if (table === undefined && !savedMapping && !connectionKind(draft.type).service) table = null;
+          else if (
+            table === undefined &&
+            !savedMapping &&
+            !connectionKind(draft.type).service &&
+            !connectionKind(draft.type).mappingRequired
+          )
+            table = null;
         }
         renderLogs();
         updateFooter();

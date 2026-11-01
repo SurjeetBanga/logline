@@ -437,6 +437,30 @@ test('CloudWatch takes a profile, its region, and log groups one a line, and nee
   assert.equal(form.save().disabled, false);
 });
 
+test('Elasticsearch needs its index pattern chosen, with no None, and can sign in with AWS', () => {
+  const form = setup();
+  form.init();
+  form.radio('type', 'elasticsearch').fire('change');
+  form.type('#field-url', 'https://search-logs-abc.eu-west-1.es.amazonaws.com');
+  assert.equal(form.$('.hint.callout').hidden, false, 'an Amazon OpenSearch endpoint suggests AWS credentials');
+  form.radio('auth', 'iam').fire('change');
+  assert.ok(form.$('#field-profile'));
+  form.button(/Test connection/).fire('click');
+  form.receive({
+    type: 'tested',
+    ok: true,
+    detail: 'OpenSearch 2.13.0',
+    tables: ['logs-app-*', 'logs-app-2026.10.30'],
+  });
+  const options = form
+    .$('#field-table')
+    .querySelectorAll('option')
+    .map((option) => option.textContent);
+  assert.deepEqual(options, ['Choose an index pattern…', 'logs-app-*', 'logs-app-2026.10.30']);
+  assert.equal(form.note(), 'Choose the log index pattern.');
+  assert.equal(form.save().disabled, true);
+});
+
 test('a field changed while a test runs makes its answer stale, and a name does not', () => {
   const form = setup();
   form.init();

@@ -997,7 +997,7 @@
           "logline.connections": {
             "type": "array",
             "default": [],
-            "markdownDescription": "Datadog organizations, CloudWatch log groups, Grafana Loki, Postgres and MySQL servers (Aurora and RDS too), MongoDB deployments, and SQLite files whose logs Logline can search and tail. Add one with [Add Connection](command:logline.addConnection). Passwords and keys are kept in VS Code secret storage, never here.",
+            "markdownDescription": "Datadog organizations, CloudWatch log groups, Grafana Loki, Elasticsearch and OpenSearch clusters, Postgres and MySQL servers (Aurora and RDS too), MongoDB deployments, and SQLite files whose logs Logline can search and tail. Add one with [Add Connection](command:logline.addConnection). Passwords and keys are kept in VS Code secret storage, never here.",
             "items": {
               "type": "object",
               "properties": {
@@ -1018,7 +1018,8 @@
                     "mongodb",
                     "datadog",
                     "cloudwatch",
-                    "loki"
+                    "loki",
+                    "elasticsearch"
                   ]
                 },
                 "path": {
@@ -1040,7 +1041,7 @@
                 },
                 "user": {
                   "type": "string",
-                  "description": "Postgres and MySQL: user name. Loki: the user for basic auth, such as a Grafana Cloud user id."
+                  "description": "Postgres and MySQL: user name. Elasticsearch and Loki: the user for basic auth (for Loki, such as a Grafana Cloud user id)."
                 },
                 "ssl": {
                   "type": "boolean",
@@ -1088,11 +1089,11 @@
                 },
                 "logs": {
                   "type": "object",
-                  "description": "The table (for MongoDB, the collection) that holds one row or document per log event, and which of its columns hold the time, level, message, service, and trace id. Other columns become fields.",
+                  "description": "The table (for MongoDB, the collection; for Elasticsearch, the index pattern) that holds one row or document per log event, and which of its columns hold the time, level, message, service, and trace id. Other columns become fields.",
                   "properties": {
                     "table": {
                       "type": "string",
-                      "description": "Table name, or schema.table; for MongoDB, the collection."
+                      "description": "Table name, or schema.table; for MongoDB, the collection; for Elasticsearch, an index, index pattern, alias, or data stream."
                     },
                     "timestamp": {
                       "type": "string",
@@ -1131,7 +1132,7 @@
                 },
                 "auth": {
                   "type": "object",
-                  "description": "Postgres and MySQL on Amazon RDS or Aurora: sign in with a short-lived token signed by AWS credentials instead of a password. Turns on TLS.",
+                  "description": "Postgres and MySQL on Amazon RDS or Aurora, and Amazon OpenSearch Service: sign in with AWS credentials instead of a password. Turns on TLS.",
                   "properties": {
                     "kind": {
                       "type": "string",
@@ -1154,7 +1155,7 @@
                 },
                 "url": {
                   "type": "string",
-                  "description": "MongoDB: a mongodb:// or mongodb+srv:// URL without a password, such as mongodb+srv://reader@cluster0.example.mongodb.net/app. Loki: the URL of the Loki API, such as http://localhost:3100."
+                  "description": "MongoDB: a mongodb:// or mongodb+srv:// URL without a password, such as mongodb+srv://reader@cluster0.example.mongodb.net/app. Loki: the URL of the Loki API, such as http://localhost:3100. Elasticsearch: the cluster's URL, such as http://localhost:9200."
                 }
               },
               "required": [
@@ -1185,7 +1186,7 @@
             "default": 1000,
             "minimum": 100,
             "maximum": 50000,
-            "description": "Most logs one search fetches from a CloudWatch or Loki connection, and one tail read. The newest matching logs are kept.",
+            "description": "Most logs one search fetches from a CloudWatch, Loki, or Elasticsearch connection, and one tail read. The newest matching logs are kept.",
             "order": 4
           },
           "logline.connectionPollSeconds": {

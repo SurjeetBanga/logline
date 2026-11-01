@@ -136,6 +136,14 @@ export function draftFromConnection(connection: ConnectionConfig): FormDraft {
       return { ...draft, path: connection.path };
     case 'datadog':
       return { ...draft, site: connection.site };
+    case 'elasticsearch':
+      return {
+        ...draft,
+        url: connection.url,
+        user: connection.user ?? '',
+        auth: connection.auth ? 'iam' : 'password',
+        profile: connection.auth?.profile ?? '',
+      };
     case 'loki':
       return {
         ...draft,
@@ -165,7 +173,8 @@ export function draftLogGroups(draft: Pick<FormDraft, 'logGroups'>): string[] {
 /** The name a new connection is offered: its database, its file, or prod for Datadog. */
 export function suggestedLabel(draft: FormDraft): string {
   if (draft.type === 'datadog') return 'prod';
-  if (draft.type === 'loki') return /\/\/(?:localhost|127\.0\.0\.1|\[::1\])[:/]?/.test(draft.url) ? 'local' : 'prod';
+  if (draft.type === 'loki' || draft.type === 'elasticsearch')
+    return /\/\/(?:localhost|127\.0\.0\.1|\[::1\])[:/]?/.test(draft.url) ? 'local' : 'prod';
   if (draft.type === 'cloudwatch') {
     // The service of the first group: `/aws/lambda/checkout` is `checkout`.
     const [first] = draftLogGroups(draft);
@@ -240,9 +249,10 @@ export function keepUnmodeled(next: ConnectionConfig, before?: ConnectionConfig)
   // An endpoint is set in settings only, such as LocalStack's.
   if (next.type === 'cloudwatch' && before.type === 'cloudwatch' && before.endpoint && !next.endpoint)
     return { ...next, endpoint: before.endpoint };
+  // An IAM region set in settings stays, for a server or endpoint whose name does not say it.
   if (
-    (next.type === 'postgres' || next.type === 'mysql') &&
-    (before.type === 'postgres' || before.type === 'mysql') &&
+    (next.type === 'postgres' || next.type === 'mysql' || next.type === 'elasticsearch') &&
+    (before.type === 'postgres' || before.type === 'mysql' || before.type === 'elasticsearch') &&
     next.auth &&
     before.auth?.region &&
     !next.auth.region
@@ -253,6 +263,8 @@ export function keepUnmodeled(next: ConnectionConfig, before?: ConnectionConfig)
 
 /** Whether the form should offer AWS IAM sign-in first: the host is RDS or Aurora. */
 export function suggestsIam(draft: FormDraft): boolean {
+  if (draft.type === 'elasticsearch')
+    return /\.(?:es|aoss)\.amazonaws\.com(?:\.cn)?(?::\d+)?(?:\/|$)/i.test(draft.url.trim());
   return (draft.type === 'postgres' || draft.type === 'mysql') && isRdsHost(draft.host.trim());
 }
 
@@ -337,6 +349,22 @@ export function readDraft(draft: FormDraft, saved: { secret?: boolean } = {}): D
           keys = { apiKey: draft.apiKey.trim(), appKey: draft.appKey.trim() };
       }
       break;
+    case 'elasticsearch': {
+      const url = draft.url.trim();
+      const iam = draft.auth === 'iam';
+      if (!url) errors.url = 'Enter the URL of the cluster, such as http://localhost:9200';
+      else if (!apiUrl(url) || (iam && !url.startsWith('https:')))
+        errors.url = iam
+          ? 'An https URL: AWS signs requests only over TLS'
+          : 'An https URL, or http on this machine, without a password or query';
+      item = {
+        type: 'elasticsearch',
+        url,
+        ...(draft.user.trim() && !iam ? { user: draft.user.trim() } : {}),
+        ...(iam ? { auth: { kind: 'iam', ...(draft.profile ? { profile: draft.profile } : {}) } } : {}),
+      };
+      break;
+    }
     case 'loki': {
       const url = draft.url.trim();
       const selector = draft.selector.trim();
