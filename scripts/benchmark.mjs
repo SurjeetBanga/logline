@@ -301,6 +301,41 @@ timed('loki-logs', 'Turn 5,000 Loki lines, JSON and plain text, into events', as
       });
   };
 });
+timed('elastic-logs', 'Turn 5,000 Elasticsearch hits in the Elastic Common Schema into events', async () => {
+  const { LogStore } = await load('core/log-store.js');
+  const { Ingestion } = await load('capture/ingestion.js');
+  const { elasticLine } = await load('capture/connectors/elastic.js');
+  const mapping = {
+    table: 'logs-*',
+    timestamp: '@timestamp',
+    level: 'log.level',
+    message: 'message',
+    service: 'service.name',
+    traceId: 'trace.id',
+  };
+  const hits = Array.from({ length: 5000 }, (_, i) => ({
+    _index: `.ds-logs-app-default-2026.10.30-00000${i % 3}`,
+    _id: `id-${i}`,
+    _source: {
+      '@timestamp': new Date(receivedAt.getTime() + i * 10).toISOString(),
+      log: { level: i % 10 ? 'info' : 'error', logger: 'checkout' },
+      message: `request ${i} took ${i % 900} ms`,
+      service: { name: 'checkout', version: '1.4.2' },
+      trace: { id: `${i % 100}` },
+      http: { response: { status_code: i % 10 ? 200 : 502 } },
+      user: { id: i % 97 },
+    },
+  }));
+  return () => {
+    const ingestion = new Ingestion(new LogStore(10000, 100 * 1024 * 1024), () => {});
+    for (const hit of hits)
+      ingestion.accept(elasticLine(hit, mapping).line, 'remote', {
+        serverId: 'conn:prod',
+        server: 'Elasticsearch · prod',
+        sessionId: 'run',
+      });
+  };
+});
 timed('remote-sql', 'Turn 1,000 searches into SQL for a log table', async () => {
   const { buildSqlLogQuery } = await load('core/remote-query.js');
   const table = {

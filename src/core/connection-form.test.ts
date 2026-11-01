@@ -451,3 +451,42 @@ test('a Loki draft needs a URL, keeps its token as the password, and checks its 
     selector: '{job="api"}',
   });
 });
+
+test('an Elasticsearch draft takes a user or an API key, or AWS credentials over https', () => {
+  const draft = { ...emptyDraft('elasticsearch'), url: 'http://localhost:9200', password: ['api', 'key'].join('-') };
+  const keyed = readDraft(draft);
+  assert.deepEqual(keyed.connection, {
+    id: 'draft',
+    label: 'draft',
+    type: 'elasticsearch',
+    url: 'http://localhost:9200',
+  });
+  assert.equal(keyed.password, draft.password);
+  assert.equal(suggestedLabel(draft), 'local');
+  const aws = {
+    ...draft,
+    url: 'https://search-logs-abc.eu-west-1.es.amazonaws.com',
+    auth: 'iam' as const,
+    profile: 'work',
+    user: 'ignored',
+  };
+  assert.equal(suggestsIam({ ...aws, auth: 'password' }), true);
+  assert.deepEqual(readDraft(aws).connection, {
+    id: 'draft',
+    label: 'draft',
+    type: 'elasticsearch',
+    url: 'https://search-logs-abc.eu-west-1.es.amazonaws.com',
+    auth: { kind: 'iam', profile: 'work' },
+  });
+  assert.equal(
+    readDraft({ ...aws, url: 'http://localhost:9200' }).errors.url,
+    'An https URL: AWS signs requests only over TLS',
+  );
+  assert.deepEqual(draftFromConnection(readDraft(aws).connection!), {
+    ...emptyDraft('elasticsearch'),
+    label: 'draft',
+    url: aws.url,
+    auth: 'iam',
+    profile: 'work',
+  });
+});

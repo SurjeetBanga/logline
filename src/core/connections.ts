@@ -3,7 +3,8 @@
 // them in secret storage under `secretKey`.
 import { CONNECTION_KINDS } from './connection-types';
 
-export type ConnectionType = 'sqlite' | 'postgres' | 'mysql' | 'mongodb' | 'datadog' | 'cloudwatch' | 'loki';
+export type ConnectionType =
+  'sqlite' | 'postgres' | 'mysql' | 'mongodb' | 'datadog' | 'cloudwatch' | 'loki' | 'elasticsearch';
 /** How a timestamp column stores time; `native` is a database date/time type. */
 export type TimeEncoding = 'iso' | 'epoch_s' | 'epoch_ms' | 'native';
 
@@ -92,7 +93,21 @@ export interface LokiConnection extends BaseConnection {
   /** The streams a search reads when it names no service. */
   selector?: string;
 }
+/**
+ * An Elasticsearch or OpenSearch cluster. Its log index pattern is the mapping's `table`, and its fields the
+ * mapping's columns.
+ */
+export interface ElasticConnection extends BaseConnection {
+  type: 'elasticsearch';
+  /** The cluster's URL, such as `https://search-logs.us-east-1.es.amazonaws.com` or `http://localhost:9200`. */
+  url: string;
+  /** With a password, signs in with basic auth; a secret without a user is an API key. */
+  user?: string;
+  /** Amazon OpenSearch Service, signed with AWS credentials instead of a password. */
+  auth?: IamAuth;
+}
 export type ConnectionConfig =
+  | ElasticConnection
   | SqliteConnection
   | PostgresConnection
   | MysqlConnection
@@ -159,6 +174,21 @@ export function isLokiSelector(value: string): boolean {
   return SELECTOR.test(value.trim());
 }
 
+/** The AWS region and service of an Amazon OpenSearch endpoint, such as `search-logs-abc.us-east-1.es.amazonaws.com`. */
+export function openSearchService(url: string): { region?: string; service: 'es' | 'aoss' } {
+  const host = (() => {
+    try {
+      return new URL(url).hostname;
+    } catch {
+      return '';
+    }
+  })();
+  const match = /\.([a-z]{2}(?:-gov)?-[a-z]+-\d+)\.(es|aoss)\.amazonaws\.com(?:\.cn)?$/i.exec(host);
+  return match
+    ? { region: match[1].toLowerCase(), service: match[2].toLowerCase() as 'es' | 'aoss' }
+    : { service: 'es' };
+}
+
 /** The CloudWatch Logs API a connection reads: its endpoint, or its region's. */
 export function cloudwatchEndpoint(connection: Pick<CloudWatchConnection, 'region' | 'endpoint'>): string {
   if (connection.endpoint) return connection.endpoint;
@@ -200,6 +230,8 @@ export function connectionLabel(connection: Pick<ConnectionConfig, 'type' | 'lab
  * points a connection elsewhere never receives them.
  */
 export function secretKey(connection: Exclude<ConnectionConfig, SqliteConnection | CloudWatchConnection>): string {
+  if (connection.type === 'elasticsearch')
+    return `logline.connection.elasticsearch:${apiUrl(connection.url) ?? connection.url}/${encodeURIComponent(connection.user ?? '')}`;
   if (connection.type === 'loki')
     return `logline.connection.loki:${apiUrl(connection.url) ?? connection.url}/${encodeURIComponent(connection.tenant ?? '')}/${encodeURIComponent(connection.user ?? '')}`;
   if (connection.type === 'datadog')
@@ -333,6 +365,20 @@ export function normalizeConnections(value: unknown): ConnectionConfig[] {
           : [];
         connection = { id, label, type: 'datadog', site, ...(indexes.length ? { indexes } : {}) };
       }
+    } else if (item.type === 'elasticsearch') {
+      const url = typeof item.url === 'string' ? apiUrl(item.url.trim()) : undefined;
+      const user = text(item.user, 256);
+      const auth = normalizeAuth(item.auth);
+      // AWS signs requests only over TLS.
+      if (url && (!auth || url.startsWith('https:')))
+        connection = {
+          id,
+          label,
+          type: 'elasticsearch',
+          url,
+          ...(user && !auth ? { user } : {}),
+          ...(auth ? { auth } : {}),
+        };
     } else if (item.type === 'loki') {
       const url = typeof item.url === 'string' ? apiUrl(item.url.trim()) : undefined;
       const tenant = text(item.tenant, 256);
@@ -464,11 +510,11 @@ export interface ColumnInfo {
 
 const ROLE_NAMES: Record<MappedField, RegExp> = {
   timestamp:
-    /^(?:timestamp|ts|time|datetime|date_?time|created_?at|logged_?at|inserted_?at|occurred_?at|event_?time)$/i,
-  level: /^(?:level|severity|log_?level|lvl|priority)$/i,
+    /^(?:@timestamp|timestamp|ts|time|datetime|date_?time|created_?at|logged_?at|inserted_?at|occurred_?at|event_?time)$/i,
+  level: /^(?:level|severity|log_?level|log\.level|lvl|priority)$/i,
   message: /^(?:message|msg|text|body|log|line|description)$/i,
-  service: /^(?:service|service_?name|app|application|logger|source|component)$/i,
-  traceId: /^(?:trace_?id|traceid|trace|correlation_?id|request_?id)$/i,
+  service: /^(?:service|service_?name|service\.name|app|application|logger|source|component)$/i,
+  traceId: /^(?:trace_?id|traceid|trace\.id|trace|correlation_?id|request_?id)$/i,
 };
 
 /** Guess which columns hold time, level, message, service, and trace id from their names. */

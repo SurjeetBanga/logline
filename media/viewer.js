@@ -2095,12 +2095,26 @@ Trace ${trace.traceId}`;
       services: false,
       secret: "password"
     },
+    elasticsearch: {
+      label: "Elasticsearch",
+      description: "Also OpenSearch and Amazon OpenSearch Service",
+      service: false,
+      icon: "database",
+      noun: "document",
+      native: { label: "Lucene", title: "Type a query in Lucene syntax, as in Kibana, sent as you type it" },
+      container: "index pattern",
+      mappingRequired: true,
+      services: true,
+      maxRowsSetting: "logServiceMaxRows",
+      secret: "password"
+    },
     mongodb: {
       label: "MongoDB",
       description: "Also Atlas, DocumentDB",
       service: false,
       icon: "database",
       noun: "document",
+      container: "collection",
       language: "mongo",
       services: false,
       secret: "password"
@@ -2967,6 +2981,8 @@ Span ${call.spanId}`;
     return sourceId?.startsWith(SOURCE_PREFIX) ? sourceId.slice(SOURCE_PREFIX.length) : void 0;
   }
   function secretKey(connection) {
+    if (connection.type === "elasticsearch")
+      return `logline.connection.elasticsearch:${apiUrl(connection.url) ?? connection.url}/${encodeURIComponent(connection.user ?? "")}`;
     if (connection.type === "loki")
       return `logline.connection.loki:${apiUrl(connection.url) ?? connection.url}/${encodeURIComponent(connection.tenant ?? "")}/${encodeURIComponent(connection.user ?? "")}`;
     if (connection.type === "datadog")
@@ -3069,6 +3085,19 @@ Span ${call.spanId}`;
           const indexes = Array.isArray(item.indexes) ? item.indexes.filter((index) => typeof index === "string" && !!index.trim()) : [];
           connection = { id, label, type: "datadog", site, ...indexes.length ? { indexes } : {} };
         }
+      } else if (item.type === "elasticsearch") {
+        const url = typeof item.url === "string" ? apiUrl(item.url.trim()) : void 0;
+        const user = text(item.user, 256);
+        const auth = normalizeAuth(item.auth);
+        if (url && (!auth || url.startsWith("https:")))
+          connection = {
+            id,
+            label,
+            type: "elasticsearch",
+            url,
+            ...user && !auth ? { user } : {},
+            ...auth ? { auth } : {}
+          };
       } else if (item.type === "loki") {
         const url = typeof item.url === "string" ? apiUrl(item.url.trim()) : void 0;
         const tenant = text(item.tenant, 256);
@@ -4650,7 +4679,8 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
   }
   function suggestedLabel(draft) {
     if (draft.type === "datadog") return "prod";
-    if (draft.type === "loki") return /\/\/(?:localhost|127\.0\.0\.1|\[::1\])[:/]?/.test(draft.url) ? "local" : "prod";
+    if (draft.type === "loki" || draft.type === "elasticsearch")
+      return /\/\/(?:localhost|127\.0\.0\.1|\[::1\])[:/]?/.test(draft.url) ? "local" : "prod";
     if (draft.type === "cloudwatch") {
       const [first] = draftLogGroups(draft);
       return first?.split(/[/:]/).filter(Boolean).at(-1) ?? "";
@@ -4697,6 +4727,8 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
     return url.replace(/^(\s*[a-z][\w+.-]*:\/\/[^:@/?#]+):[^@/?#]*@/i, "$1@");
   }
   function suggestsIam(draft) {
+    if (draft.type === "elasticsearch")
+      return /\.(?:es|aoss)\.amazonaws\.com(?:\.cn)?(?::\d+)?(?:\/|$)/i.test(draft.url.trim());
     return (draft.type === "postgres" || draft.type === "mysql") && isRdsHost(draft.host.trim());
   }
   function draftSecretKey(draft) {
@@ -4757,6 +4789,20 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
             keys = { apiKey: draft.apiKey.trim(), appKey: draft.appKey.trim() };
         }
         break;
+      case "elasticsearch": {
+        const url = draft.url.trim();
+        const iam = draft.auth === "iam";
+        if (!url) errors.url = "Enter the URL of the cluster, such as http://localhost:9200";
+        else if (!apiUrl(url) || iam && !url.startsWith("https:"))
+          errors.url = iam ? "An https URL: AWS signs requests only over TLS" : "An https URL, or http on this machine, without a password or query";
+        item = {
+          type: "elasticsearch",
+          url,
+          ...draft.user.trim() && !iam ? { user: draft.user.trim() } : {},
+          ...iam ? { auth: { kind: "iam", ...draft.profile ? { profile: draft.profile } : {} } } : {}
+        };
+        break;
+      }
       case "loki": {
         const url = draft.url.trim();
         const selector = draft.selector.trim();
@@ -5021,6 +5067,56 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
         )
       ];
     }
+    function elasticDetails() {
+      const iamHint = h(
+        "div",
+        { className: "hint callout", hidden: !(suggestsIam(draft) && draft.auth === "password") },
+        "This is an Amazon OpenSearch endpoint: it can sign requests with AWS credentials instead."
+      );
+      return [
+        h(
+          "div",
+          { className: "grid" },
+          field("url", "URL", {
+            wide: true,
+            placeholder: "http://localhost:9200",
+            hint: "The cluster\u2019s URL: Elasticsearch, Elastic Cloud, OpenSearch, or Amazon OpenSearch Service.",
+            onInput: (value) => {
+              draft.url = value;
+              iamHint.hidden = !(suggestsIam(draft) && draft.auth === "password");
+            }
+          })
+        ),
+        iamHint,
+        choice(
+          "auth",
+          "Sign in with",
+          draft.auth,
+          [
+            { value: "password", label: "User or API key" },
+            { value: "iam", label: "AWS credentials", hint: "For Amazon OpenSearch Service" }
+          ],
+          (value) => {
+            draft.auth = value;
+            renderDetails();
+            changed();
+          }
+        ),
+        draft.auth === "iam" ? profileField(
+          "AWS profile that signs requests",
+          "Its keys, credential_process, or SSO session from aws sso login. The region is read from the URL."
+        ) : h(
+          "div",
+          { className: "grid" },
+          field("user", "User", { hint: "For basic auth. Leave empty to sign in with an API key." }),
+          secretField(
+            "password",
+            "Password or API key",
+            "Without a user, the encoded API key from Kibana or the API. Kept in VS Code secret storage, never in settings."
+          )
+        )
+      ];
+    }
     function lokiDetails() {
       return [
         h(
@@ -5167,6 +5263,9 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
           break;
         case "loki":
           children.push(...lokiDetails());
+          break;
+        case "elasticsearch":
+          children.push(...elasticDetails());
           break;
       }
       details2.replaceChildren(...children.filter((child) => !!child));
@@ -5464,7 +5563,7 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
       logsStep.classList.toggle("locked", !ready);
       nameStep.classList.toggle("locked", !ready);
       labelInput.disabled = !ready;
-      const word = draft.type === "mongodb" ? "collection" : "table";
+      const word = kind.container ?? "table";
       logsHeading.textContent = kind.service ? "Logs" : `Log ${word}`;
       if (kind.service) {
         logs.replaceChildren(
@@ -5482,14 +5581,16 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
       }
       const query = draft.type === "mongodb" ? "queries" : "SQL";
       const tables = test.tables ?? [];
+      const required = kind.mappingRequired === true;
       const select = h(
         "select",
         {
           id: "field-table",
           onchange: () => chooseTable(select.value === "\0none" ? null : select.value || void 0)
         },
-        table === void 0 ? h("option", { value: "", selected: true }, `Choose a ${word}\u2026`) : void 0,
-        h(
+        table === void 0 ? h("option", { value: "", selected: true }, `Choose ${/^[aeiou]/.test(word) ? "an" : "a"} ${word}\u2026`) : void 0,
+        // A store that is only searched has nothing to run without its logs.
+        required ? void 0 : h(
           "option",
           { value: "\0none", ...table === null ? { selected: true } : {} },
           `None: only run ${query} you type`
@@ -5504,13 +5605,13 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
             "label",
             { for: "field-table" },
             h("span", {}, `Log ${word}`),
-            h("span", { className: "required" }, " optional")
+            required ? void 0 : h("span", { className: "required" }, " optional")
           ),
           select,
           h(
             "div",
             { className: "hint" },
-            tables.length ? `The connection runs the ${query} you type. If a ${word} holds one ${draft.type === "mongodb" ? "document" : "row"} per log event, choose it to also search and tail it like logs.` : `This database has no ${word}s Logline can read; it can still run the ${query} you type.`
+            required ? tables.length ? `Choose the data stream, index pattern, or index whose documents are log events, then the fields that hold their time, level, and message.` : `This cluster has no indices Logline can read.` : tables.length ? `The connection runs the ${query} you type. If a ${word} holds one ${kind.noun} per log event, choose it to also search and tail it like logs.` : `This database has no ${word}s Logline can read; it can still run the ${query} you type.`
           )
         )
       ];
@@ -5647,9 +5748,11 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
     function missing() {
       if (test.state === "running") return "Testing the connection\u2026";
       if (test.state !== "ok") return "Test the connection to continue.";
-      if (!connectionKind(draft.type).service) {
-        const word = draft.type === "mongodb" ? "collection" : "table";
-        if (table === void 0) return `Choose the log ${word}, or None.`;
+      const kind = connectionKind(draft.type);
+      if (!kind.service) {
+        const word = kind.container ?? "table";
+        if (table === void 0 || table === null && kind.mappingRequired)
+          return `Choose the log ${word}${kind.mappingRequired ? "" : ", or None"}.`;
         if (table && columnsState !== "ready") return `Reading ${table}\u2026`;
         if (table && !mapping.timestamp) return "Choose the time column.";
       }
@@ -5704,7 +5807,8 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
             const again = table === null ? void 0 : table ?? savedMapping?.table;
             if (again && tables.includes(again)) chooseTable(again);
             else if (table && !tables.includes(table)) chooseTable(void 0);
-            else if (table === void 0 && !savedMapping && !connectionKind(draft.type).service) table = null;
+            else if (table === void 0 && !savedMapping && !connectionKind(draft.type).service && !connectionKind(draft.type).mappingRequired)
+              table = null;
           }
           renderLogs();
           updateFooter();

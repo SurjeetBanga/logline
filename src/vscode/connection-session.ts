@@ -287,7 +287,10 @@ export class ConnectionSession {
       const table =
         mappingValue && typeof mappingValue === 'object' ? (mappingValue as { table?: unknown }).table : undefined;
       logs = normalizeMapping(mappingValue, typeof table === 'string' ? (this.columns.get(table) ?? []) : []);
-      if (logs === undefined) return fail('Choose the log table and its time column, or No log table.');
+      const kind = connectionKind(connection.type);
+      const word = kind.container ?? 'table';
+      if (logs === undefined || (logs === null && kind.mappingRequired))
+        return fail(`Choose the log ${word} and its time column${kind.mappingRequired ? '' : `, or No log ${word}`}.`);
       // A time format set by hand in settings stays while the table and time column do.
       const before = this.editing && !connectionKind(this.editing.type).service ? this.editing.logs : undefined;
       if (logs && before?.timestampFormat && before.table === logs.table && before.timestamp === logs.timestamp)

@@ -26,6 +26,10 @@ export interface ConnectionKind {
   traceQuery?(traceId: string): string;
   /** For a log service, which fields its searches use, as the form explains them. */
   fields?: string;
+  /** What holds a database's logs, as the form names it: `table` when left out. */
+  container?: 'collection' | 'index pattern';
+  /** A database that is only searched, with no queries to type, needs its logs mapped. */
+  mappingRequired?: boolean;
   /** Whether the store can list the services that logged in a range. */
   services: boolean;
   /** The setting that caps one search, when it is not `connectionMaxRows`. */
@@ -104,12 +108,26 @@ export const CONNECTION_KINDS: Record<ConnectionType, ConnectionKind> = {
     services: false,
     secret: 'password',
   },
+  elasticsearch: {
+    label: 'Elasticsearch',
+    description: 'Also OpenSearch and Amazon OpenSearch Service',
+    service: false,
+    icon: 'database',
+    noun: 'document',
+    native: { label: 'Lucene', title: 'Type a query in Lucene syntax, as in Kibana, sent as you type it' },
+    container: 'index pattern',
+    mappingRequired: true,
+    services: true,
+    maxRowsSetting: 'logServiceMaxRows',
+    secret: 'password',
+  },
   mongodb: {
     label: 'MongoDB',
     description: 'Also Atlas, DocumentDB',
     service: false,
     icon: 'database',
     noun: 'document',
+    container: 'collection',
     language: 'mongo',
     services: false,
     secret: 'password',
