@@ -1,6 +1,7 @@
 import type { DoctorAction, DoctorFindingView, Snapshot } from '../../protocol/messages';
 import type { EventScope } from '../event-scope';
 import type { WebviewApi } from '../types';
+import { icon } from './details';
 
 const GROUPS: { codes: string[]; title: string }[] = [
   { codes: ['secret'], title: 'Secrets in logs' },
@@ -42,14 +43,14 @@ export function feedbackButtons(code: string): HTMLElement {
   const group = document.createElement('span');
   group.className = 'doctor-feedback';
   group.dataset.code = code;
-  for (const [helpful, label, title] of [
-    [true, '👍', 'This kind of finding is useful'],
-    [false, '👎', 'This kind of finding is not useful'],
+  for (const [helpful, name, title] of [
+    [true, 'thumbsUp', 'This kind of finding is useful'],
+    [false, 'thumbsDown', 'This kind of finding is not useful'],
   ] as const) {
     const button = document.createElement('button');
     button.type = 'button';
     button.className = 'doctor-action doctor-vote';
-    button.textContent = label;
+    button.append(icon(name));
     button.title = title;
     button.setAttribute('aria-label', title);
     button.dataset.doctorFeedback = String(helpful);

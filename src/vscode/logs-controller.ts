@@ -77,6 +77,8 @@ import { openSourceLocation } from './source-navigation';
 import { parseQuery } from '../core/query';
 import { CONNECTION_TYPES, queryFeatures } from '../core/usage-events';
 import type { Usage, UsageSummarySource } from './usage';
+import type { FeedbackOpen } from '../core/feedback';
+import { feedbackSendable, sendFeedback } from './feedback';
 
 const SHARE_ALL_CONFIRMED_KEY = 'logline.shareAllLogsConfirmed.v1';
 
@@ -166,6 +168,7 @@ export class LogsController {
   private pendingReveal?: { target: string; fallback?: string };
   private pendingForm?: FormOpen;
   private pendingTour = false;
+  private pendingFeedback?: FeedbackOpen;
   readonly transfer = new LogTransfer(this.store, this.config, this.ingestion, this.state);
   readonly searches: SavedSearches;
   private readonly globalState: Pick<vscode.ExtensionContext, 'globalState'>['globalState'];
@@ -294,8 +297,10 @@ export class LogsController {
       pendingReveal: reveal,
       pendingTour: startTour,
       pendingForm: openConnectionForm,
+      pendingFeedback: openFeedback,
     } = this;
     this.pendingTour = false;
+    this.pendingFeedback = undefined;
     this.pendingQuery = this.pendingTrace = this.pendingSource = this.pendingRun = this.pendingCompare = undefined;
     this.pendingReveal = this.pendingForm = undefined;
     // The guide's first steps tick off from what was done; a search is remembered once it happens.
@@ -322,6 +327,7 @@ export class LogsController {
       ...(reveal ? { reveal } : {}),
       ...(openConnectionForm ? { openConnectionForm } : {}),
       ...(startTour ? { startTour } : {}),
+      ...(openFeedback ? { openFeedback } : {}),
       ...snapshot,
       ...(applyQuery !== undefined ? { applyQuery } : {}),
       ...(openTrace ? { openTrace } : {}),
@@ -386,6 +392,7 @@ export class LogsController {
     return handleMessage(
       {
         usage: this.usage,
+        feedback: (request) => sendFeedback(this.usage, request),
         store: this.store,
         config: this.config,
         transfer: this.transfer,
@@ -509,6 +516,12 @@ export class LogsController {
   async startTour(): Promise<void> {
     this.usage?.record('tour', { step: 'started' });
     this.pendingTour = true;
+    await vscode.commands.executeCommand('logline.logs.focus');
+    this.notifications.send({ type: 'update' });
+  }
+  /** Open Suggest a feature or Vote on what's next in the Logs panel, with the next snapshot like the tour. */
+  async openFeedback(mode: FeedbackOpen['mode']): Promise<void> {
+    this.pendingFeedback = { mode, sendable: feedbackSendable(this.usage) };
     await vscode.commands.executeCommand('logline.logs.focus');
     this.notifications.send({ type: 'update' });
   }

@@ -3,32 +3,29 @@ import { test } from 'node:test';
 import { withVscode } from '../test/vscode-mock';
 
 const ui = {
-  picks: [] as unknown[],
-  inputs: [] as (string | undefined)[],
   answers: [] as (string | undefined)[],
-  messages: [] as { message: string; detail?: string; items: string[] }[],
+  messages: [] as string[],
   opened: [] as string[],
 };
 const mock = {
   Uri: { parse: (value: string) => ({ toString: () => value }) },
   env: { openExternal: async (uri: { toString(): string }) => void ui.opened.push(uri.toString()) },
   window: {
-    showQuickPick: async () => ui.picks.shift(),
-    showInputBox: async () => ui.inputs.shift(),
-    showInformationMessage: async (message: string, ...rest: unknown[]) => {
-      const options = typeof rest[0] === 'object' ? (rest.shift() as { detail?: string }) : {};
-      ui.messages.push({ message, detail: options.detail, items: rest as string[] });
+    showInformationMessage: async (message: string) => {
+      ui.messages.push(message);
       return ui.answers.shift();
     },
   },
 };
 const feedback = withVscode(mock, () => require('./feedback') as typeof import('./feedback'));
-const { suggestFeature, voteOnNext, FeedbackPrompt, SUGGEST_SURVEY, VOTE_SURVEY, VOTE_AFTER_MS, QUIET_MS } = feedback;
+const { sendFeedback, feedbackSendable, FeedbackPrompt, SUGGEST_SURVEY, VOTE_SURVEY, VOTE_AFTER_MS, QUIET_MS } =
+  feedback;
 
 function reset() {
-  Object.assign(ui, { picks: [], inputs: [], answers: [], messages: [], opened: [] });
+  Object.assign(ui, { answers: [], messages: [], opened: [] });
 }
-function fakeUsage(enabled = true) {
+/** Usage counts that are on or off, and whose answers PostHog accepts or not. */
+function fakeUsage(enabled = true, accepted = true) {
   const surveys: { id: string; responses: Record<string, string | string[]> }[] = [];
   return {
     surveys,
@@ -36,79 +33,93 @@ function fakeUsage(enabled = true) {
       enabled,
       survey: async (id: string, responses: Record<string, string | string[]>) => {
         surveys.push({ id, responses });
-        return enabled;
+        return accepted;
       },
     } as any,
   };
 }
 
-test('a suggestion is shown redacted before it is sent, and Cancel sends nothing', async () => {
-  Object.assign(SUGGEST_SURVEY, { id: 'suggest', area: 'q-area', text: 'q-text' });
+test('a suggestion from the panel is redacted again before it is sent, with its area', async () => {
   reset();
   const { usage, surveys } = fakeUsage();
   const token = ['ghp', 'A'.repeat(36)].join('_');
-  ui.picks.push('Search');
-  ui.inputs.push(`Saved searches per project, token ${token}`);
-  ui.answers.push('Send');
-  await suggestFeature(usage);
-  assert.doesNotMatch(ui.messages[0].detail!, new RegExp(token));
-  assert.match(ui.messages[0].detail!, /^Search: Saved searches per project/);
-  assert.deepEqual(surveys[0].id, 'suggest');
-  assert.equal(surveys[0].responses['q-area'], 'Search');
-  assert.doesNotMatch(String(surveys[0].responses['q-text']), new RegExp(token));
-
-  reset();
-  ui.picks.push('Search');
-  ui.inputs.push('Something');
-  ui.answers.push(undefined);
-  await suggestFeature(usage);
-  assert.equal(surveys.length, 1);
+  assert.deepEqual(
+    await sendFeedback(usage, {
+      mode: 'suggest',
+      area: 'Search',
+      text: `  Saved searches per project, token ${token} `,
+    }),
+    { ok: true, via: 'posthog' },
+  );
+  assert.equal(surveys[0].id, SUGGEST_SURVEY.id);
+  assert.equal(surveys[0].responses[SUGGEST_SURVEY.area], 'Search');
+  assert.match(String(surveys[0].responses[SUGGEST_SURVEY.text]), /^Saved searches per project, token \[REDACTED\]$/);
   assert.deepEqual(ui.opened, []);
 
-  reset();
-  ui.picks.push(undefined);
-  await suggestFeature(usage);
-  assert.equal(ui.messages.length, 0, 'no area, no question');
+  // An area the form did not offer is filed as Something else; an empty suggestion is not sent.
+  await sendFeedback(usage, { mode: 'suggest', area: 'Billing', text: 'More colors' });
+  assert.equal(surveys[1].responses[SUGGEST_SURVEY.area], 'Something else');
+  assert.deepEqual(await sendFeedback(usage, { mode: 'suggest', area: 'Search', text: '   ' }), {
+    ok: false,
+    via: 'posthog',
+  });
+  assert.equal(surveys.length, 2);
 });
 
-test('with usage counts off, a suggestion or a vote goes to a GitHub issue instead', async () => {
-  Object.assign(SUGGEST_SURVEY, { id: 'suggest', area: 'q-area', text: 'q-text' });
-  Object.assign(VOTE_SURVEY, { id: 'vote', choice: 'q-choice' });
-  reset();
-  const { usage, surveys } = fakeUsage(false);
-  ui.picks.push('Agents');
-  ui.inputs.push('Let Codex wait for new logs');
-  ui.answers.push('Open GitHub Issue Instead');
-  await suggestFeature(usage);
-  assert.deepEqual(ui.messages[0].items, ['Open GitHub Issue Instead']);
-  assert.match(ui.opened[0], /issues\/new\?labels=enhancement&title=Suggestion/);
-  assert.match(decodeURIComponent(ui.opened[0]), /Area: Agents\n\nLet Codex wait for new logs/);
-
-  reset();
-  ui.picks.push(['Deeper agent investigations']);
-  ui.answers.push('Open GitHub Issue');
-  await voteOnNext(usage);
-  assert.match(decodeURIComponent(ui.opened[0]), /- Deeper agent investigations/);
-  assert.equal(surveys.length, 0);
-});
-
-test('a vote is sent as one answer with every pick', async () => {
-  Object.assign(VOTE_SURVEY, { id: 'vote', choice: 'q-choice' });
+test('a vote is sent as one answer with only the choices the vote offers', async () => {
   reset();
   const { usage, surveys } = fakeUsage();
-  ui.picks.push(['Saved panel layouts and views', 'More log stores and services']);
-  await voteOnNext(usage);
+  assert.deepEqual(
+    await sendFeedback(usage, {
+      mode: 'vote',
+      picks: ['Saved panel layouts and views', 'Free pizza', 'More log stores and services'],
+    }),
+    { ok: true, via: 'posthog' },
+  );
   assert.deepEqual(surveys, [
-    { id: 'vote', responses: { 'q-choice': ['Saved panel layouts and views', 'More log stores and services'] } },
+    {
+      id: VOTE_SURVEY.id,
+      responses: { [VOTE_SURVEY.choice]: ['Saved panel layouts and views', 'More log stores and services'] },
+    },
   ]);
-  assert.match(ui.messages[0].message, /vote was counted/);
-  reset();
-  ui.picks.push([]);
-  await voteOnNext(usage);
-  assert.equal(surveys.length, 1, 'no picks, no vote');
+  assert.deepEqual(await sendFeedback(usage, { mode: 'vote', picks: ['Free pizza'] }), { ok: false, via: 'posthog' });
 });
 
-test('the vote question waits for two weeks of use, asks once, and keeps a month from the rating question', async () => {
+test('with usage counts off, or when asked, feedback opens a GitHub issue and sends nothing', async () => {
+  reset();
+  const off = fakeUsage(false);
+  assert.equal(feedbackSendable(off.usage), false);
+  assert.deepEqual(
+    await sendFeedback(off.usage, { mode: 'suggest', area: 'Agents', text: 'Let Codex wait for logs' }),
+    {
+      ok: true,
+      via: 'github',
+    },
+  );
+  assert.match(ui.opened[0], /issues\/new\?labels=enhancement&title=Suggestion/);
+  assert.match(decodeURIComponent(ui.opened[0]), /Area: Agents\n\nLet Codex wait for logs/);
+  await sendFeedback(off.usage, { mode: 'vote', picks: ['Deeper agent investigations'] });
+  assert.match(decodeURIComponent(ui.opened[1]), /- Deeper agent investigations/);
+  assert.deepEqual(off.surveys, []);
+
+  const on = fakeUsage();
+  assert.equal(feedbackSendable(on.usage), true);
+  await sendFeedback(on.usage, { mode: 'vote', picks: ['Deeper agent investigations'], github: true });
+  assert.equal(ui.opened.length, 3);
+  assert.deepEqual(on.surveys, [], 'a GitHub issue was asked for, so nothing goes to PostHog');
+});
+
+test('answers PostHog does not accept are reported as not sent', async () => {
+  reset();
+  const { usage } = fakeUsage(true, false);
+  assert.deepEqual(await sendFeedback(usage, { mode: 'vote', picks: ['Deeper agent investigations'] }), {
+    ok: false,
+    via: 'posthog',
+  });
+  assert.deepEqual(ui.opened, [], 'the form offers a GitHub issue; nothing opens on its own');
+});
+
+test('the vote question waits for two weeks of use, asks once, keeps a month from the rating question, and opens the vote', async () => {
   reset();
   const stored = new Map<string, unknown>();
   const memento = {
@@ -116,9 +127,10 @@ test('the vote question waits for two weeks of use, asks once, and keeps a month
     update: async (key: string, value: unknown) => void stored.set(key, value),
   };
   let now = 10 * VOTE_AFTER_MS;
+  let opened = 0;
   const prompt = new FeedbackPrompt(
     memento,
-    undefined,
+    () => opened++,
     () => true,
     () => now,
   );
@@ -128,9 +140,10 @@ test('the vote question waits for two weeks of use, asks once, and keeps a month
   stored.set('logline.rating', { firstUsed: now - VOTE_AFTER_MS, asked: now - QUIET_MS + 1 });
   assert.equal(await prompt.check(), false, 'not within a month of the rating question');
   now += 1;
-  ui.answers.push('Not now');
+  ui.answers.push('Vote');
   assert.equal(await prompt.check(), true);
-  assert.match(ui.messages[0].message, /What should Logline do next/);
+  assert.match(ui.messages[0], /What should Logline do next/);
+  assert.equal(opened, 1, 'Vote opens the vote in the Logs panel');
   assert.equal(await prompt.check(), false, 'once');
   prompt.start();
   prompt.dispose();

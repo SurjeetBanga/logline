@@ -25,6 +25,7 @@ import type { AgentLogAccess } from './agent-access';
 import type { ConnectionManager } from './connections';
 import type { CompareRequest, CompareView } from '../protocol/messages';
 import type { Usage } from './usage';
+import type { FeedbackRequest, FeedbackResult } from '../core/feedback';
 
 /** The panel's requests that open a view, as usage counts name the view. */
 const VIEW_REQUESTS: Partial<Record<ViewRequest['type'], string>> = {
@@ -41,6 +42,8 @@ const VIEW_REQUESTS: Partial<Record<ViewRequest['type'], string>> = {
 
 interface MessageServices {
   usage?: Pick<Usage, 'view' | 'record' | 'findingHelpful'>;
+  /** Send what the feedback form submitted. */
+  feedback?(request: FeedbackRequest): Promise<FeedbackResult>;
   store: LogStore;
   config: Settings;
   runner: ProcessRunner;
@@ -283,6 +286,17 @@ export async function handleMessage(
       return;
     case 'manageServers':
       await manageServers();
+      return;
+    case 'feedbackSend': {
+      const { type: _type, ...request } = msg;
+      const result = await services.feedback?.(request);
+      if (result) send({ type: 'feedbackResult', ...result });
+      return;
+    }
+    case 'suggestFeature':
+    case 'voteOnNext':
+      // The commands, so the menu and the Command Palette count and behave the same.
+      await vscode.commands.executeCommand(`logline.${msg.type}`);
       return;
     case 'addConnection':
       await services.connections?.add();

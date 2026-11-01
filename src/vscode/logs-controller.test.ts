@@ -370,3 +370,20 @@ test('Ask Copilot asks later whether it helped, only once the chat opened', asyn
   await controller.askCopilot();
   assert.equal(followUps, 1);
 });
+
+test('Suggest a feature and Vote on what’s next open in the panel with the next snapshot, saying whether they can be sent', async (t) => {
+  const controller = setup(t);
+  controller.usage = { enabled: false, record() {} } as any;
+  await controller.openFeedback('vote');
+  assert.deepEqual(controller.snapshot({ type: 'snapshot', limit: 50 } as any).openFeedback, {
+    mode: 'vote',
+    sendable: false,
+  });
+  assert.equal(controller.snapshot({ type: 'snapshot', limit: 50 } as any).openFeedback, undefined, 'once');
+  controller.usage = { enabled: true, record() {} } as any;
+  await controller.openFeedback('suggest');
+  assert.deepEqual(controller.snapshot({ type: 'snapshot', limit: 50 } as any).openFeedback, {
+    mode: 'suggest',
+    sendable: true,
+  });
+});

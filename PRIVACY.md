@@ -38,7 +38,7 @@ Events are sent in batches about once a minute over HTTPS to [PostHog](https://p
 
 ## Turning it off
 
-Usage counts follow VS Code's `telemetry.telemetryLevel`: they need `all`, and error codes need `error` or `all`. To turn them off for Logline only, set `logline.telemetry.enabled` to `false`, or choose **Turn off** when Logline first tells you about them. `DO_NOT_TRACK=1` in the environment turns them off too. Turning them off drops anything not yet sent.
+Usage counts follow VS Code's `telemetry.telemetryLevel`: they need `all`, and error codes need `error` or `all`. To turn them off for Logline only, set `logline.telemetry.enabled` to `false` in your user settings. `DO_NOT_TRACK=1` in the environment turns them off too. Turning them off drops anything not yet sent.
 
 ## Deleting your data
 

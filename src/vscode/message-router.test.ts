@@ -337,3 +337,34 @@ test('message router counts views, exports for AI, finding votes, and how a tour
     ['tour', { step: 'skipped' }],
   ]);
 });
+
+test('the More actions menu suggests a feature and votes through the same commands as the Command Palette', async () => {
+  calls.length = 0;
+  for (const type of ['suggestFeature', 'voteOnNext'])
+    await handleMessage(services() as any, () => undefined, { type });
+  assert.deepEqual(
+    calls.filter((call) => call.name === 'command').map((call) => call.value),
+    ['logline.suggestFeature', 'logline.voteOnNext'],
+  );
+});
+
+test('the feedback form’s request is sent, and its result goes back to the panel', async () => {
+  const service = services() as any;
+  const asked: unknown[] = [];
+  service.feedback = async (request: unknown) => {
+    asked.push(request);
+    return { ok: true, via: 'posthog' };
+  };
+  const sent: unknown[] = [];
+  const send = (message: unknown) => void sent.push(message);
+  await handleMessage(service, send, {
+    type: 'feedbackSend',
+    mode: 'vote',
+    picks: ['Deeper agent investigations', 42],
+  });
+  assert.deepEqual(asked, [{ mode: 'vote', picks: ['Deeper agent investigations'], github: false }]);
+  assert.deepEqual(sent, [{ type: 'feedbackResult', ok: true, via: 'posthog' }]);
+  await handleMessage(service, send, { type: 'feedbackSend', mode: 'suggest', text: '' });
+  await handleMessage(service, send, { type: 'feedbackSend', mode: 'other' });
+  assert.equal(asked.length, 1, 'malformed requests are ignored');
+});

@@ -440,7 +440,7 @@ export const GUIDE_CARDS: GuideCard[] = [
     text: 'A Connection tab opens with a form: choose Datadog, CloudWatch, Loki, Elasticsearch, Cloud Logging, Postgres, MySQL, MongoDB, or SQLite, test it, and pick the log table with a preview of its rows, or none to only run queries. Passwords and keys stay in VS Code secret storage, never in settings; Aurora and RDS can sign in with AWS IAM instead.',
     target: 'railAddConnection',
     fallback: 'sourceRail',
-    docs: 'connections-datadog-postgres-mysql-mongodb-and-sqlite',
+    docs: 'connections',
   },
   {
     section: 'connections',
@@ -449,7 +449,7 @@ export const GUIDE_CARDS: GuideCard[] = [
     text: 'Opens the same form filled in and tests it, to rename the connection, sign in again, or choose another table and columns. A saved password is kept while the connection points at the same server; its runs stay with it.',
     command: 'logline.editConnection',
     target: 'sourceRail',
-    docs: 'connections-datadog-postgres-mysql-mongodb-and-sqlite',
+    docs: 'connections',
   },
   {
     section: 'connections',
@@ -742,6 +742,22 @@ export const GUIDE_CARDS: GuideCard[] = [
     text: 'Logs stay within a memory budget, oldest first out. The meter’s panel shows what was received, kept, and discarded.',
     example: '50,000 events · 100 MiB',
     target: 'counts',
+  },
+  {
+    section: 'settings',
+    title: 'Suggest a feature',
+    where: ['More actions', 'Suggest a feature…'],
+    text: 'Tell the Logline developers what to build, or vote on what comes next. What you write is redacted and shown to you before it is sent; with usage counts off, it opens a GitHub issue instead.',
+    target: 'suggestFeature',
+    command: 'logline.suggestFeature',
+  },
+  {
+    section: 'settings',
+    title: 'Usage data',
+    where: ['Settings', 'Agents and privacy'],
+    text: 'Logline sends anonymous usage counts, such as which features are used, never log content, searches, paths, or names. It follows VS Code’s telemetry setting; turn it off for Logline here. Logline: Show Usage Data lists what was sent.',
+    setting: 'logline.telemetry.enabled',
+    docs: 'usage-data',
   },
   {
     section: 'settings',

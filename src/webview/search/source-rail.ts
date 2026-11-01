@@ -439,7 +439,7 @@ export function createSourceRail(
     button.id = 'railAddConnection';
     button.className = 'rail-action rail-add';
     button.setAttribute('aria-label', 'Add connection');
-    button.title = 'Add a Datadog, Postgres, MySQL, MongoDB, or SQLite connection';
+    button.title = 'Add a connection to a log service or a database';
     button.append(icon('add', 13));
     scope.listen(button, 'click', () => api.postMessage({ type: 'addConnection' }));
     return button;
@@ -478,7 +478,8 @@ export function createSourceRail(
       const empty = document.createElement('div');
       empty.className = 'rail-empty';
       const text = document.createElement('p');
-      text.textContent = 'Search Datadog, Postgres, MySQL, MongoDB, or SQLite logs next to your local runs.';
+      text.textContent =
+        'Search Datadog, CloudWatch, Loki, Elasticsearch, Cloud Logging, or a database next to your local runs.';
       const button = document.createElement('button');
       button.type = 'button';
       button.className = 'rail-empty-add';

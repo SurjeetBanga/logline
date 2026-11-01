@@ -1,10 +1,17 @@
 import * as vscode from 'vscode';
+import {
+  FEEDBACK_AREAS,
+  FEEDBACK_TEXT_LIMIT,
+  ROADMAP,
+  type FeedbackRequest,
+  type FeedbackResult,
+} from '../core/feedback';
 import { redactText } from '../core/redaction';
-import { SURVEY_TEXT_LIMIT, type Usage } from './usage';
+import type { Usage } from './usage';
 
-// PostHog surveys of type API: PostHog shows nothing, Logline asks and sends the
-// answers. The ids come from each survey's Overview tab; with none, answers go
-// to a GitHub issue instead.
+// PostHog surveys of type API: PostHog shows nothing, the Logs panel's form asks and
+// Logline sends the answers. The ids come from each survey's Overview tab; with none,
+// answers go to a GitHub issue instead.
 export const SUGGEST_SURVEY = {
   id: '01a19806-2611-0000-b93c-6ea0d136281a',
   area: '1f1556d3-4391-4214-9ecb-2bd205d437d9',
@@ -14,15 +21,6 @@ export const VOTE_SURVEY = {
   id: '01a19806-2752-0000-c584-cf423c8e6a9b',
   choice: 'e24a742a-6a67-4141-bd04-7ffef3d60a7c',
 };
-/** What could come next, as the vote offers it. Keep in step with the survey's choices. */
-export const ROADMAP = [
-  'More log stores and services',
-  'Alerts when a log pattern appears',
-  'Share a captured session with a teammate',
-  'Saved panel layouts and views',
-  'Deeper agent investigations',
-];
-export const AREAS = ['Capture', 'Search', 'Views', 'Connections', 'Agents', 'Something else'];
 const ISSUES_URL = 'https://github.com/SurjeetBanga/logline/issues/new';
 
 export const FEEDBACK_PROMPT_KEY = 'logline.feedbackPrompt';
@@ -38,62 +36,39 @@ function issueUrl(title: string, body: string): string {
   return `${ISSUES_URL}?labels=enhancement&title=${encodeURIComponent(title)}&body=${encodeURIComponent(body)}`;
 }
 
-/** Ask what Logline should do, send it to PostHog, or open a GitHub issue with it when usage counts are off. */
-export async function suggestFeature(usage: Usage | undefined): Promise<void> {
-  const area = await vscode.window.showQuickPick(AREAS, {
-    title: 'Suggest a feature (1/2)',
-    placeHolder: 'What is it about?',
-  });
-  if (!area) return;
-  const text = await vscode.window.showInputBox({
-    title: 'Suggest a feature (2/2)',
-    prompt: "What should Logline do? Don't paste logs or secrets.",
-    ignoreFocusOut: true,
-    validateInput: (value) =>
-      value.length > SURVEY_TEXT_LIMIT ? `Keep it under ${SURVEY_TEXT_LIMIT} characters.` : undefined,
-  });
-  if (!text?.trim()) return;
-  const redacted = redactText(text.trim());
-  const sendable = !!usage?.enabled && !!SUGGEST_SURVEY.id;
-  const SEND = 'Send';
-  const GITHUB = 'Open GitHub Issue Instead';
-  const answer = await vscode.window.showInformationMessage(
-    sendable ? 'Send this suggestion to the Logline developers?' : 'Open a GitHub issue with this suggestion?',
-    { modal: true, detail: `${area}: ${redacted}` },
-    ...(sendable ? [SEND, GITHUB] : [GITHUB]),
-  );
-  if (answer === SEND && usage) {
-    if (await usage.survey(SUGGEST_SURVEY.id, { [SUGGEST_SURVEY.area]: area, [SUGGEST_SURVEY.text]: redacted })) {
-      void vscode.window.showInformationMessage('Logline: Thanks, your suggestion was sent.');
-      return;
-    }
-  }
-  if (answer === SEND || answer === GITHUB)
-    await vscode.env.openExternal(
-      vscode.Uri.parse(issueUrl(`Suggestion: ${redacted.slice(0, 60)}`, `Area: ${area}\n\n${redacted}`)),
-    );
+/** Whether answers can go to the developers: usage counts are on and the surveys exist. */
+export function feedbackSendable(usage: Usage | undefined): boolean {
+  return !!usage?.enabled && !!SUGGEST_SURVEY.id && !!VOTE_SURVEY.id;
 }
 
-/** Pick what should come next, from the roadmap. */
-export async function voteOnNext(usage: Usage | undefined): Promise<void> {
-  const picked = await vscode.window.showQuickPick(ROADMAP, {
-    title: 'What should Logline do next?',
-    placeHolder: 'Pick any that would help you',
-    canPickMany: true,
-  });
-  if (!picked?.length) return;
-  if (usage?.enabled && VOTE_SURVEY.id && (await usage.survey(VOTE_SURVEY.id, { [VOTE_SURVEY.choice]: picked }))) {
-    void vscode.window.showInformationMessage('Logline: Thanks, your vote was counted.');
-    return;
-  }
-  const answer = await vscode.window.showInformationMessage(
-    'Usage counts are off, so votes cannot be sent. Open a GitHub issue with your picks?',
-    'Open GitHub Issue',
-  );
-  if (answer)
+/**
+ * Send what the Logs panel's form submitted: to the developers as survey answers, or
+ * as a GitHub issue when asked, when usage counts are off, or never in a form Logline
+ * did not offer. A suggestion is redacted here too, whatever the form showed.
+ */
+export async function sendFeedback(usage: Usage | undefined, request: FeedbackRequest): Promise<FeedbackResult> {
+  const github = request.github === true || !feedbackSendable(usage);
+  if (request.mode === 'suggest') {
+    const area = (FEEDBACK_AREAS as readonly string[]).includes(request.area) ? request.area : 'Something else';
+    const text = redactText(request.text.trim().slice(0, FEEDBACK_TEXT_LIMIT));
+    if (!text) return { ok: false, via: github ? 'github' : 'posthog' };
+    if (!github)
+      return {
+        ok: await usage!.survey(SUGGEST_SURVEY.id, { [SUGGEST_SURVEY.area]: area, [SUGGEST_SURVEY.text]: text }),
+        via: 'posthog',
+      };
     await vscode.env.openExternal(
-      vscode.Uri.parse(issueUrl('What should Logline do next?', picked.map((item) => `- ${item}`).join('\n'))),
+      vscode.Uri.parse(issueUrl(`Suggestion: ${text.slice(0, 60)}`, `Area: ${area}\n\n${text}`)),
     );
+    return { ok: true, via: 'github' };
+  }
+  const picks = request.picks.filter((pick) => (ROADMAP as readonly string[]).includes(pick));
+  if (!picks.length) return { ok: false, via: github ? 'github' : 'posthog' };
+  if (!github) return { ok: await usage!.survey(VOTE_SURVEY.id, { [VOTE_SURVEY.choice]: picks }), via: 'posthog' };
+  await vscode.env.openExternal(
+    vscode.Uri.parse(issueUrl('What should Logline do next?', picks.map((item) => `- ${item}`).join('\n'))),
+  );
+  return { ok: true, via: 'github' };
 }
 
 interface PromptState {
@@ -110,7 +85,8 @@ export class FeedbackPrompt implements vscode.Disposable {
 
   constructor(
     private readonly memento: Pick<vscode.Memento, 'get' | 'update'>,
-    private readonly usage: Usage | undefined,
+    /** Open the vote in the Logs panel. */
+    private readonly openVote: () => unknown,
     /** Whether this session has captured any logs yet. */
     private readonly used: () => boolean,
     private readonly now: () => number = Date.now,
@@ -137,7 +113,7 @@ export class FeedbackPrompt implements vscode.Disposable {
       VOTE,
       'Not now',
     );
-    if (answer === VOTE) await voteOnNext(this.usage);
+    if (answer === VOTE) await this.openVote();
     return true;
   }
 

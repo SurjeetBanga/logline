@@ -105,7 +105,14 @@ function memento(initial: Record<string, unknown> = {}) {
 }
 
 function setup(
-  options: { mode?: number; env?: NodeJS.ProcessEnv; state?: ReturnType<typeof memento>; key?: string } = {},
+  options: {
+    mode?: number;
+    env?: NodeJS.ProcessEnv;
+    state?: ReturnType<typeof memento>;
+    key?: string;
+    /** Whether PostHog accepts what is sent. */
+    accepted?: boolean;
+  } = {},
 ) {
   Object.assign(host, { usageEnabled: true, errorsEnabled: true, answer: undefined, messages: [], opened: [] });
   host.settings.clear();
@@ -121,8 +128,10 @@ function setup(
     now: () => now,
     transport: async (body) => {
       bodies.push(body);
+      if (options.accepted === false) return false;
       const parsed = JSON.parse(body) as { batch: typeof sent };
       sent.push(...parsed.batch);
+      return true;
     },
   });
   return {
@@ -135,11 +144,10 @@ function setup(
   };
 }
 
-test('a new install says so once, asks before sending, and sends batches with only coarse common properties', async () => {
+test('a new install sends installed, then batches with only coarse common properties, without a pop-up', async () => {
   const { usage, sent, bodies, events, globalState } = setup();
   usage.start();
-  assert.equal(host.messages.length, 1, 'the notice shows first');
-  assert.match(host.messages[0], /never sends log content/);
+  assert.equal(host.messages.length, 0, 'it follows the telemetry setting without asking again');
   usage.command('logline.showLogs');
   await usage.flush();
   assert.deepEqual(events(), ['installed', 'activated', 'active_day', 'command']);
@@ -164,7 +172,7 @@ test('a new install says so once, asks before sending, and sends batches with on
   assert.doesNotMatch(bodies.join(''), /machineid|sessionid/i);
   usage.dispose();
 
-  // The next window keeps the id and says nothing again.
+  // The next window keeps the id.
   const next = setup({ state: globalState });
   next.usage.start();
   await next.usage.flush();
@@ -174,17 +182,15 @@ test('a new install says so once, asks before sending, and sends batches with on
   next.usage.dispose();
 });
 
-test('Turn off in the notice turns usage counts off before anything is sent', async () => {
-  const { usage, sent } = setup();
-  host.answer = 'Turn off';
+test('answers that PostHog does not accept are reported, so the person can send them another way', async () => {
+  const { usage } = setup({ accepted: false });
   usage.start();
-  await new Promise((resolve) => setImmediate(resolve));
-  assert.equal(host.settings.get('telemetry.enabled'), false);
-  host.configListener?.({ affectsConfiguration: (key) => key === 'logline.telemetry.enabled' });
-  usage.command('logline.showLogs');
-  await usage.flush();
-  assert.deepEqual(sent, []);
+  assert.equal(await usage.survey('survey-1', { q1: 'Search' }), false);
   usage.dispose();
+  const accepted = setup();
+  accepted.usage.start();
+  assert.equal(await accepted.usage.survey('survey-1', { q1: 'Search' }), true);
+  accepted.usage.dispose();
 });
 
 test('nothing is recorded when VS Code telemetry, Logline’s setting, or DO_NOT_TRACK says no', async () => {
@@ -195,7 +201,6 @@ test('nothing is recorded when VS Code telemetry, Logline’s setting, or DO_NOT
     usage.command('logline.showLogs');
     await usage.flush();
     assert.deepEqual(sent, []);
-    assert.equal(host.messages.length, 0, 'and no notice');
     usage.dispose();
   }
   const { usage, sent } = setup({ env: { DO_NOT_TRACK: '1' } });
