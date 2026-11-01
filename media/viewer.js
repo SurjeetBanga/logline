@@ -2058,6 +2058,20 @@ Trace ${trace.traceId}`;
       maxRowsSetting: "logServiceMaxRows",
       secret: "none"
     },
+    gcp: {
+      label: "Cloud Logging",
+      description: "Search the logs of a Google Cloud project",
+      service: true,
+      icon: "cloud",
+      noun: "log",
+      native: { label: "Logging query", title: "Type a query in the Logging query language, sent as you type it" },
+      // The trace field is `projects/<project>/traces/<id>`; the id alone is a part of it.
+      traceQuery: (traceId) => `trace:${JSON.stringify(traceId)}`,
+      fields: "Searches become the Logging query language: words are searched as Cloud Logging does, and fields such as level:error match severity and the fields of JSON payloads.",
+      services: false,
+      maxRowsSetting: "logServiceMaxRows",
+      secret: "none"
+    },
     loki: {
       label: "Loki",
       description: "Search the logs of Grafana Loki or Grafana Cloud",
@@ -2969,6 +2983,9 @@ Span ${call.spanId}`;
   function isLokiSelector(value) {
     return SELECTOR.test(value.trim());
   }
+  function isGcpProject(value) {
+    return /^(?:[a-z0-9.-]+:)?[a-z][a-z0-9-]{4,28}[a-z0-9]$/.test(value);
+  }
   function logGroupIdentifier(value) {
     const text2 = value.trim();
     const arn = /^arn:aws(?:-[a-z-]+)?:logs:[a-z0-9-]+:\d{12}:log-group:([\w.\-/#]{1,512})(?::\*)?$/.exec(text2);
@@ -3085,6 +3102,21 @@ Span ${call.spanId}`;
           const indexes = Array.isArray(item.indexes) ? item.indexes.filter((index) => typeof index === "string" && !!index.trim()) : [];
           connection = { id, label, type: "datadog", site, ...indexes.length ? { indexes } : {} };
         }
+      } else if (item.type === "gcp") {
+        const project = text(item.project, 64);
+        const filter = text(item.filter, 4096);
+        const serviceField = text(item.serviceField, 256);
+        const endpoint = typeof item.endpoint === "string" ? apiUrl(item.endpoint.trim()) : void 0;
+        if (project && isGcpProject(project))
+          connection = {
+            id,
+            label,
+            type: "gcp",
+            project,
+            ...filter ? { filter } : {},
+            ...serviceField && /^[A-Za-z_][\w.]*$/.test(serviceField) ? { serviceField } : {},
+            ...endpoint && /^http:\/\/(?:127\.0\.0\.1|localhost|\[::1\])[:/]/.test(`${endpoint}/`) ? { endpoint } : {}
+          };
       } else if (item.type === "elasticsearch") {
         const url = typeof item.url === "string" ? apiUrl(item.url.trim()) : void 0;
         const user = text(item.user, 256);
@@ -4663,6 +4695,8 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
       logGroups: "",
       tenant: "",
       selector: "",
+      project: "",
+      filter: "",
       url: "",
       path: "",
       site: DATADOG_SITES[0],
@@ -4679,6 +4713,7 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
   }
   function suggestedLabel(draft) {
     if (draft.type === "datadog") return "prod";
+    if (draft.type === "gcp") return draft.project.trim();
     if (draft.type === "loki" || draft.type === "elasticsearch")
       return /\/\/(?:localhost|127\.0\.0\.1|\[::1\])[:/]?/.test(draft.url) ? "local" : "prod";
     if (draft.type === "cloudwatch") {
@@ -4789,6 +4824,14 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
             keys = { apiKey: draft.apiKey.trim(), appKey: draft.appKey.trim() };
         }
         break;
+      case "gcp": {
+        const project = draft.project.trim();
+        if (!project) errors.project = "Enter the project id, such as shop-prod-1234";
+        else if (!isGcpProject(project))
+          errors.project = "A project id: lowercase letters, digits, and dashes, such as shop-prod-1234";
+        item = { type: "gcp", project, ...draft.filter.trim() ? { filter: draft.filter.trim() } : {} };
+        break;
+      }
       case "elasticsearch": {
         const url = draft.url.trim();
         const iam = draft.auth === "iam";
@@ -5067,6 +5110,28 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
         )
       ];
     }
+    function gcpDetails() {
+      return [
+        h(
+          "div",
+          { className: "grid" },
+          field("project", "Project", {
+            placeholder: "shop-prod-1234",
+            hint: "The Google Cloud project id, as gcloud config get-value project prints it."
+          }),
+          field("filter", "Narrow every search to", {
+            wide: true,
+            placeholder: 'resource.type="cloud_run_revision"',
+            hint: "Optional: a query in the Logging query language that every search adds."
+          })
+        ),
+        h(
+          "div",
+          { className: "hint" },
+          "Signs in with Application Default Credentials: run gcloud auth application-default login, or set GOOGLE_APPLICATION_CREDENTIALS to a service account key. Reading logs needs the Logs Viewer role. Nothing is stored."
+        )
+      ];
+    }
     function elasticDetails() {
       const iamHint = h(
         "div",
@@ -5266,6 +5331,9 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
           break;
         case "elasticsearch":
           children.push(...elasticDetails());
+          break;
+        case "gcp":
+          children.push(...gcpDetails());
           break;
       }
       details2.replaceChildren(...children.filter((child) => !!child));

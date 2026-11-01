@@ -1,7 +1,13 @@
 // What each kind of connection is, in one place: the editor, the Logs panel,
 // and the connection form ask this instead of testing for each type, so a new
 // kind of store is one entry here and one connector.
-import type { CloudWatchConnection, ConnectionConfig, ConnectionType, SqliteConnection } from './connections';
+import type {
+  CloudWatchConnection,
+  ConnectionConfig,
+  ConnectionType,
+  GcpConnection,
+  SqliteConnection,
+} from './connections';
 
 export interface ConnectionKind {
   /** The store's name, as the panel says it. */
@@ -67,6 +73,21 @@ export const CONNECTION_KINDS: Record<ConnectionType, ConnectionKind> = {
     fields:
       'Searches become CloudWatch filter patterns: a field such as level:error matches the fields of JSON logs, whole and with case, as CloudWatch does.',
     services: true,
+    maxRowsSetting: 'logServiceMaxRows',
+    secret: 'none',
+  },
+  gcp: {
+    label: 'Cloud Logging',
+    description: 'Search the logs of a Google Cloud project',
+    service: true,
+    icon: 'cloud',
+    noun: 'log',
+    native: { label: 'Logging query', title: 'Type a query in the Logging query language, sent as you type it' },
+    // The trace field is `projects/<project>/traces/<id>`; the id alone is a part of it.
+    traceQuery: (traceId) => `trace:${JSON.stringify(traceId)}`,
+    fields:
+      'Searches become the Logging query language: words are searched as Cloud Logging does, and fields such as level:error match severity and the fields of JSON payloads.',
+    services: false,
     maxRowsSetting: 'logServiceMaxRows',
     secret: 'none',
   },
@@ -157,6 +178,6 @@ export function storeName(type: ConnectionType): string {
 /** A connection whose password or keys are kept in secret storage. */
 export function keepsSecret(
   connection: ConnectionConfig,
-): connection is Exclude<ConnectionConfig, SqliteConnection | CloudWatchConnection> {
+): connection is Exclude<ConnectionConfig, SqliteConnection | CloudWatchConnection | GcpConnection> {
   return CONNECTION_KINDS[connection.type].secret !== 'none';
 }

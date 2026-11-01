@@ -490,3 +490,26 @@ test('an Elasticsearch draft takes a user or an API key, or AWS credentials over
     profile: 'work',
   });
 });
+
+test('a Cloud Logging draft needs a project id, and keeps the service field and endpoint set in settings', () => {
+  const draft = { ...emptyDraft('gcp'), project: 'shop-prod-1234', filter: ' severity>=WARNING ' };
+  const { connection } = readDraft(draft);
+  assert.deepEqual(connection, {
+    id: 'draft',
+    label: 'draft',
+    type: 'gcp',
+    project: 'shop-prod-1234',
+    filter: 'severity>=WARNING',
+  });
+  assert.equal(suggestedLabel(draft), 'shop-prod-1234');
+  assert.equal(readDraft({ ...draft, project: '' }).errors.project, 'Enter the project id, such as shop-prod-1234');
+  assert.match(readDraft({ ...draft, project: 'Shop Prod' }).errors.project!, /^A project id/);
+  const saved = { ...connection!, serviceField: 'resource.labels.container_name', endpoint: 'http://127.0.0.1:8085' };
+  assert.deepEqual(keepUnmodeled(connection!, saved), saved);
+  assert.deepEqual(draftFromConnection(saved), {
+    ...emptyDraft('gcp'),
+    label: 'draft',
+    project: 'shop-prod-1234',
+    filter: 'severity>=WARNING',
+  });
+});

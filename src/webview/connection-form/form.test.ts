@@ -461,6 +461,20 @@ test('Elasticsearch needs its index pattern chosen, with no None, and can sign i
   assert.equal(form.save().disabled, true);
 });
 
+test('Cloud Logging takes a project and a filter, signs in with gcloud, and needs no table', () => {
+  const form = setup();
+  form.init();
+  form.radio('type', 'gcp').fire('change');
+  form.type('#field-project', 'shop-prod-1234');
+  assert.equal(form.$('#field-label').value, 'shop-prod-1234');
+  assert.match(form.$('.details').textContent, /gcloud auth application-default login/);
+  form.button(/Test connection/).fire('click');
+  assert.equal((form.sent.at(-1) as Extract<FormRequest, { type: 'test' }>).draft.project, 'shop-prod-1234');
+  form.receive({ type: 'tested', ok: true, detail: 'Cloud Logging · shop-prod-1234 readable' });
+  assert.match(form.$('.logs').textContent, /Cloud Logging logs need no table/);
+  assert.equal(form.save().disabled, false);
+});
+
 test('a field changed while a test runs makes its answer stale, and a name does not', () => {
   const form = setup();
   form.init();

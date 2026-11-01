@@ -23,19 +23,20 @@ export interface AwsProfile {
 }
 
 /** What reading credentials touches, so tests can stand in for files, the network, and processes. */
-export interface AwsEnvironment {
+export interface AuthEnvironment {
   env: NodeJS.ProcessEnv;
   home: string;
   readFile(path: string): string | undefined;
   fetch(
     url: string,
-    init: { headers: Record<string, string>; signal?: AbortSignal },
+    init: { method?: 'GET' | 'POST'; headers: Record<string, string>; body?: string; signal?: AbortSignal },
   ): Promise<{ ok: boolean; status: number; json(): Promise<unknown> }>;
   run(command: string, timeoutMs: number): Promise<string>;
   now(): number;
 }
+export type AwsEnvironment = AuthEnvironment;
 
-export function systemEnvironment(): AwsEnvironment {
+export function systemEnvironment(): AuthEnvironment {
   return {
     env: process.env,
     home: homedir(),
