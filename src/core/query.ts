@@ -104,7 +104,8 @@ export function parseQuery(input = ''): ParsedQuery {
   return groups.filter((group) => group.length);
 }
 
-function parseToken(token: string): Token {
+/** One term of a search, as `parseQuery` reads it. */
+export function parseToken(token: string): Token {
   let negate = token.startsWith('-');
   if (negate) token = token.slice(1);
   // Only a bare identifier before the colon names a field, so pasted values that
