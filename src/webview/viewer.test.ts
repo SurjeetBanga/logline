@@ -2227,12 +2227,18 @@ test('a first run welcomes, and the tour walks the panel with Next, Back, and Sk
   assert.equal(card().children[0].textContent, 'You’re set');
   card().querySelectorAll('.tour-primary')[0].listeners.get('click')!();
   assert.equal(layer.children.length, 0, 'Done ends the tour');
+  assert.deepEqual(JSON.parse(JSON.stringify(messages.at(-1))), { type: 'tourEnded', finished: true });
 
   // The tour starts again from the menu, a snapshot (the Command Palette or the guide), and ends with Escape.
   get('takeTour').listeners.get('click')!();
   assert.equal(dom.body.children.at(-1)!.children.at(-1)!.children[1].textContent, 'Your sources');
   dom.listeners.get('keydown')!({ key: 'Escape', preventDefault() {} });
   assert.equal(dom.body.children.at(-1)!.children.length, 0);
+  assert.deepEqual(
+    JSON.parse(JSON.stringify(messages.at(-1))),
+    { type: 'tourEnded', finished: false },
+    'Escape skips it',
+  );
   receive({
     type: 'snapshot',
     generation: 1,
@@ -2566,6 +2572,18 @@ test('rows show their code link and log doctor finding, with actions, and the Is
   });
   assert.equal(messages.at(-1)!.action, 'showEvents');
   assert.equal(app.views.active(), 'logs', 'the events it filters to come into view');
+  // A thumbs up or down says whether this kind of finding helps, then thanks instead of asking again.
+  const vote = item.querySelectorAll('.doctor-vote').find((button) => button.dataset.doctorFeedback === 'false')!;
+  get('doctorView').listeners.get('click')!({
+    target: { closest: (wanted: string) => (wanted === '[data-doctor-feedback]' ? vote : undefined) },
+  });
+  assert.deepEqual(JSON.parse(JSON.stringify(messages.at(-1))), {
+    type: 'doctorFeedback',
+    code: 'secret',
+    helpful: false,
+  });
+  assert.equal(item.querySelectorAll('.doctor-vote').length, 0);
+  assert.equal(item.querySelector('.doctor-thanks')!.textContent, 'Thanks');
   app.bridge.pending = false;
   app.bridge.request(true);
   assert.equal(messages.at(-1)!.doctorRevision, 3, 'the host can skip a list the view already has');
@@ -2659,7 +2677,12 @@ test('a leak in output no statement accounts for names its source and opens an e
   });
   const item = get('doctorList').querySelectorAll('.doctor-item')[0];
   assert.equal(item.querySelector('.doctor-source')!.textContent, 'Vendor SDK');
-  assert.equal(item.querySelectorAll('.doctor-action').length, 1, 'nothing to open or fix in the editor');
+  assert.equal(
+    item.querySelectorAll('.doctor-action').length - item.querySelectorAll('.doctor-vote').length,
+    1,
+    'nothing to open or fix in the editor',
+  );
+  assert.equal(item.querySelectorAll('.doctor-vote').length, 2, 'it can still be voted on');
   const example = item.querySelector('.doctor-action')!;
   assert.equal(example.dataset.doctorAction, 'example');
   const sent = messages.length;

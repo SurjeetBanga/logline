@@ -481,6 +481,24 @@ timed('redact', 'Redact 1,000 lines that carry credentials', async () => {
     for (const text of lines) redactor.text(text);
   };
 });
+timed('usage', 'Count the operators of 1,000 new searches and check 1,000 usage events', async () => {
+  const { parseQuery } = await load('core/query.js');
+  const { queryFeatures, sanitizeUsage } = await load('core/usage-events.js');
+  const queries = Array.from(
+    { length: 1000 },
+    (_, i) => `level:error service:api-${i} -"timeout ${i}" status:>=500 last:15m OR /retry.?${i}/`,
+  );
+  const vocabulary = { commands: new Set(['logline.showLogs']), guideSections: new Set(), settings: new Map() };
+  return () => {
+    for (const query of queries) queryFeatures(parseQuery(query));
+    for (let i = 0; i < 1000; i++)
+      sanitizeUsage(
+        'agent_tool',
+        { tool: 'logline_search_logs', via: 'mcp', client: 'claude-code', ok: true, ms: i, result_size: i * 64 },
+        vocabulary,
+      );
+  };
+});
 timed('sites', 'Index 200 source files and attribute 1,000 events', async () => {
   const { LogSiteIndex, extractLogSites } = await load('core/log-sites.js');
   const { parseLogLine } = await load('core/log-event.js');

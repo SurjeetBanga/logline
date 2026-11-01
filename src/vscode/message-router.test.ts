@@ -308,3 +308,32 @@ test('message router passes a Datadog query typed as is, and answers with the se
     { type: 'connectionServices', connectionId: 'prod', range: '4h', services: [{ name: 'prod-api', count: 3 }] },
   ]);
 });
+
+test('message router counts views, exports for AI, finding votes, and how a tour ended', async () => {
+  const service = services() as any;
+  const counted: unknown[] = [];
+  service.usage = {
+    view: (view: string) => counted.push(['view', view]),
+    record: (event: string, properties?: unknown) => counted.push([event, properties]),
+    findingHelpful: (code: string, helpful: boolean) => counted.push(['vote', code, helpful]),
+  };
+  service.traceList = () => [];
+  service.metricList = () => [];
+  const send = () => undefined;
+  for (const message of [
+    { type: 'traces' },
+    { type: 'metrics' },
+    { type: 'exportForAI', query: 'level:error' },
+    { type: 'doctorFeedback', code: 'noisy', helpful: true },
+    { type: 'doctorFeedback', code: 'noisy' },
+    { type: 'tourEnded', finished: false },
+  ])
+    await handleMessage(service, send, message);
+  assert.deepEqual(counted, [
+    ['view', 'traces'],
+    ['view', 'metrics'],
+    ['exported_for_ai', undefined],
+    ['vote', 'noisy', true],
+    ['tour', { step: 'skipped' }],
+  ]);
+});

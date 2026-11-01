@@ -1,7 +1,10 @@
 import * as vscode from 'vscode';
 
 const RATING_KEY = 'logline.rating';
+/** The feedback prompt's state: the two questions are kept a month apart. */
+const FEEDBACK_PROMPT_KEY = 'logline.feedbackPrompt';
 const DAY = 24 * 60 * 60 * 1000;
+const QUIET_MS = 30 * DAY;
 /** Ask only after someone has used Logline for a few days, over a few sessions. */
 export const RATING_AFTER_MS = 3 * DAY;
 export const RATING_MIN_SESSIONS = 3;
@@ -65,6 +68,8 @@ export class RatingPrompt implements vscode.Disposable {
       await this.save(state);
     }
     const now = this.now();
+    const voted = this.memento.get<{ asked?: number }>(FEEDBACK_PROMPT_KEY)?.asked;
+    if (voted !== undefined && now - voted < QUIET_MS) return false;
     const due =
       state.firstUsed !== undefined &&
       now - state.firstUsed >= RATING_AFTER_MS &&

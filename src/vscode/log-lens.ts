@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import { counted, type Usage } from './usage';
 import {
   extractLogSites,
   LOG_SITE_EXTENSIONS,
@@ -25,6 +26,7 @@ export interface LensSources {
   generation(): number;
   /** Filter the Logs panel and bring it into view. */
   showQuery(query: string): Promise<void>;
+  usage?: Usage;
 }
 
 const GLOB = `**/*.{${LOG_SITE_EXTENSIONS.join(',')}}`;
@@ -101,8 +103,14 @@ export class LogLens implements vscode.CodeLensProvider, vscode.HoverProvider, v
     this.disposables.push(
       vscode.languages.registerCodeLensProvider(selector, this),
       vscode.languages.registerHoverProvider(selector, this),
-      vscode.commands.registerCommand('logline.showLogSite', (id: unknown) => this.showSite(id)),
-      vscode.commands.registerCommand('logline.showQuietLogStatements', () => this.showQuietStatements()),
+      vscode.commands.registerCommand(
+        'logline.showLogSite',
+        counted(this.sources.usage, 'logline.showLogSite', (id: unknown) => this.showSite(id)),
+      ),
+      vscode.commands.registerCommand(
+        'logline.showQuietLogStatements',
+        counted(this.sources.usage, 'logline.showQuietLogStatements', () => this.showQuietStatements()),
+      ),
       vscode.window.onDidChangeVisibleTextEditors(() => this.decorate()),
       vscode.workspace.onDidChangeConfiguration((event) => {
         if (event.affectsConfiguration('logline.logLenses')) this.applyMode();
@@ -265,7 +273,9 @@ export class LogLens implements vscode.CodeLensProvider, vscode.HoverProvider, v
 
   private async showSite(id: unknown): Promise<void> {
     const site = typeof id === 'string' ? this.sources.index.find(id) : undefined;
-    if (site) await this.sources.showQuery(siteQuery(site));
+    if (!site) return;
+    this.sources.usage?.record('log_lens_clicked');
+    await this.sources.showQuery(siteQuery(site));
   }
 
   private async showQuietStatements(): Promise<void> {

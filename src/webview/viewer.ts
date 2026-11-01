@@ -924,7 +924,7 @@ export function createViewer(api: WebviewApi) {
       if (views.active() !== 'logs') views.show('logs');
       for (const popover of popovers) popover.close();
     },
-    ended: () => undefined,
+    ended: (finished) => api.postMessage({ type: 'tourEnded', finished }),
   });
   function startTour(): void {
     elements.tourHint.hidden = true;

@@ -13,9 +13,15 @@ export class LogsProvider implements vscode.WebviewViewProvider {
     });
     const media = vscode.Uri.joinPath(this.context.extensionUri, 'media');
     view.webview.options = { enableScripts: true, localResourceRoots: [media] };
+    // How long the panel takes to show its first logs, from opening.
+    let opened: number | undefined = performance.now();
     const messages = view.webview.onDidReceiveMessage((message) => {
       void this.controller
         .handleMessage((reply) => {
+          if (opened !== undefined && (reply as { type?: string }).type === 'snapshot') {
+            this.controller.usage?.record('perf', { op: 'first_render', ms: performance.now() - opened });
+            opened = undefined;
+          }
           void view.webview.postMessage(reply);
         }, message)
         .catch((error) => vscode.window.showErrorMessage(`Logline: ${String(error)}`));

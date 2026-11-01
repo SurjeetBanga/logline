@@ -3470,6 +3470,19 @@ th[data-column='base:message'] .column-label {
   font-size: 12px;
   font-family: var(--vscode-font-family, system-ui, sans-serif);
 }
+.doctor-feedback {
+  display: flex;
+  gap: 2px;
+  margin-left: 4px;
+}
+.doctor-action.doctor-vote {
+  padding: 2px 4px;
+}
+.doctor-thanks {
+  margin-left: 4px;
+  color: var(--vscode-descriptionForeground, #888);
+  font-size: 12px;
+}
 .event-finding {
   display: flex;
   align-items: center;

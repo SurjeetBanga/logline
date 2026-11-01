@@ -14,12 +14,12 @@ import {
 } from '../protocol/agent-bridge';
 
 export interface AgentBridgeOptions {
-  /** Run a Logline tool and return its bounded JSON text. */
-  run(tool: string, input: unknown, token: { isCancellationRequested: boolean }): Promise<string>;
+  /** Run a Logline tool and return its bounded JSON text; `client` is the name the MCP client gave. */
+  run(tool: string, input: unknown, token: { isCancellationRequested: boolean }, client?: string): Promise<string>;
   folders(): string[];
   name(): string;
   /** Called when a client calls for the first time in a while, so the panel can show it. */
-  onClient?(): void;
+  onClient?(client: string): void;
   /** The current sharing grant; agents are shown as readers only of the grant they called under. */
   grant?(): string | undefined;
   directory?: string;
@@ -180,7 +180,8 @@ export class AgentBridge {
     }
     let text: string;
     try {
-      text = await this.options.run(request.tool, request.input, cancellation);
+      const client = typeof request.client === 'string' ? request.client : undefined;
+      text = await this.options.run(request.tool, request.input, cancellation, client);
     } catch (error) {
       reply({ error: error instanceof Error ? error.message : String(error) });
       return;
@@ -191,7 +192,8 @@ export class AgentBridge {
       const previous = this.clients.get(label);
       const grant = this.options.grant?.();
       this.clients.set(label, { seen: Date.now(), grant });
-      if (!previous || Date.now() - previous.seen >= RECENT_MS || previous.grant !== grant) this.options.onClient?.();
+      if (!previous || Date.now() - previous.seen >= RECENT_MS || previous.grant !== grant)
+        this.options.onClient?.(request.client);
     }
     reply({ text });
   }

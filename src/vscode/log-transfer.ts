@@ -22,6 +22,8 @@ import { LinePipeline, linePipelineOptions } from '../capture/line-pipeline';
 import type { ContainerTag } from '../core/container-prefix';
 
 export class LogTransfer {
+  /** Told how long an import took and how many events it brought, for usage counts. */
+  imported?: (ms: number, events: number) => void;
   constructor(
     private readonly store: LogStore,
     private readonly config: Settings,
@@ -184,6 +186,7 @@ export class LogTransfer {
       openLabel: 'Import logs',
     });
     if (!uris?.length) return;
+    const started = performance.now();
     let imported = 0;
     for (const uri of uris) {
       // Keep surrounding context from crossing between independently imported files.
@@ -239,6 +242,7 @@ export class LogTransfer {
       this.state.status = `Imported ${imported.toLocaleString()} events`;
       this.state.notify();
     }
+    this.imported?.(performance.now() - started, imported);
     vscode.window.showInformationMessage(`Imported ${imported.toLocaleString()} log events.`);
   }
 

@@ -1,0 +1,597 @@
+{
+  "commonProperties": {
+    "version": {
+      "classification": "SystemMetaData",
+      "purpose": "FeatureInsight",
+      "comment": "The Logline version."
+    },
+    "vscode": {
+      "classification": "SystemMetaData",
+      "purpose": "FeatureInsight",
+      "comment": "The VS Code version."
+    },
+    "host": {
+      "classification": "SystemMetaData",
+      "purpose": "FeatureInsight",
+      "comment": "The editor: vscode, cursor, windsurf, vscodium, or other."
+    },
+    "ui": {
+      "classification": "SystemMetaData",
+      "purpose": "FeatureInsight",
+      "comment": "desktop or web."
+    },
+    "remote": {
+      "classification": "SystemMetaData",
+      "purpose": "FeatureInsight",
+      "comment": "Where the extension runs: none, ssh, wsl, container, codespaces, or other."
+    },
+    "os": {
+      "classification": "SystemMetaData",
+      "purpose": "FeatureInsight",
+      "comment": "darwin, win32, linux, or other."
+    },
+    "arch": {
+      "classification": "SystemMetaData",
+      "purpose": "FeatureInsight",
+      "comment": "x64, arm64, arm, ia32, or other."
+    },
+    "cpus": {
+      "classification": "SystemMetaData",
+      "purpose": "PerformanceAndHealth",
+      "comment": "CPU cores, bucketed."
+    },
+    "ram_gb": {
+      "classification": "SystemMetaData",
+      "purpose": "PerformanceAndHealth",
+      "comment": "Memory, bucketed."
+    }
+  },
+  "events": {
+    "surjeetbanga.logline/installed": {
+      "owner": "SurjeetBanga",
+      "comment": "Logline ran for the first time on this machine."
+    },
+    "surjeetbanga.logline/updated": {
+      "owner": "SurjeetBanga",
+      "comment": "Logline started at a new version; from is the previous version.",
+      "from": {
+        "classification": "SystemMetaData",
+        "purpose": "FeatureInsight",
+        "comment": "A version number."
+      }
+    },
+    "surjeetbanga.logline/activated": {
+      "owner": "SurjeetBanga",
+      "comment": "Logline started in a window."
+    },
+    "surjeetbanga.logline/active_day": {
+      "owner": "SurjeetBanga",
+      "comment": "The first time in a day someone did something in Logline."
+    },
+    "surjeetbanga.logline/milestone": {
+      "owner": "SurjeetBanga",
+      "comment": "The first time someone did one of a few key things, and how long after installing.",
+      "name": {
+        "classification": "SystemMetaData",
+        "purpose": "FeatureInsight",
+        "comment": "One of: first_capture, first_search, first_filtered_search, first_view_switch, first_connection, first_share, first_agent_call, first_doctor_action, first_log_breakpoint."
+      },
+      "after": {
+        "classification": "SystemMetaData",
+        "purpose": "FeatureInsight",
+        "comment": "A duration, bucketed (<1m, 1-5m, ...)."
+      }
+    },
+    "surjeetbanga.logline/command": {
+      "owner": "SurjeetBanga",
+      "comment": "A Logline command was run; the command id only, never its arguments.",
+      "id": {
+        "classification": "SystemMetaData",
+        "purpose": "FeatureInsight",
+        "comment": "One of Logline's own names."
+      }
+    },
+    "surjeetbanga.logline/capture_started": {
+      "owner": "SurjeetBanga",
+      "comment": "A kind of capture started, once per kind per session.",
+      "kind": {
+        "classification": "SystemMetaData",
+        "purpose": "FeatureInsight",
+        "comment": "One of: terminal, debug, task, file, compose, command, otlp, import, connection."
+      }
+    },
+    "surjeetbanga.logline/view_opened": {
+      "owner": "SurjeetBanga",
+      "comment": "A view of the Logs panel was opened, once per view per session.",
+      "view": {
+        "classification": "SystemMetaData",
+        "purpose": "FeatureInsight",
+        "comment": "One of: logs, analysis, compare, traces, trace, metrics, aiCalls, aiCall, doctor, connection."
+      }
+    },
+    "surjeetbanga.logline/connection_added": {
+      "owner": "SurjeetBanga",
+      "comment": "A connection was added; its type and how it signs in, never its name or host.",
+      "type": {
+        "classification": "SystemMetaData",
+        "purpose": "FeatureInsight",
+        "comment": "One of: sqlite, postgres, mysql, mongodb, datadog, cloudwatch, loki, elasticsearch, gcp."
+      },
+      "auth": {
+        "classification": "SystemMetaData",
+        "purpose": "FeatureInsight",
+        "comment": "One of: password, iam, other."
+      }
+    },
+    "surjeetbanga.logline/connection_searched": {
+      "owner": "SurjeetBanga",
+      "comment": "A connection was searched; its type, outcome, time, and row count bucket.",
+      "type": {
+        "classification": "SystemMetaData",
+        "purpose": "FeatureInsight",
+        "comment": "One of: sqlite, postgres, mysql, mongodb, datadog, cloudwatch, loki, elasticsearch, gcp."
+      },
+      "ok": {
+        "classification": "SystemMetaData",
+        "purpose": "FeatureInsight",
+        "comment": "true or false."
+      },
+      "ms": {
+        "classification": "SystemMetaData",
+        "purpose": "FeatureInsight",
+        "comment": "A time, bucketed (<10ms, 10-24ms, ...)."
+      },
+      "rows": {
+        "classification": "SystemMetaData",
+        "purpose": "FeatureInsight",
+        "comment": "A count, bucketed (0, 1-9, 10-99, ...)."
+      }
+    },
+    "surjeetbanga.logline/connection_tailed": {
+      "owner": "SurjeetBanga",
+      "comment": "A connection was tailed; its type.",
+      "type": {
+        "classification": "SystemMetaData",
+        "purpose": "FeatureInsight",
+        "comment": "One of: sqlite, postgres, mysql, mongodb, datadog, cloudwatch, loki, elasticsearch, gcp."
+      }
+    },
+    "surjeetbanga.logline/connection_sql_run": {
+      "owner": "SurjeetBanga",
+      "comment": "A query was run on a database connection; its type and outcome, never the query.",
+      "type": {
+        "classification": "SystemMetaData",
+        "purpose": "FeatureInsight",
+        "comment": "One of: sqlite, postgres, mysql, mongodb, datadog, cloudwatch, loki, elasticsearch, gcp."
+      },
+      "ok": {
+        "classification": "SystemMetaData",
+        "purpose": "FeatureInsight",
+        "comment": "true or false."
+      }
+    },
+    "surjeetbanga.logline/connection_tested": {
+      "owner": "SurjeetBanga",
+      "comment": "A connection was tested; its type and outcome.",
+      "type": {
+        "classification": "SystemMetaData",
+        "purpose": "FeatureInsight",
+        "comment": "One of: sqlite, postgres, mysql, mongodb, datadog, cloudwatch, loki, elasticsearch, gcp."
+      },
+      "ok": {
+        "classification": "SystemMetaData",
+        "purpose": "FeatureInsight",
+        "comment": "true or false."
+      }
+    },
+    "surjeetbanga.logline/connection_agent_allowed": {
+      "owner": "SurjeetBanga",
+      "comment": "Agents were allowed to query a connection; its type.",
+      "type": {
+        "classification": "SystemMetaData",
+        "purpose": "FeatureInsight",
+        "comment": "One of: sqlite, postgres, mysql, mongodb, datadog, cloudwatch, loki, elasticsearch, gcp."
+      }
+    },
+    "surjeetbanga.logline/shared_with_agent": {
+      "owner": "SurjeetBanga",
+      "comment": "Logs were shared with agents; how, and bucketed counts of sources and events.",
+      "how": {
+        "classification": "SystemMetaData",
+        "purpose": "FeatureInsight",
+        "comment": "One of: all, runs, event."
+      },
+      "sources": {
+        "classification": "SystemMetaData",
+        "purpose": "FeatureInsight",
+        "comment": "A count, bucketed (0, 1-9, 10-99, ...)."
+      },
+      "events": {
+        "classification": "SystemMetaData",
+        "purpose": "FeatureInsight",
+        "comment": "A count, bucketed (0, 1-9, 10-99, ...)."
+      },
+      "redacted": {
+        "classification": "SystemMetaData",
+        "purpose": "FeatureInsight",
+        "comment": "true or false."
+      }
+    },
+    "surjeetbanga.logline/sharing_stopped": {
+      "owner": "SurjeetBanga",
+      "comment": "Sharing stopped; how long it lasted.",
+      "duration": {
+        "classification": "SystemMetaData",
+        "purpose": "FeatureInsight",
+        "comment": "A duration, bucketed (<1m, 1-5m, ...)."
+      }
+    },
+    "surjeetbanga.logline/exported_for_ai": {
+      "owner": "SurjeetBanga",
+      "comment": "Logs were exported for an AI assistant."
+    },
+    "surjeetbanga.logline/ask_copilot": {
+      "owner": "SurjeetBanga",
+      "comment": "Ask Copilot was used."
+    },
+    "surjeetbanga.logline/agent_connected": {
+      "owner": "SurjeetBanga",
+      "comment": "An agent called Logline for the first time in a while; which kind of client.",
+      "client": {
+        "classification": "SystemMetaData",
+        "purpose": "FeatureInsight",
+        "comment": "One of: claude-code, codex, cursor, copilot, other."
+      }
+    },
+    "surjeetbanga.logline/agent_tool": {
+      "owner": "SurjeetBanga",
+      "comment": "An agent called a Logline tool; the tool, route, client kind, outcome, time, and result size bucket.",
+      "tool": {
+        "classification": "SystemMetaData",
+        "purpose": "FeatureInsight",
+        "comment": "One of: logline_list_shared_sources, logline_search_logs, logline_inspect_event, logline_analyze_logs, logline_get_trace, logline_get_ai_calls, logline_fetch_production, logline_compare_with_production, logline_wait_for_logs."
+      },
+      "via": {
+        "classification": "SystemMetaData",
+        "purpose": "FeatureInsight",
+        "comment": "One of: copilot, mcp."
+      },
+      "client": {
+        "classification": "SystemMetaData",
+        "purpose": "FeatureInsight",
+        "comment": "One of: claude-code, codex, cursor, copilot, other."
+      },
+      "ok": {
+        "classification": "SystemMetaData",
+        "purpose": "FeatureInsight",
+        "comment": "true or false."
+      },
+      "code": {
+        "classification": "SystemMetaData",
+        "purpose": "FeatureInsight",
+        "comment": "A code Logline names, such as INVALID_INPUT."
+      },
+      "ms": {
+        "classification": "SystemMetaData",
+        "purpose": "FeatureInsight",
+        "comment": "A time, bucketed (<10ms, 10-24ms, ...)."
+      },
+      "result_size": {
+        "classification": "SystemMetaData",
+        "purpose": "FeatureInsight",
+        "comment": "A size, bucketed (<1KB, 1-8KB, ...)."
+      },
+      "truncated": {
+        "classification": "SystemMetaData",
+        "purpose": "FeatureInsight",
+        "comment": "true or false."
+      }
+    },
+    "surjeetbanga.logline/first_tool_after_share": {
+      "owner": "SurjeetBanga",
+      "comment": "How long after sharing an agent first called a tool.",
+      "after": {
+        "classification": "SystemMetaData",
+        "purpose": "FeatureInsight",
+        "comment": "A duration, bucketed (<1m, 1-5m, ...)."
+      }
+    },
+    "surjeetbanga.logline/tour": {
+      "owner": "SurjeetBanga",
+      "comment": "The panel tour was started, finished, or skipped.",
+      "step": {
+        "classification": "SystemMetaData",
+        "purpose": "FeatureInsight",
+        "comment": "One of: started, finished, skipped."
+      }
+    },
+    "surjeetbanga.logline/guide_section": {
+      "owner": "SurjeetBanga",
+      "comment": "A section of the guide was opened.",
+      "section": {
+        "classification": "SystemMetaData",
+        "purpose": "FeatureInsight",
+        "comment": "One of Logline's own names."
+      }
+    },
+    "surjeetbanga.logline/setting_changed": {
+      "owner": "SurjeetBanga",
+      "comment": "A Logline setting changed; its name, and its value only when it is a boolean, bucketed number, or one of its choices.",
+      "key": {
+        "classification": "SystemMetaData",
+        "purpose": "FeatureInsight",
+        "comment": "One of Logline's own names."
+      },
+      "value": {
+        "classification": "SystemMetaData",
+        "purpose": "FeatureInsight",
+        "comment": "A boolean, a bucketed number, one of the setting's choices, or custom."
+      }
+    },
+    "surjeetbanga.logline/perf": {
+      "owner": "SurjeetBanga",
+      "comment": "How long activation, the first logs in the panel, a search, or an import took, bucketed; for an import, its event count bucketed.",
+      "op": {
+        "classification": "SystemMetaData",
+        "purpose": "FeatureInsight",
+        "comment": "One of: activate, first_render, search, import."
+      },
+      "ms": {
+        "classification": "SystemMetaData",
+        "purpose": "FeatureInsight",
+        "comment": "A time, bucketed (<10ms, 10-24ms, ...)."
+      },
+      "events": {
+        "classification": "SystemMetaData",
+        "purpose": "FeatureInsight",
+        "comment": "A count, bucketed (0, 1-9, 10-99, ...)."
+      }
+    },
+    "surjeetbanga.logline/doctor_finding": {
+      "owner": "SurjeetBanga",
+      "comment": "Log Doctor found a kind of problem, once per kind per session.",
+      "code": {
+        "classification": "SystemMetaData",
+        "purpose": "FeatureInsight",
+        "comment": "One of: secret, personal, noisy, missing-exception, unstructured, quiet-failure, oversized, contextless, unnamed-service, span-name-ids, missing-route, unmarked-error, old-attributes, unit-in-name."
+      }
+    },
+    "surjeetbanga.logline/doctor_action": {
+      "owner": "SurjeetBanga",
+      "comment": "An action was taken on a Log Doctor finding.",
+      "action": {
+        "classification": "SystemMetaData",
+        "purpose": "FeatureInsight",
+        "comment": "One of: open, showEvents, fix, report."
+      }
+    },
+    "surjeetbanga.logline/feedback": {
+      "owner": "SurjeetBanga",
+      "comment": "A thumbs up or down on a kind of Log Doctor finding, or whether Copilot helped, asked after Ask Copilot.",
+      "surface": {
+        "classification": "SystemMetaData",
+        "purpose": "FeatureInsight",
+        "comment": "One of: doctor, copilot."
+      },
+      "code": {
+        "classification": "SystemMetaData",
+        "purpose": "FeatureInsight",
+        "comment": "One of: secret, personal, noisy, missing-exception, unstructured, quiet-failure, oversized, contextless, unnamed-service, span-name-ids, missing-route, unmarked-error, old-attributes, unit-in-name."
+      },
+      "helpful": {
+        "classification": "SystemMetaData",
+        "purpose": "FeatureInsight",
+        "comment": "true or false."
+      }
+    },
+    "surjeetbanga.logline/log_lens_clicked": {
+      "owner": "SurjeetBanga",
+      "comment": "A log lens above a log statement was clicked."
+    },
+    "surjeetbanga.logline/log_breakpoint": {
+      "owner": "SurjeetBanga",
+      "comment": "A log breakpoint was set or paused a debug session.",
+      "step": {
+        "classification": "SystemMetaData",
+        "purpose": "FeatureInsight",
+        "comment": "One of: set, hit."
+      }
+    },
+    "surjeetbanga.logline/compare_production": {
+      "owner": "SurjeetBanga",
+      "comment": "A comparison with production finished.",
+      "ok": {
+        "classification": "SystemMetaData",
+        "purpose": "FeatureInsight",
+        "comment": "true or false."
+      }
+    },
+    "surjeetbanga.logline/error": {
+      "owner": "SurjeetBanga",
+      "comment": "Something failed; an area and a code Logline names, never a message.",
+      "area": {
+        "classification": "SystemMetaData",
+        "purpose": "FeatureInsight",
+        "comment": "One of: bridge, otlp, connection, import, export, capture."
+      },
+      "code": {
+        "classification": "SystemMetaData",
+        "purpose": "FeatureInsight",
+        "comment": "A code Logline names, such as INVALID_INPUT."
+      }
+    },
+    "surjeetbanga.logline/session_summary": {
+      "owner": "SurjeetBanga",
+      "comment": "Counts for a session, sent when the window closes and once a day: activity, searches and the operators they used, captured volume, views, features, connections by type, and agent use, all bucketed.",
+      "active_minutes": {
+        "classification": "SystemMetaData",
+        "purpose": "FeatureInsight",
+        "comment": "A duration, bucketed (<1m, 1-5m, ...)."
+      },
+      "searches": {
+        "classification": "SystemMetaData",
+        "purpose": "FeatureInsight",
+        "comment": "A count, bucketed (0, 1-9, 10-99, ...)."
+      },
+      "events_captured": {
+        "classification": "SystemMetaData",
+        "purpose": "FeatureInsight",
+        "comment": "A count, bucketed (0, 1-9, 10-99, ...)."
+      },
+      "sources": {
+        "classification": "SystemMetaData",
+        "purpose": "FeatureInsight",
+        "comment": "A count, bucketed (0, 1-9, 10-99, ...)."
+      },
+      "memory_mb": {
+        "classification": "SystemMetaData",
+        "purpose": "FeatureInsight",
+        "comment": "A count, bucketed (0, 1-9, 10-99, ...)."
+      },
+      "trimmed": {
+        "classification": "SystemMetaData",
+        "purpose": "FeatureInsight",
+        "comment": "true or false."
+      },
+      "peak_events_per_sec": {
+        "classification": "SystemMetaData",
+        "purpose": "FeatureInsight",
+        "comment": "A count, bucketed (0, 1-9, 10-99, ...)."
+      },
+      "views_used": {
+        "classification": "SystemMetaData",
+        "purpose": "FeatureInsight",
+        "comment": "A list of Logline's own names."
+      },
+      "features_used": {
+        "classification": "SystemMetaData",
+        "purpose": "FeatureInsight",
+        "comment": "A list of Logline's own names."
+      },
+      "fields": {
+        "classification": "SystemMetaData",
+        "purpose": "FeatureInsight",
+        "comment": "A list of Logline's own names."
+      },
+      "op_field": {
+        "classification": "SystemMetaData",
+        "purpose": "FeatureInsight",
+        "comment": "A count, bucketed (0, 1-9, 10-99, ...)."
+      },
+      "op_negation": {
+        "classification": "SystemMetaData",
+        "purpose": "FeatureInsight",
+        "comment": "A count, bucketed (0, 1-9, 10-99, ...)."
+      },
+      "op_regex": {
+        "classification": "SystemMetaData",
+        "purpose": "FeatureInsight",
+        "comment": "A count, bucketed (0, 1-9, 10-99, ...)."
+      },
+      "op_time": {
+        "classification": "SystemMetaData",
+        "purpose": "FeatureInsight",
+        "comment": "A count, bucketed (0, 1-9, 10-99, ...)."
+      },
+      "op_compare": {
+        "classification": "SystemMetaData",
+        "purpose": "FeatureInsight",
+        "comment": "A count, bucketed (0, 1-9, 10-99, ...)."
+      },
+      "op_glob": {
+        "classification": "SystemMetaData",
+        "purpose": "FeatureInsight",
+        "comment": "A count, bucketed (0, 1-9, 10-99, ...)."
+      },
+      "op_changed": {
+        "classification": "SystemMetaData",
+        "purpose": "FeatureInsight",
+        "comment": "A count, bucketed (0, 1-9, 10-99, ...)."
+      },
+      "op_or": {
+        "classification": "SystemMetaData",
+        "purpose": "FeatureInsight",
+        "comment": "A count, bucketed (0, 1-9, 10-99, ...)."
+      },
+      "conn_sqlite": {
+        "classification": "SystemMetaData",
+        "purpose": "FeatureInsight",
+        "comment": "A count, bucketed (0, 1-9, 10-99, ...)."
+      },
+      "conn_postgres": {
+        "classification": "SystemMetaData",
+        "purpose": "FeatureInsight",
+        "comment": "A count, bucketed (0, 1-9, 10-99, ...)."
+      },
+      "conn_mysql": {
+        "classification": "SystemMetaData",
+        "purpose": "FeatureInsight",
+        "comment": "A count, bucketed (0, 1-9, 10-99, ...)."
+      },
+      "conn_mongodb": {
+        "classification": "SystemMetaData",
+        "purpose": "FeatureInsight",
+        "comment": "A count, bucketed (0, 1-9, 10-99, ...)."
+      },
+      "conn_datadog": {
+        "classification": "SystemMetaData",
+        "purpose": "FeatureInsight",
+        "comment": "A count, bucketed (0, 1-9, 10-99, ...)."
+      },
+      "conn_cloudwatch": {
+        "classification": "SystemMetaData",
+        "purpose": "FeatureInsight",
+        "comment": "A count, bucketed (0, 1-9, 10-99, ...)."
+      },
+      "conn_loki": {
+        "classification": "SystemMetaData",
+        "purpose": "FeatureInsight",
+        "comment": "A count, bucketed (0, 1-9, 10-99, ...)."
+      },
+      "conn_elasticsearch": {
+        "classification": "SystemMetaData",
+        "purpose": "FeatureInsight",
+        "comment": "A count, bucketed (0, 1-9, 10-99, ...)."
+      },
+      "conn_gcp": {
+        "classification": "SystemMetaData",
+        "purpose": "FeatureInsight",
+        "comment": "A count, bucketed (0, 1-9, 10-99, ...)."
+      },
+      "shares": {
+        "classification": "SystemMetaData",
+        "purpose": "FeatureInsight",
+        "comment": "A count, bucketed (0, 1-9, 10-99, ...)."
+      },
+      "tool_calls": {
+        "classification": "SystemMetaData",
+        "purpose": "FeatureInsight",
+        "comment": "A count, bucketed (0, 1-9, 10-99, ...)."
+      },
+      "unused_shares": {
+        "classification": "SystemMetaData",
+        "purpose": "FeatureInsight",
+        "comment": "A count, bucketed (0, 1-9, 10-99, ...)."
+      },
+      "clients_used": {
+        "classification": "SystemMetaData",
+        "purpose": "FeatureInsight",
+        "comment": "A list of Logline's own names."
+      }
+    },
+    "surjeetbanga.logline/survey sent": {
+      "owner": "SurjeetBanga",
+      "comment": "Answers to Suggest a Feature or Vote on What's Next, sent only when the person presses Send after seeing them. The only text Logline sends; it is redacted first.",
+      "$survey_id": {
+        "classification": "SystemMetaData",
+        "purpose": "FeatureInsight",
+        "comment": "Which survey."
+      },
+      "$survey_response": {
+        "classification": "CustomerContent",
+        "purpose": "FeatureInsight",
+        "comment": "The area and text of a suggestion, or the picks of a vote, as the person wrote and sent them."
+      }
+    }
+  }
+}

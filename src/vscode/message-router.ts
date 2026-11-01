@@ -24,8 +24,23 @@ import { openSource } from './source-navigation';
 import type { AgentLogAccess } from './agent-access';
 import type { ConnectionManager } from './connections';
 import type { CompareRequest, CompareView } from '../protocol/messages';
+import type { Usage } from './usage';
+
+/** The panel's requests that open a view, as usage counts name the view. */
+const VIEW_REQUESTS: Partial<Record<ViewRequest['type'], string>> = {
+  trace: 'trace',
+  traces: 'traces',
+  metrics: 'metrics',
+  aiCalls: 'aiCalls',
+  aiCall: 'aiCall',
+  analysis: 'analysis',
+  compare: 'compare',
+  connectionPreview: 'connection',
+  connectionFetch: 'connection',
+};
 
 interface MessageServices {
+  usage?: Pick<Usage, 'view' | 'record' | 'findingHelpful'>;
   store: LogStore;
   config: Settings;
   runner: ProcessRunner;
@@ -85,6 +100,9 @@ export async function handleMessage(
 ): Promise<void> {
   const msg = parseViewRequest(value);
   if (!msg) return;
+  const view = VIEW_REQUESTS[msg.type];
+  if (view) services.usage?.view(view);
+  if (msg.type === 'exportForAI') services.usage?.record('exported_for_ai');
   const { store, config, transfer, searches } = services;
   switch (msg.type) {
     case 'snapshot':
@@ -138,6 +156,12 @@ export async function handleMessage(
       return;
     case 'doctorAction':
       await services.doctorAction(msg.action, msg.siteId);
+      return;
+    case 'doctorFeedback':
+      services.usage?.findingHelpful(msg.code, msg.helpful);
+      return;
+    case 'tourEnded':
+      services.usage?.record('tour', { step: msg.finished ? 'finished' : 'skipped' });
       return;
     case 'breakOnQuery':
       await services.breakOnQuery(msg.query ?? '', msg.levels ?? []);

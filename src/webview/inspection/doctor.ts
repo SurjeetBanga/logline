@@ -37,6 +37,28 @@ export function doctorButton(action: PanelAction, label: string, title: string, 
   return button;
 }
 
+/** Thumbs up and down: whether this kind of finding helps, counted when usage counts are on. */
+export function feedbackButtons(code: string): HTMLElement {
+  const group = document.createElement('span');
+  group.className = 'doctor-feedback';
+  group.dataset.code = code;
+  for (const [helpful, label, title] of [
+    [true, '👍', 'This kind of finding is useful'],
+    [false, '👎', 'This kind of finding is not useful'],
+  ] as const) {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'doctor-action doctor-vote';
+    button.textContent = label;
+    button.title = title;
+    button.setAttribute('aria-label', title);
+    button.dataset.doctorFeedback = String(helpful);
+    button.dataset.code = code;
+    group.append(button);
+  }
+  return group;
+}
+
 export const DOCTOR_ACTION_TITLES = {
   fix: 'Open the statement and show its quick fixes: lower the level, pass the exception, ignore the finding, or fix it with Copilot',
   showEvents: 'Filter the Logs panel to the events this statement logged',
@@ -63,6 +85,8 @@ export function createDoctor(
   // The host sends the list only when it changes; this is the revision on screen.
   let revision: number | undefined;
   let findings: DoctorFindingView[] = [];
+  // Kinds of finding voted on, so a new list shows thanks instead of asking again.
+  const voted = new Set<string>();
 
   function receive(doctor: Snapshot['doctor']) {
     // Hidden only while log doctor is off; with nothing found it stays visible so it can be discovered.
@@ -141,6 +165,7 @@ export function createDoctor(
     actions.append(
       doctorButton('fix', 'Fix…', DOCTOR_ACTION_TITLES.fix, finding.siteId),
       doctorButton('showEvents', 'Show events', DOCTOR_ACTION_TITLES.showEvents, finding.siteId),
+      voted.has(finding.code) ? thanks() : feedbackButtons(finding.code),
     );
     row.append(location, message, actions);
     return row;
@@ -170,12 +195,32 @@ export function createDoctor(
       trace.dataset.traceId = finding.traceId;
       actions.append(trace);
     }
+    actions.append(voted.has(finding.code) ? thanks() : feedbackButtons(finding.code));
     row.append(location, message, actions);
     return row;
   }
 
+  // A vote replaces both buttons with thanks, for every finding of that kind.
+  function handleFeedback(event: Event): boolean {
+    const target = (event.target as HTMLElement).closest<HTMLElement>('[data-doctor-feedback]');
+    const code = target?.dataset.code;
+    if (!target || !code) return false;
+    api.postMessage({ type: 'doctorFeedback', code, helpful: target.dataset.doctorFeedback === 'true' });
+    voted.add(code);
+    for (const other of panel.querySelectorAll<HTMLElement>('.doctor-feedback'))
+      if (other.dataset.code === code) other.replaceChildren(thanks());
+    return true;
+  }
+  function thanks(): HTMLElement {
+    const text = document.createElement('span');
+    text.className = 'doctor-thanks';
+    text.textContent = 'Thanks';
+    return text;
+  }
+
   // Doctor actions also appear in expanded events, so any click on one is handled here.
   function handleAction(event: Event): boolean {
+    if (handleFeedback(event)) return true;
     const target = (event.target as HTMLElement).closest<HTMLElement>('[data-doctor-action]');
     const action = target?.dataset.doctorAction as PanelAction | undefined;
     if (!target || !action) return false;

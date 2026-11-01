@@ -50,6 +50,10 @@ export type ViewRequest =
   | { type: 'openSource'; id: number; block: number; line: number }
   | { type: 'openLogSite' | 'breakOnEvent'; id: number }
   | { type: 'doctorAction'; action: DoctorAction; siteId?: string }
+  /** A thumbs up or down on a log doctor finding, by its kind. */
+  | { type: 'doctorFeedback'; code: string; helpful: boolean }
+  /** The panel tour ended: finished, or skipped. */
+  | { type: 'tourEnded'; finished: boolean }
   | { type: 'connectAgent'; agent?: 'claude' | 'codex' }
   | { type: 'onboardingSeen' }
   | { type: 'showStatus' }
@@ -411,6 +415,12 @@ export function parseViewRequest(value: unknown): ViewRequest | undefined {
       const id = index('id');
       return id === undefined ? undefined : { type: msg.type, id };
     }
+    case 'doctorFeedback': {
+      const code = string('code')?.slice(0, 64);
+      return code && typeof msg.helpful === 'boolean' ? { type: msg.type, code, helpful: msg.helpful } : undefined;
+    }
+    case 'tourEnded':
+      return { type: msg.type, finished: msg.finished === true };
     case 'doctorAction': {
       const action = ['open', 'showEvents', 'fix', 'report'].includes(msg.action as string)
         ? (msg.action as DoctorAction)
