@@ -2,7 +2,7 @@
 
 All notable changes to Logline are documented in this file.
 
-## Unreleased
+## 1.19.1 — 2026-11-02
 
 ### Fixes
 
