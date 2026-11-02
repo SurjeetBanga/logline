@@ -2,6 +2,14 @@
 
 All notable changes to Logline are documented in this file.
 
+## Unreleased
+
+### Fixes
+
+- The **Add connection** form no longer scrolls the whole Logs panel when it opens in a short panel, which pushed the tabs out of view and left the form squeezed above an empty area.
+- On a narrow panel, such as one in the side bar, opening the **Sources** rail, or the rail of **Compare**, **Traces**, or **Metrics**, lays it over the view rather than squeezing the search box and table into a sliver beside it.
+- On the narrowest panels, the match count in the status bar is shortened so the pager's **Older page** arrow stays in reach, and a long tab name, such as the Connection form's, ends in an ellipsis rather than running past the panel's edge.
+
 ## 1.19.0 — 2026-11-01
 
 ### Changes
