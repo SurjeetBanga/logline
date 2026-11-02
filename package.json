@@ -1387,6 +1387,7 @@
     "test": "node scripts/test.mjs",
     "benchmark": "npm run compile && node --expose-gc scripts/benchmark.mjs",
     "smoke": "npm run compile && tsc -p tsconfig.test.json && node scripts/smoke.mjs",
+    "test:layout": "npm run compile && tsc -p tsconfig.test.json && node --test out-tests/test/viewer-layout.js",
     "lint": "oxlint --type-aware --tsconfig tsconfig.test.json src",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
@@ -1405,6 +1406,7 @@
     "oxlint": "^1.90.0",
     "oxlint-tsgolint": "^7.0.2002",
     "pg": "8.23.1",
+    "playwright": "1.64.1",
     "prettier": "^3.9.10",
     "typescript": "^7.0.2"
   },

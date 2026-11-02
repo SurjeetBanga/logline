@@ -464,8 +464,19 @@ body > header {
   border: 0;
   border-bottom: 2px solid transparent;
   border-radius: 0;
+  min-width: 0;
   background: transparent;
   color: var(--vscode-panelTitle-inactiveForeground, var(--vscode-descriptionForeground, #aaa));
+}
+/* A long name, such as the Connection form's, ends in an ellipsis rather than running past a narrow panel. */
+.view-tab .button-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.view-tab .tb-icon {
+  flex: none;
 }
 .view-tab:hover {
   background: transparent;
@@ -804,6 +815,30 @@ body > header {
 }
 .source-rail.collapsed .rail-resizer {
   display: none;
+}
+/* Below the width where the rails start collapsed (NARROW_PANEL), an opened rail slides over the view rather than
+   squeezing it: the view keeps the collapsed strip's place, and the rail leaves that strip's width of the view showing. */
+@media (max-width: 519.98px) {
+  .workspace {
+    position: relative;
+  }
+  .workspace > .source-rail:not(.collapsed) {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    z-index: 10;
+    width: min(var(--rail-width, 236px), calc(100% - 40px));
+    background: var(--vscode-sideBar-background, var(--vscode-editor-background, #1e1e1e));
+    box-shadow: 0 0 8px var(--vscode-widget-shadow, rgba(0, 0, 0, 0.36));
+  }
+  body:is([data-view='logs'], [data-view='analysis']) #sourceRail:not(.collapsed) ~ .workspace-main,
+  body:is([data-view='compare'], [data-view='traces'], [data-view='metrics'])
+    #tabRail:not(.collapsed)
+    ~ .workspace-main {
+    margin-left: 39px;
+    border-left: 1px solid var(--vscode-panel-border, #444);
+  }
 }
 /* Collapsed, the rail is a strip of icons; each row's name, status, and count are in its tooltip. */
 .source-rail.collapsed {
@@ -2722,6 +2757,10 @@ td.time {
   flex: none;
 }
 .match-count {
+  /* The count gives way first on a narrow panel, so the pager's arrows stay in reach. */
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
   color: var(--vscode-foreground, #d4d4d4);
 }
 .page-number {
@@ -3875,6 +3914,15 @@ th[data-column='base:message'] .column-label {
     margin-right: 0;
   }
 }
+/* The narrowest side bars: the memory meter gives up width so the pager's arrows still fit. */
+@media (max-width: 280px) {
+  .memory-meter {
+    width: 14px;
+  }
+  .status-bar {
+    gap: 6px;
+  }
+}
 .doctor-chip.is-clear {
   color: var(--vscode-descriptionForeground, #aaa);
 }
@@ -4139,6 +4187,8 @@ body:not([data-view='logs']) .match-count {
 
 /* The Connection form: a tab of its own while a connection is added or edited, scrolling under its pinned footer. */
 .view-panel.connection-view {
+  /* Positioned, so a hidden radio placed absolutely scrolls with the form rather than the page. */
+  position: relative;
   display: block;
   padding: 0;
   overflow-y: auto;
@@ -4400,6 +4450,7 @@ body:not([data-view='logs']) .match-count {
   background: var(--input);
 }
 .connection-view .segment {
+  position: relative;
   padding: 2px 12px;
   border-radius: 3px;
   color: var(--muted);
