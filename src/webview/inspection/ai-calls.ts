@@ -419,7 +419,7 @@ function partBlock(part: GenAiPart, detail: GenAiCallDetail): HTMLElement {
   }
   if (part.kind === 'reasoning') return block('Reasoning', [pre(part.text ?? ''), ...cut], open);
   if (part.kind === 'tool_call') {
-    const run = part.id ? detail.toolRuns[part.id] : undefined;
+    const run = part.id && Object.hasOwn(detail.toolRuns, part.id) ? detail.toolRuns[part.id] : undefined;
     const outcome = run ? ` · ${run.error ? 'failed' : 'ok'} · ${formatDuration(run.durationMs)}` : '';
     const body = [pre(part.value ?? ''), ...cut];
     if (run?.result !== undefined) {

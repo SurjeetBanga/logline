@@ -1075,6 +1075,12 @@
     let timer;
     let warmUntil = 0;
     function adopt(element2) {
+      if (element2.getAttribute("title") === "") {
+        element2.removeAttribute("title");
+        element2.removeAttribute("aria-description");
+        delete element2.dataset.tip;
+        return void 0;
+      }
       if (element2.title) {
         element2.dataset.tip = element2.title;
         if (!element2.getAttribute("aria-label") && !element2.textContent?.trim())
@@ -2885,7 +2891,7 @@ Span ${call.spanId}`;
     }
     if (part.kind === "reasoning") return block("Reasoning", [pre(part.text ?? ""), ...cut], open);
     if (part.kind === "tool_call") {
-      const run = part.id ? detail.toolRuns[part.id] : void 0;
+      const run = part.id && Object.hasOwn(detail.toolRuns, part.id) ? detail.toolRuns[part.id] : void 0;
       const outcome = run ? ` \xB7 ${run.error ? "failed" : "ok"} \xB7 ${formatDuration(run.durationMs)}` : "";
       const body = [pre(part.value ?? ""), ...cut];
       if (run?.result !== void 0) {
@@ -2939,6 +2945,7 @@ Span ${call.spanId}`;
     const popovers = [];
     function createPopover(container, button, panel) {
       const api = {
+        container,
         isOpen: () => !panel.hidden,
         close(restoreFocus = false) {
           panel.hidden = true;
@@ -2992,7 +2999,7 @@ Span ${call.spanId}`;
         event.stopPropagation();
         api.isOpen() ? api.close() : api.open();
       });
-      popovers.push({ container, ...api });
+      popovers.push(api);
       return api;
     }
     scope.listen(document, "click", (event) => {
@@ -4026,6 +4033,7 @@ ${answer.range}`;
       const note = elements.connectionPreview;
       note.classList[preview.error ? "add" : "remove"]("connection-error");
       if (preview.error) {
+        statement = "";
         note.textContent = preview.error;
         note.title = "";
         return;
@@ -6469,7 +6477,7 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
     function button(label, className, onClick) {
       const element2 = document.createElement("button");
       element2.type = "button";
-      element2.className = className;
+      element2.className = `tour-button ${className}`;
       element2.textContent = label;
       scope.listen(element2, "click", onClick);
       return element2;
@@ -6625,6 +6633,13 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
       if (event.key === "Escape") {
         event.preventDefault();
         close(false);
+      } else if (event.key === "Tab") {
+        const buttons = [...layer.querySelectorAll(".tour-button")];
+        if (!buttons.length) return;
+        event.preventDefault();
+        const index2 = buttons.indexOf(document.activeElement);
+        const next = index2 < 0 ? 0 : (index2 + (event.shiftKey ? -1 : 1) + buttons.length) % buttons.length;
+        buttons[next].focus();
       }
     });
     scope.listen(window, "resize", () => {

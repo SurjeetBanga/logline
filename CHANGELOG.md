@@ -21,6 +21,10 @@ All notable changes to Logline are documented in this file.
 - A drag across a metric chart ends where the pointer is released, even past the chart's edge.
 - **Copy filtered results** appears and goes as a source or run is chosen, rather than at the next filter change.
 - Choosing a connection in the **Metrics** rail updates the query bar's example and **Watch** for it.
+- Tab stays inside the tour's card, rather than moving to the dimmed panel behind it.
+- A tooltip goes once its control has nothing more to say, such as a filter action that is available again.
+- Turning on a connection's own query syntax after a filter failed to translate starts empty, rather than from the filter before it.
+- A tool call whose id matches a built-in name, such as `constructor`, no longer shows `NaN s` in **AI calls**.
 - Agents receive replies of several megabytes from the Logline window faster: a 16 MB reply took a fifteenth of the time in a local test.
 
 ## 1.19.1 — 2026-11-02

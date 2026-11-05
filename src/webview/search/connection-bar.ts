@@ -280,6 +280,7 @@ export function createConnectionBar(
     const note = elements.connectionPreview;
     note.classList[preview.error ? 'add' : 'remove']('connection-error');
     if (preview.error) {
+      statement = '';
       note.textContent = preview.error;
       note.title = '';
       return;

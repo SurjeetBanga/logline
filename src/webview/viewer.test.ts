@@ -4725,3 +4725,78 @@ test('a metric keeps its size when it rounds to a round number, and a tiny one i
     ['100', '-100', '10', '2e-10', '3.2e-20', '1.2', '0.5', '0.00001', '42'],
   );
 });
+
+test('opening a popover does not close it first', () => {
+  const { get } = viewer();
+  get('levelMenu').hidden = true;
+  const button = get('levelButton');
+  const expanded: string[] = [];
+  const setAttribute = button.setAttribute.bind(button);
+  button.setAttribute = (name: string, value: string) => {
+    if (name === 'aria-expanded') expanded.push(value);
+    setAttribute(name, value);
+  };
+  button.listeners.get('click')!({ stopPropagation() {} });
+  assert.deepEqual(expanded, ['true']);
+});
+
+test('Tab stays inside the tour card', () => {
+  const { get, dom } = viewer({}, { firstRun: true });
+  get('welcomeTour').listeners.get('click')!();
+  const card = dom.body.children.at(-1)!.children.at(-1)!;
+  const skip = card.querySelectorAll('.tour-skip')[0];
+  const next = card.querySelectorAll('.tour-primary')[0];
+  const press = (shiftKey: boolean) => {
+    let prevented = false;
+    dom.listeners.get('keydown')!({ key: 'Tab', shiftKey, preventDefault: () => (prevented = true) });
+    assert.equal(prevented, true);
+  };
+  assert.equal(dom.activeElement, next);
+  press(false);
+  assert.equal(dom.activeElement, skip, 'past the last button comes the first');
+  press(true);
+  assert.equal(dom.activeElement, next, 'before the first button comes the last');
+});
+
+test('a tool call id named like an object property has no run', () => {
+  const { get, receive } = viewer();
+  const target = { closest: () => ({ dataset: { traceId: 't', spanId: 's' } }) };
+  get('aiCallRows').listeners.get('click')!({ target });
+  receive({
+    type: 'aiCall',
+    traceId: 't',
+    spanId: 's',
+    detail: {
+      call: { kind: 'model', name: 'chat', operation: 'chat', traceId: 't', spanId: 's', durationMs: 1, startMs: 0 },
+      messages: [{ role: 'assistant', parts: [{ kind: 'tool_call', name: 'lookup', id: 'constructor', value: '{}' }] }],
+      toolRuns: {},
+      conversation: [{ traceId: 't', spanId: 's' }],
+      position: 0,
+    },
+  });
+  const block = get('aiCallTranscript').children[0].children.at(-1)!;
+  assert.equal(block.children[0].textContent, 'Tool call lookup');
+});
+
+test('a filter that cannot be translated leaves no earlier statement to start a native query from', () => {
+  const { app, get, receive } = viewer({ server: 'conn:dd', query: '', levels: undefined });
+  const connection = {
+    id: 'dd',
+    sourceId: 'conn:dd',
+    label: 'Datadog · prod',
+    type: 'datadog',
+    mapped: true,
+    sql: false,
+    watching: [],
+    tailing: false,
+  };
+  const servers = [{ id: 'conn:dd', label: 'Datadog · prod', status: 'idle', activeSessions: 0 }];
+  receive({ ...railSnapshot, servers, sessions: [], connections: [connection] });
+  const preview = { type: 'connectionPreview', connectionId: 'dd', range: '1h' };
+  receive({ ...preview, query: '', statement: 'status:(error)', local: [] });
+  app.search.setQuery('level:error', true);
+  receive({ ...preview, query: 'level:error', local: [], error: 'That filter cannot be sent.' });
+  assert.equal(get('connectionPreview').textContent, 'That filter cannot be sent.');
+  get('connectionSyntax').listeners.get('click')!();
+  assert.equal(get('connectionNative').value, '');
+});

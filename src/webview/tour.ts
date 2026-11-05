@@ -82,7 +82,7 @@ export function createTour(
   function button(label: string, className: string, onClick: () => void): HTMLButtonElement {
     const element = document.createElement('button');
     element.type = 'button';
-    element.className = className;
+    element.className = `tour-button ${className}`;
     element.textContent = label;
     scope.listen(element, 'click', onClick);
     return element;
@@ -254,6 +254,14 @@ export function createTour(
     if (event.key === 'Escape') {
       event.preventDefault();
       close(false);
+    } else if (event.key === 'Tab') {
+      // The panel behind the card is dimmed, so Tab goes around the card's buttons.
+      const buttons = [...layer.querySelectorAll<HTMLElement>('.tour-button')];
+      if (!buttons.length) return;
+      event.preventDefault();
+      const index = buttons.indexOf(document.activeElement as HTMLElement);
+      const next = index < 0 ? 0 : (index + (event.shiftKey ? -1 : 1) + buttons.length) % buttons.length;
+      buttons[next].focus();
     }
   });
   // Spotlights follow the panel's layout; a resize puts the current stop back in place.

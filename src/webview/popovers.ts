@@ -13,6 +13,7 @@ export function createPopovers(scope: EventScope) {
 
   function createPopover(container: HTMLElement, button: HTMLElement, panel: HTMLElement) {
     const api = {
+      container,
       isOpen: () => !panel.hidden,
       close(restoreFocus = false) {
         panel.hidden = true;
@@ -94,7 +95,7 @@ export function createPopovers(scope: EventScope) {
       event.stopPropagation();
       api.isOpen() ? api.close() : api.open();
     });
-    popovers.push({ container, ...api });
+    popovers.push(api);
     return api;
   }
 
