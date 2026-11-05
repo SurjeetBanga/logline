@@ -165,3 +165,19 @@ test('explicit top-level fields win over nested aliases regardless of JSON key o
   assert.equal(event.fields!.status, 200);
   assert.equal(event.fields!['nested.status'], 503);
 });
+
+test('reads the level of plain-text imports as a followed file does', () => {
+  const level = (line: string, stream = 'import') => parseLogLine(line, stream, 1, new Date()).level;
+  assert.equal(level('ERROR db down'), 'error');
+  assert.equal(level('2026-11-04 10:00:00 WARN slow'), 'warn');
+  assert.equal(level('TypeError: x\n    at a (b.js:1:2)'), 'error');
+  for (const line of ['ERROR db down', 'starting up', 'TypeError: x\n    at a (b.js:1:2)'])
+    assert.equal(level(line), level(line, 'file'));
+  assert.equal(level('starting up'), 'unclassified');
+});
+
+test('imported JSON keeps its own level, or info without one', () => {
+  const level = (line: string) => parseLogLine(line, 'import', 1, new Date()).level;
+  assert.equal(level('{"level":"warn","msg":"x"}'), 'warn');
+  assert.equal(level('{"msg":"ERROR in the text"}'), 'info');
+});

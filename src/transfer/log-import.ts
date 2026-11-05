@@ -149,7 +149,8 @@ export async function* importRecords(
   let firstText = true;
   const convert = (record: ImportRecord): ImportRecord | undefined => {
     if (!(format === 'csv' ? record.raw : record.raw.trim()) && !record.truncated) return undefined;
-    if (format !== 'csv') return record;
+    // Line patterns such as the stack trace joiner's expect no line ending.
+    if (format !== 'csv') return record.raw.endsWith('\r') ? { ...record, raw: record.raw.slice(0, -1) } : record;
     if (!header) {
       if (record.truncated) throw new Error('CSV header exceeds the maximum log line length.');
       header = parseCsv(record.raw)[0];

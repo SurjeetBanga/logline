@@ -60,7 +60,7 @@ export function parseLogLine(line: string, stream: string, id: number, receivedA
       : normalizeLevel(
           severity as string | number | undefined,
           stream,
-          stream === 'terminal' || stream === 'file'
+          stream === 'terminal' || stream === 'file' || (stream === 'import' && value === undefined)
             ? plainLevel(headline, multiline ? trimmed : undefined)
             : undefined,
         );

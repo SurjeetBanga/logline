@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { LinePipeline } from '../capture/line-pipeline';
 import { parseLogLine } from '../core/log-event';
 import { importRecords, parseCsv, parseCsvRecords } from './log-import';
 
@@ -17,7 +18,7 @@ test('JSONL keeps UTF-8, large numeric IDs and original raw JSON across chunk bo
   const raw = '{"message":"café 🚀","id":9007199254740993}';
   const records = await read(raw + '\r\nplain text\n\n[1,2]\nfinal', 'jsonl', 1);
   assert.deepEqual(
-    records.map((record) => record.raw.trim()),
+    records.map((record) => record.raw),
     [raw, 'plain text', '[1,2]', 'final'],
   );
   assert.ok(records.every((record) => !record.truncated));
@@ -122,4 +123,35 @@ test('CSV imports round-trip a Logline export and accept foreign files', () => {
     [{ message: 'hi' }],
     'ids and epoch columns are re-derived on ingest rather than carried over',
   );
+});
+
+test('CRLF line endings are removed, also when split across chunks or on the last line', async () => {
+  for (const size of [1, 7, 1000])
+    assert.deepEqual(
+      (await read('first\r\nsecond\r\n\r\nlast\r', 'log', size)).map((record) => record.raw),
+      ['first', 'second', 'last'],
+    );
+});
+
+test('a CRLF Node crash joins into one record, as it does with LF', async () => {
+  const crash = [
+    '/app/server.js:12',
+    '    throw new Error("boom");',
+    '    ^',
+    '',
+    'Error: boom',
+    '    at main (/app/server.js:12:11)',
+    '',
+    'Node.js v22.11.0',
+  ];
+  const joined = async (ending: string) => {
+    const lines: string[] = [];
+    const pipeline = new LinePipeline((line) => lines.push(line), { join: true, containers: false, flushMs: 0 });
+    for (const record of await read(crash.join(ending) + ending, 'log')) pipeline.write(record.raw, record.truncated);
+    pipeline.end();
+    return lines;
+  };
+  const crlf = await joined('\r\n');
+  assert.deepEqual(crlf, await joined('\n'));
+  assert.equal(crlf.length, 1);
 });

@@ -2,6 +2,19 @@
 
 All notable changes to Logline are documented in this file.
 
+## Unreleased
+
+### Fixes
+
+- Redaction hides a whole object or array under a sensitive key in plain text, such as `{"credentials":{"user":"svc","key":"…"}}` or `secret=[a, b, c]`, rather than only its first member. One cut off before it closes is redacted to the end of the text, unless it is prose such as `Unexpected token: [ at line 3`.
+- Redacted exports and agent responses keep integers above 2^53 and long decimals exact, instead of rounding IDs such as `9007199254740993`.
+- Imported `.log` and `.txt` files get their levels the way a followed file does: `ERROR db down` is an error, a joined exception trace is an error, and a line with no level is **Unclassified** rather than **Info**.
+- Imported files with Windows line endings join stack traces and Node.js crashes into one event, as files with Unix line endings do.
+- A column for a field named like `constructor` or `toString` stays empty on events without that field, instead of showing internal code.
+- Unchecking only **Unclassified** in the level menu is remembered after the panel reloads.
+- Run times in the **Sources** rail follow `logline.timezone`, as the table does.
+- Agents receive replies of several megabytes from the Logline window faster: a 16 MB reply took a fifteenth of the time in a local test.
+
 ## 1.19.1 — 2026-11-02
 
 ### Fixes

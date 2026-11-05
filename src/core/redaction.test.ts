@@ -217,3 +217,66 @@ test('value-pattern redaction reaches structured fields and raw JSON', () => {
   assert.equal(event.fields!.note, 'token was [REDACTED]');
   assert.doesNotMatch(event.raw!, /ghp_|s3cret/);
 });
+
+test('redacts a whole object or array held by a sensitive key in plain text', () => {
+  const key = ['hX9', 'value'].join('-');
+  assert.equal(
+    redactText(`INFO loaded config {"credentials":{"user":"svc","key":"${key}"},"region":"eu"}`),
+    'INFO loaded config {"credentials":[REDACTED],"region":"eu"}',
+  );
+  assert.equal(redactText('secret=[a, b, c] next=1'), 'secret=[REDACTED] next=1');
+  assert.equal(redactText(`secret={"a":"}","b":["${key}"]} next=1`), 'secret=[REDACTED] next=1');
+  assert.equal(redactText("secret={'a': ']', 'b': 'x'} next=1"), 'secret=[REDACTED] next=1');
+  assert.equal(redactText('password=[REDACTED] next=1'), 'password=[REDACTED] next=1');
+});
+
+test('redacts to the end of the text when a sensitive object is cut off', () => {
+  assert.equal(redactText('before {"credentials":{"user":"svc","key":"cut-off'), 'before {"credentials":[REDACTED]');
+});
+
+test('keeps redaction linear on many unclosed sensitive containers', () => {
+  const started = performance.now();
+  redactText('secret=[ '.repeat(100_000));
+  assert.ok(performance.now() - started < 2000);
+});
+
+test('keeps large integers exact in redacted raw JSON', () => {
+  const event = (raw: string) => redactEvent({ id: 1, message: 'x', raw } as never).raw;
+  assert.equal(event('{"id":9007199254740993}'), '{"id":9007199254740993}');
+  assert.equal(
+    event('[-9007199254740993,{"a":12345678901234567890}]'),
+    '[-9007199254740993,{"a":12345678901234567890}]',
+  );
+  assert.equal(event('{"id":9007199254740993,"token":"x"}'), '{"id":9007199254740993,"token":"[REDACTED]"}');
+  assert.equal(event('{"token":9007199254740993}'), '{"token":"[REDACTED]"}');
+  // Text that only looks like a number stays text, and short numbers keep their usual form.
+  assert.equal(
+    event('{"id":"9007199254740993","n":1.5,"t":1700000000000}'),
+    '{"id":"9007199254740993","n":1.5,"t":1700000000000}',
+  );
+  assert.equal(event('{"f":1.12345678901234567890,"token":"x"}'), '{"f":1.12345678901234567890,"token":"[REDACTED]"}');
+});
+
+test('text that is not valid JSON stays on the text path despite long digits', () => {
+  const raw = 'ERROR id=9007199254740993 password=hunter2';
+  assert.equal(redactEvent({ id: 1, message: 'x', raw } as never).raw, 'ERROR id=9007199254740993 password=[REDACTED]');
+  assert.equal(redactEvent({ id: 1, message: 'x', raw: '09007199254740993' } as never).raw, '09007199254740993');
+});
+
+test('a lone opener in prose keeps the text after it, but cut-off data does not', () => {
+  assert.equal(redactText('Unexpected token: [ at line 3:5'), 'Unexpected token: [REDACTED] at line 3:5');
+  assert.equal(
+    redactText('Unexpected token: {\n    at parse (/app/a.js:1:2)'),
+    'Unexpected token: [REDACTED]\n    at parse (/app/a.js:1:2)',
+  );
+  assert.equal(redactText('secret={ "a": "b", "c": "d'), 'secret=[REDACTED]');
+  assert.equal(redactText('secret={ user: abc, key: value'), 'secret=[REDACTED]');
+  assert.equal(redactText('secret=[ a b ] next=1'), 'secret=[REDACTED] next=1');
+  assert.equal(redactText(`secret=[ a ${'b '.repeat(5000)}`), 'secret=[REDACTED]');
+});
+
+test('the lookahead for prose openers is bounded, however many a line holds', () => {
+  const started = performance.now();
+  redactText('secret=[ a '.repeat(350));
+  assert.ok(performance.now() - started < 500);
+});
