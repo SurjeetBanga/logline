@@ -307,6 +307,7 @@ test('only a fresh install is welcomed, once, and a tour request reaches the pan
         ['logline.usage.state', {}],
         ['logline.rating', {}],
         ['logline.feedbackPrompt', {}],
+        ['logline.update', {}],
       ]),
     ).firstRun(),
     true,

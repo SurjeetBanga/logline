@@ -18,6 +18,7 @@ import { GitChanges } from './vscode/git-changes';
 import { RatingPrompt } from './vscode/rating-prompt';
 import { Usage, usageEnvironment, usageVocabulary } from './vscode/usage';
 import { FeedbackPrompt } from './vscode/feedback';
+import { UpdateCheck } from './vscode/update-check';
 
 let controller: LogsController | undefined;
 let usage: Usage | undefined;
@@ -73,7 +74,12 @@ export function activate(context: vscode.ExtensionContext): { provider: LogsProv
     (answer) => usage?.record('prompt_answered', { prompt: 'feedback', answer }),
   );
   feedback.start();
-  context.subscriptions.push(rating, feedback);
+  const update = new UpdateCheck(context.globalState, packageJSON?.version ?? '', (answer) =>
+    usage?.record('prompt_answered', { prompt: 'update', answer }),
+  );
+  // A development host runs what is being worked on, whatever the store has.
+  if (context.extensionMode === (vscode.ExtensionMode?.Production ?? 1)) update.start();
+  context.subscriptions.push(rating, feedback, update);
   // Editor surfaces are optional: hosts without CodeLens support still capture logs.
   if (typeof vscode.languages?.registerCodeLensProvider === 'function') {
     const logController = controller;

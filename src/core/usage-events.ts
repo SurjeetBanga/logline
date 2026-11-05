@@ -215,7 +215,10 @@ export const USAGE_EVENTS: Record<string, Record<string, Rule>> = {
   doctor_finding: { code: oneOf(...DOCTOR_CODES) },
   doctor_action: { action: oneOf('open', 'showEvents', 'fix', 'report') },
   feedback: { surface: oneOf('doctor', 'copilot'), code: oneOf(...DOCTOR_CODES), helpful: BOOL },
-  prompt_answered: { prompt: oneOf('rating', 'feedback'), answer: oneOf('accepted', 'later', 'never', 'dismissed') },
+  prompt_answered: {
+    prompt: oneOf('rating', 'feedback', 'update'),
+    answer: oneOf('accepted', 'later', 'never', 'dismissed', 'failed'),
+  },
   log_lens_clicked: {},
   log_breakpoint: { step: oneOf('set', 'hit') },
   compare_production: { ok: BOOL },

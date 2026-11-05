@@ -52,7 +52,7 @@ const PROGRESS_KEY = 'logline.onboarding.progress';
 /** Set once the first-run welcome was seen, or for a profile that used Logline before it existed. */
 const WELCOME_KEY = 'logline.onboarding.welcomed';
 /** What Logline stores by itself on any start, so it says nothing about whether someone used it before. */
-const AUTOMATIC_KEYS = /^logline\.(?:usage\.|rating$|feedbackPrompt$)/;
+const AUTOMATIC_KEYS = /^logline\.(?:usage\.|rating$|feedbackPrompt$|update$)/;
 import { AgentAccessError, AgentLogAccess } from './agent-access';
 import { ChangedLines, ChangeScope } from '../core/changed-lines';
 import { eventLocation, LogSiteIndex, LogSiteTracker } from '../core/log-sites';

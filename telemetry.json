@@ -709,7 +709,7 @@
     },
     "surjeetbanga.logline/prompt_answered": {
       "owner": "SurjeetBanga",
-      "comment": "How the rating or feedback question was answered.",
+      "comment": "How the rating, feedback, or update question was answered.",
       "prompt": {
         "classification": "SystemMetaData",
         "purpose": "FeatureInsight",
@@ -718,7 +718,7 @@
       "answer": {
         "classification": "SystemMetaData",
         "purpose": "FeatureInsight",
-        "comment": "Accepted, later, never, or dismissed."
+        "comment": "Accepted, later, never, dismissed, or failed."
       }
     }
   }

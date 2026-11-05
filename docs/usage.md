@@ -6,7 +6,7 @@ Detailed behavior and settings for Logline. For an interactive quick reference, 
 
 ## Capture and live tail
 
-Installing Logline opens the Logs panel once, except on a remote host such as a Codespace. The first time the panel opens, it offers **Take the 1-minute tour** or **Explore on my own**, with quick starts for capturing a terminal, importing logs, adding a connection, and receiving OpenTelemetry. It shows once, and never after an update. The tour has seven stops (sources, connections, search, the table, the tabs, sharing, and the status bar); each dims the panel around one control and explains it, with **Back**, **Next**, and **Skip tour** (or Escape). Take it again from **More actions → Take the tour**, **Logline: Take the Tour**, or the guide's Get started section. VS Code's Welcome page also has a **Get started with Logline** walkthrough whose steps tick off as you capture, search, share, add a connection, and take the tour.
+Installing Logline opens the Logs panel once, except on a remote host such as a Codespace. The first time the panel opens, it offers **Take the 1-minute tour** or **Explore on my own**, with quick starts for capturing a terminal, importing logs, adding a connection, and receiving OpenTelemetry. It shows once. Someone who already opened the panel in an earlier version does not see it after an update. The tour has seven stops (sources, connections, search, the table, the tabs, sharing, and the status bar); each dims the panel around one control and explains it, with **Back**, **Next**, and **Skip tour** (or Escape). Take it again from **More actions → Take the tour**, **Logline: Take the Tour**, or the guide's Get started section. VS Code's Welcome page also has a **Get started with Logline** walkthrough whose steps tick off as you capture, search, share, add a connection, and take the tour.
 
 Open **More actions → Help** in the Logs panel for the offline **Logline Guide**. **Get started** walks through capturing a run, searching it, and sharing it with an agent, and ticks each step off once you have done it. Below it, cards for each area (capture, connections, search, inspection and analysis, traces and AI calls, comparing with production, sharing, and settings) say what a feature does and where it is; **Show me** points at the control in the Logs panel, opening its tab or menu first, and some cards run their command or open their setting. The search box in the guide's sidebar narrows the cards. **What’s new** shows the highlights of the newest release, marked when you have not seen them, then earlier releases in brief; the full version history is available from there. The Command Palette also exposes **Logline: Open Guide** and **Logline: What’s New**. Sections new in the release carry a **New** badge until you open them, from the sidebar or by reading them for a moment. Help gets a small **New** badge after an update, and the guide never opens by itself. Once you have used Logline for a few days, it asks whether you would rate it on the Marketplace (or Open VSX in Cursor, Windsurf, and Kiro); **Not now** asks once more two weeks later, and **Don't ask again** or rating ends it.
 
@@ -347,6 +347,10 @@ Run **Logline: Show Status**, click the check mark at the right of the status ba
 - **Log lenses and log doctor**, and **My changes**.
 
 Choose an item to run its fix, or **Copy status** for a bug report.
+
+## Updates
+
+Your editor updates Logline by itself unless you turned that off. With `extensions.autoUpdate` off, and `extensions.autoCheckUpdates` on, Logline checks for a new version at most once a day and tells you once about each one. **Update** installs it, then offers to reload the window. It checks the store your editor installs from, sending only the extension's name. See [PRIVACY.md](../PRIVACY.md#update-checks).
 
 ## Usage data
 
