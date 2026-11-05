@@ -5,12 +5,15 @@ import * as os from 'node:os';
 import { join } from 'node:path';
 import * as vscode from 'vscode';
 import {
+  AUTOMATIC_CAPTURES,
   commonProperties,
   DOCTOR_CODES,
   MILESTONES,
+  panelWidth,
   sanitizeUsage,
   USAGE_EVENTS,
   type Milestone,
+  type PanelAction,
   type SearchOperator,
   type UsageEnvironment,
   type UsageProperties,
@@ -82,6 +85,11 @@ export interface UsageSummarySource {
   memoryMb(): number;
   trimmed(): boolean;
   connections(): Record<string, number>;
+  /** Events dropped to stay within limits, and events cut short. */
+  discarded?(): number;
+  truncated?(): number;
+  /** How the newest retained events parsed, as percentages; nothing when there are none. */
+  quality?(): { json: number; unclassified: number; multiline: number } | undefined;
 }
 
 export interface UsageOptions {
@@ -144,6 +152,12 @@ export class Usage implements vscode.Disposable {
   private id = '';
   private fresh = false;
   private panelCounted = false;
+  private sizeCounted = false;
+  private readonly startedAt: number;
+  private readonly terminalsChecked = new Set<string>();
+  private readonly actions = new Set<PanelAction>();
+  private inspected = 0;
+  private emptySearches = 0;
   private summarySource?: UsageSummarySource;
   private disposed = false;
   private closing?: Promise<void>;
@@ -170,6 +184,7 @@ export class Usage implements vscode.Disposable {
     private readonly options: UsageOptions,
   ) {
     this.now = options.now ?? Date.now;
+    this.startedAt = this.now();
     this.env = options.env ?? process.env;
     this.transport = options.transport ?? postBatch;
     this.projectKey = options.projectKey ?? USAGE_PROJECT_KEY;
@@ -370,6 +385,25 @@ export class Usage implements vscode.Disposable {
     this.record('panel_opened');
   }
 
+  /** How wide the panel was when it first showed, once a session. */
+  panelSize(pixels: number): void {
+    if (this.sizeCounted) return;
+    this.sizeCounted = true;
+    this.record('panel_size', { width: panelWidth(pixels) });
+  }
+
+  /** Something done in the panel: activity each time, one event a session for each kind, and a count of events read. */
+  panelAction(action: PanelAction): void {
+    this.touch();
+    if (action === 'inspect_event') {
+      this.inspected++;
+      this.milestone('first_event_inspected');
+    }
+    if (this.actions.has(action)) return;
+    this.actions.add(action);
+    this.record('panel_action', { action });
+  }
+
   /** A view the panel opened; some poll while open, so this does not count as activity. */
   view(view: string): void {
     if (view !== 'logs' && view !== 'trace' && view !== 'aiCall') this.milestone('first_view_switch');
@@ -383,13 +417,22 @@ export class Usage implements vscode.Disposable {
     this.milestone('first_capture');
     if (this.features.has(kind)) return;
     this.features.add(kind);
-    this.record('capture_started', { kind });
+    this.record('capture_started', { kind, auto: AUTOMATIC_CAPTURES.includes(kind) });
   }
 
-  /** A new search in the panel: what it used, never what it said. */
-  search(operators: Iterable<SearchOperator>, fields: Iterable<string>, ms?: number): void {
+  /** Whether a terminal came up with shell integration, without which nothing is captured: each outcome once a session for each shell. */
+  terminalChecked(shell: string, integrated: boolean): void {
+    const key = `${shell}:${integrated}`;
+    if (this.terminalsChecked.has(key)) return;
+    this.terminalsChecked.add(key);
+    this.record('terminal_checked', { shell, integrated });
+  }
+
+  /** A new search in the panel: what it used and how much it found, never what it said. */
+  search(operators: Iterable<SearchOperator>, fields: Iterable<string>, ms?: number, matched?: number): void {
     this.touch();
     this.searches++;
+    if (matched === 0) this.emptySearches++;
     this.milestone('first_search');
     let filtered = false;
     for (const operator of operators) {
@@ -399,7 +442,7 @@ export class Usage implements vscode.Disposable {
     for (const field of fields) this.fields.add(field);
     if (filtered) this.milestone('first_filtered_search');
     if (ms !== undefined && (this.timedSearches++ < SAMPLE_AFTER || this.timedSearches % SAMPLE_EVERY === 0))
-      this.record('perf', { op: 'search', ms });
+      this.record('perf', { op: 'search', ms, ...(matched !== undefined ? { events: matched } : {}) });
   }
 
   shared(how: 'all' | 'runs' | 'event', sources: number, events: number): void {
@@ -408,13 +451,13 @@ export class Usage implements vscode.Disposable {
     this.shares++;
     this.sharedAt = this.now();
     this.sharedCalls = 0;
-    this.record('shared_with_agent', { how, sources, events, redacted: true });
+    this.record('shared_with_agent', { how, sources, events });
     this.milestone('first_share');
   }
 
-  sharingStopped(): void {
+  sharingStopped(by: 'user' | 'closed' = 'user'): void {
     if (this.sharedAt === undefined) return;
-    this.record('sharing_stopped', { duration: this.now() - this.sharedAt });
+    this.record('sharing_stopped', { duration: this.now() - this.sharedAt, by });
     if (this.sharedCalls === 0) this.unusedShares++;
     this.sharedAt = undefined;
   }
@@ -433,6 +476,7 @@ export class Usage implements vscode.Disposable {
     ms: number;
     resultSize: number;
     truncated: boolean;
+    redactions: number;
   }): void {
     this.touch();
     this.toolCalls++;
@@ -524,10 +568,20 @@ export class Usage implements vscode.Disposable {
   private sendSummary(): void {
     const source = this.summarySource;
     const connections = source?.connections() ?? {};
+    const quality = source?.quality?.();
     this.record('session_summary', {
       active_minutes: this.activeMinutes.size * 60_000,
+      session_length: this.now() - this.startedAt,
       searches: this.searches,
+      empty_searches: this.emptySearches,
+      events_inspected: this.inspected,
+      actions_used: [...this.actions],
       events_captured: source?.eventsCaptured() ?? 0,
+      events_discarded: source?.discarded?.() ?? 0,
+      events_truncated: source?.truncated?.() ?? 0,
+      ...(quality
+        ? { pct_json: quality.json, pct_unclassified: quality.unclassified, pct_multiline: quality.multiline }
+        : {}),
       sources: source?.sources() ?? 0,
       memory_mb: source?.memoryMb() ?? 0,
       trimmed: source?.trimmed() ?? false,
@@ -608,7 +662,7 @@ export class Usage implements vscode.Disposable {
   close(): Promise<void> {
     if (this.disposed) return Promise.resolve();
     if (!this.closing) {
-      this.sharingStopped();
+      this.sharingStopped('closed');
       this.sendSummary();
       // Disposed once the last batch is out, so Show Usage Data still lists it.
       this.closing = this.flush().then(

@@ -40,6 +40,8 @@ export class RatingPrompt implements vscode.Disposable {
     /** Whether this session has captured any logs yet. */
     private readonly used: () => boolean,
     private readonly now: () => number = Date.now,
+    /** Told what the answer was, for usage counts. */
+    private readonly answered?: (answer: 'accepted' | 'later' | 'never' | 'dismissed') => void,
   ) {}
 
   private get state(): RatingState {
@@ -83,6 +85,9 @@ export class RatingPrompt implements vscode.Disposable {
       RATE,
       LATER,
       NEVER,
+    );
+    this.answered?.(
+      answer === RATE ? 'accepted' : answer === LATER ? 'later' : answer === NEVER ? 'never' : 'dismissed',
     );
     if (answer === RATE) await vscode.env.openExternal(vscode.Uri.parse(reviewsUrl(vscode.env.appName)));
     if (answer === RATE || answer === NEVER) await this.save({ ...this.state, done: true });

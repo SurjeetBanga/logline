@@ -1,3 +1,4 @@
+import { WELCOME_CHOICES, type WelcomeChoice } from '../core/usage-events';
 import type { ServerSummary, SessionRegistry } from '../capture/session-registry';
 import type { FormUpdate } from '../core/connection-form';
 import type { ExceptionBlock } from '../core/exceptions';
@@ -56,7 +57,8 @@ export type ViewRequest =
   /** The panel tour ended: finished, or skipped. */
   | { type: 'tourEnded'; finished: boolean }
   | { type: 'connectAgent'; agent?: 'claude' | 'codex' }
-  | { type: 'onboardingSeen' }
+  | { type: 'onboardingSeen'; choice?: WelcomeChoice }
+  | { type: 'panelSize'; width: number }
   | { type: 'showStatus' }
   | ({ type: 'breakOnQuery' } & Filter)
   | { type: 'trace'; traceId: string }
@@ -476,8 +478,15 @@ export function parseViewRequest(value: unknown): ViewRequest | undefined {
         : { type: msg.type };
     case 'stopSharing':
     case 'showStatus':
-    case 'onboardingSeen':
       return { type: msg.type };
+    case 'onboardingSeen': {
+      const choice = WELCOME_CHOICES.find((item) => item === msg.choice);
+      return choice ? { type: msg.type, choice } : { type: msg.type };
+    }
+    case 'panelSize':
+      return typeof msg.width === 'number' && Number.isFinite(msg.width) && msg.width > 0
+        ? { type: msg.type, width: msg.width }
+        : undefined;
     case 'askCopilot':
       return { type: msg.type, anchor: index('anchor') };
     case 'shareEvent': {

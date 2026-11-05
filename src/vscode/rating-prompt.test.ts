@@ -77,3 +77,27 @@ test('rating opens the store the editor installs from; either answer but Not now
   idle.advance(RATING_AFTER_MS * 10);
   assert.equal(await idle.prompt.check(), false);
 });
+
+test('the answer to the rating question is reported, whichever it was', async () => {
+  for (const [answer, reported] of [
+    ['Rate Logline', 'accepted'],
+    ['Not now', 'later'],
+    ["Don't ask again", 'never'],
+    [undefined, 'dismissed'],
+  ] as const) {
+    Object.assign(ui, { asked: 0, answer, opened: [] });
+    const stored = new Map<string, unknown>([['logline.rating', { firstUsed: 0, sessions: 5 }]]);
+    const answers: string[] = [];
+    const prompt = new RatingPrompt(
+      {
+        get: <T>(key: string) => stored.get(key) as T | undefined,
+        update: async (key: string, value: unknown) => void stored.set(key, value),
+      },
+      () => true,
+      () => 10 * RATING_AFTER_MS,
+      (value) => answers.push(value),
+    );
+    assert.equal(await prompt.check(), true);
+    assert.deepEqual(answers, [reported]);
+  }
+});

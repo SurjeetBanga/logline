@@ -88,3 +88,18 @@ test('full export selects a destination before capture and streams a filtered re
     await rm(root, { recursive: true, force: true });
   }
 });
+
+test('an export that cannot be written is reported for usage counts, without its message', async () => {
+  const transfer = new LogTransfer(
+    {} as any,
+    { get: (_key: string, fallback: unknown) => fallback } as any,
+    {} as any,
+    {} as any,
+  );
+  const failures: string[] = [];
+  transfer.failed = (area) => failures.push(area);
+  snapshots = 0;
+  target = { scheme: 'vscode-remote', fsPath: '/report.md' };
+  assert.equal(await transfer.saveExport('report', 'md', 'report'), false);
+  assert.deepEqual(failures, ['export']);
+});

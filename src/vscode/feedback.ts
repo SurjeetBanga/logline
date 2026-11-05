@@ -83,6 +83,8 @@ export class FeedbackPrompt implements vscode.Disposable {
     /** Whether this session has captured any logs yet. */
     private readonly used: () => boolean,
     private readonly now: () => number = Date.now,
+    /** Told what the answer was, for usage counts. */
+    private readonly answered?: (answer: 'accepted' | 'later' | 'dismissed') => void,
   ) {}
 
   start(): void {
@@ -106,6 +108,7 @@ export class FeedbackPrompt implements vscode.Disposable {
       VOTE,
       'Not now',
     );
+    this.answered?.(answer === VOTE ? 'accepted' : answer ? 'later' : 'dismissed');
     if (answer === VOTE) await this.openVote();
     return true;
   }

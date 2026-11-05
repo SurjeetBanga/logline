@@ -32,7 +32,7 @@ All notable changes to Logline are documented in this file.
 ### Changes
 
 - Installing Logline opens the Logs panel once, so the welcome is seen. It stays closed on remote hosts, such as a Codespace, where a synced extension installs afresh each time.
-- Usage counts now include when the Logs panel opens, and opening it counts as activity. See [PRIVACY.md](PRIVACY.md).
+- Usage counts now include when the Logs panel opens, and opening it counts as activity. They also say which panel actions are used, how many events a search found, whether a terminal has the shell integration capture needs, which welcome option was chosen, how connecting an agent went, how the rating and feedback questions were answered, and more failures, by name and range only. See [PRIVACY.md](PRIVACY.md).
 
 ## 1.19.1 — 2026-11-02
 

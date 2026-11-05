@@ -18,6 +18,8 @@ import {
   sanitizeUsage,
   USAGE_EVENTS,
   type UsageVocabulary,
+  panelWidth,
+  percentBucket,
 } from './usage-events';
 
 const vocabulary: UsageVocabulary = {
@@ -232,6 +234,7 @@ test('every property of every event can only carry Logline’s own names or buck
   for (let n = -1; n < 1e10; n = n < 1 ? n + 1 : n * 1.37)
     for (const bucket of [countBucket, msBucket, durationBucket]) allowed.add(bucket(n));
   for (const size of [0, 1023, 1024, 9000, 40000]) allowed.add(bytesBucket(size));
+  for (const percent of [0, 1, 25, 50, 75, 100]) allowed.add(percentBucket(percent));
   const version = /^\d{1,4}\.\d{1,4}\.\d{1,6}(?:-insider)?$/;
 
   const token = ['ghp', 'Q'.repeat(36)].join('_');
@@ -299,4 +302,20 @@ test('the editor and machine are named only from short lists and ranges', () => 
     cpus: '9-16',
     ram_gb: '32+',
   });
+});
+
+test('percentages and panel widths only ever leave as ranges', () => {
+  assert.deepEqual([Number.NaN, 0, 0.5, 24.9, 25, 74, 75, 99.9, 100, 140].map(percentBucket), [
+    '0',
+    '0',
+    '1-24',
+    '1-24',
+    '25-49',
+    '50-74',
+    '75-99',
+    '75-99',
+    '100',
+    '100',
+  ]);
+  assert.deepEqual([120, 399, 400, 899, 900].map(panelWidth), ['narrow', 'narrow', 'medium', 'medium', 'wide']);
 });

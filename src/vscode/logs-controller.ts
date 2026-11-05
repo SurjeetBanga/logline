@@ -73,7 +73,7 @@ import { SensitiveScanner, type SourceSensitive } from '../core/log-findings';
 import type { GitChanges } from './git-changes';
 import type { LogLens } from './log-lens';
 import type { AgentBridge } from './agent-bridge';
-import { agentLaunch, agentsWithSkills, connectAgent, copilotAvailable } from './agent-setup';
+import { agentLaunch, agentsWithSkills, connectAgent, copilotAvailable, shellKind } from './agent-setup';
 import { mcpScriptPath } from '../protocol/agent-bridge';
 import { openSourceLocation } from './source-navigation';
 import { parseQuery } from '../core/query';
@@ -193,6 +193,11 @@ export class LogsController {
     this.usageCounter = usage;
     this.connections.usage = usage;
     this.transfer.imported = usage && ((ms, events) => usage.record('perf', { op: 'import', ms, events }));
+    this.transfer.failed =
+      usage && ((area) => usage.record('error', { area, code: area === 'export' ? 'write_failed' : 'read_failed' }));
+    this.otel.failed = usage && (() => usage.record('error', { area: 'otlp', code: 'start_failed' }));
+    this.terminalCapture.checked =
+      usage && ((integrated) => usage.terminalChecked(shellKind(vscode.env.shell), integrated));
   }
   private guideOpener?: (section: 'guide' | 'whatsNew') => void;
   readonly otel: OtelIntegration;
@@ -317,9 +322,10 @@ export class LogsController {
       clearTimeout(this.searchSettle);
       const ms = performance.now() - started;
       if (query) {
+        const { matched } = snapshot;
         this.searchSettle = setTimeout(() => {
           const { operators, fields } = queryFeatures(parseQuery(query));
-          this.usage?.search(operators, fields, ms);
+          this.usage?.search(operators, fields, ms, matched);
         }, SEARCH_SETTLE_MS);
         this.searchSettle.unref?.();
       }
@@ -652,9 +658,11 @@ export class LogsController {
       void vscode.window.showWarningMessage(
         'Logline is not accepting MCP clients in this window. Turn on logline.externalAgents to connect Claude Code or Codex.',
       );
+      this.usage?.record('agent_setup', { agent: agent ?? 'none', outcome: 'unavailable' });
       return;
     }
-    await connectAgent(agentLaunch(mcpScriptPath()), undefined, agent);
+    const setup = await connectAgent(agentLaunch(mcpScriptPath()), undefined, agent);
+    this.usage?.record('agent_setup', { ...setup });
     this.agentSetupCache = undefined;
   }
   async doctorAction(action: DoctorAction, siteId?: string): Promise<void> {
@@ -1046,6 +1054,19 @@ export class LogsController {
       sources: () => new Set([...this.registry.records.values()].map((record) => record.serverId)).size,
       memoryMb: () => this.store.bytes / (1024 * 1024),
       trimmed: () => this.store.discarded > 0,
+      discarded: () => this.store.discarded,
+      truncated: () => this.store.stats().truncated,
+      quality: () => {
+        const { events } = this.store.page({ full: true });
+        if (!events.length) return undefined;
+        const percent = (test: (event: (typeof events)[number]) => boolean) =>
+          (events.filter(test).length * 100) / events.length;
+        return {
+          json: percent((event) => event.isJson === true),
+          unclassified: percent((event) => event.level === 'unclassified'),
+          multiline: percent((event) => event.raw?.includes('\n') === true),
+        };
+      },
       connections: () => {
         const counts: Record<string, number> = {};
         for (const connection of this.connections.list())

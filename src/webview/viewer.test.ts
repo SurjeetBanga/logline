@@ -2214,6 +2214,7 @@ test('a first run welcomes, and the tour walks the panel with Next, Back, and Sk
   get('welcomeTour').listeners.get('click')!();
   assert.equal(get('welcomeDialog').open, false);
   assert.equal(messages.at(-1)?.type, 'onboardingSeen', 'the welcome shows once');
+  assert.equal(messages.at(-1)?.choice, 'tour', 'and says which option was chosen');
   const layer = dom.body.children.at(-1)!;
   const card = () => layer.children.at(-1)!;
   const title = () => card().children[1].textContent;

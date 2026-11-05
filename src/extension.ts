@@ -58,12 +58,19 @@ export function activate(context: vscode.ExtensionContext): { provider: LogsProv
     guide,
   );
   const logs = controller;
-  const rating = new RatingPrompt(context.globalState, () => logs.store.total > 0);
+  const rating = new RatingPrompt(
+    context.globalState,
+    () => logs.store.total > 0,
+    undefined,
+    (answer) => usage?.record('prompt_answered', { prompt: 'rating', answer }),
+  );
   rating.start();
   const feedback = new FeedbackPrompt(
     context.globalState,
     () => logs.openFeedback('vote'),
     () => logs.store.total > 0,
+    undefined,
+    (answer) => usage?.record('prompt_answered', { prompt: 'feedback', answer }),
   );
   feedback.start();
   context.subscriptions.push(rating, feedback);

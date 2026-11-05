@@ -318,6 +318,14 @@ test('only a fresh install is welcomed, once, and a tour request reaches the pan
   assert.equal(first.snapshot({ type: 'snapshot' }).startTour, undefined, 'applied once');
 });
 
+test('connecting an agent where the bridge is not running is counted as unavailable', async (t) => {
+  const controller = setup(t);
+  const recorded: unknown[][] = [];
+  controller.usage = { record: (...args: unknown[]) => recorded.push(args) } as any;
+  await controller.connectAgent('claude');
+  assert.deepEqual(recorded, [['agent_setup', { agent: 'claude', outcome: 'unavailable' }]]);
+});
+
 test('sharing logs with an agent is counted with how it was shared', async (t) => {
   const controller = setup(t);
   const shares: { how: string; sources: number; events: number }[] = [];

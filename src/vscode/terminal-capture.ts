@@ -24,8 +24,15 @@ type CaptureContext = {
   endSeen: boolean;
 };
 
+/** How long a terminal gets to bring up shell integration before it is judged. */
+export const INTEGRATION_WAIT_MS = 10_000;
+
 /** Captures externally owned terminal commands without ever stopping them. */
 export class TerminalCapture {
+  /** Told whether a terminal brought up shell integration: without it, its commands cannot be captured. */
+  checked?: (integrated: boolean) => void;
+  private readonly judged = new WeakSet<object>();
+  private readonly checks = new Set<ReturnType<typeof setTimeout>>();
   private enabled = false;
   private disposed = false;
   private readonly ignored = new Set<object>();
@@ -118,6 +125,7 @@ export class TerminalCapture {
     if (!value) {
       for (const context of this.active) this.interrupt(context, 'Capture disabled while the command was running.');
     }
+    if (value) for (const terminal of vscode.window.terminals ?? []) this.checkIntegration(terminal as TerminalLike);
     this.state.status = value ? 'Ready for the next supported terminal command' : 'Terminal capture is off';
     this.state.notify();
   }
@@ -173,6 +181,21 @@ export class TerminalCapture {
     for (const context of this.active) this.interrupt(context, 'Logline was disposed before the stream ended.');
     for (const disposable of this.disposables) disposable.dispose();
     this.disposables.length = 0;
+    for (const check of this.checks) clearTimeout(check);
+    this.checks.clear();
+  }
+
+  private checkIntegration(terminal: TerminalLike): void {
+    const object = terminal as object;
+    if (!this.enabled || this.disposed || this.judged.has(object)) return;
+    this.judged.add(object);
+    const check = setTimeout(() => {
+      this.checks.delete(check);
+      if (this.enabled && !this.disposed && !terminal.exitStatus && !this.ignored.has(object))
+        this.checked?.(!!terminal.shellIntegration);
+    }, INTEGRATION_WAIT_MS);
+    check.unref?.();
+    this.checks.add(check);
   }
 
   private onStart(event: { terminal: TerminalLike; execution: ExecutionLike; shellIntegration?: unknown }): void {
@@ -357,6 +380,7 @@ export class TerminalCapture {
     const id = existing ?? `terminal-${randomBytes(5).toString('hex')}-${this.nextTerminal++}`;
     this.terminalIds.set(object, id);
     this.terminals.set(id, { terminal: object, label: `${terminal.name || 'Terminal'} · ${id}` });
+    this.checkIntegration(terminal);
     return id;
   }
 }

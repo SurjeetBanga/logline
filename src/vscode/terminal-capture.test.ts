@@ -247,3 +247,34 @@ test('terminal capture ignores disabled/ignored terminals and records unavailabl
   h.capture.dispose();
   h.capture.dispose();
 });
+
+test('a terminal is judged on shell integration once, after it has had time to bring it up', (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const plain = {};
+  const integrated = { shellIntegration: {} };
+  const closed = { exitStatus: { code: 0 } };
+  const { capture } = harness(true, 100000, [plain, integrated, closed]);
+  const checks: boolean[] = [];
+  capture.checked = (value) => checks.push(value);
+  t.mock.timers.tick(9_999);
+  assert.deepEqual(checks, [], 'shell integration can take a few seconds');
+  t.mock.timers.tick(1);
+  assert.deepEqual(checks, [false, true], 'a closed terminal is not judged');
+  capture.setEnabled(true);
+  t.mock.timers.tick(10_000);
+  assert.equal(checks.length, 2, 'each terminal once');
+  capture.dispose();
+});
+
+test('terminals are not judged while capture is off, and are once it is turned on', (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const { capture } = harness(false, 100000, [{}]);
+  const checks: boolean[] = [];
+  capture.checked = (value) => checks.push(value);
+  t.mock.timers.tick(10_000);
+  assert.deepEqual(checks, []);
+  capture.setEnabled(true);
+  t.mock.timers.tick(10_000);
+  assert.deepEqual(checks, [false]);
+  capture.dispose();
+});

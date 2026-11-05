@@ -1,3 +1,4 @@
+import type { WelcomeChoice } from '../core/usage-events';
 import type { HostMessage, Snapshot } from '../protocol/messages';
 import { createAnalysis } from './analysis/charts';
 import { addFilterTerm } from './search/cell-filter';
@@ -964,47 +965,48 @@ export function createViewer(api: WebviewApi) {
   scope.listen(elements.tourHintStart, 'click', () => startTour());
   scope.listen(elements.tourHintDismiss, 'click', () => (elements.tourHint.hidden = true));
   /** Leave the welcome, remembering it was seen, and do what was chosen. */
-  const welcomeChoice = (then: () => void) => () => {
+  const welcomeChoice = (choice: WelcomeChoice, then: () => void) => () => {
     elements.welcomeDialog.close();
-    api.postMessage({ type: 'onboardingSeen' });
+    api.postMessage({ type: 'onboardingSeen', choice });
     then();
   };
   scope.listen(
     elements.welcomeTour,
     'click',
-    welcomeChoice(() => tour.start()),
+    welcomeChoice('tour', () => tour.start()),
   );
   scope.listen(
     elements.welcomeExplore,
     'click',
-    welcomeChoice(() => (elements.tourHint.hidden = false)),
+    welcomeChoice('explore', () => (elements.tourHint.hidden = false)),
   );
   scope.listen(
     elements.welcomeCapture,
     'click',
-    welcomeChoice(() => api.postMessage({ type: 'toggleTerminalCapture', enabled: true })),
+    welcomeChoice('capture', () => api.postMessage({ type: 'toggleTerminalCapture', enabled: true })),
   );
   scope.listen(
     elements.welcomeImport,
     'click',
-    welcomeChoice(() => api.postMessage({ type: 'import' })),
+    welcomeChoice('import', () => api.postMessage({ type: 'import' })),
   );
   scope.listen(
     elements.welcomeConnection,
     'click',
-    welcomeChoice(() => api.postMessage({ type: 'addConnection' })),
+    welcomeChoice('connection', () => api.postMessage({ type: 'addConnection' })),
   );
   scope.listen(
     elements.welcomeOtel,
     'click',
-    welcomeChoice(() => api.postMessage({ type: 'toggleOtlp', enabled: true })),
+    welcomeChoice('otel', () => api.postMessage({ type: 'toggleOtlp', enabled: true })),
   );
   // Escape on the welcome counts as exploring: it never shows again.
   scope.listen(elements.welcomeDialog, 'cancel', () => {
-    api.postMessage({ type: 'onboardingSeen' });
+    api.postMessage({ type: 'onboardingSeen', choice: 'dismissed' });
     elements.tourHint.hidden = false;
   });
   if (document.body?.dataset.firstRun === 'true') elements.welcomeDialog.showModal?.();
+  if (globalThis.innerWidth > 0) api.postMessage({ type: 'panelSize', width: globalThis.innerWidth });
   createPopover(elements.counts.closest<HTMLElement>('.popover-container')!, elements.counts, elements.memoryPanel);
   scope.listen(elements.memorySettings, 'click', () =>
     api.postMessage({ type: 'config', setting: 'logline.maxMemoryMb' }),

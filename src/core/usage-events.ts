@@ -23,6 +23,7 @@ type Rule =
   | { kind: 'ms' }
   | { kind: 'duration' }
   | { kind: 'bytes' }
+  | { kind: 'percent' }
   | { kind: 'version' }
   | { kind: 'setting' };
 
@@ -32,6 +33,7 @@ const BOOL: Rule = { kind: 'bool' };
 const COUNT: Rule = { kind: 'count' };
 const MS: Rule = { kind: 'ms' };
 const DURATION: Rule = { kind: 'duration' };
+const PERCENT: Rule = { kind: 'percent' };
 
 export const CONNECTION_TYPES: readonly ConnectionType[] = [
   'sqlite',
@@ -90,8 +92,39 @@ export const MILESTONES = [
   'first_agent_call',
   'first_doctor_action',
   'first_log_breakpoint',
+  'first_event_inspected',
 ] as const;
 export type Milestone = (typeof MILESTONES)[number];
+/** What someone did in the Logs panel, by name only. */
+export const PANEL_ACTIONS = [
+  'inspect_event',
+  'copy_event',
+  'show_context',
+  'open_log_site',
+  'open_source',
+  'export',
+  'copy_filtered',
+  'export_context',
+  'import',
+  'save_search',
+  'delete_saved_search',
+  'clear',
+  'remove_source',
+  'remove_run',
+  'remove_finished_runs',
+  'stop',
+  'run',
+  'metric_query',
+  'metric_watch',
+  'copy_ai_call',
+  'toggle_otlp',
+] as const;
+export type PanelAction = (typeof PANEL_ACTIONS)[number];
+/** Which first step the welcome led to; `dismissed` is Escape. */
+export const WELCOME_CHOICES = ['tour', 'explore', 'capture', 'import', 'connection', 'otel', 'dismissed'] as const;
+export type WelcomeChoice = (typeof WELCOME_CHOICES)[number];
+/** Captures that start without anyone asking for that run: the rest are a deliberate step. */
+export const AUTOMATIC_CAPTURES: readonly string[] = ['debug', 'terminal', 'otlp'];
 /** Why an agent tool call failed: its error code, never its message. */
 export const AGENT_ERROR_CODES = [
   'NOT_SHARED',
@@ -106,7 +139,7 @@ export const AGENT_ERROR_CODES = [
   'RESULT_TOO_LARGE',
 ] as const;
 /** What failed inside Logline, by area, as one of these codes. */
-export const ERROR_CODES = ['start_failed'] as const;
+export const ERROR_CODES = ['start_failed', 'write_failed', 'read_failed', 'message_failed'] as const;
 /** What Log Doctor finds: its own checks and the OpenTelemetry conventions. */
 export const DOCTOR_CODES = [
   'secret',
@@ -138,8 +171,12 @@ export const USAGE_EVENTS: Record<string, Record<string, Rule>> = {
   active_day: {},
   milestone: { name: oneOf(...MILESTONES), after: DURATION },
   command: { id: { kind: 'enum', values: (vocabulary) => vocabulary.commands } },
-  capture_started: { kind: oneOf(...CAPTURE_KINDS) },
+  capture_started: { kind: oneOf(...CAPTURE_KINDS), auto: BOOL },
+  terminal_checked: { shell: oneOf('posix', 'powershell', 'cmd'), integrated: BOOL },
   panel_opened: {},
+  panel_size: { width: oneOf('narrow', 'medium', 'wide') },
+  panel_action: { action: oneOf(...PANEL_ACTIONS) },
+  welcome: { choice: oneOf(...WELCOME_CHOICES) },
   view_opened: { view: oneOf(...USAGE_VIEWS) },
   connection_added: { type: connection, auth: oneOf('password', 'iam', 'other') },
   connection_searched: { type: connection, ok: BOOL, ms: MS, rows: COUNT },
@@ -147,10 +184,14 @@ export const USAGE_EVENTS: Record<string, Record<string, Rule>> = {
   connection_sql_run: { type: connection, ok: BOOL },
   connection_tested: { type: connection, ok: BOOL },
   connection_agent_allowed: { type: connection },
-  shared_with_agent: { how: oneOf('all', 'runs', 'event'), sources: COUNT, events: COUNT, redacted: BOOL },
-  sharing_stopped: { duration: DURATION },
+  shared_with_agent: { how: oneOf('all', 'runs', 'event'), sources: COUNT, events: COUNT },
+  sharing_stopped: { duration: DURATION, by: oneOf('user', 'closed') },
   exported_for_ai: {},
   ask_copilot: {},
+  agent_setup: {
+    agent: oneOf('host', 'claude', 'codex', 'other', 'none'),
+    outcome: oneOf('added', 'copied', 'terminal', 'failed', 'cancelled', 'unavailable'),
+  },
   agent_connected: { client: oneOf(...AGENT_CLIENTS) },
   agent_tool: {
     tool: oneOf(...AGENT_TOOLS),
@@ -161,6 +202,7 @@ export const USAGE_EVENTS: Record<string, Record<string, Rule>> = {
     ms: MS,
     result_size: { kind: 'bytes' },
     truncated: BOOL,
+    redactions: COUNT,
   },
   first_tool_after_share: { after: DURATION },
   tour: { step: oneOf('started', 'finished', 'skipped') },
@@ -173,14 +215,27 @@ export const USAGE_EVENTS: Record<string, Record<string, Rule>> = {
   doctor_finding: { code: oneOf(...DOCTOR_CODES) },
   doctor_action: { action: oneOf('open', 'showEvents', 'fix', 'report') },
   feedback: { surface: oneOf('doctor', 'copilot'), code: oneOf(...DOCTOR_CODES), helpful: BOOL },
+  prompt_answered: { prompt: oneOf('rating', 'feedback'), answer: oneOf('accepted', 'later', 'never', 'dismissed') },
   log_lens_clicked: {},
   log_breakpoint: { step: oneOf('set', 'hit') },
   compare_production: { ok: BOOL },
-  error: { area: oneOf('bridge', 'otlp', 'connection', 'import', 'export', 'capture'), code: oneOf(...ERROR_CODES) },
+  error: {
+    area: oneOf('bridge', 'otlp', 'connection', 'import', 'export', 'capture', 'panel'),
+    code: oneOf(...ERROR_CODES),
+  },
   session_summary: {
     active_minutes: DURATION,
+    session_length: DURATION,
     searches: COUNT,
+    empty_searches: COUNT,
+    events_inspected: COUNT,
+    actions_used: listOf(...PANEL_ACTIONS),
     events_captured: COUNT,
+    events_discarded: COUNT,
+    events_truncated: COUNT,
+    pct_json: PERCENT,
+    pct_unclassified: PERCENT,
+    pct_multiline: PERCENT,
     sources: COUNT,
     memory_mb: COUNT,
     trimmed: BOOL,
@@ -238,6 +293,21 @@ const DURATION_EDGES: [number, string][] = [
 export function durationBucket(ms: number): string {
   for (const [edge, label] of DURATION_EDGES) if (ms < edge) return label;
   return '7d+';
+}
+
+/** `0`, `1-24`, `25-49`, `50-74`, `75-99`, `100`. */
+export function percentBucket(percent: number): string {
+  if (!(percent > 0)) return '0';
+  if (percent >= 100) return '100';
+  if (percent < 25) return '1-24';
+  if (percent < 50) return '25-49';
+  return percent < 75 ? '50-74' : '75-99';
+}
+
+/** How wide the Logs panel is: a stand-in for where it sits, which editors do not tell extensions. */
+export function panelWidth(pixels: number): string {
+  if (pixels < 400) return 'narrow';
+  return pixels < 900 ? 'medium' : 'wide';
 }
 
 export function bytesBucket(bytes: number): string {
@@ -358,6 +428,8 @@ function check(
       return typeof value === 'number' ? durationBucket(value) : undefined;
     case 'bytes':
       return typeof value === 'number' ? bytesBucket(value) : undefined;
+    case 'percent':
+      return typeof value === 'number' ? percentBucket(value) : undefined;
     case 'version':
       return typeof value === 'string' && VERSION.test(value) ? value : undefined;
     case 'setting': {

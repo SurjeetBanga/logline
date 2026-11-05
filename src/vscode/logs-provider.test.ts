@@ -158,3 +158,37 @@ test('the panel counts as opened when it resolves in view and each time it retur
   disposeView();
   assert.equal(visibilityDisposed, true);
 });
+
+test('a panel message that fails is reported and counted, without its text', async () => {
+  const counted: unknown[][] = [];
+  let listener: (message: unknown) => void = () => {};
+  const view = {
+    visible: false,
+    onDidChangeVisibility: () => ({ dispose() {} }),
+    onDidDispose: () => undefined,
+    webview: {
+      cspSource: 'csp',
+      options: undefined as unknown,
+      html: '',
+      asWebviewUri: (uri: unknown) => uri,
+      postMessage: async () => true,
+      onDidReceiveMessage: (received: (message: unknown) => void) => {
+        listener = received;
+        return { dispose() {} };
+      },
+    },
+  };
+  const controller = {
+    notifications: { subscribe: () => ({ dispose() {} }) },
+    guideStatus: () => ({ version: 'v1', unread: false }),
+    firstRun: () => false,
+    usage: { record: (...args: unknown[]) => counted.push(args) },
+    handleMessage: async () => {
+      throw new Error('private detail');
+    },
+  } as any;
+  new LogsProvider({ extensionUri: { fsPath: process.cwd() } } as any, controller).resolveWebviewView(view as any);
+  listener({ type: 'details', id: 1 });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(counted, [['error', { area: 'panel', code: 'message_failed' }]]);
+});

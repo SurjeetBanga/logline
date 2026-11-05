@@ -407,3 +407,27 @@ test('changing the port restarts a receiver that fell back to another port', asy
   assert.notEqual(receiver.endpoint, fallback);
   assert.equal(receiver.error, undefined);
 });
+
+test('a receiver that cannot start when asked to is reported for usage counts', async () => {
+  const receiver = {
+    running: false,
+    error: 'no permission',
+    start: async () => undefined,
+    stop: async () => undefined,
+  };
+  const config = { get: (_key: string, fallback: unknown) => fallback };
+  const warnings: string[] = [];
+  // The module keeps the mock it first loaded with, and this one needs its own.
+  delete require.cache[require.resolve('./otel-integration')];
+  const { OtelIntegration } = withVscode(
+    { window: { showWarningMessage: (message: string) => warnings.push(message) } },
+    () => require('./otel-integration') as typeof import('./otel-integration'),
+  );
+  const integration = new OtelIntegration(config as any, receiver as any, () => {});
+  let failures = 0;
+  integration.failed = () => failures++;
+  await integration.toggle(true);
+  assert.equal(failures, 1);
+  assert.match(warnings[0], /no permission/);
+  await integration.dispose();
+});
