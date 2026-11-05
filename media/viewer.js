@@ -9425,7 +9425,10 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
       api.postMessage({ type: "onboardingSeen", choice: "dismissed" });
       elements.tourHint.hidden = false;
     });
-    if (document.body?.dataset.firstRun === "true") elements.welcomeDialog.showModal?.();
+    if (document.body?.dataset.firstRun === "true") {
+      elements.welcomeDialog.showModal?.();
+      api.postMessage({ type: "onboardingSeen" });
+    }
     if (globalThis.innerWidth > 0) api.postMessage({ type: "panelSize", width: globalThis.innerWidth });
     scope.listen(elements.updateButton, "click", () => api.postMessage({ type: "installUpdate" }));
     createPopover(elements.counts.closest(".popover-container"), elements.counts, elements.memoryPanel);

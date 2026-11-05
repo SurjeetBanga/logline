@@ -1019,7 +1019,12 @@ export function createViewer(api: WebviewApi) {
     api.postMessage({ type: 'onboardingSeen', choice: 'dismissed' });
     elements.tourHint.hidden = false;
   });
-  if (document.body?.dataset.firstRun === 'true') elements.welcomeDialog.showModal?.();
+  // The welcome counts as seen once it opens, not when it is answered: hiding the panel, such as by
+  // switching to the Terminal tab, rebuilds it, and an unanswered welcome would open again each time.
+  if (document.body?.dataset.firstRun === 'true') {
+    elements.welcomeDialog.showModal?.();
+    api.postMessage({ type: 'onboardingSeen' });
+  }
   if (globalThis.innerWidth > 0) api.postMessage({ type: 'panelSize', width: globalThis.innerWidth });
   scope.listen(elements.updateButton, 'click', () => api.postMessage({ type: 'installUpdate' }));
   createPopover(elements.counts.closest<HTMLElement>('.popover-container')!, elements.counts, elements.memoryPanel);

@@ -2211,6 +2211,10 @@ test('the guide points at a control, opening its menu first, or at its fallback 
 test('a first run welcomes, and the tour walks the panel with Next, Back, and Skip', () => {
   const { get, messages, dom, receive, flushFrames } = viewer({}, { firstRun: true });
   assert.equal(get('welcomeDialog').open, true, 'a fresh install is welcomed');
+  assert.ok(
+    messages.some((message) => message.type === 'onboardingSeen' && message.choice === undefined),
+    'seen as soon as it opens, so a rebuilt panel does not open it again',
+  );
   get('welcomeTour').listeners.get('click')!();
   assert.equal(get('welcomeDialog').open, false);
   assert.equal(messages.at(-1)?.type, 'onboardingSeen', 'the welcome shows once');
