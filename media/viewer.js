@@ -907,6 +907,7 @@
       moreActions: element("moreActions"),
       actionsMenu: element("actionsMenu"),
       help: element("help"),
+      updateButton: element("updateButton"),
       takeTour: element("takeTour"),
       suggestFeature: element("suggestFeature"),
       voteOnNext: element("voteOnNext"),
@@ -8907,6 +8908,7 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
       }
       if (data.type !== "snapshot") return;
       if (data.guideStatus) updateGuideStatus(data.guideStatus);
+      updateUpdateButton(data.update);
       bridge.received(data.requestId);
       const rows = bridge.rows(data);
       if (data.applyQuery !== void 0 && data.applyQuery !== search.query()) {
@@ -9153,6 +9155,14 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
       const tooLong = !on && withChangedScope(search.query(), true).length > 256;
       button.disabled = tooLong;
       button.title = tooLong ? "The filter is too long to add changed:true. Remove a filter first." : changedFiles === void 0 ? "Not in a git repository, so no code counts as changed. Click to remove the filter." : `${on ? "Showing" : "Show"} only logs from code changed since the last commit (${numberFormat.format(changedFiles)} ${changedFiles === 1 ? "file" : "files"}): the statement that logged them, or a stack frame in their exception, is on a changed line`;
+    }
+    function updateUpdateButton(update) {
+      const button = elements.updateButton;
+      button.hidden = !update;
+      if (!update) return;
+      button.disabled = update.state === "installing";
+      button.textContent = update.state === "available" ? "Update" : update.state === "installing" ? "Updating\u2026" : "Reload";
+      button.title = update.state === "ready" ? `Reload the window to use Logline ${update.version}` : `Update Logline to ${update.version}`;
     }
     function updateGuideStatus(status) {
       guideUnread = status.unread;
@@ -9405,6 +9415,7 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
     });
     if (document.body?.dataset.firstRun === "true") elements.welcomeDialog.showModal?.();
     if (globalThis.innerWidth > 0) api.postMessage({ type: "panelSize", width: globalThis.innerWidth });
+    scope.listen(elements.updateButton, "click", () => api.postMessage({ type: "installUpdate" }));
     createPopover(elements.counts.closest(".popover-container"), elements.counts, elements.memoryPanel);
     scope.listen(
       elements.memorySettings,

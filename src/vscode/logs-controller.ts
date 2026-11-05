@@ -80,6 +80,7 @@ import { parseQuery } from '../core/query';
 import { CONNECTION_TYPES, queryFeatures } from '../core/usage-events';
 import type { Usage, UsageSummarySource } from './usage';
 import type { FeedbackOpen } from '../core/feedback';
+import type { UpdateCheck } from './update-check';
 import { feedbackSendable, sendFeedback } from './feedback';
 
 const SHARE_ALL_CONFIRMED_KEY = 'logline.shareAllLogsConfirmed.v1';
@@ -199,6 +200,8 @@ export class LogsController {
     this.terminalCapture.checked =
       usage && ((integrated) => usage.terminalChecked(shellKind(vscode.env.shell), integrated));
   }
+  /** The panel's Update button, in a real editor. */
+  updateCheck?: UpdateCheck;
   private guideOpener?: (section: 'guide' | 'whatsNew') => void;
   readonly otel: OtelIntegration;
 
@@ -317,6 +320,7 @@ export class LogsController {
     const changed = query !== this.countedQuery && this.usage?.enabled;
     const started = changed ? performance.now() : 0;
     const snapshot = this.buildSnapshot(request);
+    const update = this.updateCheck?.status();
     if (changed) {
       this.countedQuery = query;
       clearTimeout(this.searchSettle);
@@ -335,6 +339,7 @@ export class LogsController {
       ...(reveal ? { reveal } : {}),
       ...(openConnectionForm ? { openConnectionForm } : {}),
       ...(startTour ? { startTour } : {}),
+      ...(update ? { update } : {}),
       ...(openFeedback ? { openFeedback } : {}),
       ...snapshot,
       ...(applyQuery !== undefined ? { applyQuery } : {}),
@@ -433,6 +438,7 @@ export class LogsController {
         breakOnQuery: (query, levels) => this.breakOnQuery(query, levels),
         doctorAction: (action, siteId) => this.doctorAction(action, siteId),
         connectAgent: (agent) => this.connectAgent(agent),
+        installUpdate: async () => this.updateCheck?.press(),
         showStatus: async () => {
           await vscode.commands.executeCommand('logline.showStatus');
         },

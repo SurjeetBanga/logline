@@ -391,3 +391,11 @@ test('what someone does in the panel is counted by name, and a welcome choice an
   assert.deepEqual(recorded, [['welcome', { choice: 'capture' }]]);
   assert.deepEqual(widths, [640]);
 });
+
+test('the Update button reaches the update check', async () => {
+  let pressed = 0;
+  const base = services() as any;
+  const target = { ...(base.services ?? base), installUpdate: async () => void pressed++ };
+  await handleMessage(target, () => {}, { type: 'installUpdate' });
+  assert.equal(pressed, 1);
+});

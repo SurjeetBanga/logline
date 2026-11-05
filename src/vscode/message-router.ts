@@ -82,6 +82,8 @@ interface MessageServices {
   removeRun(sessionId: string): number;
   removeFinishedRuns(serverId: string): number;
   welcomed?(): void;
+  /** The panel's Update button was pressed. */
+  installUpdate?(): Promise<void>;
   showGuide(section: 'guide' | 'whatsNew'): void;
   agentAccess: AgentLogAccess;
   shareWithAgent(sourceIds?: string[], anchor?: number, sessionIds?: string[], chooseRuns?: boolean): Promise<void>;
@@ -287,6 +289,9 @@ export async function handleMessage(
       return;
     case 'panelSize':
       services.usage?.panelSize(msg.width);
+      return;
+    case 'installUpdate':
+      await services.installUpdate?.();
       return;
     case 'removeSource':
       // Asks first when the source is running.

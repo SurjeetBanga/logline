@@ -4801,3 +4801,23 @@ test('a filter that cannot be translated leaves no earlier statement to start a 
   get('connectionSyntax').listeners.get('click')!();
   assert.equal(get('connectionNative').value, '');
 });
+
+test('the Update button shows only while there is an update, and follows it to Reload', () => {
+  const { get, messages, receive } = viewer({}, { hidden: ['updateButton'] });
+  const button = get('updateButton');
+  assert.equal(button.hidden, true);
+  receive({ type: 'snapshot', update: { version: '1.20.0', state: 'available' } });
+  assert.equal(button.hidden, false);
+  assert.equal(button.textContent, 'Update');
+  assert.match(button.title, /Update Logline to 1\.20\.0/);
+  button.listeners.get('click')!();
+  assert.equal(messages.at(-1)?.type, 'installUpdate');
+  receive({ type: 'snapshot', update: { version: '1.20.0', state: 'installing' } });
+  assert.equal(button.disabled, true);
+  assert.equal(button.textContent, 'Updating…');
+  receive({ type: 'snapshot', update: { version: '1.20.0', state: 'ready' } });
+  assert.equal(button.disabled, false);
+  assert.equal(button.textContent, 'Reload');
+  receive({ type: 'snapshot' });
+  assert.equal(button.hidden, true);
+});

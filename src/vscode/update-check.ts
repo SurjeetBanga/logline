@@ -1,5 +1,6 @@
 import { request } from 'node:https';
 import * as vscode from 'vscode';
+import type { UpdateStatus } from '../protocol/messages';
 
 const EXTENSION_ID = 'surjeetbanga.logline';
 const STATE_KEY = 'logline.update';
@@ -13,11 +14,13 @@ export const UPDATE_EVERY_MS = 24 * 60 * 60 * 1000;
 interface UpdateState {
   /** When the store was last asked. */
   checked?: number;
-  /** The newest version someone was told about: each is mentioned once. */
-  notified?: string;
+  /** The newest version found, so the button is back after a restart without asking again. */
+  available?: string;
+  /** The version last installed from the button. If the editor could not move to it, it is not offered again. */
+  tried?: string;
 }
 
-export type UpdateAnswer = 'accepted' | 'later' | 'dismissed' | 'failed';
+export type UpdateAnswer = 'accepted' | 'failed';
 /** The newest version in the store, or nothing when it cannot be told. */
 export type LatestVersion = (appName: string | undefined) => Promise<string | undefined>;
 
@@ -100,61 +103,94 @@ const latestFromStore: LatestVersion = async (appName) => {
   );
 };
 
-/** Tells someone without automatic updates, once for each version, that a newer Logline is out. */
+/**
+ * Keeps an Update button in the Logs panel for someone without automatic updates
+ * while a newer Logline is out: Update, then Updating, then Reload.
+ */
 export class UpdateCheck implements vscode.Disposable {
   private timer?: ReturnType<typeof setTimeout>;
+  private shown?: UpdateStatus;
 
   constructor(
     private readonly memento: Pick<vscode.Memento, 'get' | 'update'>,
     private readonly current: string,
+    /** Told that the button changed, so the panel can show it. */
+    private readonly changed: () => void,
     private readonly answered?: (answer: UpdateAnswer) => void,
     private readonly latest: LatestVersion = latestFromStore,
     private readonly now: () => number = Date.now,
   ) {}
 
+  /** What the button shows; nothing while there is no update to offer. */
+  status(): UpdateStatus | undefined {
+    return this.shown;
+  }
+
+  private get wanted(): boolean {
+    const extensions = vscode.workspace.getConfiguration('extensions');
+    return wantsUpdateNotice((key) => extensions.get(key));
+  }
+
+  private get state(): UpdateState {
+    return this.memento.get<UpdateState>(STATE_KEY) ?? {};
+  }
+
+  private save(change: UpdateState): Promise<void> {
+    return Promise.resolve(this.memento.update(STATE_KEY, { ...this.state, ...change })).catch(() => undefined);
+  }
+
+  private show(status: UpdateStatus | undefined): void {
+    this.shown = status;
+    this.changed();
+  }
+
+  /** Offer a version already found, without asking the store; one that was tried and did not take is not offered again. */
+  private offer(version: string | undefined): boolean {
+    if (!version || !isNewer(version, this.current) || version === this.state.tried) return false;
+    this.show({ version, state: 'available' });
+    return true;
+  }
+
   start(): void {
+    if (this.wanted) this.offer(this.state.available);
     this.timer = setTimeout(() => void this.check(), UPDATE_DELAY_MS);
     this.timer.unref?.();
   }
 
-  private save(change: UpdateState): Promise<void> {
-    const state = this.memento.get<UpdateState>(STATE_KEY) ?? {};
-    return Promise.resolve(this.memento.update(STATE_KEY, { ...state, ...change })).catch(() => undefined);
-  }
-
-  /** Check now if it is time; returns whether it told someone about a new version. */
+  /** Ask the store if it is time; returns whether there is an update to offer. */
   async check(): Promise<boolean> {
-    const extensions = vscode.workspace.getConfiguration('extensions');
-    if (!wantsUpdateNotice((key) => extensions.get(key))) return false;
-    const { checked, notified } = this.memento.get<UpdateState>(STATE_KEY) ?? {};
+    if (!this.wanted) return false;
+    const { checked } = this.state;
     const now = this.now();
     if (checked !== undefined && now - checked < UPDATE_EVERY_MS) return false;
     await this.save({ checked: now });
     const latest = await this.latest(vscode.env.appName);
-    if (!latest || !isNewer(latest, this.current) || latest === notified) return false;
-    await this.save({ notified: latest });
-    const UPDATE = 'Update';
-    const answer = await vscode.window.showInformationMessage(
-      `Logline ${latest} is available. You have ${this.current}.`,
-      UPDATE,
-      'Not now',
-    );
-    if (answer !== UPDATE) {
-      this.answered?.(answer ? 'later' : 'dismissed');
-      return true;
+    if (!latest || !isNewer(latest, this.current)) return false;
+    await this.save({ available: latest });
+    return this.shown?.state === 'available' || this.shown?.state === undefined ? this.offer(latest) : false;
+  }
+
+  /** The button was pressed: install the update, or reload once it is installed. */
+  async press(): Promise<void> {
+    const status = this.shown;
+    if (!status || status.state === 'installing') return;
+    if (status.state === 'ready') {
+      await vscode.commands.executeCommand('workbench.action.reloadWindow');
+      return;
     }
+    this.show({ ...status, state: 'installing' });
+    await this.save({ tried: status.version });
     try {
       await vscode.commands.executeCommand('workbench.extensions.installExtension', EXTENSION_ID);
     } catch {
+      await this.save({ tried: undefined });
       this.answered?.('failed');
+      this.show({ ...status, state: 'available' });
       void vscode.window.showWarningMessage('Logline could not update itself. Update it from the Extensions view.');
-      return true;
+      return;
     }
     this.answered?.('accepted');
-    const RELOAD = 'Reload Window';
-    const reload = await vscode.window.showInformationMessage(`Logline ${latest} is ready. Reload to use it.`, RELOAD);
-    if (reload === RELOAD) await vscode.commands.executeCommand('workbench.action.reloadWindow');
-    return true;
+    this.show({ ...status, state: 'ready' });
   }
 
   dispose(): void {

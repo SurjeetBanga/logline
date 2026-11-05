@@ -32,7 +32,7 @@ All notable changes to Logline are documented in this file.
 ### Changes
 
 - Installing Logline opens the Logs panel once, so the welcome is seen. It stays closed on remote hosts, such as a Codespace, where a synced extension installs afresh each time.
-- If your editor does not update extensions automatically, Logline tells you once when a new version is out, and **Update** installs it. It checks at most once a day, and never with automatic updates on or update checks off. See [PRIVACY.md](PRIVACY.md#update-checks).
+- If your editor does not update extensions automatically, an **Update** button appears at the top of the Logs panel when a new version is out. It installs the update, then becomes **Reload**. It checks at most once a day, and never with automatic updates on or update checks off. See [PRIVACY.md](PRIVACY.md#update-checks).
 - Usage counts now include when the Logs panel opens, and opening it counts as activity. They also say which panel actions are used, how many events a search found, whether a terminal has the shell integration capture needs, which welcome option was chosen, how connecting an agent went, how the rating and feedback questions were answered, and more failures, by name and range only. See [PRIVACY.md](PRIVACY.md).
 
 ## 1.19.1 — 2026-11-02

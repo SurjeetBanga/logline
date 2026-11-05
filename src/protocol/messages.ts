@@ -32,6 +32,12 @@ export interface HeldRows {
   count: number;
   version: string;
 }
+/** The panel's Update button: a version to install, being installed, or installed and waiting for a reload. */
+export interface UpdateStatus {
+  version: string;
+  state: 'available' | 'installing' | 'ready';
+}
+
 export type ViewRequest =
   | ({
       type: 'snapshot';
@@ -58,6 +64,7 @@ export type ViewRequest =
   | { type: 'tourEnded'; finished: boolean }
   | { type: 'connectAgent'; agent?: 'claude' | 'codex' }
   | { type: 'onboardingSeen'; choice?: WelcomeChoice }
+  | { type: 'installUpdate' }
   | { type: 'panelSize'; width: number }
   | { type: 'showStatus' }
   | ({ type: 'breakOnQuery' } & Filter)
@@ -190,6 +197,8 @@ export interface Snapshot extends Stats {
   persistDropped: number;
   timezone: string;
   guideStatus: GuideStatus;
+  /** An update to offer, for someone whose editor does not update Logline by itself. */
+  update?: UpdateStatus;
   agentSharing: AgentShareStatus;
   captureTerminals: boolean;
   captureStatus?: {
@@ -478,6 +487,7 @@ export function parseViewRequest(value: unknown): ViewRequest | undefined {
         : { type: msg.type };
     case 'stopSharing':
     case 'showStatus':
+    case 'installUpdate':
       return { type: msg.type };
     case 'onboardingSeen': {
       const choice = WELCOME_CHOICES.find((item) => item === msg.choice);

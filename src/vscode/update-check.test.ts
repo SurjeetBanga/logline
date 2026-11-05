@@ -4,8 +4,6 @@ import { withVscode } from '../test/vscode-mock';
 
 const ui = {
   settings: { autoUpdate: false, autoCheckUpdates: true } as Record<string, unknown>,
-  answers: [] as (string | undefined)[],
-  messages: [] as string[],
   warnings: [] as string[],
   commands: [] as string[],
   installFails: false,
@@ -15,10 +13,6 @@ const { UpdateCheck, UPDATE_EVERY_MS, isNewer, storeVersion, wantsUpdateNotice }
     env: { appName: 'Visual Studio Code' },
     workspace: { getConfiguration: () => ({ get: (key: string) => ui.settings[key] }) },
     window: {
-      showInformationMessage: async (message: string) => {
-        ui.messages.push(message);
-        return ui.answers.shift();
-      },
       showWarningMessage: (message: string) => ui.warnings.push(message),
     },
     commands: {
@@ -31,33 +25,42 @@ const { UpdateCheck, UPDATE_EVERY_MS, isNewer, storeVersion, wantsUpdateNotice }
   () => require('./update-check') as typeof import('./update-check'),
 );
 
-function setup(latest: string | undefined = '1.20.0') {
+function setup(latest: string | undefined = '1.20.0', initial: Record<string, unknown> = {}) {
   Object.assign(ui, {
     settings: { autoUpdate: 'off', autoCheckUpdates: true },
-    answers: [],
-    messages: [],
     warnings: [],
     commands: [],
     installFails: false,
   });
-  const stored = new Map<string, unknown>();
+  const stored = new Map<string, unknown>([['logline.update', initial]]);
   let now = 1_000_000;
   let asked = 0;
+  let changes = 0;
   const answers: string[] = [];
-  const check = new UpdateCheck(
-    {
-      get: <T>(key: string) => stored.get(key) as T | undefined,
-      update: async (key: string, value: unknown) => void stored.set(key, value),
-    },
-    '1.19.1',
-    (answer) => answers.push(answer),
-    async () => {
-      asked++;
-      return latest;
-    },
-    () => now,
-  );
-  return { check, answers, asked: () => asked, advance: (ms: number) => (now += ms) };
+  const memento = {
+    get: <T>(key: string) => stored.get(key) as T | undefined,
+    update: async (key: string, value: unknown) => void stored.set(key, value),
+  };
+  const make = () =>
+    new UpdateCheck(
+      memento,
+      '1.19.1',
+      () => void changes++,
+      (answer: string) => void answers.push(answer),
+      async () => {
+        asked++;
+        return latest;
+      },
+      () => now,
+    );
+  return {
+    check: make(),
+    make,
+    answers,
+    asked: () => asked,
+    changes: () => changes,
+    advance: (ms: number) => (now += ms),
+  };
 }
 
 test('versions compare by number, and anything that is not one is never newer', () => {
@@ -87,27 +90,33 @@ test('a store answer gives its version, and a surprising one gives nothing', () 
   assert.equal(storeVersion('{"results":[]}', true), undefined);
 });
 
-test('with automatic updates on, the store is never asked', async () => {
-  const { check, asked } = setup();
+test('with automatic updates on, the store is never asked and no button shows', async () => {
+  const { check, asked } = setup('1.20.0', { available: '1.20.0' });
   ui.settings.autoUpdate = 'on';
+  check.start();
+  check.dispose();
   assert.equal(await check.check(), false);
   assert.equal(asked(), 0);
-  assert.deepEqual(ui.messages, []);
+  assert.equal(check.status(), undefined);
 });
 
-test('Update installs the new version and offers a reload; each version is mentioned once', async () => {
-  const { check, answers, advance } = setup();
-  ui.answers.push('Update', 'Reload Window');
+test('the button goes from Update through installing to Reload, and reloads', async () => {
+  const { check, answers, changes } = setup();
   assert.equal(await check.check(), true);
-  assert.match(ui.messages[0], /Logline 1\.20\.0 is available\. You have 1\.19\.1\./);
-  assert.deepEqual(ui.commands, ['workbench.extensions.installExtension', 'workbench.action.reloadWindow']);
+  assert.deepEqual(check.status(), { version: '1.20.0', state: 'available' });
+  const pressing = check.press();
+  assert.equal(check.status()?.state, 'installing');
+  await check.press();
+  await pressing;
+  assert.deepEqual(ui.commands, ['workbench.extensions.installExtension'], 'a second press does not install twice');
+  assert.deepEqual(check.status(), { version: '1.20.0', state: 'ready' });
   assert.deepEqual(answers, ['accepted']);
-  advance(UPDATE_EVERY_MS);
-  assert.equal(await check.check(), false, 'already mentioned');
-  assert.equal(ui.messages.length, 2);
+  await check.press();
+  assert.equal(ui.commands.at(-1), 'workbench.action.reloadWindow');
+  assert.equal(changes(), 3, 'the panel hears of each change');
 });
 
-test('the store is asked at most once a day, and nothing is shown when Logline is current', async () => {
+test('the store is asked at most once a day, and no button shows when Logline is current', async () => {
   const { check, asked, advance } = setup('1.19.1');
   assert.equal(await check.check(), false);
   assert.equal(await check.check(), false);
@@ -115,30 +124,54 @@ test('the store is asked at most once a day, and nothing is shown when Logline i
   advance(UPDATE_EVERY_MS);
   await check.check();
   assert.equal(asked(), 2);
-  assert.deepEqual(ui.messages, []);
+  assert.equal(check.status(), undefined);
 });
 
-test('declining, dismissing, and a failed update are reported, and only a failure warns', async () => {
-  const later = setup();
-  ui.answers.push('Not now');
+test('the button is back after a restart without asking the store, until Logline has updated', async () => {
+  const later = setup('1.20.0');
   await later.check.check();
-  assert.deepEqual(later.answers, ['later']);
-  assert.deepEqual(ui.commands, []);
-  const dismissed = setup();
-  await dismissed.check.check();
-  assert.deepEqual(dismissed.answers, ['dismissed']);
-  const failed = setup();
+  const restarted = later.make();
+  restarted.start();
+  restarted.dispose();
+  assert.deepEqual(restarted.status(), { version: '1.20.0', state: 'available' });
+  assert.equal(later.asked(), 1);
+  const current = setup('1.19.1', { available: '1.19.1' });
+  current.check.start();
+  current.check.dispose();
+  assert.equal(current.check.status(), undefined, 'the update took');
+});
+
+test('a version the editor could not move to is not offered again, but a later one is', async () => {
+  const { check, make, advance } = setup('1.20.0');
+  await check.check();
+  await check.press();
+  const restarted = make();
+  restarted.start();
+  restarted.dispose();
+  assert.equal(restarted.status(), undefined, 'still 1.19.1 after installing 1.20.0');
+  advance(UPDATE_EVERY_MS);
+  assert.equal(await restarted.check(), false);
+  const newer = setup('1.21.0', { tried: '1.20.0', available: '1.20.0' });
+  assert.equal(await newer.check.check(), true);
+  assert.equal(newer.check.status()?.version, '1.21.0');
+});
+
+test('a failed update warns, reports it, and leaves the button to try again', async () => {
+  const { check, answers } = setup();
+  await check.check();
   ui.installFails = true;
-  ui.answers.push('Update');
-  await failed.check.check();
-  assert.deepEqual(failed.answers, ['failed']);
+  await check.press();
+  assert.deepEqual(answers, ['failed']);
   assert.match(ui.warnings[0], /Extensions view/);
+  assert.equal(check.status()?.state, 'available');
+  ui.installFails = false;
+  await check.press();
+  assert.equal(check.status()?.state, 'ready');
 });
 
 test('a store that cannot be reached shows nothing', async () => {
-  const { check } = setup(undefined);
-  // `undefined` selects the default above, so this store answers with nothing another way.
+  const { check } = setup();
   (check as unknown as { latest: () => Promise<undefined> }).latest = async () => undefined;
   assert.equal(await check.check(), false);
-  assert.deepEqual(ui.messages, []);
+  assert.equal(check.status(), undefined);
 });

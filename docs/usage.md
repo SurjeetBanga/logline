@@ -350,7 +350,7 @@ Choose an item to run its fix, or **Copy status** for a bug report.
 
 ## Updates
 
-Your editor updates Logline by itself unless you turned that off. With `extensions.autoUpdate` off, and `extensions.autoCheckUpdates` on, Logline checks for a new version at most once a day and tells you once about each one. **Update** installs it, then offers to reload the window. It checks the store your editor installs from, sending only the extension's name. See [PRIVACY.md](../PRIVACY.md#update-checks).
+Your editor updates Logline by itself unless you turned that off. With `extensions.autoUpdate` off, and `extensions.autoCheckUpdates` on, Logline checks for a new version at most once a day, and an **Update** button appears at the top of the Logs panel while one is out. Pressing it installs the update, and the button then becomes **Reload**. It checks the store your editor installs from, sending only the extension's name. See [PRIVACY.md](../PRIVACY.md#update-checks).
 
 ## Usage data
 

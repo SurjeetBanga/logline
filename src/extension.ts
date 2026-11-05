@@ -74,9 +74,12 @@ export function activate(context: vscode.ExtensionContext): { provider: LogsProv
     (answer) => usage?.record('prompt_answered', { prompt: 'feedback', answer }),
   );
   feedback.start();
-  const update = new UpdateCheck(context.globalState, packageJSON?.version ?? '', (answer) =>
-    usage?.record('prompt_answered', { prompt: 'update', answer }),
-  );
+  const update = (logs.updateCheck = new UpdateCheck(
+    context.globalState,
+    packageJSON?.version ?? '',
+    () => logs.notifications.send({ type: 'update' }),
+    (answer) => usage?.record('prompt_answered', { prompt: 'update', answer }),
+  ));
   // A development host runs what is being worked on, whatever the store has.
   if (context.extensionMode === (vscode.ExtensionMode?.Production ?? 1)) update.start();
   context.subscriptions.push(rating, feedback, update);
