@@ -8,22 +8,23 @@ const ui = {
   commands: [] as string[],
   installFails: false,
 };
-const { UpdateCheck, UPDATE_EVERY_MS, isNewer, storeVersion, wantsUpdateNotice } = withVscode(
-  {
-    env: { appName: 'Visual Studio Code' },
-    workspace: { getConfiguration: () => ({ get: (key: string) => ui.settings[key] }) },
-    window: {
-      showWarningMessage: (message: string) => ui.warnings.push(message),
-    },
-    commands: {
-      executeCommand: async (command: string) => {
-        ui.commands.push(command);
-        if (ui.installFails && command.includes('installExtension')) throw new Error('offline');
+const { UpdateCheck, UPDATE_DELAY_MS, UPDATE_EVERY_MS, UPDATE_POLL_MS, isNewer, storeVersion, wantsUpdateNotice } =
+  withVscode(
+    {
+      env: { appName: 'Visual Studio Code' },
+      workspace: { getConfiguration: () => ({ get: (key: string) => ui.settings[key] }) },
+      window: {
+        showWarningMessage: (message: string) => ui.warnings.push(message),
+      },
+      commands: {
+        executeCommand: async (command: string) => {
+          ui.commands.push(command);
+          if (ui.installFails && command.includes('installExtension')) throw new Error('offline');
+        },
       },
     },
-  },
-  () => require('./update-check') as typeof import('./update-check'),
-);
+    () => require('./update-check') as typeof import('./update-check'),
+  );
 
 function setup(latest: string | undefined = '1.20.0', initial: Record<string, unknown> = {}) {
   Object.assign(ui, {
@@ -174,4 +175,27 @@ test('a store that cannot be reached shows nothing', async () => {
   (check as unknown as { latest: () => Promise<undefined> }).latest = async () => undefined;
   assert.equal(await check.check(), false);
   assert.equal(check.status(), undefined);
+});
+
+test('an open window keeps checking, and a store that does not answer does not use up the day', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'setInterval'] });
+  const { check, asked, advance } = setup();
+  const latest = (check as unknown as { latest: () => Promise<string | undefined> }).latest;
+  (check as unknown as { latest: () => Promise<undefined> }).latest = async () => undefined;
+  assert.equal(await check.check(), false);
+  (check as unknown as { latest: typeof latest }).latest = latest;
+  assert.equal(await check.check(), true, 'asks again after no answer');
+  assert.equal(asked(), 1);
+  check.start();
+  t.mock.timers.tick(UPDATE_DELAY_MS);
+  await Promise.resolve();
+  advance(UPDATE_EVERY_MS);
+  t.mock.timers.tick(UPDATE_POLL_MS);
+  await new Promise(setImmediate);
+  assert.equal(asked(), 2, 'a window left open asks once a day has passed');
+  check.dispose();
+  advance(UPDATE_EVERY_MS);
+  t.mock.timers.tick(UPDATE_POLL_MS);
+  await new Promise(setImmediate);
+  assert.equal(asked(), 2, 'not after it is closed');
 });

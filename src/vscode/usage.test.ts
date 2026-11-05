@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
@@ -674,6 +674,7 @@ test('windows starting together on a new install share one id and count one inst
   assert.ok(!second.events().includes('installed'));
   assert.ok(second.events().includes('activated'), 'the other window still counts as started');
   assert.equal(second.globalState.get('logline.usage.state'), undefined, 'state is left to the window that won');
+  assert.deepEqual(readdirSync(storage), ['usage-id'], 'the id appears whole, with nothing left beside it');
   first.usage.dispose();
   second.usage.dispose();
 });

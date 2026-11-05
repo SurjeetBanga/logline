@@ -143,7 +143,7 @@ export function shellKind(shellPath: string | undefined, platform: NodeJS.Platfo
   if (platform !== 'win32') return 'posix';
   const name = (shellPath ?? '').split(/[\\/]/).pop()!.toLowerCase();
   if (/^cmd(\.exe)?$/.test(name)) return 'cmd';
-  if (/^(bash|sh|zsh|fish)(\.exe)?$/.test(name)) return 'posix';
+  if (/^(bash|gitbash|sh|zsh|fish|wsl)(\.exe)?$/.test(name)) return 'posix';
   return 'powershell';
 }
 

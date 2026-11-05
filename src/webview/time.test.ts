@@ -8,3 +8,7 @@ test('a clock time loses its fraction, whichever mark the locale uses', () => {
   assert.equal(withoutSeconds('12:30:15.123'), '12:30');
   assert.equal(withoutSeconds('12:30:15,123'), '12:30');
 });
+
+test('times that separate their parts with a dot lose their seconds too', () => {
+  assert.equal(withoutSeconds('12.34.56,789'), '12.34');
+});

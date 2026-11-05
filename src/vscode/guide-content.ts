@@ -17,6 +17,27 @@ export interface GuideRelease {
 
 export const GUIDE_RELEASES: GuideRelease[] = [
   {
+    version: '1.20.0',
+    date: '2026-11-05',
+    highlights: [
+      {
+        title: 'The welcome is back',
+        text: 'New installs see the first-run welcome again, with its tour and quick starts, and installing Logline opens the Logs panel once so it is seen.',
+        section: 'capture',
+      },
+      {
+        title: 'Update from the Logs panel',
+        text: 'If your editor does not update extensions automatically, an Update button appears at the top of the Logs panel when a new version is out. It installs the update, then becomes Reload.',
+        section: 'settings',
+      },
+      {
+        title: 'Tighter redaction',
+        text: 'Redaction hides a whole object or array under a sensitive key, and redacted exports keep long IDs exact. Imported files get their levels the way a followed file does.',
+        section: 'settings',
+      },
+    ],
+  },
+  {
     version: '1.19.0',
     date: '2026-11-01',
     highlights: [

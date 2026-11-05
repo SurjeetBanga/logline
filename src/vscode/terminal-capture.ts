@@ -12,6 +12,8 @@ import type { SessionRegistry } from '../capture/session-registry';
 type TerminalLike = Pick<vscode.Terminal, 'name'> & {
   shellIntegration?: vscode.TerminalShellIntegration;
   exitStatus?: { code: number | undefined };
+  state?: { shell?: string };
+  creationOptions?: { shellPath?: string; pty?: unknown };
 };
 type ExecutionLike = Pick<vscode.TerminalShellExecution, 'commandLine' | 'cwd' | 'read'>;
 type CaptureContext = {
@@ -30,7 +32,7 @@ export const INTEGRATION_WAIT_MS = 10_000;
 /** Captures externally owned terminal commands without ever stopping them. */
 export class TerminalCapture {
   /** Told whether a terminal brought up shell integration: without it, its commands cannot be captured. */
-  checked?: (integrated: boolean) => void;
+  checked?: (integrated: boolean, shell: string | undefined) => void;
   private readonly judged = new WeakSet<object>();
   private readonly checks = new Set<ReturnType<typeof setTimeout>>();
   private enabled = false;
@@ -189,10 +191,12 @@ export class TerminalCapture {
     const object = terminal as object;
     if (!this.enabled || this.disposed || this.judged.has(object)) return;
     this.judged.add(object);
+    // An extension's own terminal runs no shell, so it could never have the integration.
+    if (terminal.creationOptions?.pty) return;
     const check = setTimeout(() => {
       this.checks.delete(check);
       if (this.enabled && !this.disposed && !terminal.exitStatus && !this.ignored.has(object))
-        this.checked?.(!!terminal.shellIntegration);
+        this.checked?.(!!terminal.shellIntegration, terminal.state?.shell ?? terminal.creationOptions?.shellPath);
     }, INTEGRATION_WAIT_MS);
     check.unref?.();
     this.checks.add(check);

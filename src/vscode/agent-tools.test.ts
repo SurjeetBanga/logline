@@ -91,7 +91,7 @@ test('agent tools register all actions, format bounded results, and translate va
 test('each tool call is counted by tool, route, client, and outcome, never by what it asked or returned', async () => {
   registrations.clear();
   const calls: Record<string, unknown>[] = [];
-  const usage = { agentTool: (call: Record<string, unknown>) => calls.push(call) } as any;
+  const usage = { enabled: true, agentTool: (call: Record<string, unknown>) => calls.push(call) } as any;
   const access = {
     status: () => ({ scope: 'all', sources: [] }),
     search: () => ({ events: [{ id: 1, message: 'secret order 42' }], matched: 1 }),
@@ -128,10 +128,18 @@ test('each tool call is counted by tool, route, client, and outcome, never by wh
 
 test('a tool call says how many values were redacted from what the agent received', async () => {
   const calls: Record<string, unknown>[] = [];
-  const usage = { agentTool: (call: Record<string, unknown>) => calls.push(call) } as any;
+  const usage = { enabled: true, agentTool: (call: Record<string, unknown>) => calls.push(call) } as any;
   const access = {
     search: () => ({ events: [{ id: 1, message: 'token [REDACTED] and [REDACTED]' }], matched: 1 }),
   } as any;
   await runAgentTool(access, 'logline_search_logs', { shareId: 'share' }, undefined, { usage, client: 'claude-code' });
   assert.equal(calls[0].redactions, 2);
+});
+
+test('a reply is not read for counting while usage counts are off', async () => {
+  const calls: unknown[] = [];
+  const usage = { enabled: false, agentTool: (call: unknown) => calls.push(call) } as any;
+  const access = { search: () => ({ events: [], matched: 0 }) } as any;
+  await runAgentTool(access, 'logline_search_logs', { shareId: 'share' }, undefined, { usage });
+  assert.deepEqual(calls, []);
 });

@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { linkSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { request } from 'node:https';
 import * as os from 'node:os';
 import { join } from 'node:path';
@@ -281,18 +281,27 @@ export class Usage implements vscode.Disposable {
 
   /**
    * Windows open during an install start together, before they see each other's
-   * stored id. Creating the file is atomic, so one wins and the rest use its id
-   * rather than each counting an install.
+   * stored id. Linking a finished file into place is atomic, so one wins and the
+   * rest read its whole id rather than each counting an install.
    */
   private claimId(candidate: string): { id: string; first: boolean } {
     const file = this.idFile;
     if (!file) return { id: candidate, first: true };
+    const finished = `${file}.${candidate}`;
     try {
       mkdirSync(join(file, '..'), { recursive: true });
-      writeFileSync(file, candidate, { flag: 'wx' });
+      writeFileSync(finished, candidate);
+      linkSync(finished, file);
       return { id: candidate, first: true };
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') return { id: candidate, first: true };
+      if ((error as NodeJS.ErrnoException).code !== 'EEXIST' && this.createdId(file, candidate))
+        return { id: candidate, first: true };
+    } finally {
+      try {
+        rmSync(finished, { force: true });
+      } catch {
+        /* a stray file does no harm */
+      }
     }
     try {
       const claimed = readFileSync(file, 'utf8').trim();
@@ -301,6 +310,16 @@ export class Usage implements vscode.Disposable {
       /* unreadable: this window keeps its own id */
     }
     return { id: candidate, first: true };
+  }
+
+  /** For a disk without hard links, where creating the file still lets only one window win. False if another did. */
+  private createdId(file: string, candidate: string): boolean {
+    try {
+      writeFileSync(file, candidate, { flag: 'wx' });
+      return true;
+    } catch (error) {
+      return (error as NodeJS.ErrnoException).code !== 'EEXIST';
+    }
   }
 
   private get debug(): boolean {

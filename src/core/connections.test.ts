@@ -152,6 +152,11 @@ test('MySQL and MongoDB connections are kept, IAM sign-in turns on TLS, and each
   assert.equal(isRdsHost('db.example.com'), false);
   assert.equal(rdsRegion('billing.cluster-ro-c9.eu-central-1.rds.amazonaws.com'), 'eu-central-1');
   assert.equal(mongoUrl('https://example.com'), undefined);
+  // Azure Cosmos DB's own URLs end this way, and a split password still does not pass.
+  const cosmos = 'mongodb://acct.mongo.cosmos.azure.com:10255/app?ssl=true&maxIdleTimeMS=120000&appName=@acct@';
+  assert.equal(mongoUrl(cosmos)?.database, 'app');
+  assert.equal(mongoUrl('mongodb://reader:pa?ss@db/app'), undefined);
+  assert.equal(mongoUrl('mongodb://db/app?authSource=admin&x=a@b'), undefined);
 });
 
 test('a CloudWatch connection needs a region and log groups, keeps up to 10, and reads its region’s API', () => {

@@ -280,3 +280,31 @@ test('the lookahead for prose openers is bounded, however many a line holds', ()
   redactText('secret=[ a '.repeat(350));
   assert.ok(performance.now() - started < 500);
 });
+
+test('an unclosed value is redacted unless a parser message follows the opener', () => {
+  assert.equal(redactText('password=[ hunter2'), 'password=[REDACTED]');
+  assert.equal(redactText('token: { abc123 more'), 'token: [REDACTED]');
+  assert.equal(redactText('secret={ at: value'), 'secret=[REDACTED]');
+  assert.equal(
+    redactText('SyntaxError: Unexpected token: [ at line 3, column 7 in module foo\n  at x'),
+    'SyntaxError: Unexpected token: [REDACTED] at line 3, column 7 in module foo\n  at x',
+  );
+});
+
+test('a closer of the wrong kind does not end a sensitive value', () => {
+  assert.equal(redactText('secret=[a}, leaked] next=1'), 'secret=[REDACTED] next=1');
+});
+
+test('redacted exports keep long decimals that parse to a short number', () => {
+  const event = (raw: string) => redactEvent({ id: 1, message: 'x', raw } as never).raw;
+  assert.equal(
+    event('{"v":1.00000000000000000001,"secret":"x"}'),
+    '{"v":1.00000000000000000001,"secret":"[REDACTED]"}',
+  );
+  assert.equal(event('{"v":0.30000000000000000001}'), '{"v":0.30000000000000000001}');
+  assert.equal(event('{"v":0.30000000000000004}'), '{"v":0.30000000000000004}');
+  assert.equal(
+    event('{"t":"0000000000000000000000000001","a\\"b":12345678.123456789}'),
+    '{"t":"0000000000000000000000000001","a\\"b":12345678.123456789}',
+  );
+});
