@@ -4,6 +4,7 @@ import type { ConnectionView, Snapshot } from '../../protocol/messages';
 import type { Elements } from '../dom';
 import type { EventScope } from '../event-scope';
 import type { ViewerState } from '../state';
+import { timeZoneOption } from '../time';
 import type { WebviewApi } from '../types';
 
 type Server = Snapshot['servers'][number];
@@ -347,13 +348,7 @@ export function createSourceRail(
     for (const session of sessions) {
       const wrapper = document.createElement('div');
       wrapper.className = 'run-option-row';
-      const started = session.startedAt
-        ? new Date(session.startedAt).toLocaleTimeString([], {
-            hour: 'numeric',
-            minute: '2-digit',
-            ...(byTime ? { second: '2-digit' } : {}),
-          })
-        : '';
+      const started = session.startedAt ? startTime(session.startedAt, byTime) : '';
       const stateText = session.status === 'running' ? 'running' : session.exitReason || session.status;
       // A run named by what it fetched or imported has a long name, so its time and status go on a line of their own.
       const button = byTime
@@ -499,8 +494,23 @@ export function createSourceRail(
     if (focusedSource !== undefined || focusedRun !== undefined) focus?.focus();
   }
 
+  /** When a run started, in the zone the table shows; a zone the runtime does not know falls back to the machine's. */
+  function startTime(ms: number, seconds: boolean): string {
+    const options: Intl.DateTimeFormatOptions = {
+      hour: 'numeric',
+      minute: '2-digit',
+      ...(seconds ? { second: '2-digit' } : {}),
+    };
+    try {
+      return new Date(ms).toLocaleTimeString([], { ...options, ...timeZoneOption(state.displayTimezone) });
+    } catch {
+      return new Date(ms).toLocaleTimeString([], options);
+    }
+  }
+
   function key(): string {
     return JSON.stringify([
+      state.displayTimezone,
       state.selectedServer,
       state.selectedSession,
       servers.map((server) => [

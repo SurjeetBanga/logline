@@ -4297,8 +4297,11 @@ test('a metric query is charted, and a window dragged across it shows the logs f
   svg.listeners.get('pointermove')!({ clientX: 70 });
   assert.equal(tooltip.hidden, false);
   assert.match(tooltip.textContent, /env:prod: /);
-  // Dragging selects a window.
-  svg.listeners.get('pointerdown')!({ clientX: 20 });
+  // Dragging selects a window, and the chart keeps the pointer so a release past its edge ends the drag.
+  const captured: number[] = [];
+  Object.assign(svg, { setPointerCapture: (id: number) => captured.push(id) });
+  svg.listeners.get('pointerdown')!({ clientX: 20, pointerId: 7 });
+  assert.deepEqual(captured, [7]);
   svg.listeners.get('pointermove')!({ clientX: 60 });
   svg.listeners.get('pointerup')!({ clientX: 60 });
   assert.equal(get('metricSelection').hidden, false);
@@ -4604,4 +4607,121 @@ test('Suggest a feature and Vote on what’s next are a dialog in the panel that
   assert.match(get('feedbackStatus').textContent, /couldn't send it/);
   assert.equal(get('feedbackSend').textContent, 'Open GitHub issue');
   assert.equal(again.checked, true);
+});
+
+test('a field named like an object property stays empty on events without it', () => {
+  const { get, receive } = viewer();
+  receive({
+    ...railSnapshot,
+    generation: 1,
+    events: [
+      { id: 1, level: 'info', message: 'with', fields: { constructor: 'kept' } },
+      { id: 2, level: 'info', message: 'without', fields: {} },
+    ],
+    columns: ['constructor'],
+    columnFields: ['constructor'],
+    matched: 2,
+  });
+  const text = (id: number) =>
+    get('logs')
+      .querySelectorAll('.event-row')
+      .find((row) => row.dataset.id === String(id))!
+      .children.find((cell) => cell.dataset.column === 'field:constructor')!.textContent;
+  assert.equal(text(1), 'kept');
+  assert.equal(text(2), '');
+});
+
+test('run times in the rail follow the display time zone, and an unknown zone falls back', () => {
+  const { get, receive } = viewer();
+  const startedAt = Date.UTC(2026, 10, 4, 12, 30);
+  const clock = (timeZone?: string) =>
+    new Date(startedAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', timeZone });
+  const show = (timezone: string) =>
+    receive({
+      ...railSnapshot,
+      generation: 2,
+      timezone,
+      sessions: railSnapshot.sessions.map((session) => ({ ...session, startedAt })),
+    });
+  show('Asia/Tokyo');
+  rail(get).select('api')!.listeners.get('click')!({});
+  show('Asia/Tokyo');
+  const text = () => rail(get).runs()[1].querySelector('.rail-meta')!.textContent;
+  assert.ok(text().includes(clock('Asia/Tokyo')), text());
+  show('America/New_York');
+  assert.ok(text().includes(clock('America/New_York')), text());
+  show('Not/AZone');
+  assert.ok(text().includes(clock()), text());
+});
+
+test('disposing the viewer stops a pending Metrics refresh', () => {
+  const { get, app, receive, timers } = viewer();
+  receive({ ...railSnapshot, generation: 2, metrics: { series: 1, revision: 1 } });
+  get('metrics').listeners.get('click')!();
+  receive({ type: 'metrics', metrics: [] });
+  const earlier = new Set(timers.keys());
+  receive({ ...railSnapshot, generation: 3, metrics: { series: 1, revision: 2 } });
+  const refresh = [...timers.keys()].filter((id) => !earlier.has(id));
+  assert.ok(refresh.length, 'a changed revision schedules a refresh');
+  app.dispose();
+  assert.deepEqual(
+    refresh.filter((id) => timers.has(id)),
+    [],
+  );
+});
+
+test('Copy filtered results follows the source and run chosen in the rail', () => {
+  const { get, receive } = viewer({ server: '', query: '', levels: undefined });
+  receive({ ...railSnapshot });
+  assert.equal(get('copyResults').hidden, true);
+  rail(get).select('api')!.listeners.get('click')!({});
+  assert.equal(get('copyResults').hidden, false);
+  rail(get).select('')!.listeners.get('click')!({});
+  assert.equal(get('copyResults').hidden, true);
+});
+
+test('choosing a connection in the Metrics rail updates the query bar for it', () => {
+  const { get, receive } = viewer({ server: '' });
+  const connection = { mapped: true, watching: [], tailing: false };
+  receive({
+    ...railSnapshot,
+    connections: [
+      { ...connection, id: 'prod', sourceId: 'conn:prod', label: 'Datadog', type: 'datadog', sql: false },
+      { ...connection, id: 'app', sourceId: 'conn:app', label: 'SQLite', type: 'sqlite', sql: true },
+    ],
+  });
+  get('metrics').listeners.get('click')!();
+  receive({ type: 'metrics', metrics: [] });
+  const placeholder = () => (get('metricInput') as unknown as { placeholder: string }).placeholder;
+  assert.match(placeholder(), /^avg:/);
+  get('tabRailList')
+    .querySelectorAll('.rail-select')
+    .find((row) => row.dataset.railKey === 'connection:app')!
+    .listeners.get('click')!({});
+  assert.equal(get('metricConnection').value, 'app');
+  assert.match(placeholder(), /^SELECT/);
+});
+
+test('a metric keeps its size when it rounds to a round number, and a tiny one its exponent', () => {
+  const { get, receive } = viewer();
+  receive({ ...railSnapshot, metrics: { series: 1, revision: 1 } });
+  get('metrics').listeners.get('click')!();
+  const series = (latest: number) => ({
+    key: String(latest),
+    name: 'value',
+    service: 'api',
+    attributes: [],
+    kind: 'gauge',
+    measure: 'value',
+    points: [],
+    latest,
+  });
+  const shown = [99.96, -99.97, 9.999, 2e-10, 3.2e-20, 1.2, 0.5, 0.00001, 42];
+  receive({ type: 'metrics', metrics: shown.map(series) });
+  assert.deepEqual(
+    get('metricsCards')
+      .querySelectorAll('.metric-latest')
+      .map((value) => value.textContent),
+    ['100', '-100', '10', '2e-10', '3.2e-20', '1.2', '0.5', '0.00001', '42'],
+  );
 });

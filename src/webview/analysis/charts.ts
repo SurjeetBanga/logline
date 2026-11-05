@@ -2,6 +2,7 @@ import type { AnalysisResult, ErrorGroup, FieldValues, LogPattern } from '../../
 import type { Elements } from '../dom';
 import type { EventScope } from '../event-scope';
 import type { ViewerState } from '../state';
+import { timeZoneOption } from '../time';
 
 export interface AnalysisActions {
   /** Narrow the current search by a term, such as a time range or a field value. */
@@ -45,10 +46,13 @@ export function createAnalysis(elements: Elements, state: ViewerState, actions?:
     const key = `${state.displayTimezone ?? 'local'}:${spanMs !== undefined && spanMs < 3 * 60 * 1000 ? 'seconds' : 'minutes'}`;
     if (key === formatterKey) return cachedFormatter;
     formatterKey = key;
-    const options: Intl.DateTimeFormatOptions = { hour: '2-digit', minute: '2-digit', hour12: false };
+    const options: Intl.DateTimeFormatOptions = {
+      hour: '2-digit',
+      minute: '2-digit',
+      hourCycle: 'h23',
+      ...timeZoneOption(state.displayTimezone),
+    };
     if (spanMs !== undefined && spanMs < 3 * 60 * 1000) options.second = '2-digit';
-    if (state.displayTimezone === 'utc') options.timeZone = 'UTC';
-    else if (state.displayTimezone && state.displayTimezone !== 'local') options.timeZone = state.displayTimezone;
     try {
       cachedFormatter = new Intl.DateTimeFormat(undefined, options);
     } catch {

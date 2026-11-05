@@ -62,3 +62,13 @@ test('a query typed in a store’s own syntax is kept per kind of connection, an
   const both = new ViewerState({ datadogQuery: 'old', native: { datadog: { query: 'new' } } });
   assert.equal(both.nativeOf('datadog').query, 'new');
 });
+
+test('hiding only Unclassified survives a reload, while a pre-1.8 "all levels" preference still gains it', () => {
+  const six = ['trace', 'debug', 'info', 'warn', 'error', 'fatal'];
+  const state = new ViewerState();
+  state.checkedLevels.delete('unclassified');
+  assert.deepEqual([...new ViewerState(state.persist('')).checkedLevels], six);
+  assert.equal(new ViewerState({ levels: six }).checkedLevels.has('unclassified'), true);
+  state.checkedLevels.delete('trace');
+  assert.equal(state.persist('').unclassifiedHidden, undefined);
+});

@@ -184,10 +184,7 @@ export function createViewer(api: WebviewApi) {
     reveal: () => views.show('metrics'),
     visible: () => views.active() === 'metrics',
     rail: (title, items) => tabRail.set('metrics', title, items),
-    queryConnection: (id) => {
-      elements.metricConnection.value = id;
-      elements.metricInput.focus();
-    },
+    queryConnection: (id) => metricQuery.choose(id),
   });
   const aiCalls = createAiCalls(elements, api, scope, {
     showTrace: (traceId) => traceView.show(traceId),
@@ -1290,6 +1287,7 @@ export function createViewer(api: WebviewApi) {
     visibleSessions = sessionsFor(state.selectedServer);
     rail.selectionChanged(visibleSessions);
     connectionBar.render();
+    updateCopyResultsControl();
   }
 
   function selectSource(id: string, run = ''): void {
@@ -1303,6 +1301,7 @@ export function createViewer(api: WebviewApi) {
     saveState();
     rail.selectionChanged(visibleSessions);
     connectionBar.render();
+    updateCopyResultsControl();
     requestInteraction();
   }
 
@@ -1313,6 +1312,7 @@ export function createViewer(api: WebviewApi) {
     state.filterChanged();
     saveState();
     rail.selectionChanged();
+    updateCopyResultsControl();
     requestInteraction();
   }
 }

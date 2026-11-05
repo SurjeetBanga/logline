@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { mkdtempSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { createServer, type AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
@@ -566,4 +567,28 @@ test('overlapping starts share one listener and a stop during start leaves nothi
   await starting;
   assert.equal(bridge.running, false);
   assert.deepEqual(readdirSync(directory), []);
+});
+
+test('callWindow reads a reply split across chunks, ignoring anything after its newline', async () => {
+  const reply = Buffer.from(`${JSON.stringify({ result: { text: 'café 🚀'.repeat(50) } })}\n{"ignored":true}\n`);
+  const server = createServer((socket) => {
+    // The client hangs up at the newline, while the rest of the reply is still being written.
+    socket.on('error', () => undefined);
+    socket.once('data', async () => {
+      for (let start = 0; start < reply.length && !socket.destroyed; start += 7) {
+        socket.write(reply.subarray(start, start + 7));
+        await new Promise((resolve) => setImmediate(resolve));
+      }
+    });
+  });
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const { port } = server.address() as AddressInfo;
+  const window = { port, token: 'a'.repeat(64) } as BridgeWindow;
+  try {
+    assert.deepEqual(await callWindow(window, 'logline_search_logs', {}, undefined), {
+      result: { text: 'café 🚀'.repeat(50) },
+    });
+  } finally {
+    server.close();
+  }
 });

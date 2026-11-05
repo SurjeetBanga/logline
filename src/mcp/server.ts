@@ -147,11 +147,13 @@ export function callWindow(
     socket.setEncoding('utf8');
     socket.on('connect', () => socket.write(`${JSON.stringify({ token: window.token, tool, input, client })}\n`));
     socket.on('data', (chunk) => {
+      // Only the new chunk can hold the newline; searching `data` would rescan the whole reply each time.
+      const newline = chunk.indexOf('\n');
+      const received = data.length;
       data += chunk;
-      const end = data.indexOf('\n');
-      if (end < 0) return;
+      if (newline < 0) return;
       try {
-        finish(JSON.parse(data.slice(0, end)) as BridgeResponse);
+        finish(JSON.parse(data.slice(0, received + newline)) as BridgeResponse);
       } catch {
         finish({ error: 'The Logline window sent an unreadable reply.' });
       }

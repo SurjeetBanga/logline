@@ -10,6 +10,7 @@ import {
   normalizeMapping,
   readDraft,
   sampleText,
+  withoutPassword,
   suggestedLabel,
   suggestsIam,
   type FormDraft,
@@ -512,4 +513,21 @@ test('a Cloud Logging draft needs a project id, and keeps the service field and 
     project: 'shop-prod-1234',
     filter: 'severity>=WARNING',
   });
+});
+
+test('a MongoDB password with URL characters is never saved in the URL', () => {
+  for (const secret of ['p/ss', 'p?ss', 'p/x?y']) {
+    const value = `mongodb://dev:${secret}@db.local/orders`;
+    const draft = { ...emptyDraft('mongodb'), url: applyUrl(emptyDraft('mongodb'), value)?.url ?? value };
+    assert.equal(readDraft(draft).connection, undefined, secret);
+    assert.ok(readDraft(draft).errors.url, secret);
+  }
+});
+
+test('a password holding @ moves out of the URL whole', () => {
+  const secret = ['p', 'ss'].join('@');
+  const mongo = applyUrl(emptyDraft('mongodb'), `mongodb://dev:${secret}@db.local/orders`);
+  assert.equal(mongo?.url, 'mongodb://dev@db.local/orders');
+  assert.equal(mongo?.password, secret);
+  assert.equal(withoutPassword(`postgres://dev:${secret}@db.local:5432/orders`), 'postgres://dev@db.local:5432/orders');
 });

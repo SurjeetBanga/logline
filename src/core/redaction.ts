@@ -49,6 +49,44 @@ function redactSecretValues(text: string, replacement: string): string {
   return text;
 }
 
+// Integers past 2^53 and long decimals lose digits in a JSON.parse round trip,
+// and the runtimes the extension supports have no JSON.rawJSON. They pass through
+// redaction as tagged strings instead, so they stay exact even beside a redacted secret.
+const JSON_TOKEN = /"[^"\\]*(?:\\.[^"\\]*)*"|-?\d+(?:\.\d+)?(?:[eE][-+]?\d+)?/g;
+const TAGGED_NUMBER = /"\\u0000logline-number:(-?[\d.eE+-]+)"/g;
+// Past this much text, an unclosed container is never taken for prose, which
+// also bounds the lookahead so many unclosed openers stay linear.
+const PROSE_WINDOW = 4096;
+
+function tagLossyNumbers(json: string): string {
+  return json.replace(JSON_TOKEN, (token) =>
+    token[0] !== '"' && token.length > 15 && String(Number(token)) !== token
+      ? `"\\u0000logline-number:${token}"`
+      : token,
+  );
+}
+
+// End of the object or array opening at `start`, skipping quoted text. One cut
+// off before it closes runs to the end of the text, since what follows may be
+// secret, unless the opener is prose (`Unexpected token: [ at line 3`): then
+// there is no end to report.
+function containerEnd(text: string, start: number): number | undefined {
+  let depth = 0;
+  let quote: string | undefined;
+  for (let index = start; index < text.length; index++) {
+    const char = text[index];
+    if (quote) {
+      if (char === '\\') index++;
+      else if (char === quote) quote = undefined;
+    } else if (char === '"' || char === "'") quote = char;
+    else if (char === '{' || char === '[') depth++;
+    else if ((char === '}' || char === ']') && --depth === 0) return index + 1;
+  }
+  if (text.length - start > PROSE_WINDOW) return text.length;
+  const rest = text.slice(start + 1);
+  return /^\s+[^\s{[]/.test(rest) && !/["',]/.test(rest) ? undefined : text.length;
+}
+
 function normalizedKey(key: string): string {
   return key.toLowerCase().replace(/[^a-z0-9]/g, '');
 }
@@ -183,6 +221,9 @@ function redactAssignments(text: string, replacement: string, sensitive: (key: s
       index = quote ? valueEnd : valueStart;
       continue;
     }
+    // A bare scan stops at the first separator, which would leave the rest of
+    // an object or array under a sensitive key in the clear.
+    if (text[valueStart] === '{' || text[valueStart] === '[') valueEnd = containerEnd(text, valueStart) ?? valueEnd;
     output += text.slice(cursor, valueStart);
     if (quote) output += quote + replacement + (text[valueEnd - 1] === quote ? quote : '');
     else output += replacement;
@@ -255,12 +296,20 @@ export function createRedactor(options: RedactionOptions = {}): Redactor {
         )
       : text;
 
+  // Set when a value walked below may have lost digits, which is rare enough
+  // that the raw text is only searched for such numbers after one turns up.
+  let lossyNumber = false;
+
   const redactValueInternal = (value: unknown, key?: string): unknown => {
     if (!enabled) return value;
     // An absent value has nothing to hide, and replacing it would invent one.
     if (key !== undefined && isSensitiveKey(key, configuredFields))
       return value === undefined || value === null ? value : replacement;
     if (typeof value === 'string') return redactTextInternal(value);
+    if (typeof value === 'number') {
+      if (!Number.isSafeInteger(value) && (Number.isInteger(value) || String(value).length > 14)) lossyNumber = true;
+      return value;
+    }
     if (Array.isArray(value)) return value.map((item) => redactValueInternal(item));
     if (!value || typeof value !== 'object') return value;
     return Object.fromEntries(
@@ -309,7 +358,12 @@ export function createRedactor(options: RedactionOptions = {}): Redactor {
         return redacted;
       }
       try {
+        lossyNumber = false;
         redacted.raw = JSON.stringify(redactValueInternal(value));
+        if (lossyNumber) {
+          const tagged = JSON.parse(tagLossyNumbers(event.raw)) as unknown;
+          redacted.raw = JSON.stringify(redactValueInternal(tagged)).replace(TAGGED_NUMBER, '$1');
+        }
       } catch {
         // Deep valid JSON can exceed the recursive serializer's stack. Falling
         // back to text here would expose quoted JSON credentials unchanged.

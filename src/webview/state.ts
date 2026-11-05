@@ -6,6 +6,8 @@ export const LEVELS = ['trace', 'debug', 'info', 'warn', 'error', 'fatal', 'uncl
 export interface PersistedState {
   query?: string;
   levels?: string[];
+  /** Says that six levels without Unclassified were chosen, rather than saved before it existed. */
+  unclassifiedHidden?: boolean;
   server?: string;
   session?: string;
   sort?: string;
@@ -103,7 +105,9 @@ export class ViewerState {
     // A pre-1.8 persisted "all levels" preference contained six entries;
     // retain its meaning when Unclassified is added.
     this.checkedLevels = new Set(
-      savedLevels.length === 6 && !savedLevels.includes('unclassified') ? LEVELS : savedLevels,
+      savedLevels.length === 6 && !savedLevels.includes('unclassified') && saved.unclassifiedHidden !== true
+        ? LEVELS
+        : savedLevels,
     );
   }
   currentLevels(): string[] | undefined {
@@ -159,6 +163,7 @@ export class ViewerState {
     return {
       query,
       levels: [...this.checkedLevels],
+      ...(this.checkedLevels.size === 6 && !this.checkedLevels.has('unclassified') ? { unclassifiedHidden: true } : {}),
       server: this.selectedServer,
       ...(this.selectedSession ? { session: this.selectedSession } : {}),
       sort: this.selectedSort,
