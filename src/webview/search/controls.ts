@@ -410,7 +410,16 @@ export function createSearch(
   scope.listen(elements.search, 'focus', () => {
     if (editingIndex === undefined && elements.search.value === appliedQuery) elements.search.value = '';
   });
-  scope.listen(elements.search, 'input', () => setError());
+  scope.listen(elements.search, 'input', (event) => {
+    setError();
+    // Choosing a value from the suggestions, such as `appname:"prod"`, applies it as Enter would; a field name
+    // such as `appname:` stays to be finished.
+    if (
+      (event as InputEvent | undefined)?.inputType === 'insertReplacementText' &&
+      !elements.search.value.trimEnd().endsWith(':')
+    )
+      applyDraft();
+  });
   scope.listen(elements.searchClear, 'click', (event) => {
     event.stopPropagation();
     clear();
@@ -425,6 +434,15 @@ export function createSearch(
     clearAutocomplete,
     query,
     draft: () => elements.search.value,
+    /**
+     * Apply what was typed but not yet entered, as Run and Tail do before they search. False when it is not a
+     * valid filter, which then says why.
+     */
+    applyPending(): boolean {
+      const draft = elements.search.value.trim();
+      if (!draft || (editingIndex === undefined && draft === appliedQuery)) return true;
+      return applyDraft();
+    },
     setQuery,
     appendQuery: (value: string) => setQuery(`${appliedQuery} ${value}`, true),
     clear,

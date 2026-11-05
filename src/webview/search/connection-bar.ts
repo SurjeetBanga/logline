@@ -69,6 +69,8 @@ export function createConnectionBar(
   compare: (baselineServerId: string, baselineSessionId: string) => void,
   /** Replace the filter, such as with a service chosen in the list. */
   setQuery: (query: string) => void,
+  /** Apply a filter typed but not yet entered; false when it is not valid. */
+  applyPending: () => boolean = () => true,
 ) {
   let connections: ConnectionView[] = [];
   let previewKey = '';
@@ -298,6 +300,8 @@ export function createConnectionBar(
   function run(): boolean {
     const connection = selected();
     if (!connection) return false;
+    // A filter typed without pressing Enter is part of what Run searches, rather than silently left out.
+    if (connection.mapped && !applyPending()) return true;
     if (connection.mapped)
       api.postMessage({
         type: 'connectionFetch',
@@ -348,7 +352,7 @@ export function createConnectionBar(
   scope.listen(elements.connectionRun, 'click', () => run());
   scope.listen(elements.connectionTail, 'click', () => {
     const connection = selected();
-    if (connection)
+    if (connection && applyPending())
       api.postMessage({
         type: 'connectionTail',
         connectionId: connection.id,

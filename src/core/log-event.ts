@@ -114,16 +114,17 @@ export function normalizeLevel(level: string | number | undefined, stream: strin
 }
 
 function getMessage(object: JsonObject | undefined, value: unknown, fallback: string): string {
-  // The first of these that is text, a number, or a flag is the message; an object under one of
-  // the names, such as structured `event` data, leaves the next name to be tried.
-  for (const candidate of [
-    object?.message,
-    object?.msg,
-    object?.event,
-    object?.name,
-    readValue(object, 'body.stringValue', 'Body.stringValue', 'body', 'Body'),
-  ])
-    if (candidate === null || isPrimitive(candidate)) return String(candidate);
+  // The first of these that is text, a number, or a flag is the message. A null or an object under
+  // one of the names, such as structured `event` data, leaves the next name to be tried. Checked one
+  // by one, without a list, since this runs for every line.
+  if (object) {
+    if (isPrimitive(object.message)) return String(object.message);
+    if (isPrimitive(object.msg)) return String(object.msg);
+    if (isPrimitive(object.event)) return String(object.event);
+    if (isPrimitive(object.name)) return String(object.name);
+    const body = readValue(object, 'body.stringValue', 'Body.stringValue', 'body', 'Body');
+    if (isPrimitive(body)) return String(body);
+  }
   if (value === undefined || typeof value === 'string') return String(value ?? fallback);
   if (Array.isArray(value)) return `Array (${value.length} items)`;
   // A log without a message, such as one a service wrote as JSON that its store parsed into
@@ -131,60 +132,94 @@ function getMessage(object: JsonObject | undefined, value: unknown, fallback: st
   return (object && summarize(object)) || 'JSON event';
 }
 
-// Fields every event shows in its own column, or that identify rather than describe it.
-const UNSUMMARIZED = new Set([
-  ...IGNORED_FIELDS,
-  'service',
-  'host',
-  'tags',
-  'traceId',
-  'trace_id',
-  'spanId',
-  'span_id',
-  'dd',
-  '@timestamp',
-  'observedTimeUnixNano',
-  'timeUnixNano',
-  'severityText',
-  'severityNumber',
-]);
 const SUMMARY_LENGTH = 512;
+// Fields, in lower case and by their whole dotted path, that every event shows in its own column, that
+// say when or where it was logged, or that identify rather than describe it.
+const UNSUMMARIZED = new Set(
+  [
+    'level',
+    'severity',
+    'log.level',
+    'severityText',
+    'severityNumber',
+    'timestamp',
+    'time',
+    'ts',
+    'datetime',
+    'timeMillis',
+    '@timestamp',
+    'timeUnixNano',
+    'observedTimeUnixNano',
+    'service',
+    'service.name',
+    'host',
+    'hostname',
+    'host.name',
+    'pid',
+    'tags',
+    'traceId',
+    'trace_id',
+    'trace.id',
+    'spanId',
+    'span_id',
+    'span.id',
+    'traceFlags',
+    'flags',
+    'dd',
+    'resource',
+    'scope',
+    'droppedAttributesCount',
+    'contextMap',
+  ].map((name) => name.toLowerCase()),
+);
+// A message name only holds the message when it is text; as an object it is described like any field.
+const MESSAGE_NAMES = new Set(['message', 'msg', 'event', 'name', 'body']);
 
-/** `key=value` for each of a log's fields, nested ones under dotted paths, until the message is long enough. */
+/**
+ * `key=value` for each of a log's fields, nested ones under dotted paths, until the message is long enough.
+ * Runs for each JSON line without a message, so no value is written out past that length.
+ */
 function summarize(object: JsonObject): string {
-  const parts: string[] = [];
-  const state = { length: 0 };
+  const summary = { text: '' };
   for (const key in object) {
-    if (UNSUMMARIZED.has(key) || key.startsWith('datadog.')) continue;
-    if (!summarizeValue(parts, state, key, object[key], 0)) break;
+    const lower = key.toLowerCase();
+    const value = object[key];
+    if (UNSUMMARIZED.has(lower) || lower.startsWith('datadog.')) continue;
+    // A message name with text was the message, and OTLP's typed attribute lists are already fields.
+    if (MESSAGE_NAMES.has(lower) && !isPlainObject(value)) continue;
+    if (lower === 'attributes' && Array.isArray(value)) continue;
+    if (!describe(summary, key, value, 0)) break;
   }
-  return parts.join(' ');
+  return summary.text;
 }
 
-function summarizeValue(
-  parts: string[],
-  state: { length: number },
-  key: string,
-  value: unknown,
-  depth: number,
-): boolean {
-  if (state.length >= SUMMARY_LENGTH) return false;
+/** Add `key=value`, or each of an object's values; false once the summary is long enough. */
+function describe(summary: { text: string }, key: string, value: unknown, depth: number): boolean {
   if (isPlainObject(value) && depth < 4) {
-    for (const child in value)
-      if (!summarizeValue(parts, state, `${key}.${child}`, value[child], depth + 1)) return false;
+    for (const child in value) {
+      const path = `${key}.${child}`;
+      if (UNSUMMARIZED.has(path.toLowerCase())) continue;
+      if (!describe(summary, path, value[child], depth + 1)) return false;
+    }
     return true;
   }
   if (value === undefined) return true;
+  const room = SUMMARY_LENGTH - summary.text.length;
   const text =
     typeof value === 'string'
-      ? /[\s"=]/.test(value) || !value
-        ? JSON.stringify(value)
-        : value
-      : JSON.stringify(value);
-  const part = `${key}=${text}`;
-  parts.push(part);
-  state.length += part.length + 1;
-  return true;
+      ? quoted(value.length > room ? value.slice(0, room) : value)
+      : Array.isArray(value)
+        ? `[${value.length} items]`
+        : isPlainObject(value)
+          ? '{…}'
+          : String(value);
+  summary.text += `${summary.text ? ' ' : ''}${quoted(key)}=${text}`;
+  return summary.text.length < SUMMARY_LENGTH;
+}
+
+/** Text as it is, or quoted when it is empty or holds a space, quote, or `=` that would blur where it ends. */
+function quoted(text: string): string {
+  return !text || /[\s"=]/.test(text) ? JSON.stringify(text) : text;
 }
 
 function getTimestamp(object: JsonObject | undefined, receivedAt: Date): { text: string; ms: number } {

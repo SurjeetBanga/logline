@@ -522,7 +522,7 @@ export class LogsController {
     }
     return true;
   }
-  /** The welcome was answered, or dismissed: it does not show again. */
+  /** The welcome was shown: it does not show again, whether or not it was answered. */
   welcomed(): void {
     void Promise.resolve(this.globalState.update(WELCOME_KEY, true)).catch(() => undefined);
   }

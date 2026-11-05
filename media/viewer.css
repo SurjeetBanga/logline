@@ -1114,6 +1114,14 @@ select {
 .search-editor input:focus {
   outline: 0;
 }
+/* Chromium paints a highlighted suggestion, and a chosen one, as autofill: a white box with grey text in
+   any theme. Keep the editor's own colors. */
+.search-editor input:-webkit-autofill,
+.search-editor input:-webkit-autofill:focus {
+  -webkit-text-fill-color: var(--vscode-input-foreground, #ccc);
+  box-shadow: 0 0 0 1000px var(--vscode-input-background, #333) inset;
+  caret-color: var(--vscode-input-foreground, #ccc);
+}
 .search-editor.has-chips:not(:focus-within) input {
   color: transparent;
 }

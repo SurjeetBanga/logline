@@ -6,8 +6,9 @@ All notable changes to Logline are documented in this file.
 
 ### Fixes
 
-- A JSON log without a message, such as a Datadog log whose service wrote it as JSON, shows its fields in the **Message** column (`job=recon batch.id=3`) instead of `JSON event`. A field such as `event` that holds an object no longer hides a `name` or `body` after it.
-- The first-run welcome shows once, as it says, even when it is left unanswered: switching to another panel tab, such as **Terminal**, and back no longer opens it again.
+- A filter typed in the search box but not yet entered is no longer left out: **Run** and **Tail** on a connection apply it first, and choosing a whole term from the suggestions, such as `appname:"prod"`, applies it as Enter does. A highlighted suggestion no longer turns the search box white.
+- A JSON log without a message, such as a Datadog log whose service wrote it as JSON, shows its fields in the **Message** column (`job=recon batch.id=3`) instead of `JSON event`. A field such as `event` that holds an object no longer hides a `name` or `body` after it, nor does a `message` that is `null`.
+- The first-run welcome shows once, as it says, even when it is left unanswered: switching to another panel tab, such as **Terminal**, and back no longer opens it again, and the panel points to the tour instead.
 
 ## 1.20.0 — 2026-11-05
 
