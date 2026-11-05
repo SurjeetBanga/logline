@@ -278,3 +278,16 @@ test('terminals are not judged while capture is off, and are once it is turned o
   assert.deepEqual(checks, [false]);
   capture.dispose();
 });
+
+test('a terminal is judged by its own shell, and an extension terminal not at all', (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const detected = { state: { shell: 'gitbash' }, creationOptions: { shellPath: 'C:/x/pwsh.exe' } };
+  const created = { creationOptions: { shellPath: 'C:/x/cmd.exe' } };
+  const extension = { creationOptions: { pty: {} } };
+  const { capture } = harness(true, 100000, [detected, created, extension]);
+  const shells: (string | undefined)[] = [];
+  capture.checked = (_integrated, shell) => shells.push(shell);
+  t.mock.timers.tick(10_000);
+  assert.deepEqual(shells, ['gitbash', 'C:/x/cmd.exe']);
+  capture.dispose();
+});

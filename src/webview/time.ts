@@ -14,7 +14,7 @@ export function withoutFraction(time: string): string {
 
 /** A formatted time down to the minute. */
 export function withoutSeconds(time: string): string {
-  return time.replace(/:\d\d[.,]\d+$/, '');
+  return time.replace(/[:.]\d\d[.,]\d+$/, '');
 }
 
 export function createTimestampFormatter(state: ViewerState) {

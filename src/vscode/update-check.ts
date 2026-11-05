@@ -10,6 +10,8 @@ const LIMIT_BYTES = 256 * 1024;
 /** Long enough after a start that the question never interrupts it. */
 export const UPDATE_DELAY_MS = 30_000;
 export const UPDATE_EVERY_MS = 24 * 60 * 60 * 1000;
+/** How often an open window looks at whether a check is due; the store is asked only when one is. */
+export const UPDATE_POLL_MS = 60 * 60 * 1000;
 
 interface UpdateState {
   /** When the store was last asked. */
@@ -109,6 +111,7 @@ const latestFromStore: LatestVersion = async (appName) => {
  */
 export class UpdateCheck implements vscode.Disposable {
   private timer?: ReturnType<typeof setTimeout>;
+  private poll?: ReturnType<typeof setInterval>;
   private shown?: UpdateStatus;
 
   constructor(
@@ -153,7 +156,11 @@ export class UpdateCheck implements vscode.Disposable {
 
   start(): void {
     if (this.wanted) this.offer(this.state.available);
-    this.timer = setTimeout(() => void this.check(), UPDATE_DELAY_MS);
+    this.timer = setTimeout(() => {
+      void this.check();
+      this.poll = setInterval(() => void this.check(), UPDATE_POLL_MS);
+      this.poll.unref?.();
+    }, UPDATE_DELAY_MS);
     this.timer.unref?.();
   }
 
@@ -163,9 +170,11 @@ export class UpdateCheck implements vscode.Disposable {
     const { checked } = this.state;
     const now = this.now();
     if (checked !== undefined && now - checked < UPDATE_EVERY_MS) return false;
-    await this.save({ checked: now });
     const latest = await this.latest(vscode.env.appName);
-    if (!latest || !isNewer(latest, this.current)) return false;
+    // No answer does not use up the day: the next poll asks again.
+    if (!latest) return false;
+    await this.save({ checked: now });
+    if (!isNewer(latest, this.current)) return false;
     await this.save({ available: latest });
     return this.shown?.state === 'available' || this.shown?.state === undefined ? this.offer(latest) : false;
   }
@@ -195,5 +204,6 @@ export class UpdateCheck implements vscode.Disposable {
 
   dispose(): void {
     clearTimeout(this.timer);
+    clearInterval(this.poll);
   }
 }

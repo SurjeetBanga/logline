@@ -50,6 +50,12 @@ function inputOf(options: unknown): ToolInput {
 }
 
 /** Count one tool call: which tool, how it went, and how long it took, never its input or result. */
+function occurrences(text: string, word: string): number {
+  let count = 0;
+  for (let at = text.indexOf(word); at !== -1; at = text.indexOf(word, at + word.length)) count++;
+  return count;
+}
+
 async function counted(
   usage: Usage | undefined,
   tool: string,
@@ -57,7 +63,7 @@ async function counted(
   client: string | undefined,
   run: () => Promise<string>,
 ): Promise<string> {
-  if (!usage) return run();
+  if (!usage?.enabled) return run();
   const started = performance.now();
   const text = await run();
   let result: { error?: unknown; truncated?: unknown } = {};
@@ -76,7 +82,7 @@ async function counted(
     resultSize: Buffer.byteLength(text, 'utf8'),
     truncated: result.truncated === true,
     // What the agent actually received, so a replacement inside a result counts and nothing is re-read.
-    redactions: text.split('[REDACTED]').length - 1,
+    redactions: occurrences(text, '[REDACTED]'),
   });
   return text;
 }

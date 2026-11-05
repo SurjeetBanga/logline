@@ -39,7 +39,7 @@ With usage counts off, or if sending fails, the form offers a GitHub issue inste
 
 ## Update checks
 
-If `extensions.autoUpdate` is off and `extensions.autoCheckUpdates` is on, Logline asks the store your editor installs from (the Visual Studio Marketplace or Open VSX) for its newest version, at most once a day, so it can show an **Update** button in the Logs panel when an update is out. The request names only the extension, and carries no anonymous ID or usage data. The store sees the request as it does your editor's own update checks. With automatic updates on, or update checks off, Logline makes no such request.
+If `extensions.autoUpdate` is off and `extensions.autoCheckUpdates` is on, Logline asks the store your editor installs from (the Visual Studio Marketplace or Open VSX) for its newest version, at most once a day, or hourly while the store does not answer, so it can show an **Update** button in the Logs panel when an update is out. The request names only the extension, and carries no anonymous ID or usage data. The store sees the request as it does your editor's own update checks. With automatic updates on, or update checks off, Logline makes no such request.
 
 ## Where it goes
 

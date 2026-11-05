@@ -429,6 +429,8 @@ test('agents are named for people, and setup commands quote paths for the shell'
   assert.equal(shellKind('/bin/zsh', 'darwin'), 'posix');
   assert.equal(shellKind('C:\\Program Files\\Git\\bin\\bash.exe', 'win32'), 'posix');
   assert.equal(shellKind('C:\\WINDOWS\\System32\\cmd.exe', 'win32'), 'cmd');
+  assert.equal(shellKind('gitbash', 'win32'), 'posix');
+  assert.equal(shellKind('wsl', 'win32'), 'posix');
   assert.equal(shellKind('C:\\Program Files\\PowerShell\\7\\pwsh.exe', 'win32'), 'powershell');
   assert.equal(shellKind('C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe', 'win32'), 'powershell');
   assert.equal(shellKind(undefined, 'win32'), 'powershell');

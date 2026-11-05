@@ -10,7 +10,7 @@
     return time.replace(/[.,]\d+$/, "");
   }
   function withoutSeconds(time) {
-    return time.replace(/:\d\d[.,]\d+$/, "");
+    return time.replace(/[:.]\d\d[.,]\d+$/, "");
   }
   function createTimestampFormatter(state) {
     let cachedFormatter;
@@ -3145,7 +3145,7 @@ Span ${call.spanId}`;
     if (!match) return void 0;
     const [, srv, user, hosts, database, options] = match;
     if (!hosts || /\s/.test(hosts)) return void 0;
-    if (database?.includes("@") || options?.includes("@")) return void 0;
+    if (database?.includes("@") || options?.replace(/(^|&)appName=[^&]*/gi, "").includes("@")) return void 0;
     return {
       srv: Boolean(srv),
       hosts,
@@ -6687,6 +6687,24 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
   var JSON_TOKEN = /"[^"\\]*(?:\\.[^"\\]*)*"|-?\d+(?:\.\d+)?(?:[eE][-+]?\d+)?/g;
   var TAGGED_NUMBER = /"\\u0000logline-number:(-?[\d.eE+-]+)"/g;
   var PROSE_WINDOW = 4096;
+  var PROSE_AFTER_OPENER = /^\s+(?:at|in|on|near|after|before|while|line|position|column|of)\b(?!\s*[:=])/i;
+  function hasLongNumber(json) {
+    let run = 0;
+    let quoted = false;
+    for (let index = 0; index < json.length; index++) {
+      const code = json.charCodeAt(index);
+      if (quoted) {
+        if (code === 92) index++;
+        else if (code === 34) quoted = false;
+      } else if (code === 34) {
+        quoted = true;
+        run = 0;
+      } else if (code >= 48 && code <= 57 || code === 46) {
+        if (++run === 15) return true;
+      } else run = 0;
+    }
+    return false;
+  }
   function tagLossyNumbers(json) {
     return json.replace(
       JSON_TOKEN,
@@ -6694,7 +6712,7 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
     );
   }
   function containerEnd(text2, start) {
-    let depth = 0;
+    const closers = [];
     let quote;
     for (let index = start; index < text2.length; index++) {
       const char = text2[index];
@@ -6702,12 +6720,15 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
         if (char === "\\") index++;
         else if (char === quote) quote = void 0;
       } else if (char === '"' || char === "'") quote = char;
-      else if (char === "{" || char === "[") depth++;
-      else if ((char === "}" || char === "]") && --depth === 0) return index + 1;
+      else if (char === "{") closers.push("}");
+      else if (char === "[") closers.push("]");
+      else if (char === closers[closers.length - 1]) {
+        closers.pop();
+        if (!closers.length) return index + 1;
+      }
     }
     if (text2.length - start > PROSE_WINDOW) return text2.length;
-    const rest = text2.slice(start + 1);
-    return /^\s+[^\s{[]/.test(rest) && !/["',]/.test(rest) ? void 0 : text2.length;
+    return PROSE_AFTER_OPENER.test(text2.slice(start + 1)) ? void 0 : text2.length;
   }
   function normalizedKey(key) {
     return key.toLowerCase().replace(/[^a-z0-9]/g, "");
@@ -6861,16 +6882,11 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
       redactAssignments(text2, replacement, (key) => isSensitiveKey(key, configuredFields)),
       replacement
     ) : text2;
-    let lossyNumber = false;
     const redactValueInternal = (value, key) => {
       if (!enabled) return value;
       if (key !== void 0 && isSensitiveKey(key, configuredFields))
         return value === void 0 || value === null ? value : replacement;
       if (typeof value === "string") return redactTextInternal(value);
-      if (typeof value === "number") {
-        if (!Number.isSafeInteger(value) && (Number.isInteger(value) || String(value).length > 14)) lossyNumber = true;
-        return value;
-      }
       if (Array.isArray(value)) return value.map((item) => redactValueInternal(item));
       if (!value || typeof value !== "object") return value;
       return Object.fromEntries(
@@ -6913,12 +6929,8 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
           return redacted;
         }
         try {
-          lossyNumber = false;
-          redacted.raw = JSON.stringify(redactValueInternal(value));
-          if (lossyNumber) {
-            const tagged = JSON.parse(tagLossyNumbers(event.raw));
-            redacted.raw = JSON.stringify(redactValueInternal(tagged)).replace(TAGGED_NUMBER, "$1");
-          }
+          const tagged = hasLongNumber(event.raw) ? tagLossyNumbers(event.raw) : event.raw;
+          redacted.raw = tagged === event.raw ? JSON.stringify(redactValueInternal(value)) : JSON.stringify(redactValueInternal(JSON.parse(tagged))).replace(TAGGED_NUMBER, "$1");
         } catch {
           redacted.raw = replacement;
         }

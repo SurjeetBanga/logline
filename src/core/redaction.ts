@@ -57,6 +57,29 @@ const TAGGED_NUMBER = /"\\u0000logline-number:(-?[\d.eE+-]+)"/g;
 // Past this much text, an unclosed container is never taken for prose, which
 // also bounds the lookahead so many unclosed openers stay linear.
 const PROSE_WINDOW = 4096;
+// What follows a lone opener in a parser's message; anything else may be the
+// value itself, and a word followed by : or = is a key.
+const PROSE_AFTER_OPENER = /^\s+(?:at|in|on|near|after|before|while|line|position|column|of)\b(?!\s*[:=])/i;
+
+// Only a number this long can lose digits, so JSON without one skips the search.
+// Quoted text is passed over: a zero-padded trace ID is a long run of digits, not a number.
+function hasLongNumber(json: string): boolean {
+  let run = 0;
+  let quoted = false;
+  for (let index = 0; index < json.length; index++) {
+    const code = json.charCodeAt(index);
+    if (quoted) {
+      if (code === 92) index++;
+      else if (code === 34) quoted = false;
+    } else if (code === 34) {
+      quoted = true;
+      run = 0;
+    } else if ((code >= 48 && code <= 57) || code === 46) {
+      if (++run === 15) return true;
+    } else run = 0;
+  }
+  return false;
+}
 
 function tagLossyNumbers(json: string): string {
   return json.replace(JSON_TOKEN, (token) =>
@@ -71,7 +94,7 @@ function tagLossyNumbers(json: string): string {
 // secret, unless the opener is prose (`Unexpected token: [ at line 3`): then
 // there is no end to report.
 function containerEnd(text: string, start: number): number | undefined {
-  let depth = 0;
+  const closers: string[] = [];
   let quote: string | undefined;
   for (let index = start; index < text.length; index++) {
     const char = text[index];
@@ -79,12 +102,15 @@ function containerEnd(text: string, start: number): number | undefined {
       if (char === '\\') index++;
       else if (char === quote) quote = undefined;
     } else if (char === '"' || char === "'") quote = char;
-    else if (char === '{' || char === '[') depth++;
-    else if ((char === '}' || char === ']') && --depth === 0) return index + 1;
+    else if (char === '{') closers.push('}');
+    else if (char === '[') closers.push(']');
+    else if (char === closers[closers.length - 1]) {
+      closers.pop();
+      if (!closers.length) return index + 1;
+    }
   }
   if (text.length - start > PROSE_WINDOW) return text.length;
-  const rest = text.slice(start + 1);
-  return /^\s+[^\s{[]/.test(rest) && !/["',]/.test(rest) ? undefined : text.length;
+  return PROSE_AFTER_OPENER.test(text.slice(start + 1)) ? undefined : text.length;
 }
 
 function normalizedKey(key: string): string {
@@ -296,20 +322,12 @@ export function createRedactor(options: RedactionOptions = {}): Redactor {
         )
       : text;
 
-  // Set when a value walked below may have lost digits, which is rare enough
-  // that the raw text is only searched for such numbers after one turns up.
-  let lossyNumber = false;
-
   const redactValueInternal = (value: unknown, key?: string): unknown => {
     if (!enabled) return value;
     // An absent value has nothing to hide, and replacing it would invent one.
     if (key !== undefined && isSensitiveKey(key, configuredFields))
       return value === undefined || value === null ? value : replacement;
     if (typeof value === 'string') return redactTextInternal(value);
-    if (typeof value === 'number') {
-      if (!Number.isSafeInteger(value) && (Number.isInteger(value) || String(value).length > 14)) lossyNumber = true;
-      return value;
-    }
     if (Array.isArray(value)) return value.map((item) => redactValueInternal(item));
     if (!value || typeof value !== 'object') return value;
     return Object.fromEntries(
@@ -358,12 +376,12 @@ export function createRedactor(options: RedactionOptions = {}): Redactor {
         return redacted;
       }
       try {
-        lossyNumber = false;
-        redacted.raw = JSON.stringify(redactValueInternal(value));
-        if (lossyNumber) {
-          const tagged = JSON.parse(tagLossyNumbers(event.raw)) as unknown;
-          redacted.raw = JSON.stringify(redactValueInternal(tagged)).replace(TAGGED_NUMBER, '$1');
-        }
+        // Parsing can round a number to one that looks exact, so the raw text decides.
+        const tagged = hasLongNumber(event.raw) ? tagLossyNumbers(event.raw) : event.raw;
+        redacted.raw =
+          tagged === event.raw
+            ? JSON.stringify(redactValueInternal(value))
+            : JSON.stringify(redactValueInternal(JSON.parse(tagged))).replace(TAGGED_NUMBER, '$1');
       } catch {
         // Deep valid JSON can exceed the recursive serializer's stack. Falling
         // back to text here would expose quoted JSON credentials unchanged.

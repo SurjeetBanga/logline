@@ -198,7 +198,7 @@ export class LogsController {
       usage && ((area) => usage.record('error', { area, code: area === 'export' ? 'write_failed' : 'read_failed' }));
     this.otel.failed = usage && (() => usage.record('error', { area: 'otlp', code: 'start_failed' }));
     this.terminalCapture.checked =
-      usage && ((integrated) => usage.terminalChecked(shellKind(vscode.env.shell), integrated));
+      usage && ((integrated, shell) => usage.terminalChecked(shellKind(shell ?? vscode.env.shell), integrated));
   }
   /** The panel's Update button, in a real editor. */
   updateCheck?: UpdateCheck;

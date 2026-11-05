@@ -2,7 +2,7 @@
 
 All notable changes to Logline are documented in this file.
 
-## Unreleased
+## 1.20.0 — 2026-11-05
 
 ### Fixes
 
@@ -13,7 +13,7 @@ All notable changes to Logline are documented in this file.
 - A column for a field named like `constructor` or `toString` stays empty on events without that field, instead of showing internal code.
 - Unchecking only **Unclassified** in the level menu is remembered after the panel reloads.
 - Run times in the **Sources** rail follow `logline.timezone`, as the table does.
-- A MongoDB URL whose password holds an unescaped `/` or `?` is refused rather than saved to settings with the password in it, and a password holding `@` moves out of a URL whole. A raw `@` anywhere after the host of a MongoDB URL now needs to be written `%40`.
+- A MongoDB URL whose password holds an unescaped `/` or `?` is refused rather than saved to settings with the password in it, and a password holding `@` moves out of a URL whole. A raw `@` after the host of a MongoDB URL now needs to be written `%40`, except in `appName`, where Azure Cosmos DB's URLs have one.
 - A password pasted into a connection URL a second time leaves the URL field, as it does the first time.
 - Changing the connection type while a test runs no longer lets that test's answer pass for a later test of the new type.
 - Metric values no longer lose their size when shown: `99.96` shows as `100` rather than `1`, and `2e-10` keeps its exponent.
@@ -32,7 +32,7 @@ All notable changes to Logline are documented in this file.
 ### Changes
 
 - Installing Logline opens the Logs panel once, so the welcome is seen. It stays closed on remote hosts, such as a Codespace, where a synced extension installs afresh each time.
-- If your editor does not update extensions automatically, an **Update** button appears at the top of the Logs panel when a new version is out. It installs the update, then becomes **Reload**. It checks at most once a day, and never with automatic updates on or update checks off. See [PRIVACY.md](PRIVACY.md#update-checks).
+- If your editor does not update extensions automatically, an **Update** button appears at the top of the Logs panel when a new version is out. It installs the update, then becomes **Reload**. It checks at most once a day, or hourly while the store does not answer, and never with automatic updates on or update checks off. See [PRIVACY.md](PRIVACY.md#update-checks).
 - Usage counts now include when the Logs panel opens, and opening it counts as activity. They also say which panel actions are used, how many events a search found, whether a terminal has the shell integration capture needs, which welcome option was chosen, how connecting an agent went, how the rating and feedback questions were answered, and more failures, by name and range only. See [PRIVACY.md](PRIVACY.md).
 
 ## 1.19.1 — 2026-11-02
