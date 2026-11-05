@@ -368,3 +368,34 @@ test('the feedback form’s request is sent, and its result goes back to the pan
   await handleMessage(service, send, { type: 'feedbackSend', mode: 'other' });
   assert.equal(asked.length, 1, 'malformed requests are ignored');
 });
+
+test('what someone does in the panel is counted by name, and a welcome choice and panel width reach usage counts', async () => {
+  const actions: string[] = [];
+  const recorded: unknown[][] = [];
+  const widths: number[] = [];
+  const usage = {
+    view() {},
+    findingHelpful() {},
+    record: (...args: unknown[]) => recorded.push(args),
+    panelAction: (action: string) => actions.push(action),
+    panelSize: (width: number) => widths.push(width),
+  };
+  const base = services() as any;
+  const target = { ...(base.services ?? base), usage };
+  await handleMessage(target, () => {}, { type: 'details', id: 1 });
+  await handleMessage(target, () => {}, { type: 'copy', id: 1 });
+  await handleMessage(target, () => {}, { type: 'autocomplete', input: 'le' });
+  await handleMessage(target, () => {}, { type: 'onboardingSeen', choice: 'capture' });
+  await handleMessage(target, () => {}, { type: 'panelSize', width: 640 });
+  assert.deepEqual(actions, ['inspect_event', 'copy_event'], 'typing in the search box is not an action');
+  assert.deepEqual(recorded, [['welcome', { choice: 'capture' }]]);
+  assert.deepEqual(widths, [640]);
+});
+
+test('the Update button reaches the update check', async () => {
+  let pressed = 0;
+  const base = services() as any;
+  const target = { ...(base.services ?? base), installUpdate: async () => void pressed++ };
+  await handleMessage(target, () => {}, { type: 'installUpdate' });
+  assert.equal(pressed, 1);
+});

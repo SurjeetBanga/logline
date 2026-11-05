@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { withVscode } from '../test/vscode-mock';
@@ -112,6 +113,8 @@ function setup(
     key?: string;
     /** Whether PostHog accepts what is sent. */
     accepted?: boolean;
+    /** The extension's storage folder, shared by windows of one install. */
+    storage?: string;
   } = {},
 ) {
   Object.assign(host, { usageEnabled: true, errorsEnabled: true, answer: undefined, messages: [], opened: [] });
@@ -120,7 +123,8 @@ function setup(
   const bodies: string[] = [];
   let now = Date.UTC(2026, 10, 2, 9, 0, 0);
   const globalState = options.state ?? memento();
-  const usage = new Usage({ globalState, extensionMode: options.mode ?? 1 } as any, {
+  const globalStorageUri = options.storage ? { fsPath: options.storage } : undefined;
+  const usage = new Usage({ globalState, extensionMode: options.mode ?? 1, globalStorageUri } as any, {
     vocabulary,
     environment,
     env: options.env ?? {},
@@ -332,6 +336,7 @@ test('searches are timed for the first few, then sampled; the summary counts wha
     ms: 40,
     resultSize: 2048,
     truncated: false,
+    redactions: 0,
   });
   await usage.close();
   assert.equal(sent.filter((item) => item.event === 'perf').length, 6);
@@ -602,6 +607,7 @@ test('what goes over the wire is the api key and anonymous events, nothing else'
     ms: 3,
     resultSize: 10,
     truncated: false,
+    redactions: 0,
   });
   usage.findings([pii, 'secret']);
   usage.findingHelpful(pii, true);
@@ -650,4 +656,151 @@ test('only the person’s own settings can turn usage counts on: a workspace can
     'logline.telemetry.enabled'
   ];
   assert.equal(setting.scope, 'application');
+});
+
+test('windows starting together on a new install share one id and count one install', async (t) => {
+  const storage = mkdtempSync(join(tmpdir(), 'logline-usage-'));
+  t.after(() => rmSync(storage, { recursive: true, force: true }));
+  const first = setup({ storage });
+  const second = setup({ storage });
+  first.usage.start();
+  second.usage.start();
+  await first.usage.flush();
+  await second.usage.flush();
+  assert.equal(second.usage.usageId, first.usage.usageId);
+  assert.equal(first.usage.newInstall, true);
+  assert.equal(second.usage.newInstall, false, 'only one window acts on the install');
+  assert.ok(first.events().includes('installed'));
+  assert.ok(!second.events().includes('installed'));
+  assert.ok(second.events().includes('activated'), 'the other window still counts as started');
+  assert.equal(second.globalState.get('logline.usage.state'), undefined, 'state is left to the window that won');
+  first.usage.dispose();
+  second.usage.dispose();
+});
+
+test('an id file that cannot be used leaves the window with its own id', async (t) => {
+  const storage = mkdtempSync(join(tmpdir(), 'logline-usage-'));
+  t.after(() => rmSync(storage, { recursive: true, force: true }));
+  writeFileSync(join(storage, 'usage-id'), 'not an id');
+  const { usage, events } = setup({ storage });
+  usage.start();
+  await usage.flush();
+  assert.notEqual(usage.usageId, 'not an id');
+  assert.ok(events().includes('installed'));
+  usage.dispose();
+});
+
+test('a reset id replaces the id windows would otherwise share', async (t) => {
+  const storage = mkdtempSync(join(tmpdir(), 'logline-usage-'));
+  t.after(() => rmSync(storage, { recursive: true, force: true }));
+  const { usage } = setup({ storage });
+  usage.start();
+  await usage.resetId();
+  assert.equal(readFileSync(join(storage, 'usage-id'), 'utf8'), usage.usageId);
+  usage.dispose();
+});
+
+test('someone who used Logline before is not a new install', () => {
+  const { usage } = setup({ state: memento({ 'logline.guide.lastSeenVersion': '1.15.0' }) });
+  usage.start();
+  assert.equal(usage.newInstall, false);
+  usage.dispose();
+});
+
+test('the panel coming into view is activity each time and one event a session', async () => {
+  const { usage, events, advance } = setup();
+  usage.start();
+  usage.panelOpened();
+  usage.panelOpened();
+  advance(24 * 60 * 60 * 1000);
+  usage.panelOpened();
+  await usage.flush();
+  assert.equal(events().filter((event) => event === 'panel_opened').length, 1);
+  assert.equal(events().filter((event) => event === 'active_day').length, 2);
+  usage.dispose();
+});
+
+test('panel actions are activity, sent once a session for each kind, and opened events are counted', async () => {
+  const { usage, sent } = setup();
+  usage.start();
+  usage.panelAction('inspect_event');
+  usage.panelAction('inspect_event');
+  usage.panelAction('export');
+  await usage.close();
+  const actions = sent.filter((item) => item.event === 'panel_action').map((item) => item.properties.action);
+  assert.deepEqual(actions, ['inspect_event', 'export']);
+  assert.equal(sent.filter((item) => item.event === 'active_day').length, 1);
+  const milestones = sent.filter((item) => item.event === 'milestone').map((item) => item.properties.name);
+  assert.deepEqual(milestones, ['first_event_inspected']);
+  const summary = sent.find((item) => item.event === 'session_summary')!.properties;
+  assert.equal(summary.events_inspected, '1-9');
+  assert.deepEqual(summary.actions_used, ['inspect_event', 'export']);
+});
+
+test('a search says how much it found, in a range, and the summary counts those that found nothing', async () => {
+  const { usage, sent } = setup();
+  usage.start();
+  usage.search([], [], 12, 0);
+  usage.search([], [], 12, 4321);
+  await usage.close();
+  const found = sent.filter((item) => item.properties.op === 'search').map((item) => item.properties.events);
+  assert.deepEqual(found, ['0', '1k-10k']);
+  assert.equal(sent.find((item) => item.event === 'session_summary')!.properties.empty_searches, '1-9');
+});
+
+test('a capture says whether it started by itself, and sharing says how it ended', async () => {
+  const { usage, sent } = setup();
+  usage.start();
+  usage.capture('debug');
+  usage.capture('command');
+  usage.shared('all', 1, 1);
+  usage.sharingStopped();
+  usage.shared('all', 1, 1);
+  await usage.close();
+  const captures = sent.filter((item) => item.event === 'capture_started').map((item) => item.properties.auto);
+  assert.deepEqual(captures, [true, false]);
+  const stops = sent.filter((item) => item.event === 'sharing_stopped').map((item) => item.properties.by);
+  assert.deepEqual(stops, ['user', 'closed']);
+  assert.equal(sent.find((item) => item.event === 'shared_with_agent')!.properties.redacted, undefined);
+});
+
+test('terminals report shell integration once for each shell and outcome, and the panel its width once', async () => {
+  const { usage, sent } = setup();
+  usage.start();
+  usage.terminalChecked('powershell', false);
+  usage.terminalChecked('powershell', false);
+  usage.terminalChecked('powershell', true);
+  usage.terminalChecked('secret-shell', true);
+  usage.panelSize(320);
+  usage.panelSize(1400);
+  await usage.flush();
+  const checks = sent.filter((item) => item.event === 'terminal_checked').map((item) => item.properties);
+  assert.deepEqual(checks.slice(0, 2), [
+    { ...checks[0], shell: 'powershell', integrated: false },
+    { ...checks[1], shell: 'powershell', integrated: true },
+  ]);
+  assert.equal(checks[2].shell, undefined, 'a shell outside the schema is not sent');
+  const sizes = sent.filter((item) => item.event === 'panel_size').map((item) => item.properties.width);
+  assert.deepEqual(sizes, ['narrow']);
+});
+
+test('the summary says how long the session ran, what was lost, and how logs parsed, in ranges', async () => {
+  const { usage, sent, advance } = setup();
+  usage.start({
+    eventsCaptured: () => 200,
+    sources: () => 1,
+    memoryMb: () => 1,
+    trimmed: () => true,
+    connections: () => ({}),
+    discarded: () => 150,
+    truncated: () => 3,
+    quality: () => ({ json: 100, unclassified: 30, multiline: 0 }),
+  });
+  advance(10 * 60_000);
+  await usage.close();
+  const summary = sent.find((item) => item.event === 'session_summary')!.properties;
+  assert.equal(summary.session_length, '5-15m');
+  assert.equal(summary.events_discarded, '100-999');
+  assert.equal(summary.events_truncated, '1-9');
+  assert.deepEqual([summary.pct_json, summary.pct_unclassified, summary.pct_multiline], ['100', '25-49', '0']);
 });

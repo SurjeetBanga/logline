@@ -225,7 +225,7 @@ export function hostLaunch(launch: AgentLaunch): AgentLaunch {
 }
 
 /** Add Logline to the editor's own agent by editing its MCP configuration file. */
-async function connectHost(host: HostAgent, base: AgentLaunch, after: string): Promise<void> {
+async function connectHost(host: HostAgent, base: AgentLaunch, after: string): Promise<AgentSetup['outcome']> {
   const launch = hostLaunch(base);
   const choice = await vscode.window.showInformationMessage(
     `Add Logline to ${host.name}'s agent?`,
@@ -235,7 +235,7 @@ async function connectHost(host: HostAgent, base: AgentLaunch, after: string): P
     },
     'Add Server',
   );
-  if (choice !== 'Add Server') return;
+  if (choice !== 'Add Server') return 'cancelled';
   let existing: string | undefined;
   try {
     existing = readFileSync(host.file, 'utf8');
@@ -251,9 +251,10 @@ async function connectHost(host: HostAgent, base: AgentLaunch, after: string): P
     void vscode.window.showWarningMessage(
       `Logline did not change ${host.file} because ${(error as Error).message}. The server entry was copied; add it under mcpServers yourself.`,
     );
-    return;
+    return 'failed';
   }
   void vscode.window.showInformationMessage(`Added Logline to ${host.file}. ${after}`);
+  return 'added';
 }
 
 /**
@@ -261,12 +262,18 @@ async function connectHost(host: HostAgent, base: AgentLaunch, after: string): P
  * another MCP client. Agents then read only what is shared with Share with
  * agent, like Copilot.
  */
+/** How connecting an agent went, for usage counts. */
+export interface AgentSetup {
+  agent: 'host' | 'claude' | 'codex' | 'other' | 'none';
+  outcome: 'added' | 'copied' | 'terminal' | 'failed' | 'cancelled' | 'unavailable';
+}
+
 export async function connectAgent(
   launch: AgentLaunch,
   host: HostAgent | undefined = hostAgent(),
   /** An agent chosen in the Share panel, which skips the picker. */
   chosen?: Agent,
-): Promise<void> {
+): Promise<AgentSetup> {
   const picked = chosen
     ? { agent: chosen }
     : await vscode.window.showQuickPick(
@@ -302,19 +309,18 @@ export async function connectAgent(
         ],
         { title: 'Connect an agent to Logline', placeHolder: 'Which agent should read the logs you share?' },
       );
-  if (!picked) return;
+  if (!picked) return { agent: 'none', outcome: 'cancelled' };
   const after =
     'Restart the agent so it loads Logline, then choose Share with agent in the Logs panel. Agents read only what you share, always redacted.';
   if (picked.agent === 'host') {
-    await connectHost(host!, launch, after);
-    return;
+    return { agent: 'host', outcome: await connectHost(host!, launch, after) };
   }
   if (!picked.agent) {
     await vscode.env.clipboard.writeText(mcpConfiguration(launch));
     void vscode.window.showInformationMessage(
       `Copied the Logline MCP server configuration. Add it to your client's MCP settings. ${after} Clients that support MCP prompts also list Logline's verify, triage, and slow-request workflows.`,
     );
-    return;
+    return { agent: 'other', outcome: 'copied' };
   }
   const name = AGENT_NAMES[picked.agent];
   const command = setupCommand(
@@ -335,7 +341,7 @@ export async function connectAgent(
     'Run in Terminal',
     'Copy Command',
   );
-  if (!choice) return;
+  if (!choice) return { agent: picked.agent, outcome: 'cancelled' };
   let installed: string[] = [];
   try {
     installed = installSkills(skills);
@@ -348,10 +354,11 @@ export async function connectAgent(
     void vscode.window.showInformationMessage(
       `Copied. Run it in a terminal to add Logline to ${name}. ${after}${example}`,
     );
-  } else {
-    const terminal = vscode.window.createTerminal({ name: `Logline · ${name}` });
-    terminal.show();
-    terminal.sendText(command);
-    void vscode.window.showInformationMessage(`${after}${example}`);
+    return { agent: picked.agent, outcome: 'copied' };
   }
+  const terminal = vscode.window.createTerminal({ name: `Logline · ${name}` });
+  terminal.show();
+  terminal.sendText(command);
+  void vscode.window.showInformationMessage(`${after}${example}`);
+  return { agent: picked.agent, outcome: 'terminal' };
 }

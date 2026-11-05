@@ -98,7 +98,16 @@
         "classification": "SystemMetaData",
         "purpose": "FeatureInsight",
         "comment": "One of: terminal, debug, task, file, compose, command, otlp, import, connection."
+      },
+      "auto": {
+        "classification": "SystemMetaData",
+        "purpose": "FeatureInsight",
+        "comment": "Whether the capture starts by itself, as debug, terminal, and OpenTelemetry captures do."
       }
+    },
+    "surjeetbanga.logline/panel_opened": {
+      "owner": "SurjeetBanga",
+      "comment": "The Logs panel came into view, once a session."
     },
     "surjeetbanga.logline/view_opened": {
       "owner": "SurjeetBanga",
@@ -210,11 +219,6 @@
         "classification": "SystemMetaData",
         "purpose": "FeatureInsight",
         "comment": "A count, bucketed (0, 1-9, 10-99, ...)."
-      },
-      "redacted": {
-        "classification": "SystemMetaData",
-        "purpose": "FeatureInsight",
-        "comment": "true or false."
       }
     },
     "surjeetbanga.logline/sharing_stopped": {
@@ -224,6 +228,11 @@
         "classification": "SystemMetaData",
         "purpose": "FeatureInsight",
         "comment": "A duration, bucketed (<1m, 1-5m, ...)."
+      },
+      "by": {
+        "classification": "SystemMetaData",
+        "purpose": "FeatureInsight",
+        "comment": "Whether the person stopped sharing or the window closed."
       }
     },
     "surjeetbanga.logline/exported_for_ai": {
@@ -285,6 +294,11 @@
         "classification": "SystemMetaData",
         "purpose": "FeatureInsight",
         "comment": "true or false."
+      },
+      "redactions": {
+        "classification": "SystemMetaData",
+        "purpose": "FeatureInsight",
+        "comment": "How many values were redacted from the result, in a range."
       }
     },
     "surjeetbanga.logline/first_tool_after_share": {
@@ -577,11 +591,56 @@
         "classification": "SystemMetaData",
         "purpose": "FeatureInsight",
         "comment": "A list of Logline's own names."
+      },
+      "session_length": {
+        "classification": "SystemMetaData",
+        "purpose": "FeatureInsight",
+        "comment": "How long the extension ran this session, in a range."
+      },
+      "empty_searches": {
+        "classification": "SystemMetaData",
+        "purpose": "FeatureInsight",
+        "comment": "How many searches found nothing, in a range."
+      },
+      "events_inspected": {
+        "classification": "SystemMetaData",
+        "purpose": "FeatureInsight",
+        "comment": "How many log events were opened, in a range."
+      },
+      "actions_used": {
+        "classification": "SystemMetaData",
+        "purpose": "FeatureInsight",
+        "comment": "Which panel actions were used."
+      },
+      "events_discarded": {
+        "classification": "SystemMetaData",
+        "purpose": "FeatureInsight",
+        "comment": "How many events were dropped to stay within limits, in a range."
+      },
+      "events_truncated": {
+        "classification": "SystemMetaData",
+        "purpose": "FeatureInsight",
+        "comment": "How many events were cut short, in a range."
+      },
+      "pct_json": {
+        "classification": "SystemMetaData",
+        "purpose": "FeatureInsight",
+        "comment": "The share of recent events that were JSON, in a range."
+      },
+      "pct_unclassified": {
+        "classification": "SystemMetaData",
+        "purpose": "FeatureInsight",
+        "comment": "The share of recent events with no level, in a range."
+      },
+      "pct_multiline": {
+        "classification": "SystemMetaData",
+        "purpose": "FeatureInsight",
+        "comment": "The share of recent events with several lines, in a range."
       }
     },
     "surjeetbanga.logline/survey sent": {
       "owner": "SurjeetBanga",
-      "comment": "Answers to Suggest a feature or Vote on what's next, sent only when the person presses Send in the Logs panel's form after seeing them. The only text Logline sends; credentials, email addresses, phone and long numbers, IP addresses, host names, URLs, and paths are replaced first. Sent under a one-time ID, not the install\u2019s anonymous ID.",
+      "comment": "Answers to Suggest a feature or Vote on what's next, sent only when the person presses Send in the Logs panel's form after seeing them. The only text Logline sends; credentials, email addresses, phone and long numbers, IP addresses, host names, URLs, and paths are replaced first. Sent under a one-time ID, not the install’s anonymous ID.",
       "$survey_id": {
         "classification": "SystemMetaData",
         "purpose": "FeatureInsight",
@@ -591,6 +650,75 @@
         "classification": "CustomerContent",
         "purpose": "FeatureInsight",
         "comment": "The area and text of a suggestion, or the picks of a vote, as the person wrote and sent them."
+      }
+    },
+    "surjeetbanga.logline/terminal_checked": {
+      "owner": "SurjeetBanga",
+      "comment": "Whether a terminal brought up shell integration, without which it cannot be captured; each outcome once a session for each shell.",
+      "shell": {
+        "classification": "SystemMetaData",
+        "purpose": "FeatureInsight",
+        "comment": "The kind of shell: posix, powershell, or cmd."
+      },
+      "integrated": {
+        "classification": "SystemMetaData",
+        "purpose": "FeatureInsight",
+        "comment": "Whether shell integration came up."
+      }
+    },
+    "surjeetbanga.logline/panel_size": {
+      "owner": "SurjeetBanga",
+      "comment": "How wide the Logs panel was when it first showed, once a session.",
+      "width": {
+        "classification": "SystemMetaData",
+        "purpose": "FeatureInsight",
+        "comment": "Narrow, medium, or wide."
+      }
+    },
+    "surjeetbanga.logline/panel_action": {
+      "owner": "SurjeetBanga",
+      "comment": "Something done in the Logs panel, once a session for each kind.",
+      "action": {
+        "classification": "SystemMetaData",
+        "purpose": "FeatureInsight",
+        "comment": "The action, by name, such as inspect_event or export."
+      }
+    },
+    "surjeetbanga.logline/welcome": {
+      "owner": "SurjeetBanga",
+      "comment": "Which option was chosen in the first-run welcome.",
+      "choice": {
+        "classification": "SystemMetaData",
+        "purpose": "FeatureInsight",
+        "comment": "The option, such as tour or capture; dismissed for Escape."
+      }
+    },
+    "surjeetbanga.logline/agent_setup": {
+      "owner": "SurjeetBanga",
+      "comment": "How connecting an agent went.",
+      "agent": {
+        "classification": "SystemMetaData",
+        "purpose": "FeatureInsight",
+        "comment": "Which agent: host, claude, codex, other, or none."
+      },
+      "outcome": {
+        "classification": "SystemMetaData",
+        "purpose": "FeatureInsight",
+        "comment": "What happened, such as added, copied, or cancelled."
+      }
+    },
+    "surjeetbanga.logline/prompt_answered": {
+      "owner": "SurjeetBanga",
+      "comment": "How the rating, feedback, or update question was answered.",
+      "prompt": {
+        "classification": "SystemMetaData",
+        "purpose": "FeatureInsight",
+        "comment": "Which question."
+      },
+      "answer": {
+        "classification": "SystemMetaData",
+        "purpose": "FeatureInsight",
+        "comment": "Accepted, later, never, dismissed, or failed."
       }
     }
   }

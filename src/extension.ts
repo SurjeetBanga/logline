@@ -18,6 +18,7 @@ import { GitChanges } from './vscode/git-changes';
 import { RatingPrompt } from './vscode/rating-prompt';
 import { Usage, usageEnvironment, usageVocabulary } from './vscode/usage';
 import { FeedbackPrompt } from './vscode/feedback';
+import { UpdateCheck } from './vscode/update-check';
 
 let controller: LogsController | undefined;
 let usage: Usage | undefined;
@@ -58,15 +59,30 @@ export function activate(context: vscode.ExtensionContext): { provider: LogsProv
     guide,
   );
   const logs = controller;
-  const rating = new RatingPrompt(context.globalState, () => logs.store.total > 0);
+  const rating = new RatingPrompt(
+    context.globalState,
+    () => logs.store.total > 0,
+    undefined,
+    (answer) => usage?.record('prompt_answered', { prompt: 'rating', answer }),
+  );
   rating.start();
   const feedback = new FeedbackPrompt(
     context.globalState,
     () => logs.openFeedback('vote'),
     () => logs.store.total > 0,
+    undefined,
+    (answer) => usage?.record('prompt_answered', { prompt: 'feedback', answer }),
   );
   feedback.start();
-  context.subscriptions.push(rating, feedback);
+  const update = (logs.updateCheck = new UpdateCheck(
+    context.globalState,
+    packageJSON?.version ?? '',
+    () => logs.notifications.send({ type: 'update' }),
+    (answer) => usage?.record('prompt_answered', { prompt: 'update', answer }),
+  ));
+  // A development host runs what is being worked on, whatever the store has.
+  if (context.extensionMode === (vscode.ExtensionMode?.Production ?? 1)) update.start();
+  context.subscriptions.push(rating, feedback, update);
   // Editor surfaces are optional: hosts without CodeLens support still capture logs.
   if (typeof vscode.languages?.registerCodeLensProvider === 'function') {
     const logController = controller;
@@ -159,8 +175,22 @@ export function activate(context: vscode.ExtensionContext): { provider: LogsProv
   );
   startAutoServers(controller);
   context.subscriptions.push(usage);
+  if (opensPanelOnInstall(usage.newInstall, context.extensionMode, vscode.env?.remoteName))
+    void vscode.commands.executeCommand('logline.logs.focus');
   usage.record('perf', { op: 'activate', ms: performance.now() - started });
   return { provider };
+}
+
+/**
+ * A new install opens the Logs panel once, so its welcome is seen. Not on a remote
+ * host: a synced extension installs afresh in every new Codespace or container.
+ */
+export function opensPanelOnInstall(
+  newInstall: boolean,
+  mode: vscode.ExtensionMode | undefined,
+  remoteName: string | undefined,
+): boolean {
+  return newInstall && mode === (vscode.ExtensionMode?.Production ?? 1) && !remoteName;
 }
 
 export async function deactivate(): Promise<void> {

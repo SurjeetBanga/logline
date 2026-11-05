@@ -172,3 +172,28 @@ test('the rating question keeps a month from the vote question', async () => {
   stored.set('logline.feedbackPrompt', { asked: now - QUIET_MS });
   assert.equal(await prompt.check(), true);
 });
+
+test('the answer to the vote question is reported, whichever it was', async () => {
+  for (const [answer, reported] of [
+    ['Vote', 'accepted'],
+    ['Not now', 'later'],
+    [undefined, 'dismissed'],
+  ] as const) {
+    reset();
+    ui.answers.push(answer);
+    const stored = new Map<string, unknown>([['logline.rating', { firstUsed: 0 }]]);
+    const answers: string[] = [];
+    const prompt = new FeedbackPrompt(
+      {
+        get: <T>(key: string) => stored.get(key) as T | undefined,
+        update: async (key: string, value: unknown) => void stored.set(key, value),
+      },
+      () => undefined,
+      () => true,
+      () => 10 * VOTE_AFTER_MS,
+      (value) => answers.push(value),
+    );
+    assert.equal(await prompt.check(), true);
+    assert.deepEqual(answers, [reported]);
+  }
+});

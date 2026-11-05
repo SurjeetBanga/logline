@@ -24,11 +24,19 @@ export class LogsProvider implements vscode.WebviewViewProvider {
           }
           void view.webview.postMessage(reply);
         }, message)
-        .catch((error) => vscode.window.showErrorMessage(`Logline: ${String(error)}`));
+        .catch((error) => {
+          this.controller.usage?.record('error', { area: 'panel', code: 'message_failed' });
+          void vscode.window.showErrorMessage(`Logline: ${String(error)}`);
+        });
+    });
+    if (view.visible) this.controller.usage?.panelOpened();
+    const visibility = view.onDidChangeVisibility(() => {
+      if (view.visible) this.controller.usage?.panelOpened();
     });
     view.onDidDispose(() => {
       subscription.dispose();
       messages.dispose();
+      visibility.dispose();
     });
     view.webview.html = webviewHtml(
       view.webview,

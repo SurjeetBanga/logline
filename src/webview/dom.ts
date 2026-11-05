@@ -88,6 +88,7 @@ export function getElements() {
     moreActions: element<HTMLButtonElement>('moreActions'),
     actionsMenu: element<HTMLElement>('actionsMenu'),
     help: element<HTMLButtonElement>('help'),
+    updateButton: element<HTMLButtonElement>('updateButton'),
     takeTour: element<HTMLButtonElement>('takeTour'),
     suggestFeature: element<HTMLButtonElement>('suggestFeature'),
     voteOnNext: element<HTMLButtonElement>('voteOnNext'),

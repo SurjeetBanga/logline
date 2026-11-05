@@ -125,3 +125,13 @@ test('each tool call is counted by tool, route, client, and outcome, never by wh
   assert.ok(calls.every((call) => typeof call.ms === 'number' && typeof call.resultSize === 'number'));
   assert.doesNotMatch(JSON.stringify(calls), /secret|user:42|abc/);
 });
+
+test('a tool call says how many values were redacted from what the agent received', async () => {
+  const calls: Record<string, unknown>[] = [];
+  const usage = { agentTool: (call: Record<string, unknown>) => calls.push(call) } as any;
+  const access = {
+    search: () => ({ events: [{ id: 1, message: 'token [REDACTED] and [REDACTED]' }], matched: 1 }),
+  } as any;
+  await runAgentTool(access, 'logline_search_logs', { shareId: 'share' }, undefined, { usage, client: 'claude-code' });
+  assert.equal(calls[0].redactions, 2);
+});

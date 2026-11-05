@@ -1,14 +1,19 @@
 import { randomUUID } from 'node:crypto';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { request } from 'node:https';
 import * as os from 'node:os';
+import { join } from 'node:path';
 import * as vscode from 'vscode';
 import {
+  AUTOMATIC_CAPTURES,
   commonProperties,
   DOCTOR_CODES,
   MILESTONES,
+  panelWidth,
   sanitizeUsage,
   USAGE_EVENTS,
   type Milestone,
+  type PanelAction,
   type SearchOperator,
   type UsageEnvironment,
   type UsageProperties,
@@ -35,6 +40,9 @@ export const USAGE_PROJECT_KEY = 'phc_Amvwr7HmP3SzK8uTELYNuC7joo6jKtC8X9TvovZW37
 
 const ID_KEY = 'logline.usage.id';
 const STATE_KEY = 'logline.usage.state';
+/** Holds the anonymous id in the extension's storage folder, where windows starting together can agree on one. */
+const ID_FILE = 'usage-id';
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const QUEUE_LIMIT = 500;
 const FLUSH_MS = 60_000;
 const SUMMARY_MS = 24 * 60 * 60 * 1000;
@@ -77,6 +85,11 @@ export interface UsageSummarySource {
   memoryMb(): number;
   trimmed(): boolean;
   connections(): Record<string, number>;
+  /** Events dropped to stay within limits, and events cut short. */
+  discarded?(): number;
+  truncated?(): number;
+  /** How the newest retained events parsed, as percentages; nothing when there are none. */
+  quality?(): { json: number; unclassified: number; multiline: number } | undefined;
 }
 
 export interface UsageOptions {
@@ -137,6 +150,14 @@ export class Usage implements vscode.Disposable {
   private summaryTimer?: ReturnType<typeof setInterval>;
   private readonly subscriptions: vscode.Disposable[] = [];
   private id = '';
+  private fresh = false;
+  private panelCounted = false;
+  private sizeCounted = false;
+  private readonly startedAt: number;
+  private readonly terminalsChecked = new Set<string>();
+  private readonly actions = new Set<PanelAction>();
+  private inspected = 0;
+  private emptySearches = 0;
   private summarySource?: UsageSummarySource;
   private disposed = false;
   private closing?: Promise<void>;
@@ -159,10 +180,11 @@ export class Usage implements vscode.Disposable {
 
   constructor(
     private readonly context: Pick<vscode.ExtensionContext, 'globalState'> &
-      Partial<Pick<vscode.ExtensionContext, 'extensionMode'>>,
+      Partial<Pick<vscode.ExtensionContext, 'extensionMode' | 'globalStorageUri'>>,
     private readonly options: UsageOptions,
   ) {
     this.now = options.now ?? Date.now;
+    this.startedAt = this.now();
     this.env = options.env ?? process.env;
     this.transport = options.transport ?? postBatch;
     this.projectKey = options.projectKey ?? USAGE_PROJECT_KEY;
@@ -186,17 +208,22 @@ export class Usage implements vscode.Disposable {
     const state = this.state;
     let id = this.context.globalState.get<string>(ID_KEY);
     if (!id) {
-      id = randomUUID();
       // Someone who used Logline before usage counts existed is not a new install, and their firsts are long past.
       const existing = (this.context.globalState.keys?.() ?? []).some((key) => key.startsWith('logline.'));
+      const claim = this.claimId(randomUUID());
+      id = claim.id;
       void this.save(ID_KEY, id);
       this.id = id;
-      this.saveState({
-        installedAt: this.now(),
-        version: this.common.version as string,
-        milestones: existing ? [...MILESTONES] : [],
-      });
-      if (!existing) this.record('installed');
+      // Another window of this install got there first: it counts the install and keeps the state.
+      if (claim.first) {
+        this.saveState({
+          installedAt: this.now(),
+          version: this.common.version as string,
+          milestones: existing ? [...MILESTONES] : [],
+        });
+        this.fresh = !existing;
+        if (this.fresh) this.record('installed');
+      }
     } else {
       this.id = id;
       if (state.version && state.version !== this.common.version) this.record('updated', { from: state.version });
@@ -240,6 +267,40 @@ export class Usage implements vscode.Disposable {
 
   get usageId(): string {
     return this.id;
+  }
+
+  /** Whether this window is the one that found Logline newly installed, whether or not usage counts are on. */
+  get newInstall(): boolean {
+    return this.fresh;
+  }
+
+  private get idFile(): string | undefined {
+    const folder = this.context.globalStorageUri?.fsPath;
+    return folder ? join(folder, ID_FILE) : undefined;
+  }
+
+  /**
+   * Windows open during an install start together, before they see each other's
+   * stored id. Creating the file is atomic, so one wins and the rest use its id
+   * rather than each counting an install.
+   */
+  private claimId(candidate: string): { id: string; first: boolean } {
+    const file = this.idFile;
+    if (!file) return { id: candidate, first: true };
+    try {
+      mkdirSync(join(file, '..'), { recursive: true });
+      writeFileSync(file, candidate, { flag: 'wx' });
+      return { id: candidate, first: true };
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') return { id: candidate, first: true };
+    }
+    try {
+      const claimed = readFileSync(file, 'utf8').trim();
+      if (UUID.test(claimed)) return { id: claimed, first: false };
+    } catch {
+      /* unreadable: this window keeps its own id */
+    }
+    return { id: candidate, first: true };
   }
 
   private get debug(): boolean {
@@ -316,6 +377,33 @@ export class Usage implements vscode.Disposable {
     this.record('command', { id });
   }
 
+  /** The Logs panel came into view: activity each time, and one event a session. */
+  panelOpened(): void {
+    this.touch();
+    if (this.panelCounted) return;
+    this.panelCounted = true;
+    this.record('panel_opened');
+  }
+
+  /** How wide the panel was when it first showed, once a session. */
+  panelSize(pixels: number): void {
+    if (this.sizeCounted) return;
+    this.sizeCounted = true;
+    this.record('panel_size', { width: panelWidth(pixels) });
+  }
+
+  /** Something done in the panel: activity each time, one event a session for each kind, and a count of events read. */
+  panelAction(action: PanelAction): void {
+    this.touch();
+    if (action === 'inspect_event') {
+      this.inspected++;
+      this.milestone('first_event_inspected');
+    }
+    if (this.actions.has(action)) return;
+    this.actions.add(action);
+    this.record('panel_action', { action });
+  }
+
   /** A view the panel opened; some poll while open, so this does not count as activity. */
   view(view: string): void {
     if (view !== 'logs' && view !== 'trace' && view !== 'aiCall') this.milestone('first_view_switch');
@@ -329,13 +417,22 @@ export class Usage implements vscode.Disposable {
     this.milestone('first_capture');
     if (this.features.has(kind)) return;
     this.features.add(kind);
-    this.record('capture_started', { kind });
+    this.record('capture_started', { kind, auto: AUTOMATIC_CAPTURES.includes(kind) });
   }
 
-  /** A new search in the panel: what it used, never what it said. */
-  search(operators: Iterable<SearchOperator>, fields: Iterable<string>, ms?: number): void {
+  /** Whether a terminal came up with shell integration, without which nothing is captured: each outcome once a session for each shell. */
+  terminalChecked(shell: string, integrated: boolean): void {
+    const key = `${shell}:${integrated}`;
+    if (this.terminalsChecked.has(key)) return;
+    this.terminalsChecked.add(key);
+    this.record('terminal_checked', { shell, integrated });
+  }
+
+  /** A new search in the panel: what it used and how much it found, never what it said. */
+  search(operators: Iterable<SearchOperator>, fields: Iterable<string>, ms?: number, matched?: number): void {
     this.touch();
     this.searches++;
+    if (matched === 0) this.emptySearches++;
     this.milestone('first_search');
     let filtered = false;
     for (const operator of operators) {
@@ -345,7 +442,7 @@ export class Usage implements vscode.Disposable {
     for (const field of fields) this.fields.add(field);
     if (filtered) this.milestone('first_filtered_search');
     if (ms !== undefined && (this.timedSearches++ < SAMPLE_AFTER || this.timedSearches % SAMPLE_EVERY === 0))
-      this.record('perf', { op: 'search', ms });
+      this.record('perf', { op: 'search', ms, ...(matched !== undefined ? { events: matched } : {}) });
   }
 
   shared(how: 'all' | 'runs' | 'event', sources: number, events: number): void {
@@ -354,13 +451,13 @@ export class Usage implements vscode.Disposable {
     this.shares++;
     this.sharedAt = this.now();
     this.sharedCalls = 0;
-    this.record('shared_with_agent', { how, sources, events, redacted: true });
+    this.record('shared_with_agent', { how, sources, events });
     this.milestone('first_share');
   }
 
-  sharingStopped(): void {
+  sharingStopped(by: 'user' | 'closed' = 'user'): void {
     if (this.sharedAt === undefined) return;
-    this.record('sharing_stopped', { duration: this.now() - this.sharedAt });
+    this.record('sharing_stopped', { duration: this.now() - this.sharedAt, by });
     if (this.sharedCalls === 0) this.unusedShares++;
     this.sharedAt = undefined;
   }
@@ -379,6 +476,7 @@ export class Usage implements vscode.Disposable {
     ms: number;
     resultSize: number;
     truncated: boolean;
+    redactions: number;
   }): void {
     this.touch();
     this.toolCalls++;
@@ -470,10 +568,20 @@ export class Usage implements vscode.Disposable {
   private sendSummary(): void {
     const source = this.summarySource;
     const connections = source?.connections() ?? {};
+    const quality = source?.quality?.();
     this.record('session_summary', {
       active_minutes: this.activeMinutes.size * 60_000,
+      session_length: this.now() - this.startedAt,
       searches: this.searches,
+      empty_searches: this.emptySearches,
+      events_inspected: this.inspected,
+      actions_used: [...this.actions],
       events_captured: source?.eventsCaptured() ?? 0,
+      events_discarded: source?.discarded?.() ?? 0,
+      events_truncated: source?.truncated?.() ?? 0,
+      ...(quality
+        ? { pct_json: quality.json, pct_unclassified: quality.unclassified, pct_multiline: quality.multiline }
+        : {}),
       sources: source?.sources() ?? 0,
       memory_mb: source?.memoryMb() ?? 0,
       trimmed: source?.trimmed() ?? false,
@@ -538,6 +646,15 @@ export class Usage implements vscode.Disposable {
     this.queue = [];
     this.id = randomUUID();
     await this.save(ID_KEY, this.id);
+    // The old id must not come back from the file if stored state is ever cleared.
+    const file = this.idFile;
+    if (file)
+      try {
+        mkdirSync(join(file, '..'), { recursive: true });
+        writeFileSync(file, this.id);
+      } catch {
+        /* the stored id still holds */
+      }
     void vscode.window.showInformationMessage('Logline: Your anonymous usage ID was reset.');
   }
 
@@ -545,7 +662,7 @@ export class Usage implements vscode.Disposable {
   close(): Promise<void> {
     if (this.disposed) return Promise.resolve();
     if (!this.closing) {
-      this.sharingStopped();
+      this.sharingStopped('closed');
       this.sendSummary();
       // Disposed once the last batch is out, so Show Usage Data still lists it.
       this.closing = this.flush().then(

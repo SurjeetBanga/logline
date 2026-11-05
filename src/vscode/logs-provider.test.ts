@@ -43,6 +43,8 @@ test('webview provider initializes the bridge, forwards messages, and releases l
     handleMessage: async (send: (message: unknown) => void, message: unknown) => send({ type: 'details', message }),
   } as any;
   const view = {
+    visible: false,
+    onDidChangeVisibility: () => ({ dispose() {} }),
     webview: {
       cspSource: 'csp',
       options: undefined as unknown,
@@ -94,6 +96,8 @@ test('the panel’s first snapshot counts how long it took to show logs, once', 
     handleMessage: async (send: (message: unknown) => void, message: { type: string }) => send({ type: message.type }),
   } as any;
   const view = {
+    visible: false,
+    onDidChangeVisibility: () => ({ dispose() {} }),
     webview: {
       cspSource: 'csp',
       asWebviewUri: (uri: unknown) => uri,
@@ -114,4 +118,77 @@ test('the panel’s first snapshot counts how long it took to show logs, once', 
     recorded.map(({ event, properties }) => [event, properties.op, typeof properties.ms]),
     [['perf', 'first_render', 'number']],
   );
+});
+
+test('the panel counts as opened when it resolves in view and each time it returns', () => {
+  const opened: string[] = [];
+  let visibilityChanged = () => {};
+  let visibilityDisposed = false;
+  const view = {
+    visible: true,
+    onDidChangeVisibility: (listener: () => void) => {
+      visibilityChanged = listener;
+      return { dispose: () => void (visibilityDisposed = true) };
+    },
+    onDidDispose: (listener: () => void) => void (disposeView = listener),
+    webview: {
+      cspSource: 'csp',
+      options: undefined as unknown,
+      html: '',
+      asWebviewUri: (uri: unknown) => uri,
+      postMessage: async () => true,
+      onDidReceiveMessage: () => ({ dispose() {} }),
+    },
+  };
+  let disposeView = () => {};
+  const controller = {
+    notifications: { subscribe: () => ({ dispose() {} }) },
+    guideStatus: () => ({ version: 'v1', unread: false }),
+    firstRun: () => false,
+    usage: { panelOpened: () => void opened.push('opened') },
+  } as any;
+  new LogsProvider({ extensionUri: { fsPath: process.cwd() } } as any, controller).resolveWebviewView(view as any);
+  assert.equal(opened.length, 1);
+  view.visible = false;
+  visibilityChanged();
+  assert.equal(opened.length, 1, 'hiding is not opening');
+  view.visible = true;
+  visibilityChanged();
+  assert.equal(opened.length, 2);
+  disposeView();
+  assert.equal(visibilityDisposed, true);
+});
+
+test('a panel message that fails is reported and counted, without its text', async () => {
+  const counted: unknown[][] = [];
+  let listener: (message: unknown) => void = () => {};
+  const view = {
+    visible: false,
+    onDidChangeVisibility: () => ({ dispose() {} }),
+    onDidDispose: () => undefined,
+    webview: {
+      cspSource: 'csp',
+      options: undefined as unknown,
+      html: '',
+      asWebviewUri: (uri: unknown) => uri,
+      postMessage: async () => true,
+      onDidReceiveMessage: (received: (message: unknown) => void) => {
+        listener = received;
+        return { dispose() {} };
+      },
+    },
+  };
+  const controller = {
+    notifications: { subscribe: () => ({ dispose() {} }) },
+    guideStatus: () => ({ version: 'v1', unread: false }),
+    firstRun: () => false,
+    usage: { record: (...args: unknown[]) => counted.push(args) },
+    handleMessage: async () => {
+      throw new Error('private detail');
+    },
+  } as any;
+  new LogsProvider({ extensionUri: { fsPath: process.cwd() } } as any, controller).resolveWebviewView(view as any);
+  listener({ type: 'details', id: 1 });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(counted, [['error', { area: 'panel', code: 'message_failed' }]]);
 });

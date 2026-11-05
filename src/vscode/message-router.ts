@@ -25,9 +25,35 @@ import type { AgentLogAccess } from './agent-access';
 import type { ConnectionManager } from './connections';
 import type { CompareRequest, CompareView } from '../protocol/messages';
 import type { Usage } from './usage';
+import type { PanelAction } from '../core/usage-events';
 import type { FeedbackRequest, FeedbackResult } from '../core/feedback';
 
 /** The panel's requests that open a view, as usage counts name the view. */
+/** Panel messages that are something a person did, by the name usage counts give them. */
+const PANEL_REQUESTS: Partial<Record<ViewRequest['type'], PanelAction>> = {
+  details: 'inspect_event',
+  copy: 'copy_event',
+  context: 'show_context',
+  openLogSite: 'open_log_site',
+  openSource: 'open_source',
+  export: 'export',
+  copyFiltered: 'copy_filtered',
+  exportContext: 'export_context',
+  import: 'import',
+  saveSearch: 'save_search',
+  deleteSavedSearch: 'delete_saved_search',
+  clear: 'clear',
+  removeSource: 'remove_source',
+  removeRun: 'remove_run',
+  removeFinishedRuns: 'remove_finished_runs',
+  stop: 'stop',
+  run: 'run',
+  metricQuery: 'metric_query',
+  metricWatch: 'metric_watch',
+  copyAiCall: 'copy_ai_call',
+  toggleOtlp: 'toggle_otlp',
+};
+
 const VIEW_REQUESTS: Partial<Record<ViewRequest['type'], string>> = {
   trace: 'trace',
   traces: 'traces',
@@ -41,7 +67,7 @@ const VIEW_REQUESTS: Partial<Record<ViewRequest['type'], string>> = {
 };
 
 interface MessageServices {
-  usage?: Pick<Usage, 'view' | 'record' | 'findingHelpful'>;
+  usage?: Pick<Usage, 'view' | 'record' | 'findingHelpful' | 'panelAction' | 'panelSize'>;
   /** Send what the feedback form submitted. */
   feedback?(request: FeedbackRequest): Promise<FeedbackResult>;
   store: LogStore;
@@ -56,6 +82,8 @@ interface MessageServices {
   removeRun(sessionId: string): number;
   removeFinishedRuns(serverId: string): number;
   welcomed?(): void;
+  /** The panel's Update button was pressed. */
+  installUpdate?(): Promise<void>;
   showGuide(section: 'guide' | 'whatsNew'): void;
   agentAccess: AgentLogAccess;
   shareWithAgent(sourceIds?: string[], anchor?: number, sessionIds?: string[], chooseRuns?: boolean): Promise<void>;
@@ -105,6 +133,8 @@ export async function handleMessage(
   if (!msg) return;
   const view = VIEW_REQUESTS[msg.type];
   if (view) services.usage?.view(view);
+  const action = PANEL_REQUESTS[msg.type];
+  if (action) services.usage?.panelAction(action);
   if (msg.type === 'exportForAI') services.usage?.record('exported_for_ai');
   const { store, config, transfer, searches } = services;
   switch (msg.type) {
@@ -254,7 +284,14 @@ export async function handleMessage(
       services.clear();
       return;
     case 'onboardingSeen':
+      if (msg.choice) services.usage?.record('welcome', { choice: msg.choice });
       services.welcomed?.();
+      return;
+    case 'panelSize':
+      services.usage?.panelSize(msg.width);
+      return;
+    case 'installUpdate':
+      await services.installUpdate?.();
       return;
     case 'removeSource':
       // Asks first when the source is running.

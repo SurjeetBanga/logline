@@ -188,6 +188,27 @@ for (const size of SIZES) {
     }
   });
 
+  test(`the Update button fits a ${name} panel beside the actions`, async () => {
+    const page = await open(size);
+    try {
+      await page.evaluate(() => {
+        const button = document.getElementById('updateButton') as HTMLButtonElement;
+        button.hidden = false;
+        button.textContent = 'Update';
+      });
+      await assertPageFits(page, 'Update button');
+      const box = await page.locator('#updateButton').boundingBox();
+      // The action bar's buttons are transparent: this one must stand out as the editor's main button.
+      const background = await page
+        .locator('#updateButton')
+        .evaluate((button) => getComputedStyle(button).backgroundColor);
+      assert.equal(background, 'rgb(14, 99, 156)', 'the button keeps its fill');
+      assert.ok(box && box.x >= 0 && box.x + box.width <= size.width, `the button is in reach: ${JSON.stringify(box)}`);
+    } finally {
+      await page.close();
+    }
+  });
+
   test(`an opened rail fits a ${name} panel, sliding over a narrow view rather than squeezing it`, async () => {
     const page = await open(size);
     try {

@@ -24,6 +24,8 @@ import type { ContainerTag } from '../core/container-prefix';
 export class LogTransfer {
   /** Told how long an import took and how many events it brought, for usage counts. */
   imported?: (ms: number, events: number) => void;
+  /** Told that a file could not be written or read, for usage counts. */
+  failed?: (area: 'export' | 'import') => void;
   constructor(
     private readonly store: LogStore,
     private readonly config: Settings,
@@ -81,6 +83,7 @@ export class LogTransfer {
     try {
       await vscode.workspace.fs.writeFile(uri, Buffer.from(content, 'utf8'));
     } catch (error) {
+      this.failed?.('export');
       vscode.window.showErrorMessage(`Could not export logs: ${(error as Error).message}`);
       return false;
     }
@@ -118,8 +121,10 @@ export class LogTransfer {
             `Exported ${events.length.toLocaleString()} logs to ${path.basename(uri.fsPath)}.`,
           );
         } catch (error) {
-          if (!token.isCancellationRequested)
+          if (!token.isCancellationRequested) {
+            this.failed?.('export');
             void vscode.window.showErrorMessage(`Could not export logs: ${(error as Error).message}`);
+          }
         }
       },
     );
@@ -233,6 +238,7 @@ export class LogTransfer {
           joiner?.end();
         }
       } catch (error) {
+        this.failed?.('import');
         void vscode.window.showWarningMessage(
           `Could not finish importing ${path.basename(uri.path)}: ${(error as Error).message}`,
         );

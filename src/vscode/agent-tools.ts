@@ -75,6 +75,8 @@ async function counted(
     ms: performance.now() - started,
     resultSize: Buffer.byteLength(text, 'utf8'),
     truncated: result.truncated === true,
+    // What the agent actually received, so a replacement inside a result counts and nothing is re-read.
+    redactions: text.split('[REDACTED]').length - 1,
   });
   return text;
 }

@@ -283,3 +283,14 @@ test('removing a source names it, and removing a connection names the connection
 test('the welcome reports it was seen', () => {
   assert.deepEqual(parseViewRequest({ type: 'onboardingSeen' }), { type: 'onboardingSeen' });
 });
+
+test('the welcome choice and panel width are read only when they are valid', () => {
+  assert.deepEqual(parseViewRequest({ type: 'onboardingSeen', choice: 'tour' }), {
+    type: 'onboardingSeen',
+    choice: 'tour',
+  });
+  assert.deepEqual(parseViewRequest({ type: 'onboardingSeen', choice: 'my secret' }), { type: 'onboardingSeen' });
+  assert.deepEqual(parseViewRequest({ type: 'panelSize', width: 640 }), { type: 'panelSize', width: 640 });
+  for (const width of [0, -1, Number.NaN, '640'])
+    assert.equal(parseViewRequest({ type: 'panelSize', width }), undefined);
+});

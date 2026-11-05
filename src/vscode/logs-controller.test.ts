@@ -300,10 +300,46 @@ test('only a fresh install is welcomed, once, and a tour request reaches the pan
     false,
     'an upgrade is not welcomed',
   );
+  assert.equal(
+    make(
+      new Map<string, unknown>([
+        ['logline.usage.id', 'id'],
+        ['logline.usage.state', {}],
+        ['logline.rating', {}],
+        ['logline.feedbackPrompt', {}],
+        ['logline.update', {}],
+      ]),
+    ).firstRun(),
+    true,
+    'what Logline stores by itself on a start does not hide the welcome',
+  );
 
   await first.startTour();
   assert.equal(first.snapshot({ type: 'snapshot' }).startTour, true);
   assert.equal(first.snapshot({ type: 'snapshot' }).startTour, undefined, 'applied once');
+});
+
+test('connecting an agent where the bridge is not running is counted as unavailable', async (t) => {
+  const controller = setup(t);
+  const recorded: unknown[][] = [];
+  controller.usage = { record: (...args: unknown[]) => recorded.push(args) } as any;
+  await controller.connectAgent('claude');
+  assert.deepEqual(recorded, [['agent_setup', { agent: 'claude', outcome: 'unavailable' }]]);
+});
+
+test('sharing logs with an agent is counted with how it was shared', async (t) => {
+  const controller = setup(t);
+  const shares: { how: string; sources: number; events: number }[] = [];
+  controller.usage = {
+    enabled: true,
+    shared: (how: string, sources: number, events: number) => shares.push({ how, sources, events }),
+    record() {},
+    capture() {},
+    milestone() {},
+  } as any;
+  controller.store.add({ level: 'info', id: 1, serverId: 'api', sessionId: 'a', message: 'ready' });
+  await controller.shareWithAgent(['api'], undefined, ['a']);
+  assert.deepEqual(shares, [{ how: 'runs', sources: 1, events: 1 }]);
 });
 
 test('a search counts once it stops changing, not once a keystroke, and the summary reads the window', async (t) => {

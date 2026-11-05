@@ -51,6 +51,8 @@ import {
 const PROGRESS_KEY = 'logline.onboarding.progress';
 /** Set once the first-run welcome was seen, or for a profile that used Logline before it existed. */
 const WELCOME_KEY = 'logline.onboarding.welcomed';
+/** What Logline stores by itself on any start, so it says nothing about whether someone used it before. */
+const AUTOMATIC_KEYS = /^logline\.(?:usage\.|rating$|feedbackPrompt$|update$)/;
 import { AgentAccessError, AgentLogAccess } from './agent-access';
 import { ChangedLines, ChangeScope } from '../core/changed-lines';
 import { eventLocation, LogSiteIndex, LogSiteTracker } from '../core/log-sites';
@@ -71,13 +73,14 @@ import { SensitiveScanner, type SourceSensitive } from '../core/log-findings';
 import type { GitChanges } from './git-changes';
 import type { LogLens } from './log-lens';
 import type { AgentBridge } from './agent-bridge';
-import { agentLaunch, agentsWithSkills, connectAgent, copilotAvailable } from './agent-setup';
+import { agentLaunch, agentsWithSkills, connectAgent, copilotAvailable, shellKind } from './agent-setup';
 import { mcpScriptPath } from '../protocol/agent-bridge';
 import { openSourceLocation } from './source-navigation';
 import { parseQuery } from '../core/query';
 import { CONNECTION_TYPES, queryFeatures } from '../core/usage-events';
 import type { Usage, UsageSummarySource } from './usage';
 import type { FeedbackOpen } from '../core/feedback';
+import type { UpdateCheck } from './update-check';
 import { feedbackSendable, sendFeedback } from './feedback';
 
 const SHARE_ALL_CONFIRMED_KEY = 'logline.shareAllLogsConfirmed.v1';
@@ -191,7 +194,14 @@ export class LogsController {
     this.usageCounter = usage;
     this.connections.usage = usage;
     this.transfer.imported = usage && ((ms, events) => usage.record('perf', { op: 'import', ms, events }));
+    this.transfer.failed =
+      usage && ((area) => usage.record('error', { area, code: area === 'export' ? 'write_failed' : 'read_failed' }));
+    this.otel.failed = usage && (() => usage.record('error', { area: 'otlp', code: 'start_failed' }));
+    this.terminalCapture.checked =
+      usage && ((integrated) => usage.terminalChecked(shellKind(vscode.env.shell), integrated));
   }
+  /** The panel's Update button, in a real editor. */
+  updateCheck?: UpdateCheck;
   private guideOpener?: (section: 'guide' | 'whatsNew') => void;
   readonly otel: OtelIntegration;
 
@@ -310,14 +320,16 @@ export class LogsController {
     const changed = query !== this.countedQuery && this.usage?.enabled;
     const started = changed ? performance.now() : 0;
     const snapshot = this.buildSnapshot(request);
+    const update = this.updateCheck?.status();
     if (changed) {
       this.countedQuery = query;
       clearTimeout(this.searchSettle);
       const ms = performance.now() - started;
       if (query) {
+        const { matched } = snapshot;
         this.searchSettle = setTimeout(() => {
           const { operators, fields } = queryFeatures(parseQuery(query));
-          this.usage?.search(operators, fields, ms);
+          this.usage?.search(operators, fields, ms, matched);
         }, SEARCH_SETTLE_MS);
         this.searchSettle.unref?.();
       }
@@ -327,6 +339,7 @@ export class LogsController {
       ...(reveal ? { reveal } : {}),
       ...(openConnectionForm ? { openConnectionForm } : {}),
       ...(startTour ? { startTour } : {}),
+      ...(update ? { update } : {}),
       ...(openFeedback ? { openFeedback } : {}),
       ...snapshot,
       ...(applyQuery !== undefined ? { applyQuery } : {}),
@@ -425,6 +438,7 @@ export class LogsController {
         breakOnQuery: (query, levels) => this.breakOnQuery(query, levels),
         doctorAction: (action, siteId) => this.doctorAction(action, siteId),
         connectAgent: (agent) => this.connectAgent(agent),
+        installUpdate: async () => this.updateCheck?.press(),
         showStatus: async () => {
           await vscode.commands.executeCommand('logline.showStatus');
         },
@@ -502,7 +516,7 @@ export class LogsController {
   firstRun(): boolean {
     if (this.globalState.get<boolean>(WELCOME_KEY)) return false;
     const stored = this.globalState.keys?.() ?? [];
-    if (stored.some((key) => key !== WELCOME_KEY)) {
+    if (stored.some((key) => key !== WELCOME_KEY && !AUTOMATIC_KEYS.test(key))) {
       void Promise.resolve(this.globalState.update(WELCOME_KEY, true)).catch(() => undefined);
       return false;
     }
@@ -650,9 +664,11 @@ export class LogsController {
       void vscode.window.showWarningMessage(
         'Logline is not accepting MCP clients in this window. Turn on logline.externalAgents to connect Claude Code or Codex.',
       );
+      this.usage?.record('agent_setup', { agent: agent ?? 'none', outcome: 'unavailable' });
       return;
     }
-    await connectAgent(agentLaunch(mcpScriptPath()), undefined, agent);
+    const setup = await connectAgent(agentLaunch(mcpScriptPath()), undefined, agent);
+    this.usage?.record('agent_setup', { ...setup });
     this.agentSetupCache = undefined;
   }
   async doctorAction(action: DoctorAction, siteId?: string): Promise<void> {
@@ -1044,6 +1060,19 @@ export class LogsController {
       sources: () => new Set([...this.registry.records.values()].map((record) => record.serverId)).size,
       memoryMb: () => this.store.bytes / (1024 * 1024),
       trimmed: () => this.store.discarded > 0,
+      discarded: () => this.store.discarded,
+      truncated: () => this.store.stats().truncated,
+      quality: () => {
+        const { events } = this.store.page({ full: true });
+        if (!events.length) return undefined;
+        const percent = (test: (event: (typeof events)[number]) => boolean) =>
+          (events.filter(test).length * 100) / events.length;
+        return {
+          json: percent((event) => event.isJson === true),
+          unclassified: percent((event) => event.level === 'unclassified'),
+          multiline: percent((event) => event.raw?.includes('\n') === true),
+        };
+      },
       connections: () => {
         const counts: Record<string, number> = {};
         for (const connection of this.connections.list())

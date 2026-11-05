@@ -13,6 +13,8 @@ type Config = Settings & { refresh(): void };
  * processes, terminals and debug sessions at it while it runs.
  */
 export class OtelIntegration {
+  /** Told that the receiver could not start when asked to, for usage counts. */
+  failed?: () => void;
   private disposed = false;
   /** Set by the Start/Stop commands for this window; the setting only decides whether it starts automatically. */
   private override?: boolean;
@@ -69,7 +71,10 @@ export class OtelIntegration {
       void vscode.window.showInformationMessage(
         `Logline is receiving OpenTelemetry on ${this.receiver.endpoint}. Servers, tasks, debug sessions, and new terminals started from now on send telemetry here.`,
       );
-    } else if (enabled && this.receiver.error) void vscode.window.showWarningMessage(`Logline: ${this.receiver.error}`);
+    } else if (enabled && this.receiver.error) {
+      this.failed?.();
+      void vscode.window.showWarningMessage(`Logline: ${this.receiver.error}`);
+    }
   }
 
   /** A changed `logline.otlp.enabled` setting takes over from the Start/Stop commands. */

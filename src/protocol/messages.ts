@@ -1,3 +1,4 @@
+import { WELCOME_CHOICES, type WelcomeChoice } from '../core/usage-events';
 import type { ServerSummary, SessionRegistry } from '../capture/session-registry';
 import type { FormUpdate } from '../core/connection-form';
 import type { ExceptionBlock } from '../core/exceptions';
@@ -31,6 +32,12 @@ export interface HeldRows {
   count: number;
   version: string;
 }
+/** The panel's Update button: a version to install, being installed, or installed and waiting for a reload. */
+export interface UpdateStatus {
+  version: string;
+  state: 'available' | 'installing' | 'ready';
+}
+
 export type ViewRequest =
   | ({
       type: 'snapshot';
@@ -56,7 +63,9 @@ export type ViewRequest =
   /** The panel tour ended: finished, or skipped. */
   | { type: 'tourEnded'; finished: boolean }
   | { type: 'connectAgent'; agent?: 'claude' | 'codex' }
-  | { type: 'onboardingSeen' }
+  | { type: 'onboardingSeen'; choice?: WelcomeChoice }
+  | { type: 'installUpdate' }
+  | { type: 'panelSize'; width: number }
   | { type: 'showStatus' }
   | ({ type: 'breakOnQuery' } & Filter)
   | { type: 'trace'; traceId: string }
@@ -188,6 +197,8 @@ export interface Snapshot extends Stats {
   persistDropped: number;
   timezone: string;
   guideStatus: GuideStatus;
+  /** An update to offer, for someone whose editor does not update Logline by itself. */
+  update?: UpdateStatus;
   agentSharing: AgentShareStatus;
   captureTerminals: boolean;
   captureStatus?: {
@@ -476,8 +487,16 @@ export function parseViewRequest(value: unknown): ViewRequest | undefined {
         : { type: msg.type };
     case 'stopSharing':
     case 'showStatus':
-    case 'onboardingSeen':
+    case 'installUpdate':
       return { type: msg.type };
+    case 'onboardingSeen': {
+      const choice = WELCOME_CHOICES.find((item) => item === msg.choice);
+      return choice ? { type: msg.type, choice } : { type: msg.type };
+    }
+    case 'panelSize':
+      return typeof msg.width === 'number' && Number.isFinite(msg.width) && msg.width > 0
+        ? { type: msg.type, width: msg.width }
+        : undefined;
     case 'askCopilot':
       return { type: msg.type, anchor: index('anchor') };
     case 'shareEvent': {
