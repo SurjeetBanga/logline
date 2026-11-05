@@ -2,6 +2,7 @@ import type { MetricSeriesData } from '../../core/metric-query';
 import type { ConnectionView, HostMessage } from '../../protocol/messages';
 import type { Elements } from '../dom';
 import type { EventScope } from '../event-scope';
+import { withoutFraction, withoutSeconds } from '../time';
 import type { WebviewApi } from '../types';
 import { formatMetric } from './metrics';
 
@@ -187,9 +188,9 @@ export function createMetricQuery(
         'text-anchor': index === 0 ? 'start' : index === 4 ? 'end' : 'middle',
       });
       // Milliseconds are noise on an axis, and so are seconds over an hour or more.
-      label.textContent = actions
-        .formatTime(at)
-        .replace(data.toMs - data.fromMs >= 3600000 ? /:\d\d\.\d+$/ : /\.\d+$/, '');
+      label.textContent = (data.toMs - data.fromMs >= 3600000 ? withoutSeconds : withoutFraction)(
+        actions.formatTime(at),
+      );
       root.append(label);
     }
     data.series.forEach((series, index) => {
@@ -237,6 +238,8 @@ export function createMetricQuery(
     let start: number | undefined;
     scope.listen(root, 'pointerdown', (event) => {
       start = at(event as PointerEvent);
+      // The release then reaches the chart even past its edge, ending the drag there.
+      root.setPointerCapture?.((event as PointerEvent).pointerId);
       brush.setAttribute('visibility', 'visible');
       brush.setAttribute('x', String(start));
       brush.setAttribute('width', '0');
@@ -312,10 +315,11 @@ export function createMetricQuery(
       SUGGEST_DELAY_MS,
     );
   });
-  scope.listen(elements.metricConnection, 'change', () => {
+  function connectionChanged(): void {
     placeholder();
     updateWatch();
-  });
+  }
+  scope.listen(elements.metricConnection, 'change', connectionChanged);
   scope.listen(elements.metricWatch, 'click', () => {
     const connection = selected();
     const query = elements.metricInput.value.trim();
@@ -336,5 +340,12 @@ export function createMetricQuery(
   });
   scope.track(() => clearTimeout(suggestTimer));
 
-  return { update, receive, receiveNames, run, redraw: draw };
+  /** Choose a connection from outside the list, which fires no change event. */
+  function choose(id: string): void {
+    elements.metricConnection.value = id;
+    connectionChanged();
+    elements.metricInput.focus();
+  }
+
+  return { update, receive, receiveNames, run, choose, redraw: draw };
 }

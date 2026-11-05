@@ -7,6 +7,16 @@ export function timeZoneOption(displayTimezone: string): { timeZone?: string } {
   return displayTimezone && displayTimezone !== 'local' ? { timeZone: displayTimezone } : {};
 }
 
+/** A formatted time without its fraction, which some locales set off with a comma. */
+export function withoutFraction(time: string): string {
+  return time.replace(/[.,]\d+$/, '');
+}
+
+/** A formatted time down to the minute. */
+export function withoutSeconds(time: string): string {
+  return time.replace(/:\d\d[.,]\d+$/, '');
+}
+
 export function createTimestampFormatter(state: ViewerState) {
   let cachedFormatter: Intl.DateTimeFormat | null | undefined;
 

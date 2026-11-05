@@ -4,6 +4,7 @@ import type { Elements } from '../dom';
 import { cell } from '../dom';
 import type { EventScope } from '../event-scope';
 import type { TabRailItem } from '../tab-rail';
+import { withoutFraction } from '../time';
 import type { WebviewApi } from '../types';
 
 type Session = Snapshot['sessions'][number];
@@ -169,7 +170,7 @@ export function createCompare(
   function runTime(time: string, minutes: string[]): string {
     const minute = time.slice(0, 5);
     const shared = minutes.filter((value) => value === minute).length > 1;
-    return shared ? time.replace(/\.\d+$/, '') : minute;
+    return shared ? withoutFraction(time) : minute;
   }
 
   function statusCell(row: Row): HTMLTableCellElement {

@@ -4297,8 +4297,11 @@ test('a metric query is charted, and a window dragged across it shows the logs f
   svg.listeners.get('pointermove')!({ clientX: 70 });
   assert.equal(tooltip.hidden, false);
   assert.match(tooltip.textContent, /env:prod: /);
-  // Dragging selects a window.
-  svg.listeners.get('pointerdown')!({ clientX: 20 });
+  // Dragging selects a window, and the chart keeps the pointer so a release past its edge ends the drag.
+  const captured: number[] = [];
+  Object.assign(svg, { setPointerCapture: (id: number) => captured.push(id) });
+  svg.listeners.get('pointerdown')!({ clientX: 20, pointerId: 7 });
+  assert.deepEqual(captured, [7]);
   svg.listeners.get('pointermove')!({ clientX: 60 });
   svg.listeners.get('pointerup')!({ clientX: 60 });
   assert.equal(get('metricSelection').hidden, false);
@@ -4664,5 +4667,61 @@ test('disposing the viewer stops a pending Metrics refresh', () => {
   assert.deepEqual(
     refresh.filter((id) => timers.has(id)),
     [],
+  );
+});
+
+test('Copy filtered results follows the source and run chosen in the rail', () => {
+  const { get, receive } = viewer({ server: '', query: '', levels: undefined });
+  receive({ ...railSnapshot });
+  assert.equal(get('copyResults').hidden, true);
+  rail(get).select('api')!.listeners.get('click')!({});
+  assert.equal(get('copyResults').hidden, false);
+  rail(get).select('')!.listeners.get('click')!({});
+  assert.equal(get('copyResults').hidden, true);
+});
+
+test('choosing a connection in the Metrics rail updates the query bar for it', () => {
+  const { get, receive } = viewer({ server: '' });
+  const connection = { mapped: true, watching: [], tailing: false };
+  receive({
+    ...railSnapshot,
+    connections: [
+      { ...connection, id: 'prod', sourceId: 'conn:prod', label: 'Datadog', type: 'datadog', sql: false },
+      { ...connection, id: 'app', sourceId: 'conn:app', label: 'SQLite', type: 'sqlite', sql: true },
+    ],
+  });
+  get('metrics').listeners.get('click')!();
+  receive({ type: 'metrics', metrics: [] });
+  const placeholder = () => (get('metricInput') as unknown as { placeholder: string }).placeholder;
+  assert.match(placeholder(), /^avg:/);
+  get('tabRailList')
+    .querySelectorAll('.rail-select')
+    .find((row) => row.dataset.railKey === 'connection:app')!
+    .listeners.get('click')!({});
+  assert.equal(get('metricConnection').value, 'app');
+  assert.match(placeholder(), /^SELECT/);
+});
+
+test('a metric keeps its size when it rounds to a round number, and a tiny one its exponent', () => {
+  const { get, receive } = viewer();
+  receive({ ...railSnapshot, metrics: { series: 1, revision: 1 } });
+  get('metrics').listeners.get('click')!();
+  const series = (latest: number) => ({
+    key: String(latest),
+    name: 'value',
+    service: 'api',
+    attributes: [],
+    kind: 'gauge',
+    measure: 'value',
+    points: [],
+    latest,
+  });
+  const shown = [99.96, -99.97, 9.999, 2e-10, 3.2e-20, 1.2, 0.5, 0.00001, 42];
+  receive({ type: 'metrics', metrics: shown.map(series) });
+  assert.deepEqual(
+    get('metricsCards')
+      .querySelectorAll('.metric-latest')
+      .map((value) => value.textContent),
+    ['100', '-100', '10', '2e-10', '3.2e-20', '1.2', '0.5', '0.00001', '42'],
   );
 });

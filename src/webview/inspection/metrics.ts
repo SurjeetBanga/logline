@@ -22,10 +22,7 @@ function number(value: number): string {
   if (magnitude >= 1e4)
     return new Intl.NumberFormat(undefined, { notation: 'compact', maximumFractionDigits: 1 }).format(value);
   if (magnitude >= 100 || Number.isInteger(value)) return Math.round(value).toLocaleString();
-  return value
-    .toPrecision(magnitude >= 1 ? 3 : 2)
-    .replace(/\.?0+$/, '')
-    .replace(/^-?0$/, '0');
+  return String(Number(value.toPrecision(magnitude >= 1 ? 3 : 2)));
 }
 
 function bytes(value: number): string {

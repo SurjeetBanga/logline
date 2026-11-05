@@ -13,6 +13,14 @@ All notable changes to Logline are documented in this file.
 - A column for a field named like `constructor` or `toString` stays empty on events without that field, instead of showing internal code.
 - Unchecking only **Unclassified** in the level menu is remembered after the panel reloads.
 - Run times in the **Sources** rail follow `logline.timezone`, as the table does.
+- A MongoDB URL whose password holds an unescaped `/` or `?` is refused rather than saved to settings with the password in it, and a password holding `@` moves out of a URL whole. A raw `@` anywhere after the host of a MongoDB URL now needs to be written `%40`.
+- A password pasted into a connection URL a second time leaves the URL field, as it does the first time.
+- Changing the connection type while a test runs no longer lets that test's answer pass for a later test of the new type.
+- Metric values no longer lose their size when shown: `99.96` shows as `100` rather than `1`, and `2e-10` keeps its exponent.
+- Metric chart times and the run names in **Compare** drop their seconds and milliseconds in locales that write a comma before the milliseconds.
+- A drag across a metric chart ends where the pointer is released, even past the chart's edge.
+- **Copy filtered results** appears and goes as a source or run is chosen, rather than at the next filter change.
+- Choosing a connection in the **Metrics** rail updates the query bar's example and **Watch** for it.
 - Agents receive replies of several megabytes from the Logline window faster: a 16 MB reply took a fifteenth of the time in a local test.
 
 ## 1.19.1 — 2026-11-02

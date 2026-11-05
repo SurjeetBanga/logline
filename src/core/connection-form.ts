@@ -221,7 +221,7 @@ export function draftUrl(draft: FormDraft): string {
 export function applyUrl(draft: FormDraft, value: string): FormDraft | undefined {
   if (draft.type === 'mongodb') {
     // The database may be in the URL or its own field, so a URL without one is taken too.
-    const password = /^\s*mongodb(?:\+srv)?:\/\/[^:@/?#]+:([^@/?#]*)@/i.exec(value)?.[1];
+    const password = /^\s*mongodb(?:\+srv)?:\/\/[^:@/?#]+:([^/?#]*)@/i.exec(value)?.[1];
     const url = withoutPassword(value).trim();
     if (!mongoUrl(url)) return undefined;
     return { ...draft, url, ...(password ? { password: decodePart(password) } : {}) };
@@ -243,7 +243,7 @@ export function applyUrl(draft: FormDraft, value: string): FormDraft | undefined
 
 /** A connection URL with its password taken out, as typed otherwise: `scheme://user:secret@host` → `scheme://user@host`. */
 export function withoutPassword(url: string): string {
-  return url.replace(/^(\s*[a-z][\w+.-]*:\/\/[^:@/?#]+):[^@/?#]*@/i, '$1@');
+  return url.replace(/^(\s*[a-z][\w+.-]*:\/\/[^:@/?#]+):[^/?#]*@/i, '$1@');
 }
 
 /**

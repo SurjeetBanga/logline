@@ -298,6 +298,8 @@ export function mongoUrl(
   if (!match) return undefined;
   const [, srv, user, hosts, database, options] = match;
   if (!hosts || /\s/.test(hosts)) return undefined;
+  // An unescaped @ past the host means a password with a / or ? in it was read as the host and path.
+  if (database?.includes('@') || options?.includes('@')) return undefined;
   return {
     srv: Boolean(srv),
     hosts,

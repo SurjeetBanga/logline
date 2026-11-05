@@ -511,3 +511,50 @@ test('MongoDB asks for its database only when the URL does not end with one', ()
   const sent = form.sent.at(-1) as Extract<FormRequest, { type: 'test' }>;
   assert.equal(sent.draft.database, 'events');
 });
+
+test('a password pasted a second time still leaves the URL field', () => {
+  const form = setup();
+  form.init();
+  const url = ['postgres://dev', 'pw@db.local:6543/orders'].join(':');
+  form.type('#field-url-entry', url);
+  form.type('#field-url-entry', url);
+  assert.equal(form.$('#field-url-entry').value, 'postgres://dev@db.local:6543/orders');
+  assert.equal(form.$('#field-password').value, 'pw');
+});
+
+test('a MongoDB password pasted a second time still leaves the URL field', () => {
+  const form = setup();
+  form.init();
+  form.radio('type', 'mongodb').fire('change');
+  const url = ['mongodb://dev', 'pw@db.local/orders'].join(':');
+  form.type('#field-url', url);
+  form.type('#field-url', url);
+  assert.equal(form.$('#field-url').value, 'mongodb://dev@db.local/orders');
+});
+
+test('the answer to a test of another type is not taken for a later test', () => {
+  const form = setup();
+  form.init();
+  form.type('#field-url-entry', 'postgres://dev@db.local/orders');
+  form.button(/Test connection/).fire('click');
+  form.radio('type', 'sqlite').fire('change');
+  form.type('#field-path', 'logs/app.db');
+  form.button(/Test/).fire('click');
+  form.receive({ type: 'tested', ok: true, detail: 'Postgres 16', tables: ['orders'] });
+  assert.ok(!form.$('.test-status').textContent.includes('Postgres 16'));
+});
+
+test('the hint about a file outside the workspace goes with the file', () => {
+  const form = setup();
+  form.init();
+  form.radio('type', 'sqlite').fire('change');
+  form.receive({ type: 'file', path: '/elsewhere/app.db', outside: true });
+  form.radio('type', 'postgres').fire('change');
+  form.radio('type', 'sqlite').fire('change');
+  assert.ok(
+    !form
+      .root()
+      .querySelectorAll('.hint')
+      .some((hint) => hint.textContent.includes('outside the workspace')),
+  );
+});

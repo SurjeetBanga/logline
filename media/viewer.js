@@ -6,6 +6,12 @@
     if (displayTimezone === "utc") return { timeZone: "UTC" };
     return displayTimezone && displayTimezone !== "local" ? { timeZone: displayTimezone } : {};
   }
+  function withoutFraction(time) {
+    return time.replace(/[.,]\d+$/, "");
+  }
+  function withoutSeconds(time) {
+    return time.replace(/:\d\d[.,]\d+$/, "");
+  }
   function createTimestampFormatter(state) {
     let cachedFormatter;
     let cachedFormatterTimezone;
@@ -2273,7 +2279,7 @@ Trace ${trace.traceId}`;
     if (magnitude >= 1e4)
       return new Intl.NumberFormat(void 0, { notation: "compact", maximumFractionDigits: 1 }).format(value);
     if (magnitude >= 100 || Number.isInteger(value)) return Math.round(value).toLocaleString();
-    return value.toPrecision(magnitude >= 1 ? 3 : 2).replace(/\.?0+$/, "").replace(/^-?0$/, "0");
+    return String(Number(value.toPrecision(magnitude >= 1 ? 3 : 2)));
   }
   function bytes(value) {
     const units = ["B", "KiB", "MiB", "GiB", "TiB"];
@@ -3131,6 +3137,7 @@ Span ${call.spanId}`;
     if (!match) return void 0;
     const [, srv, user, hosts, database, options] = match;
     if (!hosts || /\s/.test(hosts)) return void 0;
+    if (database?.includes("@") || options?.includes("@")) return void 0;
     return {
       srv: Boolean(srv),
       hosts,
@@ -4855,7 +4862,7 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
   }
   function applyUrl(draft, value) {
     if (draft.type === "mongodb") {
-      const password = /^\s*mongodb(?:\+srv)?:\/\/[^:@/?#]+:([^@/?#]*)@/i.exec(value)?.[1];
+      const password = /^\s*mongodb(?:\+srv)?:\/\/[^:@/?#]+:([^/?#]*)@/i.exec(value)?.[1];
       const url = withoutPassword(value).trim();
       if (!mongoUrl(url)) return void 0;
       return { ...draft, url, ...password ? { password: decodePart(password) } : {} };
@@ -4875,7 +4882,7 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
     };
   }
   function withoutPassword(url) {
-    return url.replace(/^(\s*[a-z][\w+.-]*:\/\/[^:@/?#]+):[^@/?#]*@/i, "$1@");
+    return url.replace(/^(\s*[a-z][\w+.-]*:\/\/[^:@/?#]+):[^/?#]*@/i, "$1@");
   }
   function suggestsIam(draft) {
     if (draft.type === "elasticsearch")
@@ -5415,9 +5422,10 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
       } : { ...next, label: labelEdited ? draft.label : "" };
       urlText = keep && entry === "url" ? draftUrl(draft) : "";
       urlInvalid = false;
+      outsideWorkspace = false;
       touched.clear();
       showErrors = false;
-      test = { state: "idle" };
+      if (test.state !== "running") test = { state: "idle" };
       table = void 0;
       renderTypes();
       renderDetails();
@@ -5484,7 +5492,7 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
           urlError.hidden = !!next || !urlInput.value.trim();
           urlError.textContent = next ? "" : `Enter a URL such as ${example}`;
           if (next) {
-            const movedPassword = next.password !== draft.password;
+            const movedPassword = withoutPassword(urlInput.value) !== urlInput.value;
             draft = next;
             if (movedPassword) {
               const password = details2.querySelector("#field-password");
@@ -5595,7 +5603,7 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
           onInput: (value) => {
             const next = applyUrl(draft, value);
             if (next) {
-              const movedPassword = next.password !== draft.password;
+              const movedPassword = withoutPassword(value) !== value;
               draft = next;
               const input = details2.querySelector("#field-url");
               if (input && movedPassword) input.value = draft.url;
@@ -7149,7 +7157,7 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
     function runTime(time, minutes) {
       const minute = time.slice(0, 5);
       const shared = minutes.filter((value) => value === minute).length > 1;
-      return shared ? time.replace(/\.\d+$/, "") : minute;
+      return shared ? withoutFraction(time) : minute;
     }
     function statusCell(row) {
       const status2 = STATUS[row.status];
@@ -7467,7 +7475,9 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
           y: HEIGHT - 6,
           "text-anchor": index === 0 ? "start" : index === 4 ? "end" : "middle"
         });
-        label.textContent = actions.formatTime(at2).replace(data.toMs - data.fromMs >= 36e5 ? /:\d\d\.\d+$/ : /\.\d+$/, "");
+        label.textContent = (data.toMs - data.fromMs >= 36e5 ? withoutSeconds : withoutFraction)(
+          actions.formatTime(at2)
+        );
         root.append(label);
       }
       data.series.forEach((series, index) => {
@@ -7514,6 +7524,7 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
       let start;
       scope.listen(root, "pointerdown", (event) => {
         start = at(event);
+        root.setPointerCapture?.(event.pointerId);
         brush.setAttribute("visibility", "visible");
         brush.setAttribute("x", String(start));
         brush.setAttribute("width", "0");
@@ -7583,10 +7594,11 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
         SUGGEST_DELAY_MS
       );
     });
-    scope.listen(elements.metricConnection, "change", () => {
+    function connectionChanged() {
       placeholder();
       updateWatch();
-    });
+    }
+    scope.listen(elements.metricConnection, "change", connectionChanged);
     scope.listen(elements.metricWatch, "click", () => {
       const connection = selected();
       const query = elements.metricInput.value.trim();
@@ -7606,7 +7618,12 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
       if (selection) actions.showLocal(selection[0], selection[1]);
     });
     scope.track(() => clearTimeout(suggestTimer));
-    return { update, receive, receiveNames, run, redraw: draw };
+    function choose(id) {
+      elements.metricConnection.value = id;
+      connectionChanged();
+      elements.metricInput.focus();
+    }
+    return { update, receive, receiveNames, run, choose, redraw: draw };
   }
 
   // src/webview/table/layout.ts
@@ -8692,10 +8709,7 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
       reveal: () => views.show("metrics"),
       visible: () => views.active() === "metrics",
       rail: (title, items) => tabRail.set("metrics", title, items),
-      queryConnection: (id) => {
-        elements.metricConnection.value = id;
-        elements.metricInput.focus();
-      }
+      queryConnection: (id) => metricQuery.choose(id)
     });
     const aiCalls = createAiCalls(elements, api, scope, {
       showTrace: (traceId) => traceView.show(traceId),
@@ -9614,6 +9628,7 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
       visibleSessions = sessionsFor(state.selectedServer);
       rail.selectionChanged(visibleSessions);
       connectionBar.render();
+      updateCopyResultsControl();
     }
     function selectSource(id, run = "") {
       search.clearAutocomplete();
@@ -9626,6 +9641,7 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
       saveState();
       rail.selectionChanged(visibleSessions);
       connectionBar.render();
+      updateCopyResultsControl();
       requestInteraction();
     }
     function selectRun(id) {
@@ -9635,6 +9651,7 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
       state.filterChanged();
       saveState();
       rail.selectionChanged();
+      updateCopyResultsControl();
       requestInteraction();
     }
   }

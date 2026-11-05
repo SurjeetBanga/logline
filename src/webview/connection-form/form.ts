@@ -537,9 +537,11 @@ export function createConnectionForm(api: FormApi, root: HTMLElement) {
       : { ...next, label: labelEdited ? draft.label : '' };
     urlText = keep && entry === 'url' ? draftUrl(draft) : '';
     urlInvalid = false;
+    outsideWorkspace = false;
     touched.clear();
     showErrors = false;
-    test = { state: 'idle' };
+    // A running test stays running: its answer, for the old type, must not pass for a later test.
+    if (test.state !== 'running') test = { state: 'idle' };
     table = undefined;
     renderTypes();
     renderDetails();
@@ -611,7 +613,7 @@ export function createConnectionForm(api: FormApi, root: HTMLElement) {
         urlError.hidden = !!next || !urlInput.value.trim();
         urlError.textContent = next ? '' : `Enter a URL such as ${example}`;
         if (next) {
-          const movedPassword = next.password !== draft.password;
+          const movedPassword = withoutPassword(urlInput.value) !== urlInput.value;
           draft = next;
           // A password pasted with the URL moves to its own field and out of the URL.
           if (movedPassword) {
@@ -731,7 +733,7 @@ export function createConnectionForm(api: FormApi, root: HTMLElement) {
         onInput: (value) => {
           const next = applyUrl(draft, value);
           if (next) {
-            const movedPassword = next.password !== draft.password;
+            const movedPassword = withoutPassword(value) !== value;
             draft = next;
             const input = details.querySelector<HTMLInputElement>('#field-url');
             // Show the URL without the password the moment it moves out.
