@@ -2,6 +2,7 @@ import type { LogEvent } from '../../core/types';
 import type { RowEvent } from '../../protocol/messages';
 import { cell } from '../dom';
 import { buildEventDetails, eventAction, icon, type IconName } from '../inspection/details';
+import { valueForCell } from '../search/cell-filter';
 import type { ViewerState } from '../state';
 
 export interface Column {
@@ -89,7 +90,7 @@ export function createRows(
       else if (column.key === 'base:level') tableCell = cell(event.level, `level ${event.level}`);
       else if (column.key === 'base:message') tableCell = messageCell;
       else if (column.key === 'base:source') tableCell = cell(event.stream, 'source');
-      else tableCell = cell(event.fields?.[column.label] ?? '');
+      else tableCell = cell(valueForCell(event, column.key)?.value ?? '');
       tableCell.dataset.column = column.key;
       tableCell.tabIndex = -1;
       tableCell.setAttribute('aria-label', `${column.label}: ${tableCell.textContent ?? ''}`);

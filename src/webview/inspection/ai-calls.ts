@@ -91,6 +91,8 @@ export function createAiCalls(
     refresh = undefined;
   }
 
+  scope.track(hide);
+
   function open(traceId: string, spanId: string) {
     current = { traceId: traceId.toLowerCase(), spanId: spanId.toLowerCase() };
     detail = undefined;

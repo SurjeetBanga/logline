@@ -4605,3 +4605,64 @@ test('Suggest a feature and Vote on what’s next are a dialog in the panel that
   assert.equal(get('feedbackSend').textContent, 'Open GitHub issue');
   assert.equal(again.checked, true);
 });
+
+test('a field named like an object property stays empty on events without it', () => {
+  const { get, receive } = viewer();
+  receive({
+    ...railSnapshot,
+    generation: 1,
+    events: [
+      { id: 1, level: 'info', message: 'with', fields: { constructor: 'kept' } },
+      { id: 2, level: 'info', message: 'without', fields: {} },
+    ],
+    columns: ['constructor'],
+    columnFields: ['constructor'],
+    matched: 2,
+  });
+  const text = (id: number) =>
+    get('logs')
+      .querySelectorAll('.event-row')
+      .find((row) => row.dataset.id === String(id))!
+      .children.find((cell) => cell.dataset.column === 'field:constructor')!.textContent;
+  assert.equal(text(1), 'kept');
+  assert.equal(text(2), '');
+});
+
+test('run times in the rail follow the display time zone, and an unknown zone falls back', () => {
+  const { get, receive } = viewer();
+  const startedAt = Date.UTC(2026, 10, 4, 12, 30);
+  const clock = (timeZone?: string) =>
+    new Date(startedAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', timeZone });
+  const show = (timezone: string) =>
+    receive({
+      ...railSnapshot,
+      generation: 2,
+      timezone,
+      sessions: railSnapshot.sessions.map((session) => ({ ...session, startedAt })),
+    });
+  show('Asia/Tokyo');
+  rail(get).select('api')!.listeners.get('click')!({});
+  show('Asia/Tokyo');
+  const text = () => rail(get).runs()[1].querySelector('.rail-meta')!.textContent;
+  assert.ok(text().includes(clock('Asia/Tokyo')), text());
+  show('America/New_York');
+  assert.ok(text().includes(clock('America/New_York')), text());
+  show('Not/AZone');
+  assert.ok(text().includes(clock()), text());
+});
+
+test('disposing the viewer stops a pending Metrics refresh', () => {
+  const { get, app, receive, timers } = viewer();
+  receive({ ...railSnapshot, generation: 2, metrics: { series: 1, revision: 1 } });
+  get('metrics').listeners.get('click')!();
+  receive({ type: 'metrics', metrics: [] });
+  const earlier = new Set(timers.keys());
+  receive({ ...railSnapshot, generation: 3, metrics: { series: 1, revision: 2 } });
+  const refresh = [...timers.keys()].filter((id) => !earlier.has(id));
+  assert.ok(refresh.length, 'a changed revision schedules a refresh');
+  app.dispose();
+  assert.deepEqual(
+    refresh.filter((id) => timers.has(id)),
+    [],
+  );
+});

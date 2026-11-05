@@ -1,6 +1,12 @@
 import type { LogEvent } from '../core/types';
 import type { ViewerState } from './state';
 
+/** The `timeZone` option for the display setting; `local` or none uses the machine's. */
+export function timeZoneOption(displayTimezone: string): { timeZone?: string } {
+  if (displayTimezone === 'utc') return { timeZone: 'UTC' };
+  return displayTimezone && displayTimezone !== 'local' ? { timeZone: displayTimezone } : {};
+}
+
 export function createTimestampFormatter(state: ViewerState) {
   let cachedFormatter: Intl.DateTimeFormat | null | undefined;
 
@@ -13,10 +19,9 @@ export function createTimestampFormatter(state: ViewerState) {
       minute: '2-digit',
       second: '2-digit',
       fractionalSecondDigits: 3,
-      hour12: false,
+      hourCycle: 'h23',
+      ...timeZoneOption(state.displayTimezone),
     };
-    if (state.displayTimezone === 'utc') options.timeZone = 'UTC';
-    else if (state.displayTimezone && state.displayTimezone !== 'local') options.timeZone = state.displayTimezone;
     try {
       cachedFormatter = new Intl.DateTimeFormat(undefined, options);
     } catch {

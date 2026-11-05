@@ -164,6 +164,7 @@ export function createMetricList(
     refresh = undefined;
   }
 
+  scope.track(hide);
   scope.listen(elements.metricsFilter, 'input', render);
 
   function receive(list: MetricSeriesView[]) {
