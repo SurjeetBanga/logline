@@ -29,6 +29,13 @@ export function createTooltips(scope: EventScope) {
   let warmUntil = 0;
 
   function adopt(element: HTMLElement): string | undefined {
+    // An empty title means the element no longer has anything to say.
+    if (element.getAttribute('title') === '') {
+      element.removeAttribute('title');
+      element.removeAttribute('aria-description');
+      delete element.dataset.tip;
+      return undefined;
+    }
     if (element.title) {
       element.dataset.tip = element.title;
       if (!element.getAttribute('aria-label') && !element.textContent?.trim())
