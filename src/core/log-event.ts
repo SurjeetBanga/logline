@@ -114,16 +114,77 @@ export function normalizeLevel(level: string | number | undefined, stream: strin
 }
 
 function getMessage(object: JsonObject | undefined, value: unknown, fallback: string): string {
-  const candidate =
-    object?.message ??
-    object?.msg ??
-    object?.event ??
-    object?.name ??
-    readValue(object, 'body.stringValue', 'Body.stringValue', 'body', 'Body');
-  if (candidate === null || isPrimitive(candidate)) return String(candidate);
+  // The first of these that is text, a number, or a flag is the message; an object under one of
+  // the names, such as structured `event` data, leaves the next name to be tried.
+  for (const candidate of [
+    object?.message,
+    object?.msg,
+    object?.event,
+    object?.name,
+    readValue(object, 'body.stringValue', 'Body.stringValue', 'body', 'Body'),
+  ])
+    if (candidate === null || isPrimitive(candidate)) return String(candidate);
   if (value === undefined || typeof value === 'string') return String(value ?? fallback);
   if (Array.isArray(value)) return `Array (${value.length} items)`;
-  return 'JSON event';
+  // A log without a message, such as one a service wrote as JSON that its store parsed into
+  // attributes, shows its own fields rather than a placeholder every such row would share.
+  return (object && summarize(object)) || 'JSON event';
+}
+
+// Fields every event shows in its own column, or that identify rather than describe it.
+const UNSUMMARIZED = new Set([
+  ...IGNORED_FIELDS,
+  'service',
+  'host',
+  'tags',
+  'traceId',
+  'trace_id',
+  'spanId',
+  'span_id',
+  'dd',
+  '@timestamp',
+  'observedTimeUnixNano',
+  'timeUnixNano',
+  'severityText',
+  'severityNumber',
+]);
+const SUMMARY_LENGTH = 512;
+
+/** `key=value` for each of a log's fields, nested ones under dotted paths, until the message is long enough. */
+function summarize(object: JsonObject): string {
+  const parts: string[] = [];
+  const state = { length: 0 };
+  for (const key in object) {
+    if (UNSUMMARIZED.has(key) || key.startsWith('datadog.')) continue;
+    if (!summarizeValue(parts, state, key, object[key], 0)) break;
+  }
+  return parts.join(' ');
+}
+
+function summarizeValue(
+  parts: string[],
+  state: { length: number },
+  key: string,
+  value: unknown,
+  depth: number,
+): boolean {
+  if (state.length >= SUMMARY_LENGTH) return false;
+  if (isPlainObject(value) && depth < 4) {
+    for (const child in value)
+      if (!summarizeValue(parts, state, `${key}.${child}`, value[child], depth + 1)) return false;
+    return true;
+  }
+  if (value === undefined) return true;
+  const text =
+    typeof value === 'string'
+      ? /[\s"=]/.test(value) || !value
+        ? JSON.stringify(value)
+        : value
+      : JSON.stringify(value);
+  const part = `${key}=${text}`;
+  parts.push(part);
+  state.length += part.length + 1;
+  return true;
 }
 
 function getTimestamp(object: JsonObject | undefined, receivedAt: Date): { text: string; ms: number } {

@@ -54,7 +54,28 @@ test('derives a message for non-object JSON and array payloads', () => {
   assert.equal(parseLogLine('"just a string"', 'stdout', 1, now).message, 'just a string');
   assert.equal(parseLogLine('42', 'stdout', 1, now).message, 'JSON event');
   assert.equal(parseLogLine('[1,2,3]', 'stdout', 1, now).message, 'Array (3 items)');
-  assert.equal(parseLogLine('{"unrelated":"field"}', 'stdout', 1, now).message, 'JSON event');
+  assert.equal(parseLogLine('{"unrelated":"field"}', 'stdout', 1, now).message, 'unrelated=field');
+  assert.equal(parseLogLine('{}', 'stdout', 1, now).message, 'JSON event');
+});
+test('a JSON log without a message shows its own fields', () => {
+  // A Datadog log a service wrote as JSON comes back with its attributes and no message.
+  const event = parseLogLine(
+    '{"timestamp":"2026-11-05T15:09:29.904Z","level":"info","service":"recon-app","host":"web-1","tags":"env:prod","datadog.id":"AwAA","job":"recon","batch":{"id":3,"rows":120},"note":"two words","ok":true,"traceId":"7f3a"}',
+    'remote',
+    1,
+    now,
+  );
+  assert.equal(event.message, 'job=recon batch.id=3 batch.rows=120 note="two words" ok=true');
+  // Structured data under a message name leaves the next name to be tried.
+  assert.equal(parseLogLine('{"event":{"kind":"x"},"name":"checkout"}', 'stdout', 1, now).message, 'checkout');
+  // The summary stops once it is as long as a message can be.
+  const long = parseLogLine(
+    JSON.stringify(Object.fromEntries(Array.from({ length: 200 }, (_, i) => [`k${i}`, i]))),
+    'stdout',
+    1,
+    now,
+  );
+  assert.ok(long.message!.length <= 512 && long.message!.startsWith('k0=0 k1=1'));
 });
 test('extracts primitive payload fields and skips nested objects', () => {
   const event = parseLogLine(

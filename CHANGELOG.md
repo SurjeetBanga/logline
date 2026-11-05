@@ -2,6 +2,12 @@
 
 All notable changes to Logline are documented in this file.
 
+## Unreleased
+
+### Fixes
+
+- A JSON log without a message, such as a Datadog log whose service wrote it as JSON, shows its fields in the **Message** column (`job=recon batch.id=3`) instead of `JSON event`. A field such as `event` that holds an object no longer hides a `name` or `body` after it.
+
 ## 1.20.0 — 2026-11-05
 
 ### Fixes
