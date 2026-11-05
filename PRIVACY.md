@@ -15,7 +15,7 @@ Every event carries:
 
 Events cover:
 
-- **Use**: the day you first use Logline each day, the commands you run, the kinds of capture you start, the views you open, whether you finished or skipped the panel tour, and the first time you reach a few steps such as your first search or first share.
+- **Use**: the day you first use Logline each day, the commands you run, the kinds of capture you start, when the Logs panel opens, the views you open, whether you finished or skipped the panel tour, and the first time you reach a few steps such as your first search or first share.
 - **Searches**: which operators a search used (fields, `-`, regex, time ranges, comparisons, `*`, `changed:`, `OR`) and which of Logline's own fields it filtered on, such as `level` or `service`. Never what you searched for, and never your own field names.
 - **Connections**: the type (Datadog, Postgres, and so on), how it signs in, and whether a search, tail, query, or test worked, with its time and row count in ranges.
 - **Log doctor**: which kinds of problem it found, such as a secret or a noisy statement, once a session; the actions you take on them; and a thumbs up or down you give a kind of finding. Never the statement, file, or value.

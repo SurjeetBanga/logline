@@ -139,6 +139,7 @@ export const USAGE_EVENTS: Record<string, Record<string, Rule>> = {
   milestone: { name: oneOf(...MILESTONES), after: DURATION },
   command: { id: { kind: 'enum', values: (vocabulary) => vocabulary.commands } },
   capture_started: { kind: oneOf(...CAPTURE_KINDS) },
+  panel_opened: {},
   view_opened: { view: oneOf(...USAGE_VIEWS) },
   connection_added: { type: connection, auth: oneOf('password', 'iam', 'other') },
   connection_searched: { type: connection, ok: BOOL, ms: MS, rows: COUNT },

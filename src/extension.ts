@@ -159,8 +159,22 @@ export function activate(context: vscode.ExtensionContext): { provider: LogsProv
   );
   startAutoServers(controller);
   context.subscriptions.push(usage);
+  if (opensPanelOnInstall(usage.newInstall, context.extensionMode, vscode.env?.remoteName))
+    void vscode.commands.executeCommand('logline.logs.focus');
   usage.record('perf', { op: 'activate', ms: performance.now() - started });
   return { provider };
+}
+
+/**
+ * A new install opens the Logs panel once, so its welcome is seen. Not on a remote
+ * host: a synced extension installs afresh in every new Codespace or container.
+ */
+export function opensPanelOnInstall(
+  newInstall: boolean,
+  mode: vscode.ExtensionMode | undefined,
+  remoteName: string | undefined,
+): boolean {
+  return newInstall && mode === (vscode.ExtensionMode?.Production ?? 1) && !remoteName;
 }
 
 export async function deactivate(): Promise<void> {

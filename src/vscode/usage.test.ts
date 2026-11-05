@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { withVscode } from '../test/vscode-mock';
@@ -112,6 +113,8 @@ function setup(
     key?: string;
     /** Whether PostHog accepts what is sent. */
     accepted?: boolean;
+    /** The extension's storage folder, shared by windows of one install. */
+    storage?: string;
   } = {},
 ) {
   Object.assign(host, { usageEnabled: true, errorsEnabled: true, answer: undefined, messages: [], opened: [] });
@@ -120,7 +123,8 @@ function setup(
   const bodies: string[] = [];
   let now = Date.UTC(2026, 10, 2, 9, 0, 0);
   const globalState = options.state ?? memento();
-  const usage = new Usage({ globalState, extensionMode: options.mode ?? 1 } as any, {
+  const globalStorageUri = options.storage ? { fsPath: options.storage } : undefined;
+  const usage = new Usage({ globalState, extensionMode: options.mode ?? 1, globalStorageUri } as any, {
     vocabulary,
     environment,
     env: options.env ?? {},
@@ -650,4 +654,66 @@ test('only the person’s own settings can turn usage counts on: a workspace can
     'logline.telemetry.enabled'
   ];
   assert.equal(setting.scope, 'application');
+});
+
+test('windows starting together on a new install share one id and count one install', async (t) => {
+  const storage = mkdtempSync(join(tmpdir(), 'logline-usage-'));
+  t.after(() => rmSync(storage, { recursive: true, force: true }));
+  const first = setup({ storage });
+  const second = setup({ storage });
+  first.usage.start();
+  second.usage.start();
+  await first.usage.flush();
+  await second.usage.flush();
+  assert.equal(second.usage.usageId, first.usage.usageId);
+  assert.equal(first.usage.newInstall, true);
+  assert.equal(second.usage.newInstall, false, 'only one window acts on the install');
+  assert.ok(first.events().includes('installed'));
+  assert.ok(!second.events().includes('installed'));
+  assert.ok(second.events().includes('activated'), 'the other window still counts as started');
+  assert.equal(second.globalState.get('logline.usage.state'), undefined, 'state is left to the window that won');
+  first.usage.dispose();
+  second.usage.dispose();
+});
+
+test('an id file that cannot be used leaves the window with its own id', async (t) => {
+  const storage = mkdtempSync(join(tmpdir(), 'logline-usage-'));
+  t.after(() => rmSync(storage, { recursive: true, force: true }));
+  writeFileSync(join(storage, 'usage-id'), 'not an id');
+  const { usage, events } = setup({ storage });
+  usage.start();
+  await usage.flush();
+  assert.notEqual(usage.usageId, 'not an id');
+  assert.ok(events().includes('installed'));
+  usage.dispose();
+});
+
+test('a reset id replaces the id windows would otherwise share', async (t) => {
+  const storage = mkdtempSync(join(tmpdir(), 'logline-usage-'));
+  t.after(() => rmSync(storage, { recursive: true, force: true }));
+  const { usage } = setup({ storage });
+  usage.start();
+  await usage.resetId();
+  assert.equal(readFileSync(join(storage, 'usage-id'), 'utf8'), usage.usageId);
+  usage.dispose();
+});
+
+test('someone who used Logline before is not a new install', () => {
+  const { usage } = setup({ state: memento({ 'logline.guide.lastSeenVersion': '1.15.0' }) });
+  usage.start();
+  assert.equal(usage.newInstall, false);
+  usage.dispose();
+});
+
+test('the panel coming into view is activity each time and one event a session', async () => {
+  const { usage, events, advance } = setup();
+  usage.start();
+  usage.panelOpened();
+  usage.panelOpened();
+  advance(24 * 60 * 60 * 1000);
+  usage.panelOpened();
+  await usage.flush();
+  assert.equal(events().filter((event) => event === 'panel_opened').length, 1);
+  assert.equal(events().filter((event) => event === 'active_day').length, 2);
+  usage.dispose();
 });

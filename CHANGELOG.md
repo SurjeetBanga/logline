@@ -26,6 +26,13 @@ All notable changes to Logline are documented in this file.
 - Turning on a connection's own query syntax after a filter failed to translate starts empty, rather than from the filter before it.
 - A tool call whose id matches a built-in name, such as `constructor`, no longer shows `NaN s` in **AI calls**.
 - Agents receive replies of several megabytes from the Logline window faster: a 16 MB reply took a fifteenth of the time in a local test.
+- The first-run welcome shows again. Logline's own background settings made every new install look like an upgrade, so new users never saw the welcome, its tour, or its quick starts.
+- Installing Logline with several windows open counts one install, not one for each window.
+
+### Changes
+
+- Installing Logline opens the Logs panel once, so the welcome is seen. It stays closed on remote hosts, such as a Codespace, where a synced extension installs afresh each time.
+- Usage counts now include when the Logs panel opens, and opening it counts as activity. See [PRIVACY.md](PRIVACY.md).
 
 ## 1.19.1 — 2026-11-02
 

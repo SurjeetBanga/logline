@@ -37,7 +37,10 @@ const mock = {
     onDidEndTask: () => ({ dispose() {} }),
   },
 };
-const { activate, deactivate } = withVscode(mock, () => require('./extension') as typeof import('./extension'));
+const { activate, deactivate, opensPanelOnInstall } = withVscode(
+  mock,
+  () => require('./extension') as typeof import('./extension'),
+);
 
 test('activation registers the provider, command/task surfaces, autostart, and idempotent shutdown', async () => {
   registeredCommands.length = 0;
@@ -188,4 +191,14 @@ test('activation adds editor features where the host supports them, and follows 
       else process.env[key] = value;
     }
   }
+});
+
+test('only a new local install in a real editor opens the Logs panel', () => {
+  const production = 1;
+  const development = 2;
+  assert.equal(opensPanelOnInstall(true, production, undefined), true);
+  assert.equal(opensPanelOnInstall(false, production, undefined), false, 'not on an upgrade or in a second window');
+  assert.equal(opensPanelOnInstall(true, production, 'codespaces'), false, 'not on a remote host');
+  assert.equal(opensPanelOnInstall(true, development, undefined), false, 'not in development or tests');
+  assert.equal(opensPanelOnInstall(true, undefined, undefined), false);
 });

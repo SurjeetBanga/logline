@@ -1,6 +1,8 @@
 import { randomUUID } from 'node:crypto';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { request } from 'node:https';
 import * as os from 'node:os';
+import { join } from 'node:path';
 import * as vscode from 'vscode';
 import {
   commonProperties,
@@ -35,6 +37,9 @@ export const USAGE_PROJECT_KEY = 'phc_Amvwr7HmP3SzK8uTELYNuC7joo6jKtC8X9TvovZW37
 
 const ID_KEY = 'logline.usage.id';
 const STATE_KEY = 'logline.usage.state';
+/** Holds the anonymous id in the extension's storage folder, where windows starting together can agree on one. */
+const ID_FILE = 'usage-id';
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const QUEUE_LIMIT = 500;
 const FLUSH_MS = 60_000;
 const SUMMARY_MS = 24 * 60 * 60 * 1000;
@@ -137,6 +142,8 @@ export class Usage implements vscode.Disposable {
   private summaryTimer?: ReturnType<typeof setInterval>;
   private readonly subscriptions: vscode.Disposable[] = [];
   private id = '';
+  private fresh = false;
+  private panelCounted = false;
   private summarySource?: UsageSummarySource;
   private disposed = false;
   private closing?: Promise<void>;
@@ -159,7 +166,7 @@ export class Usage implements vscode.Disposable {
 
   constructor(
     private readonly context: Pick<vscode.ExtensionContext, 'globalState'> &
-      Partial<Pick<vscode.ExtensionContext, 'extensionMode'>>,
+      Partial<Pick<vscode.ExtensionContext, 'extensionMode' | 'globalStorageUri'>>,
     private readonly options: UsageOptions,
   ) {
     this.now = options.now ?? Date.now;
@@ -186,17 +193,22 @@ export class Usage implements vscode.Disposable {
     const state = this.state;
     let id = this.context.globalState.get<string>(ID_KEY);
     if (!id) {
-      id = randomUUID();
       // Someone who used Logline before usage counts existed is not a new install, and their firsts are long past.
       const existing = (this.context.globalState.keys?.() ?? []).some((key) => key.startsWith('logline.'));
+      const claim = this.claimId(randomUUID());
+      id = claim.id;
       void this.save(ID_KEY, id);
       this.id = id;
-      this.saveState({
-        installedAt: this.now(),
-        version: this.common.version as string,
-        milestones: existing ? [...MILESTONES] : [],
-      });
-      if (!existing) this.record('installed');
+      // Another window of this install got there first: it counts the install and keeps the state.
+      if (claim.first) {
+        this.saveState({
+          installedAt: this.now(),
+          version: this.common.version as string,
+          milestones: existing ? [...MILESTONES] : [],
+        });
+        this.fresh = !existing;
+        if (this.fresh) this.record('installed');
+      }
     } else {
       this.id = id;
       if (state.version && state.version !== this.common.version) this.record('updated', { from: state.version });
@@ -240,6 +252,40 @@ export class Usage implements vscode.Disposable {
 
   get usageId(): string {
     return this.id;
+  }
+
+  /** Whether this window is the one that found Logline newly installed, whether or not usage counts are on. */
+  get newInstall(): boolean {
+    return this.fresh;
+  }
+
+  private get idFile(): string | undefined {
+    const folder = this.context.globalStorageUri?.fsPath;
+    return folder ? join(folder, ID_FILE) : undefined;
+  }
+
+  /**
+   * Windows open during an install start together, before they see each other's
+   * stored id. Creating the file is atomic, so one wins and the rest use its id
+   * rather than each counting an install.
+   */
+  private claimId(candidate: string): { id: string; first: boolean } {
+    const file = this.idFile;
+    if (!file) return { id: candidate, first: true };
+    try {
+      mkdirSync(join(file, '..'), { recursive: true });
+      writeFileSync(file, candidate, { flag: 'wx' });
+      return { id: candidate, first: true };
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') return { id: candidate, first: true };
+    }
+    try {
+      const claimed = readFileSync(file, 'utf8').trim();
+      if (UUID.test(claimed)) return { id: claimed, first: false };
+    } catch {
+      /* unreadable: this window keeps its own id */
+    }
+    return { id: candidate, first: true };
   }
 
   private get debug(): boolean {
@@ -314,6 +360,14 @@ export class Usage implements vscode.Disposable {
   command(id: string): void {
     this.touch();
     this.record('command', { id });
+  }
+
+  /** The Logs panel came into view: activity each time, and one event a session. */
+  panelOpened(): void {
+    this.touch();
+    if (this.panelCounted) return;
+    this.panelCounted = true;
+    this.record('panel_opened');
   }
 
   /** A view the panel opened; some poll while open, so this does not count as activity. */
@@ -538,6 +592,15 @@ export class Usage implements vscode.Disposable {
     this.queue = [];
     this.id = randomUUID();
     await this.save(ID_KEY, this.id);
+    // The old id must not come back from the file if stored state is ever cleared.
+    const file = this.idFile;
+    if (file)
+      try {
+        mkdirSync(join(file, '..'), { recursive: true });
+        writeFileSync(file, this.id);
+      } catch {
+        /* the stored id still holds */
+      }
     void vscode.window.showInformationMessage('Logline: Your anonymous usage ID was reset.');
   }
 
