@@ -3367,6 +3367,8 @@ Span ${call.spanId}`;
     newestFirst = true;
     cellHintDismissed;
     rowHintDismissed;
+    /** The first-run welcome is open and not yet answered, so a rebuilt panel can point to the tour. */
+    welcomeOpen;
     /** The selected tab, kept so the panel reopens on it. */
     view;
     /** The time range a connection search covers, such as `1h`. */
@@ -3396,6 +3398,7 @@ Span ${call.spanId}`;
       this.following = !saved.sort;
       this.cellHintDismissed = saved.cellHintDismissed === true;
       this.rowHintDismissed = saved.rowHintDismissed === true;
+      this.welcomeOpen = saved.welcomeOpen === true;
       this.selectedServer = saved.server ?? "";
       this.selectedSession = saved.session ?? "";
       this.selectedSort = saved.sort ?? "";
@@ -3473,6 +3476,7 @@ Span ${call.spanId}`;
         extraColumns: this.extraColumns,
         ...this.cellHintDismissed ? { cellHintDismissed: true } : {},
         ...this.rowHintDismissed ? { rowHintDismissed: true } : {},
+        ...this.welcomeOpen ? { welcomeOpen: true } : {},
         ...this.view !== "logs" ? { view: this.view } : {},
         ...this.connectionRange !== "1h" ? { range: this.connectionRange } : {},
         ...Object.keys(this.native).length ? { native: this.persistedNative() } : {},
@@ -3834,7 +3838,11 @@ Span ${call.spanId}`;
     scope.listen(elements.search, "focus", () => {
       if (editingIndex === void 0 && elements.search.value === appliedQuery) elements.search.value = "";
     });
-    scope.listen(elements.search, "input", () => setError());
+    scope.listen(elements.search, "input", (event) => {
+      setError();
+      if (event?.inputType === "insertReplacementText" && !elements.search.value.trimEnd().endsWith(":"))
+        applyDraft();
+    });
     scope.listen(elements.searchClear, "click", (event) => {
       event.stopPropagation();
       clear();
@@ -3848,6 +3856,15 @@ Span ${call.spanId}`;
       clearAutocomplete,
       query,
       draft: () => elements.search.value,
+      /**
+       * Apply what was typed but not yet entered, as Run and Tail do before they search. False when it is not a
+       * valid filter, which then says why.
+       */
+      applyPending() {
+        const draft = elements.search.value.trim();
+        if (!draft || editingIndex === void 0 && draft === appliedQuery) return true;
+        return applyDraft();
+      },
       setQuery,
       appendQuery: (value) => setQuery(`${appliedQuery} ${value}`, true),
       clear
@@ -3875,7 +3892,7 @@ Span ${call.spanId}`;
     if (service) kept.push(`service:${/[\s"():]/.test(service) ? JSON.stringify(service) : service}`);
     return kept.join(" ");
   }
-  function createConnectionBar(elements, state, api, scope, query, saveState, compare, setQuery) {
+  function createConnectionBar(elements, state, api, scope, query, saveState, compare, setQuery, applyPending = () => true) {
     let connections = [];
     let previewKey = "";
     let previewTimer;
@@ -4051,6 +4068,7 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
     function run() {
       const connection = selected();
       if (!connection) return false;
+      if (connection.mapped && !applyPending()) return true;
       if (connection.mapped)
         api.postMessage({
           type: "connectionFetch",
@@ -4099,7 +4117,7 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
     scope.listen(elements.connectionRun, "click", () => run());
     scope.listen(elements.connectionTail, "click", () => {
       const connection = selected();
-      if (connection)
+      if (connection && applyPending())
         api.postMessage({
           type: "connectionTail",
           connectionId: connection.id,
@@ -8680,7 +8698,8 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
       () => search.query(),
       saveState,
       (baselineServerId, baselineSessionId) => compareView.open({ baselineServerId, baselineSessionId }),
-      (query) => search.setQuery(query, true)
+      (query) => search.setQuery(query, true),
+      () => search.applyPending()
     );
     const rail = createSourceRail(elements, state, api, scope, {
       selectSource: (id) => selectSource(id),
@@ -9388,6 +9407,7 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
     scope.listen(elements.tourHintDismiss, "click", () => elements.tourHint.hidden = true);
     const welcomeChoice = (choice, then) => () => {
       elements.welcomeDialog.close();
+      welcomeAnswered();
       api.postMessage({ type: "onboardingSeen", choice });
       then();
     };
@@ -9422,10 +9442,25 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
       welcomeChoice("otel", () => api.postMessage({ type: "toggleOtlp", enabled: true }))
     );
     scope.listen(elements.welcomeDialog, "cancel", () => {
+      welcomeAnswered();
       api.postMessage({ type: "onboardingSeen", choice: "dismissed" });
       elements.tourHint.hidden = false;
     });
-    if (document.body?.dataset.firstRun === "true") elements.welcomeDialog.showModal?.();
+    function welcomeAnswered() {
+      if (!state.welcomeOpen) return;
+      state.welcomeOpen = false;
+      saveState();
+    }
+    if (document.body?.dataset.firstRun === "true" && elements.welcomeDialog.showModal) {
+      elements.welcomeDialog.showModal();
+      state.welcomeOpen = true;
+      saveState();
+      api.postMessage({ type: "onboardingSeen" });
+    } else if (state.welcomeOpen) {
+      elements.tourHint.hidden = false;
+      welcomeAnswered();
+      api.postMessage({ type: "onboardingSeen", choice: "dismissed" });
+    }
     if (globalThis.innerWidth > 0) api.postMessage({ type: "panelSize", width: globalThis.innerWidth });
     scope.listen(elements.updateButton, "click", () => api.postMessage({ type: "installUpdate" }));
     createPopover(elements.counts.closest(".popover-container"), elements.counts, elements.memoryPanel);

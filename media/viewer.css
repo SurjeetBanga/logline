@@ -555,6 +555,19 @@ body > header {
   margin-left: 14px;
   margin-right: 14px;
 }
+/* In a short or narrow panel the connection's controls wrap onto many lines. They scroll within
+   themselves, rather than pushing the table out of the panel and scrolling the page. */
+.workspace-main > .connection-bar {
+  flex-shrink: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+/* A short panel keeps its height for the rows; the tip about using them waits for a taller one. */
+@media (max-height: 360px) {
+  .workspace-main > .table-hint {
+    display: none;
+  }
+}
 .source-rail {
   position: relative;
   display: flex;
@@ -1114,6 +1127,14 @@ select {
 .search-editor input:focus {
   outline: 0;
 }
+/* Chromium paints a highlighted suggestion, and a chosen one, as autofill: a white box with grey text in
+   any theme. Keep the editor's own colors. */
+.search-editor input:-webkit-autofill,
+.search-editor input:autofill {
+  -webkit-text-fill-color: var(--vscode-input-foreground, #ccc);
+  box-shadow: 0 0 0 1000px var(--vscode-input-background, #333) inset;
+  caret-color: var(--vscode-input-foreground, #ccc);
+}
 .search-editor.has-chips:not(:focus-within) input {
   color: transparent;
 }
@@ -1594,6 +1615,11 @@ select {
   white-space: nowrap;
   color: var(--vscode-descriptionForeground, #aaa);
   font-size: 11px;
+}
+/* What the last fetch found is read in full: in a narrow panel it wraps rather than ending in an ellipsis. */
+#connectionResult {
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 .connection-preview {
   font-family: var(--vscode-editor-font-family, monospace);
