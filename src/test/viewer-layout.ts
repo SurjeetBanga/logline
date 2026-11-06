@@ -90,7 +90,12 @@ after(async () => {
   await browser?.close();
 });
 
-async function open(size: { width: number; height: number }): Promise<Page> {
+async function open(
+  size: { width: number; height: number },
+  /** The panel's saved state, such as the selected source; the snapshot sent first. */
+  saved?: Record<string, unknown>,
+  first: unknown = snapshot,
+): Promise<Page> {
   const page = await browser.newPage({ viewport: size });
   const errors: string[] = [];
   page.on('pageerror', (error) => errors.push(error.message));
@@ -102,13 +107,13 @@ async function open(size: { width: number; height: number }): Promise<Page> {
     if (name === '') return route.fulfill({ contentType: 'text/html', body: html });
     return route.fulfill({ path: join(media, name) });
   });
-  await page.addInitScript(() => {
+  await page.addInitScript((state) => {
     Object.assign(window, {
-      acquireVsCodeApi: () => ({ getState: () => undefined, setState() {}, postMessage() {} }),
+      acquireVsCodeApi: () => ({ getState: () => state, setState() {}, postMessage() {} }),
     });
-  });
+  }, saved);
   await page.goto(`${origin}/`);
-  await post(page, snapshot);
+  await post(page, first);
   assert.deepEqual(errors, []);
   return page;
 }
@@ -249,6 +254,42 @@ for (const size of SIZES) {
       await post(page, { type: 'connectionForm', session: 2, update: { type: 'close' } });
       await openForm(page, 3, 'edit');
       await assertPageFits(page, 'Edit connection');
+    } finally {
+      await page.close();
+    }
+  });
+
+  test(`what a Datadog search found is read in full in a ${name} panel`, async () => {
+    const datadog = {
+      id: 'dd',
+      sourceId: 'remote:dd',
+      label: 'Datadog prod',
+      type: 'datadog',
+      mapped: true,
+      sql: false,
+      watching: [],
+      agents: false,
+      tailing: false,
+      last: { sessionId: 's', kind: 'fetch', running: false, fetched: 1000, kept: 1000, total: 57253, elapsedMs: 1840 },
+    };
+    const page = await open(
+      size,
+      { server: 'remote:dd', query: 'service:recon-app' },
+      {
+        ...snapshot,
+        servers: [{ id: 'remote:dd', label: 'Datadog prod', status: 'stopped', activeSessions: 0, configured: true }],
+        connections: [datadog],
+      },
+    );
+    try {
+      const result = page.locator('#connectionResult');
+      assert.match((await result.textContent()) ?? '', /^Fetched 1,000 of 57,253 logs/);
+      const { shown, needs } = await result.evaluate((element) => ({
+        shown: element.clientWidth,
+        needs: element.scrollWidth,
+      }));
+      assert.ok(needs <= shown, `the result needs ${needs}px and shows ${shown}px`);
+      await assertPageFits(page, 'Datadog connection selected');
     } finally {
       await page.close();
     }
