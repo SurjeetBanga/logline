@@ -9,6 +9,10 @@ All notable changes to Logline are documented in this file.
 - A filter typed in the search box but not yet entered is no longer left out: **Run** and **Tail** on a connection apply it first, and choosing a whole term from the suggestions, such as `appname:"prod"`, applies it as Enter does. A highlighted suggestion no longer turns the search box white.
 - What a connection's search found, such as `Fetched 1,000 of 57,253 logs`, wraps in a narrow panel instead of ending in an ellipsis. In a short or narrow panel, a connection's controls scroll within their bar, rather than pushing the table out of view and scrolling the whole panel, and the tip about rows waits for a taller panel.
 - A JSON log without a message, such as a Datadog log whose service wrote it as JSON, shows its fields in the **Message** column (`job=recon batch.id=3`) instead of `JSON event`. A field such as `event` that holds an object no longer hides a `name` or `body` after it, nor does a `message` that is `null`.
+- In editors without built-in SQLite, a query on a SQLite connection can no longer run a `sqlite3` command such as `.shell`: a line holding only `/` or `GO`, which `sqlite3` reads as the end of a statement, is refused, and `sqlite3` 3.37 or later runs in its safe mode.
+- An agent's call to a VS Code window that never answers, such as one paused in a debugger, now gives up after 10 minutes with a message saying so, instead of waiting forever.
+- A batch of usage counts that does not reach PostHog is tried once more before it is dropped. Suggestions and votes are not: the form has already said they were not sent.
+- `telemetry.json` lists every value the `error` and `milestone` events can send.
 - The first-run welcome shows once, as it says, even when it is left unanswered: switching to another panel tab, such as **Terminal**, and back no longer opens it again, and the panel points to the tour instead.
 
 ## 1.20.0 — 2026-11-05

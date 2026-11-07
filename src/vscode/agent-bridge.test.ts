@@ -86,6 +86,32 @@ test('an agent that gives up cancels the call in the window', async () => {
   await bridge.stop();
 });
 
+test('a call to a window that never answers gives up, and cancels the call there', async () => {
+  let cancelled!: () => void;
+  const stopped = new Promise<void>((resolve) => (cancelled = resolve));
+  const bridge = new AgentBridge({
+    run: (_tool, _input, token) =>
+      new Promise(() => {
+        const poll = setInterval(() => {
+          if (token.isCancellationRequested) {
+            clearInterval(poll);
+            cancelled();
+          }
+        }, 5);
+      }),
+    folders: () => [],
+    name: () => 'frozen',
+    directory: join(temp(), 'agents'),
+    pid: process.pid,
+  });
+  await bridge.start();
+  const window = JSON.parse(readFileSync(join(bridge['directory'], `${process.pid}.json`), 'utf8')) as BridgeWindow;
+  const reply = await callWindow(window, 'logline_search_logs', {}, undefined, undefined, 50);
+  assert.match(JSON.stringify(reply), /did not answer within \d+ seconds/);
+  await stopped;
+  await bridge.stop();
+});
+
 test('windows that closed without cleaning up are ignored and removed', async () => {
   const directory = join(temp(), 'agents');
   const bridge = new AgentBridge({

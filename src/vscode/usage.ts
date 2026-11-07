@@ -73,6 +73,8 @@ interface QueuedEvent {
   timestamp: string;
   /** Its own one-time id instead of the install's, for answers a person wrote. */
   distinctId?: string;
+  /** Already sent once and not accepted: not tried again. */
+  retried?: boolean;
 }
 
 /** Sends one batch and says whether it was accepted; the default posts it to PostHog. */
@@ -131,7 +133,7 @@ function postBatch(body: string): Promise<boolean> {
  * Anonymous usage counts, only while both VS Code's telemetry setting and
  * `logline.telemetry.enabled` allow them. Events are checked against the schema
  * in `core/usage-events`, queued in memory, and sent in batches; nothing is
- * written to disk and failures are dropped.
+ * written to disk, and a batch that is not accepted is tried once more, then dropped.
  */
 export class Usage implements vscode.Disposable {
   private readonly logger?: TelemetryLoggerLike;
@@ -627,7 +629,8 @@ export class Usage implements vscode.Disposable {
     const batch = this.queue;
     this.queue = [];
     for (const item of batch)
-      this.remember(`${item.timestamp.slice(11, 19)}  ${item.event.padEnd(22)} ${describe(item.properties)}`);
+      if (!item.retried)
+        this.remember(`${item.timestamp.slice(11, 19)}  ${item.event.padEnd(22)} ${describe(item.properties)}`);
     if (!this.production || !this.projectKey || this.debug) return true;
     const body = JSON.stringify({
       api_key: this.projectKey,
@@ -638,7 +641,20 @@ export class Usage implements vscode.Disposable {
         properties: { ...this.common, ...item.properties, $process_person_profile: false, $geoip_disable: true },
       })),
     });
-    return this.transport(body).catch(() => false);
+    const sent = await this.transport(body).catch(() => false);
+    if (!sent) this.requeue(batch);
+    return sent;
+  }
+
+  /**
+   * Put a batch that was not accepted back in front of what was queued since,
+   * for one more try. Answers a person sent are not: the form already said they
+   * were not sent.
+   */
+  private requeue(batch: QueuedEvent[]): void {
+    if (this.disposed || !this.enabled) return;
+    const again = batch.filter((item) => !item.retried && !item.distinctId).map((item) => ({ ...item, retried: true }));
+    this.queue = [...again, ...this.queue].slice(-QUEUE_LIMIT);
   }
 
   private remember(line: string): void {

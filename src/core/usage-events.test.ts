@@ -221,6 +221,22 @@ test('telemetry.json lists every event and property, so code --telemetry shows w
   assert.deepEqual(documented, schema, 'update telemetry.json with the event schema');
 });
 
+test('a value list in telemetry.json names exactly the values that can be sent', () => {
+  const listed = JSON.parse(readFileSync(join(__dirname, '..', '..', 'telemetry.json'), 'utf8')) as {
+    events: Record<string, Record<string, { comment?: string }>>;
+  };
+  for (const [name, properties] of Object.entries(USAGE_EVENTS))
+    for (const [key, rule] of Object.entries(properties)) {
+      const list = /^One of: (.*)\.$/.exec(listed.events[`surjeetbanga.logline/${name}`]?.[key]?.comment ?? '')?.[1];
+      if (!list || (rule.kind !== 'enum' && rule.kind !== 'list') || typeof rule.values === 'function') continue;
+      assert.deepEqual(
+        list.split(/, (?:or )?/).sort(),
+        [...(rule.values as Iterable<string>)].sort(),
+        `update the values listed for ${name}.${key} in telemetry.json`,
+      );
+    }
+});
+
 test('every property of every event can only carry Logline’s own names or buckets, whatever it is given', () => {
   // Everything that may come out: the schema's own choices, the manifest's names, buckets, and versions.
   const allowed = new Set<string>(['custom']);
