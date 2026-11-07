@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync } from 'node:fs';
+import { chmodSync, existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { isBuiltin } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -234,6 +234,45 @@ test(
     } finally {
       await connector.dispose();
     }
+  },
+);
+
+test(
+  'the sqlite3 command runs no shell command smuggled after a / or GO line',
+  { skip: !hasSqlite || !hasCli },
+  async () => {
+    const file = logDatabase();
+    const marker = join(mkdtempSync(join(tmpdir(), 'logline-sqlite-')), 'ran');
+    const driver = new SqliteCliDriver(file);
+    for (const end of ['/', ' go ', 'GO'])
+      await assert.rejects(
+        driver.query(`SELECT 1) AS x LIMIT 1\n${end}\n.shell touch '${marker}'\nSELECT (1`, [], { timeoutMs: 5000 }),
+        /ends a statement in sqlite3/,
+      );
+    assert.equal(existsSync(marker), false);
+    // Division split over lines still runs when the slash shares its line.
+    assert.deepEqual(await driver.query('SELECT 6\n/ 2 AS v', [], { timeoutMs: 5000 }), [{ v: 3 }]);
+  },
+);
+
+test(
+  'a sqlite3 older than 3.37, without -safe, still runs queries',
+  { skip: !hasSqlite || !hasCli || process.platform === 'win32' },
+  async () => {
+    const file = logDatabase();
+    const folder = mkdtempSync(join(tmpdir(), 'logline-old-sqlite3-'));
+    const command = join(folder, 'sqlite3');
+    const calls = join(folder, 'calls');
+    writeFileSync(
+      command,
+      `#!/bin/sh\necho "$1" >> '${calls}'\nif [ "$1" = -safe ]; then echo "sqlite3: Error: unknown option: -safe" >&2; exit 1; fi\nexec sqlite3 "$@"\n`,
+    );
+    chmodSync(command, 0o755);
+    const driver = new SqliteCliDriver(file, command);
+    assert.deepEqual(await driver.query('SELECT 1 AS v', [], { timeoutMs: 5000 }), [{ v: 1 }]);
+    assert.deepEqual(await driver.query('SELECT 2 AS v', [], { timeoutMs: 5000 }), [{ v: 2 }]);
+    // -safe is tried once, then left off.
+    assert.deepEqual(readFileSync(calls, 'utf8').trim().split('\n'), ['-safe', '-readonly', '-readonly']);
   },
 );
 

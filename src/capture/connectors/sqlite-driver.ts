@@ -132,13 +132,30 @@ function literal(value: SqlValue): string {
 export class SqliteCliDriver implements SqlDriver {
   readonly dialect = 'sqlite';
   private readonly running = new Set<ChildProcess>();
+  /** Whether this sqlite3 knows -safe, which turns off .shell and other commands that reach outside the database. */
+  private safe = true;
 
   constructor(
     private readonly file: string,
     private readonly command = 'sqlite3',
   ) {}
 
-  query(sql: string, params: SqlValue[], options: QueryOptions): Promise<Row[]> {
+  async query(sql: string, params: SqlValue[], options: QueryOptions): Promise<Row[]> {
+    // The shell also ends a statement at a line holding only / or go, and then
+    // runs the next line starting with a dot as a shell command, such as .shell.
+    if (sql.split(/\r?\n|\r/).some((line) => /^\s*(?:\/|go)\s*$/i.test(line)))
+      throw new Error('A line holding only / or GO ends a statement in sqlite3, so it cannot run here.');
+    try {
+      return await this.run(sql, params, options);
+    } catch (error) {
+      // sqlite3 before 3.37 has no -safe; the check above still keeps it to one statement.
+      if (!this.safe || !/unknown option.*-safe/i.test(error instanceof Error ? error.message : '')) throw error;
+      this.safe = false;
+      return this.run(sql, params, options);
+    }
+  }
+
+  private run(sql: string, params: SqlValue[], options: QueryOptions): Promise<Row[]> {
     // The shell binds `?` parameters, in order, to the keys ?1, ?2, … of its
     // parameter table, which lives in the writable temp schema.
     const bindings = params.map((value, index) => `('?${index + 1}', ${literal(value)})`).join(', ');
@@ -149,7 +166,7 @@ export class SqliteCliDriver implements SqlDriver {
       '',
     ].join('\n');
     return new Promise<Row[]>((resolve, reject) => {
-      const child = spawn(this.command, ['-readonly', '-bail', '-json', this.file], {
+      const child = spawn(this.command, [...(this.safe ? ['-safe'] : []), '-readonly', '-bail', '-json', this.file], {
         stdio: ['pipe', 'pipe', 'pipe'],
         windowsHide: true,
       });

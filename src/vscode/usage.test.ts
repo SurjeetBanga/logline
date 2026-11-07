@@ -148,6 +148,29 @@ function setup(
   };
 }
 
+test('a batch PostHog does not accept is sent once more, ahead of newer events, then dropped', async () => {
+  const options = { accepted: false };
+  const { usage, bodies, events } = setup(options);
+  usage.start();
+  assert.equal(await usage.flush(), false);
+  usage.command('logline.showLogs');
+  options.accepted = true;
+  assert.equal(await usage.flush(), true);
+  assert.deepEqual(events(), ['installed', 'activated', 'active_day', 'command']);
+
+  const failing = setup({ accepted: false });
+  failing.usage.start();
+  await failing.usage.flush();
+  await failing.usage.flush();
+  const tries = failing.bodies.length;
+  await failing.usage.flush();
+  assert.equal(tries, 2);
+  assert.equal(failing.bodies.length, 2, 'nothing is left to try a third time');
+  assert.equal(bodies.length, 2);
+  usage.dispose();
+  failing.usage.dispose();
+});
+
 test('a new install sends installed, then batches with only coarse common properties, without a pop-up', async () => {
   const { usage, sent, bodies, events, globalState } = setup();
   usage.start();

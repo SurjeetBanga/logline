@@ -74,7 +74,7 @@
       "name": {
         "classification": "SystemMetaData",
         "purpose": "FeatureInsight",
-        "comment": "One of: first_capture, first_search, first_filtered_search, first_view_switch, first_connection, first_share, first_agent_call, first_doctor_action, first_log_breakpoint."
+        "comment": "One of: first_capture, first_search, first_filtered_search, first_view_switch, first_connection, first_share, first_agent_call, first_doctor_action, first_log_breakpoint, first_event_inspected."
       },
       "after": {
         "classification": "SystemMetaData",
@@ -426,12 +426,12 @@
       "area": {
         "classification": "SystemMetaData",
         "purpose": "FeatureInsight",
-        "comment": "One of: bridge, otlp, connection, import, export, capture."
+        "comment": "One of: bridge, otlp, connection, import, export, capture, panel."
       },
       "code": {
         "classification": "SystemMetaData",
         "purpose": "FeatureInsight",
-        "comment": "One of: start_failed."
+        "comment": "One of: start_failed, write_failed, read_failed, message_failed."
       }
     },
     "surjeetbanga.logline/session_summary": {

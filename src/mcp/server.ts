@@ -124,26 +124,44 @@ export function pickWindow(
   };
 }
 
-/** Send one tool call to a window. Aborting closes the connection, which cancels the call there. */
+/**
+ * Longest a tool call may wait for its window. Queries on a connection stop
+ * after at most five minutes there; a window that answers nothing for longer
+ * is frozen, or paused in a debugger.
+ */
+export const CALL_TIMEOUT_MS = 10 * 60 * 1000;
+
+/** Send one tool call to a window. Aborting, or the timeout, closes the connection, which cancels the call there. */
 export function callWindow(
   window: BridgeWindow,
   tool: string,
   input: unknown,
   client: string | undefined,
   signal?: AbortSignal,
+  timeoutMs = CALL_TIMEOUT_MS,
 ): Promise<BridgeResponse> {
   return new Promise((done) => {
     const socket = connect({ host: '127.0.0.1', port: window.port });
     let data = '';
     let settled = false;
+    const timer = setTimeout(
+      () =>
+        finish({
+          error: `The Logline window did not answer within ${Math.round(timeoutMs / 1000)} seconds. If VS Code is frozen or paused in a debugger, resume it and try again.`,
+        }),
+      timeoutMs,
+    );
+    const onAbort = () => finish({ error: 'Cancelled.' });
     const finish = (response: BridgeResponse) => {
       if (!settled) {
         settled = true;
+        clearTimeout(timer);
+        signal?.removeEventListener('abort', onAbort);
         done(response);
       }
       socket.destroy();
     };
-    signal?.addEventListener('abort', () => finish({ error: 'Cancelled.' }), { once: true });
+    signal?.addEventListener('abort', onAbort, { once: true });
     socket.setEncoding('utf8');
     socket.on('connect', () => socket.write(`${JSON.stringify({ token: window.token, tool, input, client })}\n`));
     socket.on('data', (chunk) => {
