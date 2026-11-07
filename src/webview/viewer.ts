@@ -129,6 +129,7 @@ export function createViewer(api: WebviewApi) {
     saveState,
     (baselineServerId, baselineSessionId) => compareView.open({ baselineServerId, baselineSessionId }),
     (query) => search.setQuery(query, true),
+    () => search.applyPending(),
   );
   const rail = createSourceRail(elements, state, api, scope, {
     selectSource: (id) => selectSource(id),
@@ -981,6 +982,7 @@ export function createViewer(api: WebviewApi) {
   /** Leave the welcome, remembering it was seen, and do what was chosen. */
   const welcomeChoice = (choice: WelcomeChoice, then: () => void) => () => {
     elements.welcomeDialog.close();
+    welcomeAnswered();
     api.postMessage({ type: 'onboardingSeen', choice });
     then();
   };
@@ -1016,10 +1018,29 @@ export function createViewer(api: WebviewApi) {
   );
   // Escape on the welcome counts as exploring: it never shows again.
   scope.listen(elements.welcomeDialog, 'cancel', () => {
+    welcomeAnswered();
     api.postMessage({ type: 'onboardingSeen', choice: 'dismissed' });
     elements.tourHint.hidden = false;
   });
-  if (document.body?.dataset.firstRun === 'true') elements.welcomeDialog.showModal?.();
+  function welcomeAnswered(): void {
+    if (!state.welcomeOpen) return;
+    state.welcomeOpen = false;
+    saveState();
+  }
+  // The welcome counts as seen once it opens, not when it is answered: hiding the panel, such as by
+  // switching to the Terminal tab, rebuilds it, and an unanswered welcome would open again each time.
+  // A panel rebuilt while it was still open points to the tour instead, as closing it with Escape does.
+  if (document.body?.dataset.firstRun === 'true' && elements.welcomeDialog.showModal) {
+    elements.welcomeDialog.showModal();
+    state.welcomeOpen = true;
+    saveState();
+    api.postMessage({ type: 'onboardingSeen' });
+  } else if (state.welcomeOpen) {
+    // Left without an answer: counted as dismissed, like Escape.
+    elements.tourHint.hidden = false;
+    welcomeAnswered();
+    api.postMessage({ type: 'onboardingSeen', choice: 'dismissed' });
+  }
   if (globalThis.innerWidth > 0) api.postMessage({ type: 'panelSize', width: globalThis.innerWidth });
   scope.listen(elements.updateButton, 'click', () => api.postMessage({ type: 'installUpdate' }));
   createPopover(elements.counts.closest<HTMLElement>('.popover-container')!, elements.counts, elements.memoryPanel);

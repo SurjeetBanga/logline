@@ -18,6 +18,8 @@ export interface PersistedState {
   hiddenColumns?: string[];
   cellHintDismissed?: boolean;
   rowHintDismissed?: boolean;
+  /** The first-run welcome is open and not yet answered. */
+  welcomeOpen?: boolean;
   /** The tab the panel was left on. */
   view?: string;
   /** The time range searched on connections. */
@@ -62,6 +64,8 @@ export class ViewerState {
   newestFirst = true;
   cellHintDismissed: boolean;
   rowHintDismissed: boolean;
+  /** The first-run welcome is open and not yet answered, so a rebuilt panel can point to the tour. */
+  welcomeOpen: boolean;
   /** The selected tab, kept so the panel reopens on it. */
   view: string;
   /** The time range a connection search covers, such as `1h`. */
@@ -91,6 +95,7 @@ export class ViewerState {
     this.following = !saved.sort;
     this.cellHintDismissed = saved.cellHintDismissed === true;
     this.rowHintDismissed = saved.rowHintDismissed === true;
+    this.welcomeOpen = saved.welcomeOpen === true;
     this.selectedServer = saved.server ?? '';
     this.selectedSession = saved.session ?? '';
     this.selectedSort = saved.sort ?? '';
@@ -174,6 +179,7 @@ export class ViewerState {
       extraColumns: this.extraColumns,
       ...(this.cellHintDismissed ? { cellHintDismissed: true } : {}),
       ...(this.rowHintDismissed ? { rowHintDismissed: true } : {}),
+      ...(this.welcomeOpen ? { welcomeOpen: true } : {}),
       ...(this.view !== 'logs' ? { view: this.view } : {}),
       ...(this.connectionRange !== '1h' ? { range: this.connectionRange } : {}),
       ...(Object.keys(this.native).length ? { native: this.persistedNative() } : {}),

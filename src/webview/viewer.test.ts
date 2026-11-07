@@ -795,6 +795,16 @@ test('search drafts become removable include and exclude chips when applied', ()
   get('search').value = 'service:api';
   get('search').listeners.get('input')!();
   assert.equal(snapshots().length, before, 'typing keeps the current filter until Enter');
+  // A field name chosen from the suggestions stays to be finished; a whole term chosen there is applied.
+  get('search').value = 'appname:';
+  get('search').listeners.get('input')!({ inputType: 'insertReplacementText' });
+  assert.equal(app.search.query(), '');
+  get('search').value = 'appname:"prod"';
+  get('search').listeners.get('input')!({ inputType: 'insertReplacementText' });
+  assert.equal(app.search.query(), 'appname:"prod"');
+  assert.equal(get('search').value, '');
+  get('searchClear').listeners.get('click')!({ stopPropagation() {} });
+  get('search').value = 'service:api';
   get('search').listeners.get('keydown')!({ key: 'Enter', preventDefault() {} });
   assert.equal(app.search.query(), 'service:api');
   assert.equal(get('searchChips').children.length, 1);
@@ -2211,6 +2221,10 @@ test('the guide points at a control, opening its menu first, or at its fallback 
 test('a first run welcomes, and the tour walks the panel with Next, Back, and Skip', () => {
   const { get, messages, dom, receive, flushFrames } = viewer({}, { firstRun: true });
   assert.equal(get('welcomeDialog').open, true, 'a fresh install is welcomed');
+  assert.ok(
+    messages.some((message) => message.type === 'onboardingSeen' && message.choice === undefined),
+    'seen as soon as it opens, so a rebuilt panel does not open it again',
+  );
   get('welcomeTour').listeners.get('click')!();
   assert.equal(get('welcomeDialog').open, false);
   assert.equal(messages.at(-1)?.type, 'onboardingSeen', 'the welcome shows once');
@@ -2261,6 +2275,22 @@ test('a first run welcomes, and the tour walks the panel with Next, Back, and Sk
   });
   flushFrames();
   assert.equal(dom.body.children.at(-1)!.children.at(-1)!.children[1].textContent, 'Your sources');
+});
+
+test('a welcome left open shows once: the rebuilt panel points to the tour instead', () => {
+  const first = viewer({}, { firstRun: true });
+  assert.equal(first.get('welcomeDialog').open, true);
+  assert.equal(first.savedStates.at(-1)?.welcomeOpen, true);
+  // Switching panel tabs rebuilds the view; the host no longer says it is a first run.
+  const rebuilt = viewer(first.savedStates.at(-1)!);
+  assert.equal(rebuilt.get('welcomeDialog').open, false);
+  assert.equal(rebuilt.get('tourHint').hidden, false);
+  assert.ok(rebuilt.messages.some((message) => message.type === 'onboardingSeen' && message.choice === 'dismissed'));
+  assert.equal(rebuilt.savedStates.at(-1)?.welcomeOpen, undefined, 'and only once');
+  // An answered welcome leaves nothing behind.
+  const answered = viewer({}, { firstRun: true });
+  answered.get('welcomeTour').listeners.get('click')!();
+  assert.equal(answered.savedStates.at(-1)?.welcomeOpen, undefined);
 });
 
 test('exploring alone leaves a hint about the tour, and a later window is not welcomed', () => {
@@ -3841,6 +3871,25 @@ test('a selected connection shows its range, Run, Tail and Run SQL, with the SQL
     query: 'timeout',
     enabled: true,
   });
+  // A filter typed without pressing Enter is applied before Run searches, not left out.
+  get('search').value = 'level:error';
+  get('connectionRun').listeners.get('click')!();
+  assert.deepEqual(plain(messages.at(-1)), {
+    type: 'connectionFetch',
+    connectionId: 'app',
+    query: 'timeout level:error',
+    range: '24h',
+  });
+  assert.equal(get('search').value, '', 'and becomes a chip');
+  // One that is not finished stops Run and says why.
+  const sent = messages.length;
+  get('search').value = 'service:"api';
+  get('connectionRun').listeners.get('click')!();
+  get('connectionTail').listeners.get('click')!();
+  assert.equal(messages.length, sent, 'nothing is searched');
+  assert.equal(get('searchError').hidden, false);
+  get('search').value = '';
+  app.search.setQuery('timeout', true);
   get('connectionSql').listeners.get('click')!();
   assert.deepEqual(plain(messages.at(-1)), { type: 'connectionSql', connectionId: 'app' });
   const last = {
