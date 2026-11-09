@@ -9,7 +9,7 @@ import { test } from 'node:test';
 import type { ConnectionConfig, PostgresConnection } from '../../core/connections';
 import { PostgresDriver } from './postgres-driver';
 import { SqlConnector } from './sql';
-import { openSqlite, SqliteCliDriver, SqliteProcessDriver } from './sqlite-driver';
+import { endsStatementEarly, openSqlite, SqliteCliDriver, SqliteProcessDriver } from './sqlite-driver';
 import type { SqlDriver } from './types';
 
 const hasSqlite = isBuiltin('node:sqlite');
@@ -244,7 +244,7 @@ test(
     const file = logDatabase();
     const marker = join(mkdtempSync(join(tmpdir(), 'logline-sqlite-')), 'ran');
     const driver = new SqliteCliDriver(file);
-    for (const end of ['/', ' go ', 'GO'])
+    for (const end of ['/', ' go ', 'GO', 'GO -- c', '/ /* c */', 'go /* c */ -- d', 'GO /* runs on'])
       await assert.rejects(
         driver.query(`SELECT 1) AS x LIMIT 1\n${end}\n.shell touch '${marker}'\nSELECT (1`, [], { timeoutMs: 5000 }),
         /ends a statement in sqlite3/,
@@ -252,11 +252,34 @@ test(
     assert.equal(existsSync(marker), false);
     // Division split over lines still runs when the slash shares its line.
     assert.deepEqual(await driver.query('SELECT 6\n/ 2 AS v', [], { timeoutMs: 5000 }), [{ v: 3 }]);
+    // Inside a quote or a block comment, such a line is only text.
+    assert.deepEqual(await driver.query("SELECT 'a\ngo\n/\nb' AS v", [], { timeoutMs: 5000 }), [{ v: 'a\ngo\n/\nb' }]);
+    assert.deepEqual(await driver.query('SELECT 1 AS v /*\nGO\n*/', [], { timeoutMs: 5000 }), [{ v: 1 }]);
   },
 );
 
+test('a line ending a sqlite3 statement is found outside quotes and comments only', () => {
+  for (const sql of [
+    'SELECT 1\nGO',
+    'SELECT 1\r\n/ -- c\r\n.print x',
+    "SELECT 'a' -- it's\ngo",
+    'SELECT 1 /* a */\n go',
+  ])
+    assert.equal(endsStatementEarly(sql), true, sql);
+  for (const sql of [
+    "SELECT 'x\ngo\n'",
+    'SELECT "a\n/\nb"',
+    'SELECT [a\ngo\n]',
+    'SELECT 1 /*\ngo\n*/',
+    'SELECT 1 -- go\n',
+    'SELECT 6\n/ 2',
+    'SELECT 1\ngone',
+  ])
+    assert.equal(endsStatementEarly(sql), false, sql);
+});
+
 test(
-  'a sqlite3 older than 3.37, without -safe, still runs queries',
+  'a sqlite3 older than 3.37, without -safe, runs no query',
   { skip: !hasSqlite || !hasCli || process.platform === 'win32' },
   async () => {
     const file = logDatabase();
@@ -269,10 +292,9 @@ test(
     );
     chmodSync(command, 0o755);
     const driver = new SqliteCliDriver(file, command);
-    assert.deepEqual(await driver.query('SELECT 1 AS v', [], { timeoutMs: 5000 }), [{ v: 1 }]);
-    assert.deepEqual(await driver.query('SELECT 2 AS v', [], { timeoutMs: 5000 }), [{ v: 2 }]);
-    // -safe is tried once, then left off.
-    assert.deepEqual(readFileSync(calls, 'utf8').trim().split('\n'), ['-safe', '-readonly', '-readonly']);
+    await assert.rejects(driver.query('SELECT 1 AS v', [], { timeoutMs: 5000 }), /older than 3\.37/);
+    // It is never run without -safe.
+    assert.deepEqual(readFileSync(calls, 'utf8').trim().split('\n'), ['-safe']);
   },
 );
 

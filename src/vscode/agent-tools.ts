@@ -169,7 +169,10 @@ export function agentToolHandlers(access: AgentLogAccess): Map<string, ToolCallb
       },
     ],
     ['logline_get_ai_calls', (input) => access.aiCalls(input as unknown as AgentAiCallsInput)],
-    ['logline_fetch_production', (input) => access.fetchProduction(input as unknown as ProductionFetchInput)],
+    [
+      'logline_fetch_production',
+      (input, token) => access.fetchProduction(input as unknown as ProductionFetchInput, token),
+    ],
     [
       'logline_compare_with_production',
       (input) =>

@@ -174,6 +174,43 @@ test('stopping a fetch cancels the query and keeps none of its rows', async () =
   assert.equal(registry.records.get(sessionId)!.exitReason, 'stopped');
 });
 
+test("a fetch stops when its caller's signal aborts, even before it starts", async () => {
+  const { remote, target, registry, messages } = setup();
+  let release!: (value: FetchResult) => void;
+  let signal: AbortSignal | undefined;
+  const caller = new AbortController();
+  const pending = remote.fetch(
+    target({
+      fetchLogs: (_request, abort) => {
+        signal = abort;
+        return new Promise((resolve) => (release = resolve));
+      },
+    }),
+    { query: '', title: 'All rows', signal: caller.signal },
+  );
+  caller.abort();
+  assert.equal(signal?.aborted, true);
+  release(result([row(1, 'info', 'late')]));
+  const info = await pending;
+  assert.deepEqual(messages(), []);
+  assert.equal(info.running, false);
+  const [sessionId] = [...registry.records.keys()];
+  assert.equal(registry.records.get(sessionId)!.exitReason, 'stopped');
+
+  let called = false;
+  const before = await remote.fetch(
+    target({
+      fetchLogs: async () => {
+        called = true;
+        return result([]);
+      },
+    }),
+    { query: '', title: 'All rows', signal: AbortSignal.abort() },
+  );
+  assert.equal(called, false, 'a cancelled fetch never queries the store');
+  assert.equal(before.running, false);
+});
+
 test('a tail shows the newest rows, then only rows it has not shown, and survives a failed read', async () => {
   mock.timers.enable({ apis: ['setInterval'] });
   const { remote, target, registry, messages } = setup({ connectionPollSeconds: 1 });

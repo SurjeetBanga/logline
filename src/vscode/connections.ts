@@ -192,6 +192,7 @@ export class ConnectionManager implements vscode.Disposable {
     traceId?: string;
     range: string;
     limit: number;
+    signal?: AbortSignal;
   }): Promise<ProductionFetchResult> {
     const connection = this.find(input.connectionId);
     const sourceId = connectionSourceId(input.connectionId);
@@ -215,6 +216,7 @@ export class ConnectionManager implements vscode.Disposable {
       toMs: now,
       limit: input.limit,
       title: `Agent: ${trace ? `trace ${trace.slice(0, 16)}` : input.query.trim() || 'all logs'} · last ${input.range}`,
+      ...(input.signal ? { signal: input.signal } : {}),
     });
     return {
       sessionId: info.sessionId,

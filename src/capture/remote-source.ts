@@ -64,6 +64,8 @@ export interface FetchOptions {
    * agent's or a link's, are neither replaced nor replace one.
    */
   replace?: boolean;
+  /** Stops the run, as Stop does, when it aborts: the caller no longer wants the rows. */
+  signal?: AbortSignal;
 }
 
 interface Run {
@@ -188,6 +190,11 @@ export class RemoteSource {
     this.state.status = `Fetching from ${target.label}…`;
     this.state.notify();
     options.started?.(run.record.id);
+    const cancel = () => {
+      if (!run.stopped) this.halt(run);
+    };
+    if (options.signal?.aborted) cancel();
+    else options.signal?.addEventListener('abort', cancel, { once: true });
     const started = Date.now();
     const filter = options.sql === undefined && options.native === undefined ? rowFilter(options.query) : undefined;
     // The first rows of a store that reads in pages are shown while it reads the rest.
@@ -211,6 +218,7 @@ export class RemoteSource {
       this.state.invalidate();
     };
     try {
+      if (run.stopped) return run.info;
       const connector = target.connector;
       let result: FetchResult;
       if (options.sql !== undefined) {
@@ -253,6 +261,8 @@ export class RemoteSource {
         this.finish(run, 'failed', run.info.error);
         this.state.status = `${target.label}: ${run.info.error}`;
       }
+    } finally {
+      options.signal?.removeEventListener('abort', cancel);
     }
     this.state.notify();
     return run.info;

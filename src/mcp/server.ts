@@ -131,7 +131,10 @@ export function pickWindow(
  */
 export const CALL_TIMEOUT_MS = 10 * 60 * 1000;
 
-/** Send one tool call to a window. Aborting, or the timeout, closes the connection, which cancels the call there. */
+/**
+ * Send one tool call to a window. Aborting, or the timeout, closes the
+ * connection; the window then cancels the call, production fetches included.
+ */
 export function callWindow(
   window: BridgeWindow,
   tool: string,
@@ -141,27 +144,22 @@ export function callWindow(
   timeoutMs = CALL_TIMEOUT_MS,
 ): Promise<BridgeResponse> {
   return new Promise((done) => {
+    const timeout = AbortSignal.timeout(timeoutMs);
+    const stopped = signal ? AbortSignal.any([signal, timeout]) : timeout;
+    if (stopped.aborted) return done(stoppedResponse(timeout, timeoutMs));
     const socket = connect({ host: '127.0.0.1', port: window.port });
     let data = '';
     let settled = false;
-    const timer = setTimeout(
-      () =>
-        finish({
-          error: `The Logline window did not answer within ${Math.round(timeoutMs / 1000)} seconds. If VS Code is frozen or paused in a debugger, resume it and try again.`,
-        }),
-      timeoutMs,
-    );
-    const onAbort = () => finish({ error: 'Cancelled.' });
+    const onStop = () => finish(stoppedResponse(timeout, timeoutMs));
     const finish = (response: BridgeResponse) => {
       if (!settled) {
         settled = true;
-        clearTimeout(timer);
-        signal?.removeEventListener('abort', onAbort);
+        stopped.removeEventListener('abort', onStop);
         done(response);
       }
       socket.destroy();
     };
-    signal?.addEventListener('abort', onAbort, { once: true });
+    stopped.addEventListener('abort', onStop, { once: true });
     socket.setEncoding('utf8');
     socket.on('connect', () => socket.write(`${JSON.stringify({ token: window.token, tool, input, client })}\n`));
     socket.on('data', (chunk) => {
@@ -184,6 +182,16 @@ export function callWindow(
     );
     socket.on('close', () => finish({ error: 'The Logline window closed the connection.' }));
   });
+}
+
+/** Why a call stopped before the window answered: the timeout, or the agent cancelled it. */
+function stoppedResponse(timeout: AbortSignal, timeoutMs: number): BridgeResponse {
+  return timeout.aborted
+    ? {
+        error: `The Logline window did not answer within ${Math.round(timeoutMs / 1000)} seconds. If VS Code is frozen or paused in a debugger, resume it and try again.`,
+        code: 'TIMEOUT',
+      }
+    : { error: 'Cancelled.', code: 'CANCELLED' };
 }
 
 export interface McpServerOptions {
@@ -279,7 +287,12 @@ export function createMcpServer(options: McpServerOptions) {
           const response = await call(picked.window, name, params.arguments ?? {}, client, abort.signal);
           if ('error' in response)
             return result(id, {
-              content: [{ type: 'text', text: JSON.stringify({ error: 'NOT_CONNECTED', message: response.error }) }],
+              content: [
+                {
+                  type: 'text',
+                  text: JSON.stringify({ error: response.code ?? 'NOT_CONNECTED', message: response.error }),
+                },
+              ],
               isError: true,
             });
           let isError = false;

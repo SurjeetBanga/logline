@@ -628,31 +628,40 @@ export class Usage implements vscode.Disposable {
     }
     const batch = this.queue;
     this.queue = [];
-    for (const item of batch)
-      if (!item.retried)
+    // Show Usage Data lists an event once it is sent, or would have been from a build that sends.
+    const listSent = () => {
+      for (const item of batch)
         this.remember(`${item.timestamp.slice(11, 19)}  ${item.event.padEnd(22)} ${describe(item.properties)}`);
-    if (!this.production || !this.projectKey || this.debug) return true;
+    };
+    if (!this.production || !this.projectKey || this.debug) {
+      listSent();
+      return true;
+    }
+    // The id the events were recorded under, though Reset Usage ID may replace it while they are sent.
+    const id = this.id;
     const body = JSON.stringify({
       api_key: this.projectKey,
       batch: batch.map((item) => ({
         event: item.event,
-        distinct_id: item.distinctId ?? this.id,
+        distinct_id: item.distinctId ?? id,
         timestamp: item.timestamp,
         properties: { ...this.common, ...item.properties, $process_person_profile: false, $geoip_disable: true },
       })),
     });
     const sent = await this.transport(body).catch(() => false);
-    if (!sent) this.requeue(batch);
+    if (sent) listSent();
+    else this.requeue(batch, id);
     return sent;
   }
 
   /**
    * Put a batch that was not accepted back in front of what was queued since,
    * for one more try. Answers a person sent are not: the form already said they
-   * were not sent.
+   * were not sent. Nor is a batch recorded under an id that was reset since:
+   * the reset dropped what was queued, so it cannot be tied to the new id.
    */
-  private requeue(batch: QueuedEvent[]): void {
-    if (this.disposed || !this.enabled) return;
+  private requeue(batch: QueuedEvent[], id: string): void {
+    if (this.disposed || !this.enabled || id !== this.id) return;
     const again = batch.filter((item) => !item.retried && !item.distinctId).map((item) => ({ ...item, retried: true }));
     this.queue = [...again, ...this.queue].slice(-QUEUE_LIMIT);
   }

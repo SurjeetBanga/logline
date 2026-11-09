@@ -171,6 +171,48 @@ test('a batch PostHog does not accept is sent once more, ahead of newer events, 
   failing.usage.dispose();
 });
 
+test('Show Usage Data lists only what PostHog accepted', async () => {
+  const options = { accepted: false };
+  const { usage } = setup(options);
+  usage.start();
+  usage.showData();
+  host.lines.length = 0;
+  await usage.flush();
+  await usage.flush();
+  assert.doesNotMatch(host.lines.join('\n'), /activated/, 'events dropped after two tries were never sent');
+  usage.command('logline.showLogs');
+  options.accepted = true;
+  await usage.flush();
+  assert.match(host.lines.join('\n'), /command/);
+  usage.dispose();
+});
+
+test('a batch that fails while the id is reset is dropped, never sent under the new id', async () => {
+  let fail!: () => void;
+  const bodies: string[] = [];
+  const { usage } = setup();
+  (usage as any).transport = (body: string) => {
+    bodies.push(body);
+    return bodies.length === 1
+      ? new Promise<boolean>((resolve) => (fail = () => resolve(false)))
+      : Promise.resolve(true);
+  };
+  usage.start();
+  const before = usage.usageId;
+  const flushing = usage.flush();
+  await usage.resetId();
+  fail();
+  assert.equal(await flushing, false);
+  usage.command('logline.showLogs');
+  await usage.flush();
+  const later = (JSON.parse(bodies[1]) as { batch: { event: string; distinct_id: string }[] }).batch;
+  const events = later.map((item) => item.event);
+  assert.ok(events.includes('command'));
+  assert.ok(!events.includes('installed') && !events.includes('activated'), 'the old events were not put back');
+  assert.ok(later.every((item) => item.distinct_id === usage.usageId && item.distinct_id !== before));
+  usage.dispose();
+});
+
 test('a new install sends installed, then batches with only coarse common properties, without a pop-up', async () => {
   const { usage, sent, bodies, events, globalState } = setup();
   usage.start();

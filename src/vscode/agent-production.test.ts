@@ -108,7 +108,9 @@ test('agents fetch production only from connections the user allowed, within a d
     query: 'level:error',
     limit: 5000,
   })) as Record<string, any>;
-  assert.deepEqual(fetches[0], { connectionId: 'prod', query: 'level:error', range: '1h', limit: 1000 });
+  const { signal, ...sent } = fetches[0] as { signal?: AbortSignal };
+  assert.ok(signal instanceof AbortSignal);
+  assert.deepEqual(sent, { connectionId: 'prod', query: 'level:error', range: '1h', limit: 1000 });
   assert.equal(result.connection, 'Datadog · prod');
   assert.deepEqual([result.fetched, result.kept, result.totalInRange], [3, 3, 40]);
   assert.deepEqual(result.filteredLocally, ['/x/']);
@@ -127,6 +129,27 @@ test('agents fetch production only from connections the user allowed, within a d
     other.access.fetchProduction({ shareId: share.shareId!, connectionId: 'prod' }),
     (error: unknown) => code('REMOTE_ERROR')(error) && !/hunter22/.test((error as Error).message),
   );
+});
+
+test('a production fetch the agent gives up on is stopped', async () => {
+  const { access } = fixture();
+  const { shareId } = access.shareAll();
+  let signal: AbortSignal | undefined;
+  access.production = {
+    ...access.production!,
+    fetch: (input) =>
+      new Promise((resolve) => {
+        signal = input.signal;
+        signal?.addEventListener('abort', () =>
+          resolve({ sourceId: 'conn:prod', label: 'prod', fetched: 0, kept: 0, local: [] }),
+        );
+      }),
+  };
+  const token = { isCancellationRequested: false };
+  const pending = access.fetchProduction({ shareId: shareId!, connectionId: 'prod' }, token);
+  token.isCancellationRequested = true;
+  await assert.rejects(pending, code('CANCELLED'));
+  assert.equal(signal?.aborted, true);
 });
 
 test('a fetched run joins a share of selected runs, and is compared with the newest local runs', async () => {

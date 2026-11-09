@@ -118,6 +118,48 @@ export class SqliteProcessDriver implements SqlDriver {
   }
 }
 
+/**
+ * Whether sqlite3 would end a statement inside `sql`: a line, outside any
+ * quote or block comment, holding / or GO and then only whitespace and
+ * comments. An unclosed block comment after it is counted too, to be safe.
+ */
+export function endsStatementEarly(sql: string): boolean {
+  // What closes the quote or comment the scan is in, if any.
+  let closer = '';
+  let lineStart = true;
+  for (let i = 0; i < sql.length; i++) {
+    const c = sql[i];
+    if (closer) {
+      if (sql.startsWith(closer, i)) {
+        i += closer.length - 1;
+        closer = '';
+      } else if (closer === '\n' && (c === '\r' || c === '\n')) closer = '';
+      if (!closer) lineStart = c === '\n' || c === '\r';
+      continue;
+    }
+    if (lineStart && terminatorAt(sql, i)) return true;
+    lineStart = c === '\n' || c === '\r';
+    if (c === "'" || c === '"' || c === '`') closer = c;
+    else if (c === '[') closer = ']';
+    else if (c === '-' && sql[i + 1] === '-') closer = '\n';
+    else if (c === '/' && sql[i + 1] === '*') {
+      closer = '*/';
+      i++;
+    }
+  }
+  return false;
+}
+
+/** Whether the line from `start` is a terminator: / or GO, then only whitespace and comments. */
+function terminatorAt(sql: string, start: number): boolean {
+  const end = sql.slice(start).search(/[\r\n]/);
+  const line = end < 0 ? sql.slice(start) : sql.slice(start, start + end);
+  const rest = /^[^\S\r\n]*(?:\/|go)(.*)$/is.exec(line)?.[1];
+  if (rest === undefined) return false;
+  // A block comment may run onto later lines; sqlite3 then reads on, so count it as a terminator.
+  return /^(?:\s|\/\*[\s\S]*?(?:\*\/|$)|--.*$)*$/.test(rest);
+}
+
 /** An SQL literal for a parameter value. */
 function literal(value: SqlValue): string {
   if (value === null) return 'NULL';
@@ -132,8 +174,6 @@ function literal(value: SqlValue): string {
 export class SqliteCliDriver implements SqlDriver {
   readonly dialect = 'sqlite';
   private readonly running = new Set<ChildProcess>();
-  /** Whether this sqlite3 knows -safe, which turns off .shell and other commands that reach outside the database. */
-  private safe = true;
 
   constructor(
     private readonly file: string,
@@ -142,16 +182,18 @@ export class SqliteCliDriver implements SqlDriver {
 
   async query(sql: string, params: SqlValue[], options: QueryOptions): Promise<Row[]> {
     // The shell also ends a statement at a line holding only / or go, and then
-    // runs the next line starting with a dot as a shell command, such as .shell.
-    if (sql.split(/\r?\n|\r/).some((line) => /^\s*(?:\/|go)\s*$/i.test(line)))
+    // runs the next line starting with a dot as a dot-command.
+    if (endsStatementEarly(sql))
       throw new Error('A line holding only / or GO ends a statement in sqlite3, so it cannot run here.');
     try {
       return await this.run(sql, params, options);
     } catch (error) {
-      // sqlite3 before 3.37 has no -safe; the check above still keeps it to one statement.
-      if (!this.safe || !/unknown option.*-safe/i.test(error instanceof Error ? error.message : '')) throw error;
-      this.safe = false;
-      return this.run(sql, params, options);
+      // Without -safe, SQL could call writefile() or edit(), and dot-commands such as .shell run.
+      if (/unknown option.*-safe/i.test(error instanceof Error ? error.message : ''))
+        throw new Error(
+          "This editor's runtime has no built-in SQLite, and the sqlite3 command is older than 3.37, which cannot run queries safely. Update the editor, or install a newer sqlite3 on your PATH.",
+        );
+      throw error;
     }
   }
 
@@ -166,7 +208,7 @@ export class SqliteCliDriver implements SqlDriver {
       '',
     ].join('\n');
     return new Promise<Row[]>((resolve, reject) => {
-      const child = spawn(this.command, [...(this.safe ? ['-safe'] : []), '-readonly', '-bail', '-json', this.file], {
+      const child = spawn(this.command, ['-safe', '-readonly', '-bail', '-json', this.file], {
         stdio: ['pipe', 'pipe', 'pipe'],
         windowsHide: true,
       });
