@@ -4,6 +4,8 @@ name: Release
 # for the version, and the commit must be on main. CI already ran on that commit when it reached main, so the VSIX that
 # run built and tested is the one published, after approval, to the VS Code Marketplace and Open VSX, then attached to a
 # GitHub release. When that run did not succeed or its VSIX has expired, the whole of CI runs again on the tag instead.
+# Either way the dependencies are audited again, and the VSIX's build provenance attestation must show it was built by
+# ci.yml from this commit.
 #
 # No stored token publishes to the Marketplace: the publish job signs in to Azure as a managed identity federated with
 # the `release` environment, which only `v*` tags reach and which waits for a reviewer. Open VSX uses trusted
@@ -46,6 +48,12 @@ jobs:
           git merge-base --is-ancestor "$GITHUB_SHA" origin/main \
             || { echo "::error::$TAG is not on main: release only commits that passed CI there."; exit 1; }
           echo "version=$version" >> "$GITHUB_OUTPUT"
+      # CI's audit ran when the commit reached main; an advisory published since then must still stop the release.
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+      - name: Fail on any known vulnerability, including dev dependencies
+        run: npm audit --audit-level=low
       - name: Find the CI run on main for this commit, with its VSIX
         id: ci-run
         env:
@@ -69,10 +77,12 @@ jobs:
     if: needs.verify.outputs.ci-run == ''
     uses: ./.github/workflows/ci.yml
     # A called workflow can only use permissions its caller grants. Its comment job (pull requests only, so it does
-    # not run here) asks to write pull request comments.
+    # not run here) asks to write pull request comments, and its package job to attest the VSIX.
     permissions:
       contents: read
       pull-requests: write
+      id-token: write
+      attestations: write
 
   publish:
     needs: [verify, ci]
@@ -84,6 +94,7 @@ jobs:
     permissions:
       contents: read
       actions: read
+      attestations: read
       id-token: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -101,6 +112,14 @@ jobs:
           github-token: ${{ github.token }}
       - name: Check the VSIX is this version
         run: test -f "vsix/logline-${{ needs.verify.outputs.version }}.vsix"
+      # Built by this repository's CI workflow on a GitHub-hosted runner, from exactly the tagged commit.
+      - name: Verify the VSIX's build provenance
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: >-
+          gh attestation verify vsix/*.vsix --repo "$REPO" --signer-workflow "$REPO/.github/workflows/ci.yml"
+          --source-digest "$GITHUB_SHA" --deny-self-hosted-runners
       - uses: azure/login@a641126d1b8aa4d1fa005f4f92df94a3a4c4c906 # v3.1.0
         with:
           client-id: ${{ secrets.AZURE_CLIENT_ID }}

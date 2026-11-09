@@ -91,6 +91,11 @@ jobs:
   package:
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    # For the build provenance attestation below. Pull requests from forks get neither permission and skip it.
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
@@ -99,6 +104,12 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run package
+      # Signed proof that this workflow built the VSIX from this commit, which the release checks before publishing it.
+      # Pushes only: main's runs, and a tag's when the release runs CI again; pull requests are never published.
+      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        if: github.event_name == 'push'
+        with:
+          subject-path: '*.vsix'
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: logline-vsix
