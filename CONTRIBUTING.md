@@ -82,4 +82,4 @@ git tag v<version> origin/main
 git push origin v<version>
 ```
 
-The Release workflow checks the tag against `package.json` and `CHANGELOG.md`, runs CI on the commit, and waits for approval in the `release` environment. It then publishes the VSIX that CI built and tested to the VS Code Marketplace and Open VSX, and creates the GitHub release with that version's changelog and the VSIX attached. Nothing is published from a laptop.
+The Release workflow checks the tag against `package.json` and `CHANGELOG.md`, finds the CI run that tested the commit when it reached main (or runs CI on it again when that run failed or its VSIX expired after 14 days), and waits for approval in the `release` environment. It then publishes the VSIX that CI built and tested to the VS Code Marketplace and Open VSX, and creates the GitHub release with that version's changelog and the VSIX attached. Nothing is published from a laptop.
