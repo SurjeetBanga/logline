@@ -42,6 +42,8 @@ export type AgentErrorCode =
 
 /** Production fetches an agent may make, for each connection, per minute. */
 const PRODUCTION_FETCHES_PER_MINUTE = 10;
+/** How often a running production fetch checks whether the agent cancelled it. */
+const CANCEL_CHECK_MS = 250;
 /** The ranges an agent may fetch: up to a day. */
 const PRODUCTION_RANGES = ['15m', '1h', '4h', '24h'];
 
@@ -76,6 +78,8 @@ export interface ProductionAccess {
     traceId?: string;
     range: string;
     limit: number;
+    /** Aborts when the agent cancels the call or its connection closes. */
+    signal?: AbortSignal;
   }): Promise<ProductionFetchResult>;
   /** Compare with the newest local runs that `allowed` admits. */
   compare(request: CompareRequest, allowed?: (runId: string) => boolean): CompareView;
@@ -353,7 +357,7 @@ export class AgentLogAccess {
    * Fetch production logs from a connection the user allowed, into a run of
    * its own, and summarize them: the agent reads them with the other tools.
    */
-  async fetchProduction(input: ProductionFetchInput): Promise<unknown> {
+  async fetchProduction(input: ProductionFetchInput, token?: { isCancellationRequested?: boolean }): Promise<unknown> {
     if (!input || typeof input !== 'object' || typeof input.shareId !== 'string')
       throw new AgentAccessError('INVALID_INPUT', 'shareId is required.');
     this.assertShare(input.shareId);
@@ -389,13 +393,27 @@ export class AgentLogAccess {
         `At most ${PRODUCTION_FETCHES_PER_MINUTE} fetches a minute from ${connection.label}; search the runs already fetched with logline_search_logs.`,
       );
     this.productionFetches.set(connection.id, [...recent, now]);
-    const result = await this.production!.fetch({
-      connectionId: connection.id,
-      query: input.query ?? '',
-      ...(input.traceId ? { traceId: input.traceId } : {}),
-      range,
-      limit,
-    });
+    // The token is a flag, so it is checked often; the fetch stops once the agent gives up on it.
+    const abort = new AbortController();
+    if (token?.isCancellationRequested) abort.abort();
+    const watch = setInterval(() => {
+      if (token?.isCancellationRequested) abort.abort();
+    }, CANCEL_CHECK_MS);
+    let result: ProductionFetchResult;
+    try {
+      result = await this.production!.fetch({
+        connectionId: connection.id,
+        query: input.query ?? '',
+        ...(input.traceId ? { traceId: input.traceId } : {}),
+        range,
+        limit,
+        signal: abort.signal,
+      });
+    } finally {
+      clearInterval(watch);
+    }
+    if (abort.signal.aborted || token?.isCancellationRequested)
+      throw new AgentAccessError('CANCELLED', 'The fetch was cancelled.');
     if (result.error || !result.sessionId)
       throw new AgentAccessError(
         'REMOTE_ERROR',

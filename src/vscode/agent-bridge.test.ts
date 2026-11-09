@@ -81,8 +81,15 @@ test('an agent that gives up cancels the call in the window', async () => {
   const abort = new AbortController();
   const call = callWindow(window, 'logline_wait_for_logs', {}, undefined, abort.signal);
   setTimeout(() => abort.abort(), 20);
-  assert.deepEqual(await call, { error: 'Cancelled.' });
+  assert.deepEqual(await call, { error: 'Cancelled.', code: 'CANCELLED' });
   assert.equal(await finished, true, 'the wait stops instead of running to its timeout');
+  // A call cancelled before it starts ends at once, without connecting.
+  const before = new AbortController();
+  before.abort();
+  assert.deepEqual(await callWindow(window, 'logline_wait_for_logs', {}, undefined, before.signal), {
+    error: 'Cancelled.',
+    code: 'CANCELLED',
+  });
   await bridge.stop();
 });
 
@@ -108,6 +115,7 @@ test('a call to a window that never answers gives up, and cancels the call there
   const window = JSON.parse(readFileSync(join(bridge['directory'], `${process.pid}.json`), 'utf8')) as BridgeWindow;
   const reply = await callWindow(window, 'logline_search_logs', {}, undefined, undefined, 50);
   assert.match(JSON.stringify(reply), /did not answer within \d+ seconds/);
+  assert.equal('error' in reply && reply.code, 'TIMEOUT');
   await stopped;
   await bridge.stop();
 });
@@ -343,6 +351,28 @@ test('a cancelled MCP request aborts its call to the window', async () => {
   await server.handle({ jsonrpc: '2.0', method: 'notifications/cancelled', params: { requestId: 'w1' } });
   assert.equal(signal?.aborted, true);
   assert.equal(((await pending) as any).result.isError, true);
+});
+
+test('the agent learns whether a call timed out or the window could not be reached', async () => {
+  for (const [response, code] of [
+    [{ error: 'did not answer', code: 'TIMEOUT' }, 'TIMEOUT'],
+    [{ error: 'gone' }, 'NOT_CONNECTED'],
+  ] as const) {
+    const server = createMcpServer({
+      tools: mcpTools([{ name: 'logline_search_logs' }]),
+      version: '1',
+      cwd: '/w',
+      windows: () => [window(1, ['/w'])],
+      call: async () => response,
+    });
+    const reply = (await server.handle({
+      jsonrpc: '2.0',
+      id: 1,
+      method: 'tools/call',
+      params: { name: 'logline_search_logs' },
+    })) as any;
+    assert.equal(JSON.parse(reply.result.content[0].text).error, code);
+  }
 });
 
 test('agents are named for people, and setup commands quote paths for the shell', () => {

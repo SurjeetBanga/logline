@@ -29,8 +29,12 @@ export interface BridgeRequest {
   client?: string;
 }
 
-/** One line back: the tool's bounded JSON text, or why the call was refused. */
-export type BridgeResponse = { text: string } | { error: string };
+/**
+ * One line back: the tool's bounded JSON text, or why the call was refused.
+ * `code` says what the agent can do about an error; without one the window
+ * could not be reached.
+ */
+export type BridgeResponse = { text: string } | { error: string; code?: 'TIMEOUT' | 'CANCELLED' };
 
 /** Largest request accepted on the bridge; tool inputs are small. */
 export const MAX_BRIDGE_REQUEST_BYTES = 1024 * 1024;
