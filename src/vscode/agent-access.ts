@@ -399,7 +399,6 @@ export class AgentLogAccess {
     const watch = setInterval(() => {
       if (token?.isCancellationRequested) abort.abort();
     }, CANCEL_CHECK_MS);
-    watch.unref?.();
     let result: ProductionFetchResult;
     try {
       result = await this.production!.fetch({
