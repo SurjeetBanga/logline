@@ -4,18 +4,19 @@ import { withVscode } from '../test/vscode-mock';
 
 const notices: string[] = [];
 let buttons: string[] = [];
-const settings: { key: string; value: unknown }[] = [];
+const settings: { key: string; value: unknown; target?: unknown }[] = [];
+const commands: string[] = [];
 let pick: (items: { runId: string }[]) => unknown = () => undefined;
 const mock = {
-  ConfigurationTarget: { Workspace: 2 },
-  commands: { executeCommand: async () => undefined },
+  ConfigurationTarget: { Global: 1, Workspace: 2 },
+  commands: { executeCommand: async (id: string) => void commands.push(id) },
   extensions: { getExtension: () => undefined },
   workspace: {
     onDidChangeConfiguration: () => ({ dispose() {} }),
     getConfiguration: () => ({
       get: (_key: string, fallback: unknown) => fallback,
-      update: async (key: string, value: unknown) => {
-        settings.push({ key, value });
+      update: async (key: string, value: unknown, target?: unknown) => {
+        settings.push(target === 1 ? { key, value, target: 'global' } : { key, value });
       },
     }),
   },
@@ -422,4 +423,32 @@ test('Suggest a feature and Vote on what’s next open in the panel with the nex
     mode: 'suggest',
     sendable: true,
   });
+});
+
+test('the empty panel’s buttons capture terminals, open a log file, and start the agent setup', async (t) => {
+  const controller = setup(t);
+  const entries: unknown[] = [];
+  controller.usage = {
+    record: (event: string, properties: unknown) => entries.push([event, properties]),
+    panelAction() {},
+    shared() {},
+    sharingStopped() {},
+    touch() {},
+  } as unknown as typeof controller.usage;
+  commands.length = 0;
+  await controller.handleMessage(() => {}, { type: 'emptyAction', action: 'capture' });
+  assert.deepEqual(settings, [{ key: 'captureTerminals', value: true }]);
+  assert.equal(controller.terminalCapture.isEnabled, true);
+  await controller.handleMessage(() => {}, { type: 'emptyAction', action: 'openFile' });
+  assert.ok(commands.includes('logline.followFile'));
+  // No agent is found here and the share warning is refused, so the setup stops after capture.
+  warningAnswer = undefined;
+  await controller.handleMessage(() => {}, { type: 'emptyAction', action: 'agent' });
+  assert.equal(controller.agentAccess.status().active, false);
+  assert.equal(entries.filter(([event]: any) => event === 'entry').length, 3);
+  assert.deepEqual(entries[0], ['entry', { from: 'empty_state' }]);
+  // Capture Everywhere saves the setting for every workspace.
+  settings.length = 0;
+  await controller.toggleTerminalCapture(true, true);
+  assert.deepEqual(settings, [{ key: 'captureTerminals', value: true, target: 'global' }]);
 });

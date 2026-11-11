@@ -420,6 +420,34 @@ test('searches are timed for the first few, then sampled; the summary counts wha
   assert.equal(after.properties.after, '<1m');
 });
 
+test('a window that shares from its start is counted apart from someone sharing', async () => {
+  const { usage, sent } = setup();
+  usage.start();
+  usage.autoShared(2, 300);
+  usage.agentTool({
+    tool: 'logline_search_logs',
+    via: 'mcp',
+    client: 'claude-code',
+    ok: true,
+    ms: 40,
+    resultSize: 2048,
+    truncated: false,
+    redactions: 0,
+  });
+  await usage.close();
+  const shared = sent.filter((item) => item.event === 'shared_with_agent');
+  assert.deepEqual(
+    shared.map(({ properties }) => [properties.how, properties.sources, properties.events]),
+    [['auto', '1-9', '100-999']],
+  );
+  assert.ok(!sent.some((item) => item.event === 'milestone' && item.properties.name === 'first_share'));
+  assert.ok(
+    sent.some((item) => item.event === 'first_tool_after_share'),
+    'its first tool call is still timed',
+  );
+  assert.equal(sent.find((item) => item.event === 'session_summary')!.properties.shares, '0');
+});
+
 test('a share no agent used is counted as unused', async () => {
   const { usage, sent } = setup();
   usage.start();

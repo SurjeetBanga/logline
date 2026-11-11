@@ -2753,6 +2753,16 @@ td.time {
   padding: 18px 14px;
   color: var(--vscode-descriptionForeground, #aaa);
 }
+/* With nothing captured yet, the three ways to get logs in, one click each. */
+.empty-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 0 14px 18px;
+}
+.empty-actions[hidden] {
+  display: none;
+}
 /* What the table shows on the left; what is running, kept, and shared on the right, each one click away. */
 .status-bar {
   display: flex;

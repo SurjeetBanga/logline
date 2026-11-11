@@ -4870,3 +4870,46 @@ test('the Update button shows only while there is an update, and follows it to R
   receive({ type: 'snapshot' });
   assert.equal(button.hidden, true);
 });
+
+test('an empty panel offers the ways to get logs in, until something is captured', () => {
+  const { get, receive, messages } = viewer();
+  const snapshot = (total: number, captureTerminals: boolean) =>
+    receive({
+      type: 'snapshot',
+      generation: 1,
+      newest: total,
+      total,
+      retained: total,
+      discarded: 0,
+      bytes: 0,
+      maxBytes: 10000,
+      truncated: 0,
+      events: [],
+      columns: [],
+      page: 0,
+      pages: 1,
+      matched: 0,
+      captureTerminals,
+      captureStatus: { state: captureTerminals ? 'waiting' : 'off', detail: '', active: 0, failed: 0 },
+    });
+  snapshot(0, false);
+  assert.equal(get('emptyActions').hidden, false);
+  assert.equal(get('emptyCapture').hidden, false);
+  assert.match(get('empty').textContent, /Nothing captured yet/);
+  for (const [button, action] of [
+    ['emptyCapture', 'capture'],
+    ['emptyOpenFile', 'openFile'],
+    ['emptyAgent', 'agent'],
+  ]) {
+    get(button).listeners.get('click')!();
+    assert.deepEqual(JSON.parse(JSON.stringify(messages.at(-1))), { type: 'emptyAction', action });
+  }
+  // With capture on, that button has nothing left to do.
+  snapshot(0, true);
+  assert.equal(get('emptyCapture').hidden, true);
+  assert.match(get('empty').textContent, /Capture is on/);
+  // A search that finds nothing among captured logs is not an empty panel.
+  snapshot(100, true);
+  assert.equal(get('emptyActions').hidden, true);
+  assert.equal(get('empty').textContent, 'No matching events in retained history.');
+});

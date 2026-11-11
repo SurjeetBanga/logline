@@ -84,7 +84,7 @@ test('commands register the complete action surface and honor trust/focus/config
   } as any;
   const guideCalls: string[] = [];
   const registrations = registerCommands(controller, (section) => guideCalls.push(section));
-  assert.equal(handlers.size, 39);
+  assert.equal(handlers.size, 42);
   await handlers.get('logline.runCommand')!();
   for (const name of [
     'logline.stopCommand',
@@ -292,4 +292,76 @@ test('commands stop at untrusted workspaces, cancelled pickers, and files Loglin
     mock.workspace.findFiles = saved.findFiles;
     trusted = true;
   }
+});
+
+test('Open in Logline follows the chosen files in full, and a terminal is captured from its menu', async () => {
+  handlers.clear();
+  calls.length = 0;
+  trusted = true;
+  const recorded: unknown[] = [];
+  const terminal = { name: 'zsh' };
+  const window = mock.window as Record<string, unknown>;
+  const controller = {
+    files: {
+      follow: async (file: string, options?: { tailBytes?: number }) =>
+        calls.push({ name: 'follow', value: [file, options?.tailBytes] }),
+    },
+    terminalCapture: { resetTerminalIgnore: (value: unknown) => calls.push({ name: 'unignore', value }) },
+    toggleTerminalCapture: async (enabled: boolean) => calls.push({ name: 'capture', value: enabled }),
+    setUpForAgent: async () => calls.push({ name: 'agent' }),
+  } as any;
+  const usage = { command() {}, record: (event: string, properties: unknown) => recorded.push([event, properties]) };
+  const registrations = registerCommands(controller, undefined, '', usage as any);
+  const file = (fsPath: string, scheme = 'file') => ({ scheme, fsPath });
+  const follows = () => calls.filter((call) => call.name === 'follow').map((call) => call.value);
+
+  // The Explorer passes the clicked file and the whole selection.
+  await handlers.get('logline.openInLogline')!(file('/w/a.log'), [file('/w/a.log'), file('/w/b.jsonl')]);
+  assert.deepEqual(follows(), [
+    ['/w/a.log', 8 * 1024 * 1024],
+    ['/w/b.jsonl', 8 * 1024 * 1024],
+  ]);
+  assert.deepEqual(recorded.at(-1), ['entry', { from: 'explorer' }]);
+  assert.equal(calls.at(-1)?.value, 'logline.logs.focus');
+  // An editor title passes its own file; the Command Palette uses the active editor.
+  calls.length = 0;
+  await handlers.get('logline.openInLogline')!(file('/w/c.log'));
+  window.activeTextEditor = { document: { uri: file('/w/d.ndjson') } };
+  await handlers.get('logline.openInLogline')!();
+  assert.deepEqual(
+    follows().map((value) => (value as unknown[])[0]),
+    ['/w/c.log', '/w/d.ndjson'],
+  );
+  assert.deepEqual(recorded.at(-1), ['entry', { from: 'editor' }]);
+  // A file that is not on disk cannot be followed; with no file at all, the picker opens.
+  calls.length = 0;
+  await handlers.get('logline.openInLogline')!(file('/w/remote.log', 'vscode-remote'));
+  assert.match(String(calls.at(-1)?.value), /local filesystem/);
+  window.activeTextEditor = undefined;
+  calls.length = 0;
+  await handlers.get('logline.openInLogline')!();
+  assert.deepEqual(calls[0], { name: 'command', value: 'logline.followFile' });
+  trusted = false;
+  calls.length = 0;
+  await handlers.get('logline.openInLogline')!(file('/w/a.log'));
+  assert.match(String(calls[0].value), /Trust this workspace/);
+  assert.deepEqual(follows(), []);
+  trusted = true;
+
+  calls.length = 0;
+  window.activeTerminal = terminal;
+  await handlers.get('logline.captureThisTerminal')!();
+  assert.deepEqual(calls.slice(0, 2), [
+    { name: 'unignore', value: terminal },
+    { name: 'capture', value: true },
+  ]);
+  assert.deepEqual(recorded.at(-1), ['entry', { from: 'terminal_menu' }]);
+  window.activeTerminal = undefined;
+  calls.length = 0;
+  await handlers.get('logline.captureThisTerminal')!();
+  assert.deepEqual(calls[0], { name: 'capture', value: true });
+
+  await handlers.get('logline.setUpForAgent')!();
+  assert.equal(calls.at(-1)?.name, 'agent');
+  for (const registration of registrations) registration.dispose();
 });

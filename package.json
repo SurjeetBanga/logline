@@ -112,6 +112,12 @@
         "category": "Logline"
       },
       {
+        "command": "logline.openInLogline",
+        "title": "Open in Logline",
+        "category": "Logline",
+        "icon": "$(output)"
+      },
+      {
         "command": "logline.followCompose",
         "title": "Follow Docker Compose Project",
         "category": "Logline"
@@ -232,6 +238,11 @@
         "category": "Logline"
       },
       {
+        "command": "logline.captureThisTerminal",
+        "title": "Capture This Terminal in Logline",
+        "category": "Logline"
+      },
+      {
         "command": "logline.enableTerminalCapture",
         "title": "Enable Terminal Capture",
         "category": "Logline"
@@ -254,6 +265,11 @@
       {
         "command": "logline.stopSharing",
         "title": "Stop Sharing Logline Sources",
+        "category": "Logline"
+      },
+      {
+        "command": "logline.setUpForAgent",
+        "title": "Set Up for My Agent",
         "category": "Logline"
       },
       {
@@ -331,6 +347,43 @@
         {
           "command": "logline.fixLogStatementWithCopilot",
           "when": "false"
+        },
+        {
+          "command": "logline.captureThisTerminal",
+          "when": "false"
+        }
+      ],
+      "explorer/context": [
+        {
+          "command": "logline.openInLogline",
+          "when": "resourceScheme == file && resourceExtname =~ /^\\.(log|jsonl|ndjson)$/",
+          "group": "navigation@90"
+        }
+      ],
+      "editor/title": [
+        {
+          "command": "logline.openInLogline",
+          "when": "resourceScheme == file && resourceExtname =~ /^\\.(log|jsonl|ndjson)$/",
+          "group": "navigation@90"
+        }
+      ],
+      "editor/title/context": [
+        {
+          "command": "logline.openInLogline",
+          "when": "resourceScheme == file && resourceExtname =~ /^\\.(log|jsonl|ndjson)$/",
+          "group": "3_open@90"
+        }
+      ],
+      "terminal/title/context": [
+        {
+          "command": "logline.captureThisTerminal",
+          "group": "3_run@90"
+        }
+      ],
+      "terminal/context": [
+        {
+          "command": "logline.captureThisTerminal",
+          "group": "navigation@90"
         }
       ]
     },
@@ -777,12 +830,13 @@
           {
             "id": "share",
             "title": "Share with an agent",
-            "description": "Let Copilot, Claude Code, or Codex read what you captured, redacted and read-only, until you stop.\n[Share with Agent](command:logline.shareWithAgent)",
+            "description": "Let Copilot, Claude Code, or Codex read what you captured, redacted and read-only, until you stop.\n[Set Up for My Agent](command:logline.setUpForAgent)\n[Share with Agent](command:logline.shareWithAgent)",
             "media": {
               "markdown": "media/walkthrough/share.md"
             },
             "completionEvents": [
-              "onCommand:logline.shareWithAgent"
+              "onCommand:logline.shareWithAgent",
+              "onCommand:logline.setUpForAgent"
             ]
           },
           {
@@ -969,6 +1023,12 @@
             "maximum": 5000,
             "description": "Minimum time between Logs panel updates. The panel refreshes as soon as new data arrives rather than on a fixed poll, so this only caps how often that happens during a heavy burst of log lines.",
             "order": 5
+          },
+          "logline.statusBar.enabled": {
+            "type": "boolean",
+            "default": true,
+            "order": 6,
+            "markdownDescription": "Show how many logs and errors Logline has captured in the status bar at the bottom of the window, once there are some. Click it to open the Logs panel."
           }
         }
       },

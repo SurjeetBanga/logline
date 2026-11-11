@@ -104,6 +104,8 @@ interface MessageServices {
   doctorAction(action: DoctorAction, siteId?: string): Promise<void>;
   connectAgent(agent?: 'claude' | 'codex'): Promise<void>;
   showStatus(): Promise<void>;
+  /** A way in chosen from the empty Logs panel. */
+  emptyAction?(action: 'capture' | 'openFile' | 'agent'): Promise<void>;
   connections?: Pick<
     ConnectionManager,
     | 'fetch'
@@ -242,6 +244,10 @@ export async function handleMessage(
       return;
     case 'showStatus':
       await services.showStatus();
+      return;
+    case 'emptyAction':
+      services.usage?.record('entry', { from: 'empty_state' });
+      await services.emptyAction?.(msg.action);
       return;
     case 'askCopilot':
       await services.askCopilot(msg.anchor);

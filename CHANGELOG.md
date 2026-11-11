@@ -4,6 +4,16 @@ All notable changes to Logline are documented in this file.
 
 ## Unreleased
 
+### Changes
+
+- **Set up for your agent in one step**: **Logline: Set Up for My Agent** turns on terminal capture, shares what Logline captures, and connects the agent found in your editor: the Cursor, Windsurf, or Kiro agent, Claude Code, Codex, or Copilot. The share confirmation and the command that registers Logline are still shown before anything happens. After it, every window on your profile shares from its start, so the agent finds your logs the next day too, until you choose **Stop sharing**. Logline offers the setup once when it finds an agent, and never on a remote host.
+- **A status bar item** shows how many logs and errors Logline has captured, such as `128 logs · 3 errors`, once there are some. Click it to open the Logs panel, on the errors when there are any. `logline.statusBar.enabled` hides it.
+- **Errors while you are not looking**: the first time a run logs errors while the Logs panel is hidden, Logline says so, with **Show Errors**. It asks once per run and at most every 10 minutes, and **Don't Show Again** ends it.
+- **Open in Logline** on a `.log`, `.jsonl`, or `.ndjson` file, in the Explorer's menu and the editor's title bar, shows the file in the Logs panel and follows what is written to it. **Capture This Terminal in Logline** is in a terminal's menu.
+- **Capture is offered when a dev server starts** in a terminal while capture is off, such as `npm run dev`, `uvicorn`, or `docker compose up`: for this workspace or for every one. It asks once per workspace, and stops after three without a yes.
+- **An empty Logs panel** offers **Capture my terminals**, **Open a log file…**, and **Set up for my agent** instead of only a sentence.
+- Usage counts now include how the agent setup, the errors notification, and the capture offer were answered, and whether Logline was opened from the status bar, a file's menu, a terminal's menu, or the empty panel. See [PRIVACY.md](PRIVACY.md).
+
 ### Fixes
 
 - A filter typed in the search box but not yet entered is no longer left out: **Run** and **Tail** on a connection apply it first, and choosing a whole term from the suggestions, such as `appname:"prod"`, applies it as Enter does. A highlighted suggestion no longer turns the search box white.

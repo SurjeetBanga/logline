@@ -205,3 +205,75 @@ test('duplicate sharing clicks use one warning and revocation prevents a pending
   assert.equal(controller.agentAccess.status().active, false);
   assert.equal(preferences.size, 0);
 });
+
+test('the one-step setup turns capture on, shares after the usual warning, and keeps later windows sharing', async (t) => {
+  const controller = setup(t);
+  const steps: string[] = [];
+  controller.usage = {
+    record: (event: string, properties: { step?: string }) => {
+      if (event === 'agent_onboarding') steps.push(properties.step!);
+    },
+    shared() {},
+    autoShared() {},
+    sharingStopped() {},
+  } as unknown as typeof controller.usage;
+  const copilot = { kind: 'copilot' as const, name: 'Copilot' };
+  await controller.setUpForAgent(copilot);
+  assert.equal(controller.terminalCapture.isEnabled, true);
+  assert.equal(warnings.length, 1);
+  assert.deepEqual(warnings[0].actions, ['Share logs'], 'the setup shares everything or nothing');
+  assert.equal(controller.agentAccess.status().scope, 'all');
+  assert.equal(preferences.get('logline.shareOnStart.v1'), true);
+  assert.equal(controller.agentReady(), true);
+  assert.match(notices.at(-1)!, /Logline is set up for Copilot\..*Check the Logline logs for errors/);
+  assert.deepEqual(steps, ['finished']);
+
+  // The next window on this profile shares from its start, without asking again.
+  const later = new LogsController({
+    globalState: {
+      get: (key: string, fallback: unknown) => preferences.get(key) ?? fallback,
+      update: async (key: string, value: unknown) => void preferences.set(key, value),
+    },
+  } as unknown as import('vscode').ExtensionContext);
+  t.after(() => later.dispose());
+  assert.equal(later.agentAccess.status().active, false);
+  later.restoreSharing();
+  assert.equal(later.agentAccess.status().scope, 'all');
+  assert.equal(warnings.length, 1);
+  // Clearing the logs keeps it shared; Stop sharing ends it here and in later windows.
+  later.clear();
+  assert.equal(later.agentAccess.status().active, true);
+  later.stopSharing();
+  assert.equal(later.agentAccess.status().active, false);
+  assert.equal(preferences.get('logline.shareOnStart.v1'), undefined);
+  later.restoreSharing();
+  assert.equal(later.agentAccess.status().active, false);
+});
+
+test('a refused warning stops the setup, and an agent that cannot be connected is reported', async (t) => {
+  const refused = setup(t);
+  const steps: string[] = [];
+  const usage = {
+    record: (event: string, properties: { step?: string }) => {
+      if (event === 'agent_onboarding') steps.push(properties.step!);
+    },
+    shared() {},
+    sharingStopped() {},
+  } as unknown as typeof refused.usage;
+  refused.usage = usage;
+  confirm = () => undefined;
+  await refused.setUpForAgent({ kind: 'claude', name: 'Claude Code' });
+  assert.equal(refused.agentAccess.status().active, false);
+  assert.equal(preferences.has('logline.shareOnStart.v1'), false);
+  assert.equal(refused.agentReady(), false);
+  assert.deepEqual(steps, ['failed_share']);
+
+  // Sharing is accepted, but this window takes no MCP clients: the agent is not connected.
+  const unconnected = setup(t);
+  unconnected.usage = usage;
+  steps.length = 0;
+  await unconnected.setUpForAgent({ kind: 'claude', name: 'Claude Code' });
+  assert.equal(unconnected.agentAccess.status().scope, 'all');
+  assert.match(warnings.at(-1)!.message, /not accepting MCP clients/);
+  assert.deepEqual(steps, ['failed_connect']);
+});

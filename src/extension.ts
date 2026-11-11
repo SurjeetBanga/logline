@@ -10,6 +10,9 @@ import { GUIDE_SECTIONS, latestGuideRelease } from './vscode/guide-content';
 import { registerAgentTools, runAgentTool } from './vscode/agent-tools';
 import { AgentBridge, installMcpScript } from './vscode/agent-bridge';
 import { copilotAvailable, refreshCopilot, refreshInstalledSkills } from './vscode/agent-setup';
+import { AgentOnboarding } from './vscode/agent-onboarding';
+import { CaptureOffer } from './vscode/capture-offer';
+import { CaptureStatus } from './vscode/capture-status';
 import { registerDebugCapture } from './vscode/debug-capture';
 import { LogBreakpoints } from './vscode/log-breakpoints';
 import { LogDoctor } from './vscode/log-doctor';
@@ -38,6 +41,7 @@ export function activate(context: vscode.ExtensionContext): { provider: LogsProv
   controller = new LogsController(context);
   controller.usage = usage;
   usage.start(controller.usageSummary());
+  controller.restoreSharing();
   const guide = new GuidePanel(context, () => controller!.acknowledgeGuide(), {
     progress: () => controller!.guideProgress(),
     reveal: (target, fallback) => void controller!.reveal(target, fallback),
@@ -174,7 +178,33 @@ export function activate(context: vscode.ExtensionContext): { provider: LogsProv
     }) ?? { dispose() {} },
   );
   startAutoServers(controller);
-  context.subscriptions.push(usage);
+  const onboarding = new AgentOnboarding({
+    memento: context.globalState,
+    ready: () => agentController.agentReady(),
+    setUp: (agent) => agentController.setUpForAgent(agent),
+    record: (step, agent) => usage?.record('agent_onboarding', { step, agent }),
+  });
+  if (offersAgentSetup(usage.newInstall, context.extensionMode, vscode.env?.remoteName)) onboarding.start();
+  const captured = new CaptureStatus({
+    store: agentController.store,
+    generation: () => agentController.state.generation,
+    panelVisible: () => provider.visible,
+    enabled: () => agentController.config.get('statusBar.enabled', true),
+    showQuery: (query) => agentController.showQuery(query),
+    memento: context.globalState,
+    entered: () => usage?.record('entry', { from: 'status_bar' }),
+    nudged: (step) => usage?.record('nudge', { kind: 'errors', step }),
+  });
+  const captureOffer = new CaptureOffer({
+    workspace: context.workspaceState,
+    global: context.globalState,
+    enable: (everywhere) => agentController.toggleTerminalCapture(true, everywhere),
+    record: (step) => usage?.record('nudge', { kind: 'capture_offer', step }),
+  });
+  // Like the agent setup, capture is offered only where an answer lasts.
+  if (context.extensionMode === (vscode.ExtensionMode?.Production ?? 1) && !vscode.env?.remoteName)
+    agentController.terminalCapture.uncaptured = (commandLine) => void captureOffer.commandStarted(commandLine);
+  context.subscriptions.push(usage, onboarding, captured);
   if (opensPanelOnInstall(usage.newInstall, context.extensionMode, vscode.env?.remoteName))
     void vscode.commands.executeCommand('logline.logs.focus');
   usage.record('perf', { op: 'activate', ms: performance.now() - started });
@@ -191,6 +221,19 @@ export function opensPanelOnInstall(
   remoteName: string | undefined,
 ): boolean {
   return newInstall && mode === (vscode.ExtensionMode?.Production ?? 1) && !remoteName;
+}
+
+/**
+ * The one-step agent setup is offered where Logline is settled: not in the
+ * session that installs it, which already opens the welcome, and not on a
+ * remote host, where every new Codespace or container starts afresh.
+ */
+export function offersAgentSetup(
+  newInstall: boolean,
+  mode: vscode.ExtensionMode | undefined,
+  remoteName: string | undefined,
+): boolean {
+  return !newInstall && mode === (vscode.ExtensionMode?.Production ?? 1) && !remoteName;
 }
 
 export async function deactivate(): Promise<void> {

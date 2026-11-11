@@ -7,6 +7,9 @@ import { convertTask } from './tasks/conversion';
 import { showStatus } from './status';
 import { counted, type Usage } from './usage';
 
+/** How much of an existing file Open in Logline reads before following it. */
+const OPEN_FILE_BYTES = 8 * 1024 * 1024;
+
 export function registerCommands(
   controller: LogsController,
   openGuide?: (section: 'guide' | 'whatsNew') => void,
@@ -56,6 +59,38 @@ export function registerCommands(
       }
       for (const uri of files) await controller.files.follow(uri.fsPath);
       if (files.length) await vscode.commands.executeCommand('logline.logs.focus');
+    }),
+    registerCommand('logline.openInLogline', async (clicked?: unknown, selected?: unknown) => {
+      if (!vscode.workspace.isTrusted) {
+        vscode.window.showWarningMessage('Trust this workspace before opening a log file in Logline.');
+        return;
+      }
+      // The Explorer passes the file clicked and every file selected; an editor title passes its own.
+      const isUri = (value: unknown): value is vscode.Uri =>
+        typeof (value as vscode.Uri | undefined)?.scheme === 'string' &&
+        typeof (value as vscode.Uri | undefined)?.fsPath === 'string';
+      const picked = Array.isArray(selected) && selected.some(isUri) ? selected.filter(isUri) : [clicked].filter(isUri);
+      const uris = picked.length ? picked : [vscode.window.activeTextEditor?.document.uri].filter(isUri);
+      if (!uris.length) return vscode.commands.executeCommand('logline.followFile');
+      const files = uris.filter((uri) => uri.scheme === 'file');
+      if (!files.length) {
+        vscode.window.showWarningMessage('Logline can only open files on the local filesystem.');
+        return;
+      }
+      usage?.record('entry', { from: Array.isArray(selected) ? 'explorer' : 'editor' });
+      // The whole of an ordinary log file, and whatever is written to it afterwards.
+      for (const uri of files) await controller.files.follow(uri.fsPath, { tailBytes: OPEN_FILE_BYTES });
+      await vscode.commands.executeCommand('logline.logs.focus');
+    }),
+    registerCommand('logline.captureThisTerminal', async () => {
+      usage?.record('entry', { from: 'terminal_menu' });
+      const terminal = vscode.window.activeTerminal;
+      if (terminal) controller.terminalCapture.resetTerminalIgnore(terminal);
+      await controller.toggleTerminalCapture(true);
+      void vscode.window.showInformationMessage(
+        'Logline will capture the next command you run in this terminal. Output from a command already in progress cannot be recovered.',
+      );
+      await vscode.commands.executeCommand('logline.logs.focus');
     }),
     registerCommand('logline.followCompose', async () => {
       if (!vscode.workspace.isTrusted) {
@@ -158,6 +193,7 @@ export function registerCommands(
     registerCommand('logline.stopSharing', () => controller.stopSharing()),
     registerCommand('logline.askCopilot', () => controller.askCopilot()),
     registerCommand('logline.connectAgent', () => controller.connectAgent()),
+    registerCommand('logline.setUpForAgent', () => controller.setUpForAgent()),
     registerCommand('logline.showStatus', () => showStatus(controller, version)),
     registerCommand('logline.startOtlpReceiver', () => controller.toggleOtlp(true)),
     registerCommand('logline.stopOtlpReceiver', () => controller.toggleOtlp(false)),

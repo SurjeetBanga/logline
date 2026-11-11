@@ -831,6 +831,10 @@
       cellFilterInclude: element("cellFilterInclude"),
       cellFilterExclude: element("cellFilterExclude"),
       empty: element("empty"),
+      emptyActions: element("emptyActions"),
+      emptyCapture: element("emptyCapture"),
+      emptyOpenFile: element("emptyOpenFile"),
+      emptyAgent: element("emptyAgent"),
       logsTab: element("logsTab"),
       logsView: element("logsView"),
       searchEditor: element("searchEditor"),
@@ -9099,7 +9103,10 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
         }
         elements.empty.hidden = rows.length > 0;
         elements.rowHint.hidden = state.rowHintDismissed || !rows.length;
-        elements.empty.textContent = connectionBar.emptyText() ?? (data.total ? "No matching events in retained history." : "Run a server command to see its logs here.");
+        const connectionEmpty = connectionBar.emptyText();
+        elements.empty.textContent = connectionEmpty ?? (data.total ? "No matching events in retained history." : data.captureTerminals ? "Capture is on. Run your app in a terminal, or press F5, and its logs appear here." : "Nothing captured yet. Run your app with F5 and its logs appear here, or start with one of these:");
+        elements.emptyActions.hidden = rows.length > 0 || data.total > 0 || connectionEmpty !== void 0;
+        elements.emptyCapture.hidden = data.captureTerminals;
         if (state.following && !state.paused && !state.selectedSort) table.scheduleRenderWindow(true);
       }
       bridge.flush();
@@ -9134,6 +9141,7 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
         state.lastRows = events.map((event) => event.id).join(",");
         table.renderRows(events);
         elements.empty.hidden = events.length > 0;
+        if (events.length) elements.emptyActions.hidden = true;
         table.scheduleRenderWindow(true);
       }
       updateModeLabel();
@@ -9405,6 +9413,12 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
     scope.listen(elements.takeTour, "click", () => startTour());
     scope.listen(elements.tourHintStart, "click", () => startTour());
     scope.listen(elements.tourHintDismiss, "click", () => elements.tourHint.hidden = true);
+    for (const [button, action] of [
+      [elements.emptyCapture, "capture"],
+      [elements.emptyOpenFile, "openFile"],
+      [elements.emptyAgent, "agent"]
+    ])
+      scope.listen(button, "click", () => api.postMessage({ type: "emptyAction", action }));
     const welcomeChoice = (choice, then) => () => {
       elements.welcomeDialog.close();
       welcomeAnswered();
