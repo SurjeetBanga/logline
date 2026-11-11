@@ -4,7 +4,7 @@
 //   node --expose-gc scripts/benchmark.mjs --root <dir>    measure the build in <dir>/out
 //   node --expose-gc scripts/benchmark.mjs --json <file>   also write the results as JSON
 //   node --expose-gc scripts/benchmark.mjs --only a,b      measure only these cases
-//   node scripts/benchmark.mjs --list                      print the case names, in order, as JSON
+//   node scripts/benchmark.mjs --list                      print the cases, in order, as JSON: [{ name, weight }]
 //
 // scripts/perf-compare.mjs runs this against two builds on the same machine and fails on regressions.
 // Each case is independent: one that cannot load in an older build is reported as unavailable.
@@ -69,6 +69,34 @@ function time(operation) {
   samples.sort((a, b) => a - b);
   return samples[Math.floor(samples.length / 2)];
 }
+
+// How long each case takes to run in its own process, less the process's startup, in units of about 100 ms on a laptop;
+// a case not listed weighs 1. perf-compare.mjs uses these to split the cases evenly across CI's shards, so update them
+// when a case gets much slower or faster to run (not to measure): time `--only <case>` against `--only heap`.
+const WEIGHTS = {
+  usage: 11,
+  analysis: 5,
+  'elastic-logs': 4,
+  'gcp-logs': 4,
+  sort: 4,
+  'agent-search': 4,
+  'agent-analyze': 4,
+  'datadog-logs': 3,
+  'cloudwatch-logs': 3,
+  'loki-logs': 3,
+  'sites-shared': 3,
+  copy: 3,
+  traces: 3,
+  stream: 3,
+  'remote-rows': 2,
+  'remote-sql': 2,
+  'ai-calls': 2,
+  sites: 2,
+  page: 2,
+  query: 2,
+  'suggest-live': 2,
+  snapshot: 2,
+};
 
 const results = {};
 const cases = [];
@@ -680,7 +708,9 @@ timed('removeSource', 'Remove a 100-event source from 50,000 retained events', a
 });
 
 if (args.list) {
-  console.log(JSON.stringify(cases.map(({ name }) => name)));
+  const unknown = Object.keys(WEIGHTS).filter((name) => !cases.some((c) => c.name === name));
+  assert.deepEqual(unknown, [], 'WEIGHTS names cases that do not exist');
+  console.log(JSON.stringify(cases.map(({ name }) => ({ name, weight: WEIGHTS[name] ?? 1 }))));
   process.exit(0);
 }
 for (const { name, label, unit, prepare, measure } of cases) {

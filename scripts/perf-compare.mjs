@@ -15,8 +15,8 @@
 // only if it is still over. A size case (bytes sent, memory retained) is deterministic and fails when it grows by
 // more than --size-threshold.
 //
-// --shard i/n measures every nth case, so CI can split the cases across machines; each comparison still runs on
-// one machine. --merge combines the shards' results into one report and one verdict.
+// --shard i/n measures one nth of the cases, balanced by the weights benchmark.mjs gives them, so CI can split the
+// cases across machines; each comparison still runs on one machine. --merge combines the shards' results into one report and one verdict.
 import { spawnSync } from 'node:child_process';
 import { appendFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -56,12 +56,10 @@ function compareBuilds() {
   const names = Object.keys(sides);
   const scratch = mkdtempSync(path.join(tmpdir(), 'logline-perf-'));
 
-  // This shard's cases: every nth, in the benchmark's order, so heavy and light cases spread evenly.
   let shardCases;
   if (args.shard) {
     const [index, count] = args.shard.split('/').map(Number);
-    const listed = spawnSync(process.execPath, [benchmark, '--list'], { encoding: 'utf8' });
-    shardCases = JSON.parse(listed.stdout).filter((_, i) => i % count === index - 1);
+    shardCases = shards(listCases(), count)[index - 1];
   }
 
   /** samples[side][case] holds one value per process run; labels and errors are kept from the latest run. */
@@ -167,16 +165,38 @@ function compareBuilds() {
   };
 }
 
+/** The benchmark's cases, in its order, with the weight of each. */
+function listCases() {
+  const listed = spawnSync(process.execPath, [benchmark, '--list'], { encoding: 'utf8' });
+  if (listed.status !== 0) throw new Error(`Could not list the benchmark's cases:\n${listed.stderr}`);
+  return JSON.parse(listed.stdout);
+}
+
+/**
+ * The case names split into `count` shards of about equal weight: the heaviest case first, each to the lightest shard.
+ * Deterministic, so every shard computes the same split; each shard keeps the benchmark's order.
+ */
+function shards(cases, count) {
+  const loads = Array.from({ length: count }, () => ({ weight: 0, names: new Set() }));
+  const heaviestFirst = cases.map((c, i) => ({ ...c, i })).sort((a, b) => b.weight - a.weight || a.i - b.i);
+  for (const { name, weight } of heaviestFirst) {
+    const lightest = loads.reduce((min, load) => (load.weight < min.weight ? load : min));
+    lightest.weight += weight;
+    lightest.names.add(name);
+  }
+  return loads.map(({ names }) => cases.map(({ name }) => name).filter((name) => names.has(name)));
+}
+
 /** Several shards' results as one, with the cases in the benchmark's order. */
 function mergeShards(files) {
-  const shards = files.map((file) => JSON.parse(readFileSync(file, 'utf8')));
-  if (!shards.length) throw new Error('No shard results to merge.');
-  const order = JSON.parse(spawnSync(process.execPath, [benchmark, '--list'], { encoding: 'utf8' }).stdout);
+  const parts = files.map((file) => JSON.parse(readFileSync(file, 'utf8')));
+  if (!parts.length) throw new Error('No shard results to merge.');
+  const order = listCases().map(({ name }) => name);
   const position = (name) => (order.includes(name) ? order.indexOf(name) : order.length);
   return {
-    ...shards[0],
-    baseline: shards.some((shard) => shard.baseline),
-    cases: shards.flatMap((shard) => shard.cases).sort((a, b) => position(a.name) - position(b.name)),
+    ...parts[0],
+    baseline: parts.some((shard) => shard.baseline),
+    cases: parts.flatMap((shard) => shard.cases).sort((a, b) => position(a.name) - position(b.name)),
   };
 }
 
