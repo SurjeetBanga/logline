@@ -596,9 +596,17 @@ export function createViewer(api: WebviewApi) {
       }
       elements.empty.hidden = rows.length > 0;
       elements.rowHint.hidden = state.rowHintDismissed || !rows.length;
+      const connectionEmpty = connectionBar.emptyText();
       elements.empty.textContent =
-        connectionBar.emptyText() ??
-        (data.total ? 'No matching events in retained history.' : 'Run a server command to see its logs here.');
+        connectionEmpty ??
+        (data.total
+          ? 'No matching events in retained history.'
+          : data.captureTerminals
+            ? 'Capture is on. Run your app in a terminal, or press F5, and its logs appear here.'
+            : 'Nothing captured yet. Run your app with F5 and its logs appear here, or start with one of these:');
+      // Nothing captured at all: offer the ways in, not only a sentence about them.
+      elements.emptyActions.hidden = rows.length > 0 || data.total > 0 || connectionEmpty !== undefined;
+      elements.emptyCapture.hidden = data.captureTerminals;
       if (state.following && !state.paused && !state.selectedSort) table.scheduleRenderWindow(true);
     }
     bridge.flush();
@@ -641,6 +649,7 @@ export function createViewer(api: WebviewApi) {
       state.lastRows = events.map((event) => event.id).join(',');
       table.renderRows(events);
       elements.empty.hidden = events.length > 0;
+      if (events.length) elements.emptyActions.hidden = true;
       table.scheduleRenderWindow(true);
     }
     updateModeLabel();
@@ -979,6 +988,12 @@ export function createViewer(api: WebviewApi) {
   scope.listen(elements.takeTour, 'click', () => startTour());
   scope.listen(elements.tourHintStart, 'click', () => startTour());
   scope.listen(elements.tourHintDismiss, 'click', () => (elements.tourHint.hidden = true));
+  for (const [button, action] of [
+    [elements.emptyCapture, 'capture'],
+    [elements.emptyOpenFile, 'openFile'],
+    [elements.emptyAgent, 'agent'],
+  ] as const)
+    scope.listen(button, 'click', () => api.postMessage({ type: 'emptyAction', action }));
   /** Leave the welcome, remembering it was seen, and do what was chosen. */
   const welcomeChoice = (choice: WelcomeChoice, then: () => void) => () => {
     elements.welcomeDialog.close();

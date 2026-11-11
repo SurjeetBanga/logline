@@ -208,7 +208,7 @@
       "how": {
         "classification": "SystemMetaData",
         "purpose": "FeatureInsight",
-        "comment": "One of: all, runs, event."
+        "comment": "One of: all, runs, event, auto."
       },
       "sources": {
         "classification": "SystemMetaData",
@@ -705,6 +705,43 @@
         "classification": "SystemMetaData",
         "purpose": "FeatureInsight",
         "comment": "What happened, such as added, copied, or cancelled."
+      }
+    },
+    "surjeetbanga.logline/agent_onboarding": {
+      "owner": "SurjeetBanga",
+      "comment": "The one-step agent setup was offered, answered, finished, or stopped at a step.",
+      "step": {
+        "classification": "SystemMetaData",
+        "purpose": "FeatureInsight",
+        "comment": "One of: offered, accepted, declined, dismissed, finished, failed_connect, failed_share."
+      },
+      "agent": {
+        "classification": "SystemMetaData",
+        "purpose": "FeatureInsight",
+        "comment": "One of: host, claude, codex, copilot."
+      }
+    },
+    "surjeetbanga.logline/nudge": {
+      "owner": "SurjeetBanga",
+      "comment": "A notification Logline raised on its own, and how it was answered.",
+      "kind": {
+        "classification": "SystemMetaData",
+        "purpose": "FeatureInsight",
+        "comment": "One of: errors, capture_offer."
+      },
+      "step": {
+        "classification": "SystemMetaData",
+        "purpose": "FeatureInsight",
+        "comment": "One of: shown, accepted, never, dismissed."
+      }
+    },
+    "surjeetbanga.logline/entry": {
+      "owner": "SurjeetBanga",
+      "comment": "Logline was opened from outside the Logs panel.",
+      "from": {
+        "classification": "SystemMetaData",
+        "purpose": "FeatureInsight",
+        "comment": "One of: status_bar, explorer, editor, terminal_menu, empty_state."
       }
     },
     "surjeetbanga.logline/prompt_answered": {

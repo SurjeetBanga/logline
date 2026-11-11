@@ -256,6 +256,9 @@ test('Connect names only a known agent, and Settings opens only a Logline settin
   });
   for (const setting of ['editor.fontSize', 'logline.', 'logline.x; rm', 42])
     assert.deepEqual(parseViewRequest({ type: 'config', setting }), { type: 'config' });
+  for (const action of ['capture', 'openFile', 'agent'])
+    assert.deepEqual(parseViewRequest({ type: 'emptyAction', action }), { type: 'emptyAction', action });
+  assert.equal(parseViewRequest({ type: 'emptyAction', action: 'rm' }), undefined);
 });
 
 test('removing a source names it, and removing a connection names the connection', () => {

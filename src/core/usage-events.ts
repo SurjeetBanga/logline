@@ -123,6 +123,28 @@ export type PanelAction = (typeof PANEL_ACTIONS)[number];
 /** Which first step the welcome led to; `dismissed` is Escape. */
 export const WELCOME_CHOICES = ['tour', 'explore', 'capture', 'import', 'connection', 'otel', 'dismissed'] as const;
 export type WelcomeChoice = (typeof WELCOME_CHOICES)[number];
+/** The agent the one-step setup found: the editor's own, Claude Code, Codex, or Copilot. */
+export const ONBOARDING_AGENTS = ['host', 'claude', 'codex', 'copilot'] as const;
+export type OnboardingAgent = (typeof ONBOARDING_AGENTS)[number];
+/** How far the one-step agent setup got; the three `failed_` steps say where it stopped. */
+export const AGENT_ONBOARDING_STEPS = [
+  'offered',
+  'accepted',
+  'declined',
+  'dismissed',
+  'finished',
+  'failed_connect',
+  'failed_share',
+] as const;
+export type AgentOnboardingStep = (typeof AGENT_ONBOARDING_STEPS)[number];
+/** A notification Logline raised on its own: errors caught while the panel was hidden, or an offer to capture a dev server. */
+export const NUDGE_KINDS = ['errors', 'capture_offer'] as const;
+export type NudgeKind = (typeof NUDGE_KINDS)[number];
+export const NUDGE_STEPS = ['shown', 'accepted', 'never', 'dismissed'] as const;
+export type NudgeStep = (typeof NUDGE_STEPS)[number];
+/** Where outside the Logs panel someone came into Logline from. */
+export const ENTRY_POINTS = ['status_bar', 'explorer', 'editor', 'terminal_menu', 'empty_state'] as const;
+export type EntryPoint = (typeof ENTRY_POINTS)[number];
 /** Captures that start without anyone asking for that run: the rest are a deliberate step. */
 export const AUTOMATIC_CAPTURES: readonly string[] = ['debug', 'terminal', 'otlp'];
 /** Why an agent tool call failed: its error code, never its message. */
@@ -184,7 +206,7 @@ export const USAGE_EVENTS: Record<string, Record<string, Rule>> = {
   connection_sql_run: { type: connection, ok: BOOL },
   connection_tested: { type: connection, ok: BOOL },
   connection_agent_allowed: { type: connection },
-  shared_with_agent: { how: oneOf('all', 'runs', 'event'), sources: COUNT, events: COUNT },
+  shared_with_agent: { how: oneOf('all', 'runs', 'event', 'auto'), sources: COUNT, events: COUNT },
   sharing_stopped: { duration: DURATION, by: oneOf('user', 'closed') },
   exported_for_ai: {},
   ask_copilot: {},
@@ -192,6 +214,12 @@ export const USAGE_EVENTS: Record<string, Record<string, Rule>> = {
     agent: oneOf('host', 'claude', 'codex', 'other', 'none'),
     outcome: oneOf('added', 'copied', 'terminal', 'failed', 'cancelled', 'unavailable'),
   },
+  agent_onboarding: {
+    step: oneOf(...AGENT_ONBOARDING_STEPS),
+    agent: oneOf(...ONBOARDING_AGENTS),
+  },
+  nudge: { kind: oneOf(...NUDGE_KINDS), step: oneOf(...NUDGE_STEPS) },
+  entry: { from: oneOf(...ENTRY_POINTS) },
   agent_connected: { client: oneOf(...AGENT_CLIENTS) },
   agent_tool: {
     tool: oneOf(...AGENT_TOOLS),

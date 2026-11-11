@@ -37,7 +37,7 @@ const mock = {
     onDidEndTask: () => ({ dispose() {} }),
   },
 };
-const { activate, deactivate, opensPanelOnInstall } = withVscode(
+const { activate, deactivate, opensPanelOnInstall, offersAgentSetup } = withVscode(
   mock,
   () => require('./extension') as typeof import('./extension'),
 );
@@ -59,7 +59,7 @@ test('activation registers the provider, command/task surfaces, autostart, and i
     } as any;
     const result = activate(context);
     assert.ok(result.provider);
-    assert.equal(registeredCommands.length, 39);
+    assert.equal(registeredCommands.length, 43);
     assert.ok(context.subscriptions.length >= 20);
     await new Promise((resolve) => setTimeout(resolve, 50));
     assert.ok(existsSync(join(home, '.logline', 'mcp.js')), 'the MCP server script is installed at a stable path');
@@ -201,4 +201,12 @@ test('only a new local install in a real editor opens the Logs panel', () => {
   assert.equal(opensPanelOnInstall(true, production, 'codespaces'), false, 'not on a remote host');
   assert.equal(opensPanelOnInstall(true, development, undefined), false, 'not in development or tests');
   assert.equal(opensPanelOnInstall(true, undefined, undefined), false);
+});
+
+test('the agent setup is offered in a settled local install, not the session that installs Logline', () => {
+  const production = 1;
+  assert.equal(offersAgentSetup(false, production, undefined), true);
+  assert.equal(offersAgentSetup(true, production, undefined), false, 'the welcome comes first');
+  assert.equal(offersAgentSetup(false, production, 'ssh-remote'), false, 'not on a remote host');
+  assert.equal(offersAgentSetup(false, 2, undefined), false, 'not in development or tests');
 });

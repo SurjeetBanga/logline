@@ -291,3 +291,28 @@ test('a terminal is judged by its own shell, and an extension terminal not at al
   assert.deepEqual(shells, ['gitbash', 'C:/x/cmd.exe']);
   capture.dispose();
 });
+
+test('a command that starts while capture is off is reported, so capture can be offered, and is not captured', async () => {
+  const h = harness(false);
+  const seen: string[] = [];
+  h.capture.uncaptured = (commandLine) => seen.push(commandLine);
+  const execution = (value?: string) => ({
+    commandLine: value === undefined ? undefined : { value },
+    cwd: { fsPath: '/workspace' },
+    async *read() {
+      yield 'ignored\n';
+    },
+  });
+  h.start({ terminal: { name: 'zsh' }, execution: execution('npm run dev') });
+  h.start({ terminal: { name: 'zsh' }, execution: execution() });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(seen, ['npm run dev']);
+  assert.equal(h.store.all().length, 0);
+  // Once capture is on, commands are captured and no longer reported.
+  h.capture.setEnabled(true);
+  h.start({ terminal: { name: 'zsh' }, execution: execution('npm run dev') });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(seen, ['npm run dev']);
+  assert.equal(h.store.all().length, 1);
+  h.capture.dispose();
+});

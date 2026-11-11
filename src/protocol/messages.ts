@@ -67,6 +67,7 @@ export type ViewRequest =
   | { type: 'installUpdate' }
   | { type: 'panelSize'; width: number }
   | { type: 'showStatus' }
+  | { type: 'emptyAction'; action: 'capture' | 'openFile' | 'agent' }
   | ({ type: 'breakOnQuery' } & Filter)
   | { type: 'trace'; traceId: string }
   | { type: 'traces' }
@@ -489,6 +490,10 @@ export function parseViewRequest(value: unknown): ViewRequest | undefined {
     case 'showStatus':
     case 'installUpdate':
       return { type: msg.type };
+    case 'emptyAction':
+      return msg.action === 'capture' || msg.action === 'openFile' || msg.action === 'agent'
+        ? { type: msg.type, action: msg.action }
+        : undefined;
     case 'onboardingSeen': {
       const choice = WELCOME_CHOICES.find((item) => item === msg.choice);
       return choice ? { type: msg.type, choice } : { type: msg.type };

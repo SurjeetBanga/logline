@@ -51,6 +51,10 @@ export async function run(): Promise<void> {
       'openConnectionLink',
       'allowAgentConnection',
       'revokeAgentConnection',
+      'setUpForAgent',
+      'openInLogline',
+      'captureThisTerminal',
+      'showCaptured',
     ]) {
       assert.ok(commands.includes(`logline.${command}`), `${command} is registered`);
     }
@@ -96,6 +100,21 @@ export async function run(): Promise<void> {
       /extension smoke/,
       'task output is captured in Logline persistence',
     );
+    await vscode.commands.executeCommand('logline.stopCommand');
+
+    // Open in Logline, as from the Explorer's menu: the file's lines are captured, and the status bar item opens the panel.
+    const logFile = vscode.Uri.file(`${folder.uri.fsPath}/service.log`);
+    await writeFile(logFile.fsPath, 'INFO service started\nERROR opened from the explorer\n');
+    await vscode.commands.executeCommand('logline.openInLogline', logFile, [logFile]);
+    // A followed file is already on disk, so it is not persisted again: look in the store.
+    const { store } = (
+      extension.exports as { provider: { controller: { store: { all(): { level: string; message?: string }[] } } } }
+    ).provider.controller;
+    const opened = () => store.all().find((event) => event.message?.includes('opened from the explorer'));
+    for (const deadline = Date.now() + 10000; !opened() && Date.now() < deadline;)
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    assert.equal(opened()?.level, 'error', 'Open in Logline captures the file, with its levels');
+    await vscode.commands.executeCommand('logline.showCaptured');
     await vscode.commands.executeCommand('logline.stopCommand');
 
     // Debug capture: a Node debug session's Debug Console output reaches Logline.

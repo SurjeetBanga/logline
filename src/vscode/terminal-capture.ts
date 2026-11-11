@@ -33,6 +33,8 @@ export const INTEGRATION_WAIT_MS = 10_000;
 export class TerminalCapture {
   /** Told whether a terminal brought up shell integration: without it, its commands cannot be captured. */
   checked?: (integrated: boolean, shell: string | undefined) => void;
+  /** Told the command line of a command that started while capture was off, so capture can be offered. */
+  uncaptured?: (commandLine: string) => void;
   private readonly judged = new WeakSet<object>();
   private readonly checks = new Set<ReturnType<typeof setTimeout>>();
   private enabled = false;
@@ -203,7 +205,12 @@ export class TerminalCapture {
   }
 
   private onStart(event: { terminal: TerminalLike; execution: ExecutionLike; shellIntegration?: unknown }): void {
-    if (this.disposed || !this.enabled || !event?.terminal || !event.execution) return;
+    if (this.disposed || !event?.terminal || !event.execution) return;
+    if (!this.enabled) {
+      const commandLine = event.execution.commandLine?.value;
+      if (commandLine) this.uncaptured?.(commandLine);
+      return;
+    }
     const terminal = event.terminal as object;
     if (this.ignored.has(terminal)) return;
     const id = this.rememberTerminal(event.terminal);

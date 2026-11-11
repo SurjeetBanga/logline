@@ -476,6 +476,13 @@ export class Usage implements vscode.Disposable {
     this.milestone('first_share');
   }
 
+  /** A window shared from its start, as the one-step setup asked: not something its user did just now. */
+  autoShared(sources: number, events: number): void {
+    this.sharedAt = this.now();
+    this.sharedCalls = 0;
+    this.record('shared_with_agent', { how: 'auto', sources, events });
+  }
+
   sharingStopped(by: 'user' | 'closed' = 'user'): void {
     if (this.sharedAt === undefined) return;
     this.record('sharing_stopped', { duration: this.now() - this.sharedAt, by });

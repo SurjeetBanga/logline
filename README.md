@@ -46,7 +46,7 @@ Run your app the way you already do: in a terminal, with F5, as a task, in Docke
 
 ![The Share panel: everything captured is shared, Copilot is ready, and Claude Code is reading](media/readme/share.webp)
 
-**Share with agent** gives Copilot, Claude Code, Codex, or the agent in Cursor, Windsurf, or Kiro read-only access to what you choose: everything, or specific runs. Logs are always redacted, agents can't run anything, and **Stop sharing** cuts them off at once. Allow an agent to fetch from a connection, and it can pull production logs and compare them with your run, then verify its own fix.
+**Logline: Set Up for My Agent** turns on capture, shares, and connects the agent in your editor in one step. **Share with agent** gives Copilot, Claude Code, Codex, or the agent in Cursor, Windsurf, or Kiro read-only access to what you choose: everything, or specific runs. Logs are always redacted, agents can't run anything, and **Stop sharing** cuts them off at once. Allow an agent to fetch from a connection, and it can pull production logs and compare them with your run, then verify its own fix.
 
 ## Get started
 
@@ -64,6 +64,7 @@ New to it? Logline offers a one-minute tour the first time, which **More actions
 | **Search tools** | Field and value autocomplete, include or exclude a value from any cell, saved searches, and surrounding logs from the same run. |
 | **Export** | JSONL, JSON, CSV, or Markdown for AI tools, redacted by default. |
 | **Retention** | Keeps the newest logs within a memory budget you set, optionally written to disk. |
+| **Outside the panel** | A status bar item counts captured logs and errors, a notification says when a run logs errors while the panel is hidden, and **Open in Logline** shows a `.log` or `.jsonl` file. |
 | **Troubleshooting** | **Logline: Show Status** shows what is on, off, or broken, with the fix. |
 | **Feedback** | **More actions → Suggest a feature…** or **Vote on what's next…** tells us what to build. |
 

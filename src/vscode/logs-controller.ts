@@ -73,17 +73,31 @@ import { SensitiveScanner, type SourceSensitive } from '../core/log-findings';
 import type { GitChanges } from './git-changes';
 import type { LogLens } from './log-lens';
 import type { AgentBridge } from './agent-bridge';
-import { agentLaunch, agentsWithSkills, connectAgent, copilotAvailable, shellKind } from './agent-setup';
+import {
+  agentLaunch,
+  agentsWithSkills,
+  connectAgent,
+  copilotAvailable,
+  shellKind,
+  type AgentSetup,
+} from './agent-setup';
+import { AGENT_FIRST_PROMPT, detectAgent, setupSummary, type DetectedAgent } from './agent-onboarding';
 import { mcpScriptPath } from '../protocol/agent-bridge';
 import { openSourceLocation } from './source-navigation';
 import { parseQuery } from '../core/query';
-import { CONNECTION_TYPES, queryFeatures } from '../core/usage-events';
+import { CONNECTION_TYPES, queryFeatures, type AgentOnboardingStep } from '../core/usage-events';
 import type { Usage, UsageSummarySource } from './usage';
 import type { FeedbackOpen } from '../core/feedback';
 import type { UpdateCheck } from './update-check';
 import { feedbackSendable, sendFeedback } from './feedback';
 
 const SHARE_ALL_CONFIRMED_KEY = 'logline.shareAllLogsConfirmed.v1';
+/**
+ * Set by the one-step agent setup: every window on this profile shares what it
+ * captures from its start, until Stop sharing. Kept out of settings so a
+ * workspace cannot turn it on.
+ */
+export const SHARE_ON_START_KEY = 'logline.shareOnStart.v1';
 
 /** Composition root for services used by commands, tasks and the Logs view. */
 // A trend line is 100 units wide; more points than this only make the message bigger.
@@ -439,6 +453,11 @@ export class LogsController {
         doctorAction: (action, siteId) => this.doctorAction(action, siteId),
         connectAgent: (agent) => this.connectAgent(agent),
         installUpdate: async () => this.updateCheck?.press(),
+        emptyAction: async (action) => {
+          if (action === 'capture') await this.toggleTerminalCapture(true);
+          else if (action === 'agent') await this.setUpForAgent();
+          else await vscode.commands.executeCommand('logline.followFile');
+        },
         showStatus: async () => {
           await vscode.commands.executeCommand('logline.showStatus');
         },
@@ -660,16 +679,97 @@ export class LogsController {
   }
   /** Register Logline with Claude Code, Codex, or another MCP client; the Share panel names the agent. */
   async connectAgent(agent?: 'claude' | 'codex'): Promise<void> {
+    await this.connect(agent);
+  }
+  /** Connect an agent, saying `after` once it is added instead of the usual next step. */
+  private async connect(agent?: 'claude' | 'codex' | 'host', after?: string): Promise<AgentSetup> {
     if (!this.agentBridge?.running) {
       void vscode.window.showWarningMessage(
         'Logline is not accepting MCP clients in this window. Turn on logline.externalAgents to connect Claude Code or Codex.',
       );
-      this.usage?.record('agent_setup', { agent: agent ?? 'none', outcome: 'unavailable' });
-      return;
+      const setup: AgentSetup = { agent: agent ?? 'none', outcome: 'unavailable' };
+      this.usage?.record('agent_setup', { ...setup });
+      return setup;
     }
-    const setup = await connectAgent(agentLaunch(mcpScriptPath()), undefined, agent);
+    const setup = await connectAgent(agentLaunch(mcpScriptPath()), undefined, agent, after);
     this.usage?.record('agent_setup', { ...setup });
     this.agentSetupCache = undefined;
+    return setup;
+  }
+  /** Whether agents read this window's logs now, or every window shares from its start. */
+  agentReady(): boolean {
+    return this.agentAccess.status().active || this.globalState.get<boolean>(SHARE_ON_START_KEY, false);
+  }
+  /**
+   * The one-step setup: capture terminals, share everything captured, in this
+   * window and later ones, and connect the agent found in this editor. Each
+   * consent is still asked; a step that is refused stops it there.
+   */
+  async setUpForAgent(found: DetectedAgent | undefined = detectAgent()): Promise<void> {
+    const record = (step: AgentOnboardingStep) =>
+      found && this.usage?.record('agent_onboarding', { step, agent: found.kind });
+    try {
+      await this.toggleTerminalCapture(true);
+    } catch {
+      // No workspace to save the setting in: capture is on for this window all the same.
+      this.terminalCapture.setEnabled(true);
+    }
+    if (!this.agentAccess.status().active) {
+      if (!this.globalState.get<boolean>(SHARE_ALL_CONFIRMED_KEY, false)) {
+        if ((await this.confirmShareAll(false)) !== 'Share logs' || this.disposing) {
+          record('failed_share');
+          return;
+        }
+        await this.globalState.update(SHARE_ALL_CONFIRMED_KEY, true);
+      }
+      this.agentAccess.shareAll();
+      this.countShare('all');
+    }
+    await this.globalState.update(SHARE_ON_START_KEY, true);
+    this.notifications.send({ type: 'update' });
+    const cmd = shellKind(vscode.env?.shell) === 'cmd';
+    if (found?.kind === 'copilot') {
+      record('finished');
+      const answer = await vscode.window.showInformationMessage(
+        setupSummary(found, { restart: false, cmd }),
+        'Copy Prompt',
+      );
+      if (answer === 'Copy Prompt') await vscode.env.clipboard.writeText(AGENT_FIRST_PROMPT);
+      return;
+    }
+    const agent = found ?? { kind: 'host' as const, name: 'your agent' };
+    const setup = await this.connect(
+      found?.kind as 'host' | 'claude' | 'codex' | undefined,
+      setupSummary(agent, { restart: true, cmd }),
+    );
+    record(['added', 'copied', 'terminal'].includes(setup.outcome) ? 'finished' : 'failed_connect');
+  }
+  /** Share everything again in a window whose profile asked for that in the one-step setup. */
+  restoreSharing(): void {
+    if (
+      this.agentAccess.status().active ||
+      !this.globalState.get<boolean>(SHARE_ON_START_KEY, false) ||
+      !this.globalState.get<boolean>(SHARE_ALL_CONFIRMED_KEY, false)
+    )
+      return;
+    const sources = this.agentAccess.shareAll().sources;
+    this.usage?.autoShared(
+      sources.length,
+      sources.reduce((sum, source) => sum + source.events, 0),
+    );
+    this.notifications.send({ type: 'update' });
+  }
+  private confirmShareAll(chooseRuns: boolean): Thenable<string | undefined> {
+    return vscode.window.showWarningMessage(
+      'Share logs with agent?',
+      {
+        modal: true,
+        detail:
+          'Agents can search captured logs in this VS Code window, including new command runs, until you stop sharing: Copilot, and Claude Code, Codex, or other MCP clients you connected to Logline. Common credentials are automatically redacted, but logs may still contain sensitive information.',
+      },
+      'Share logs',
+      ...(chooseRuns ? ['Choose specific runs…'] : []),
+    );
   }
   async doctorAction(action: DoctorAction, siteId?: string): Promise<void> {
     if (!this.doctor) {
@@ -696,6 +796,8 @@ export class LogsController {
   }
   clear(): void {
     this.agentAccess.revoke();
+    // A profile that shares from the start keeps sharing what comes after a clear.
+    this.restoreSharing();
     this.store.clear();
     this.ingestion.crashes.clear();
     this.spans.clear();
@@ -796,16 +898,7 @@ export class LogsController {
     let runs = sessionIds?.filter(Boolean) ?? [];
     if (!chooseRuns && !ids.length && !runs.length && anchor === undefined) {
       if (!this.globalState.get<boolean>(SHARE_ALL_CONFIRMED_KEY, false)) {
-        const answer = await vscode.window.showWarningMessage(
-          'Share logs with agent?',
-          {
-            modal: true,
-            detail:
-              'Agents can search captured logs in this VS Code window, including new command runs, until you stop sharing: Copilot, and Claude Code, Codex, or other MCP clients you connected to Logline. Common credentials are automatically redacted, but logs may still contain sensitive information.',
-          },
-          'Share logs',
-          'Choose specific runs…',
-        );
+        const answer = await this.confirmShareAll(true);
         if (this.disposing || revision !== this.agentAccess.status().revision) return;
         if (answer === 'Choose specific runs…') chooseRuns = true;
         else if (answer === 'Share logs') await this.globalState.update(SHARE_ALL_CONFIRMED_KEY, true);
@@ -912,6 +1005,9 @@ export class LogsController {
   }
   stopSharing(): void {
     this.usage?.sharingStopped();
+    // Stop sharing also ends sharing from the start of later windows.
+    if (this.globalState.get<boolean>(SHARE_ON_START_KEY, false))
+      void Promise.resolve(this.globalState.update(SHARE_ON_START_KEY, undefined)).catch(() => undefined);
     this.agentAccess.revoke();
     this.notifications.send({ type: 'update' });
   }
@@ -978,10 +1074,15 @@ export class LogsController {
   metricList(): MetricSeriesView[] {
     return this.metrics.list(METRIC_TREND_POINTS);
   }
-  async toggleTerminalCapture(enabled: boolean): Promise<void> {
+  /** Turn terminal capture on or off for this workspace, or with `everywhere` for every one. */
+  async toggleTerminalCapture(enabled: boolean, everywhere = false): Promise<void> {
     await vscode.workspace
       .getConfiguration('logline')
-      .update('captureTerminals', enabled, vscode.ConfigurationTarget.Workspace);
+      .update(
+        'captureTerminals',
+        enabled,
+        everywhere ? vscode.ConfigurationTarget.Global : vscode.ConfigurationTarget.Workspace,
+      );
     this.terminalCapture.setEnabled(enabled);
     this.notifications.send({ type: 'update' });
   }

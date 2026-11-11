@@ -3,11 +3,17 @@ import type { LogsController } from './logs-controller';
 import { webviewHtml } from './webview-html';
 
 export class LogsProvider implements vscode.WebviewViewProvider {
+  private view?: vscode.WebviewView;
+  /** Whether the Logs panel is on screen. */
+  get visible(): boolean {
+    return this.view?.visible ?? false;
+  }
   constructor(
     private readonly context: Pick<vscode.ExtensionContext, 'extensionUri'>,
     private readonly controller: LogsController,
   ) {}
   resolveWebviewView(view: vscode.WebviewView): void {
+    this.view = view;
     const subscription = this.controller.notifications.subscribe((message) => {
       void view.webview.postMessage(message);
     });
@@ -34,6 +40,7 @@ export class LogsProvider implements vscode.WebviewViewProvider {
       if (view.visible) this.controller.usage?.panelOpened();
     });
     view.onDidDispose(() => {
+      if (this.view === view) this.view = undefined;
       subscription.dispose();
       messages.dispose();
       visibility.dispose();
