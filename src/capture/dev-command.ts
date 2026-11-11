@@ -30,10 +30,30 @@ const PATTERNS: RegExp[] = [
   /^(?:make|just|task)\s+(?:dev|serve|start|run|up)(?:\s|$)/,
 ];
 
+/** Longer than any command someone types to start a server; nothing longer is examined. */
+const MAX_COMMAND = 2000;
+const ASSIGNMENT = /^\w+=(?:"[^"]*"|'[^']*'|\S*)\s+/;
+
+/**
+ * The command without what only sets its environment: an `env` or `cross-env`
+ * wrapper, `dotenv … --`, and leading `VAR=value` assignments. Each step takes
+ * one piece off the front, so the time taken grows with the length only.
+ */
+function withoutEnvironment(commandLine: string): string {
+  let rest = commandLine.trim();
+  const wrapper = /^(?:env|cross-env)\s+/.exec(rest);
+  if (wrapper) rest = rest.slice(wrapper[0].length);
+  else if (/^dotenv\s/.test(rest)) {
+    const separator = rest.indexOf(' -- ');
+    if (separator !== -1) rest = rest.slice(separator + 4).trimStart();
+  }
+  for (let assignment = ASSIGNMENT.exec(rest); assignment; assignment = ASSIGNMENT.exec(rest))
+    rest = rest.slice(assignment[0].length);
+  return rest;
+}
+
 export function looksLikeDevServer(commandLine: string): boolean {
-  // Leading `VAR=value` assignments and `env`/`cross-env`/`dotenv --` wrappers are part of the same run.
-  const command = commandLine
-    .trim()
-    .replace(/^(?:(?:env|cross-env|dotenv(?:\s+-\S+(?:\s+\S+)?)*\s+--)\s+)?(?:\w+=(?:"[^"]*"|'[^']*'|\S*)\s+)*/, '');
+  if (commandLine.length > MAX_COMMAND) return false;
+  const command = withoutEnvironment(commandLine);
   return PATTERNS.some((pattern) => pattern.test(command));
 }

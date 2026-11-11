@@ -35,6 +35,9 @@ test('commands that start a dev server, an app, or containers are recognized', (
     'PORT=3000 npm run dev',
     'NODE_ENV="development" DEBUG=app:* node server.js',
     'cross-env NODE_ENV=development npm start',
+    'env PORT=3000 node server.js',
+    'dotenv -e .env.local -- npm run dev',
+    'dotenv -- next dev',
     '  npm run dev  ',
   ])
     assert.equal(looksLikeDevServer(command), true, command);
@@ -63,6 +66,24 @@ test('everyday commands are not mistaken for one', () => {
     'make build',
     'echo npm run dev',
     'cat server.js',
+    'dotenv -e .env.local npm test',
+    'FOO=bar',
   ])
     assert.equal(looksLikeDevServer(command), false, command);
+});
+
+test('a long or adversarial command line is answered at once', () => {
+  const started = performance.now();
+  // Shapes that make a backtracking pattern take exponential time.
+  for (const command of [
+    `dotenv${' -! -!'.repeat(300)}`,
+    `dotenv -!${' -! -!'.repeat(300)} x`,
+    `${'A=1 '.repeat(400)}x`,
+    `node ${'--a=b '.repeat(300)}x`,
+    `docker compose ${'-f x '.repeat(300)}down`,
+    'x'.repeat(100_000),
+  ])
+    assert.equal(looksLikeDevServer(command), false);
+  assert.equal(looksLikeDevServer(`${'A=1 '.repeat(400)}npm run dev`), true);
+  assert.ok(performance.now() - started < 500, 'each answer takes time in proportion to the length');
 });
