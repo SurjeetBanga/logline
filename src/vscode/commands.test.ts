@@ -356,6 +356,13 @@ test('Open in Logline follows the chosen files in full, and a terminal is captur
     { name: 'capture', value: true },
   ]);
   assert.deepEqual(recorded.at(-1), ['entry', { from: 'terminal_menu' }]);
+  // A terminal's menu passes the terminal it was opened on, which need not be the active one.
+  const other = { name: 'bash' };
+  window.terminals = [terminal, other];
+  calls.length = 0;
+  await handlers.get('logline.captureThisTerminal')!(other);
+  assert.deepEqual(calls[0], { name: 'unignore', value: other });
+  window.terminals = undefined;
   window.activeTerminal = undefined;
   calls.length = 0;
   await handlers.get('logline.captureThisTerminal')!();

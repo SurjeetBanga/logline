@@ -82,9 +82,11 @@ export function registerCommands(
       for (const uri of files) await controller.files.follow(uri.fsPath, { tailBytes: OPEN_FILE_BYTES });
       await vscode.commands.executeCommand('logline.logs.focus');
     }),
-    registerCommand('logline.captureThisTerminal', async () => {
+    registerCommand('logline.captureThisTerminal', async (clicked?: unknown) => {
       usage?.record('entry', { from: 'terminal_menu' });
-      const terminal = vscode.window.activeTerminal;
+      // A terminal's menu passes the terminal it was opened on, which need not be the active one.
+      const terminal =
+        (vscode.window.terminals ?? []).find((candidate) => candidate === clicked) ?? vscode.window.activeTerminal;
       if (terminal) controller.terminalCapture.resetTerminalIgnore(terminal);
       await controller.toggleTerminalCapture(true);
       void vscode.window.showInformationMessage(

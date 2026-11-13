@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { LogStore } from '../core/log-store';
+import { matchesQuery, parseQuery } from '../core/query';
 import { withVscode } from '../test/vscode-mock';
 
 const item = { text: '', tooltip: '', name: '', command: '', shown: false, disposed: false };
@@ -34,7 +35,7 @@ const mock = {
     },
   },
 };
-const { CaptureStatus, ERROR_NUDGE_GAP_MS, ERROR_NUDGE_OFF_KEY, isError, statusText } = withVscode(
+const { CaptureStatus, ERRORS_QUERY, ERROR_NUDGE_GAP_MS, ERROR_NUDGE_OFF_KEY, isError, statusText } = withVscode(
   mock,
   () => require('./capture-status') as typeof import('./capture-status'),
 );
@@ -97,7 +98,7 @@ test('the status bar item appears with the first log, counts errors, and opens t
   assert.equal(item.text, '$(pulse) 3 logs · 1 error');
   assert.match(item.tooltip, /errors/);
   await h.status.show();
-  assert.deepEqual(h.queries, ['level:error']);
+  assert.deepEqual(h.queries, ['level:error OR level:fatal']);
   assert.equal(h.entered(), 2);
   // Clearing the logs starts the counts again.
   h.store.clear();
@@ -125,7 +126,7 @@ test('errors caught while the panel is hidden are announced once per run, and no
   await h.settle();
   assert.deepEqual(ui.asked, ['Logline caught 2 errors from api.']);
   assert.deepEqual(h.steps, ['shown', 'accepted']);
-  assert.deepEqual(h.queries, ['level:error']);
+  assert.deepEqual(h.queries, ['level:error OR level:fatal']);
   // More errors from the same run say nothing more.
   h.log('error');
   h.status.refresh();
@@ -147,6 +148,68 @@ test('errors caught while the panel is hidden are announced once per run, and no
   await h.settle();
   assert.equal(ui.asked[1], 'Logline caught 2 errors.');
   assert.equal(h.steps.at(-1), 'dismissed');
+  h.status.dispose();
+});
+
+test('the error count follows retention, and the query it opens matches what it counts', async () => {
+  const h = setup({ visible: true });
+  for (const level of ['error', 'fatal'])
+    assert.equal(matchesQuery({ id: 1, level, message: '' }, parseQuery(ERRORS_QUERY)), true, level);
+  const small = new LogStore(3);
+  const status = new CaptureStatus({
+    store: small,
+    generation: () => 0,
+    panelVisible: () => true,
+    enabled: () => true,
+    showQuery: async () => undefined,
+    memento: { get: () => undefined, update: async () => undefined },
+  });
+  let id = 0;
+  const log = (level: string) => small.add({ id: ++id, level, serverId: 'api', sessionId: 'run', message: level });
+  log('error');
+  log('fatal');
+  log('info');
+  status.refresh();
+  assert.equal(item.text, '$(pulse) 3 logs · 2 errors');
+  // Later lines push the errors out of the store, and out of the count.
+  log('info');
+  status.refresh();
+  assert.equal(item.text, '$(pulse) 3 logs · 1 error');
+  log('info');
+  log('info');
+  status.refresh();
+  assert.equal(item.text, '$(pulse) 3 logs');
+  status.dispose();
+  h.status.dispose();
+});
+
+test('a run already announced is not announced again when part of the history is removed', async () => {
+  const h = setup();
+  h.log('error');
+  h.status.refresh();
+  await h.settle();
+  assert.equal(ui.asked.length, 1);
+  // Removing a source or a run recounts what is retained; the old run's errors are not news.
+  h.state.generation++;
+  h.state.now += ERROR_NUDGE_GAP_MS;
+  h.status.refresh();
+  await h.settle();
+  assert.equal(ui.asked.length, 1);
+  assert.equal(item.text, '$(pulse) 1 log · 1 error');
+  // A run that fails afterwards is.
+  h.log('error', 'run-2');
+  h.status.refresh();
+  await h.settle();
+  assert.equal(ui.asked.length, 2);
+  // After a clear, the same source failing again is news too.
+  h.store.clear();
+  h.state.generation++;
+  h.state.now += ERROR_NUDGE_GAP_MS;
+  h.status.refresh();
+  h.log('error', 'run-2');
+  h.status.refresh();
+  await h.settle();
+  assert.equal(ui.asked.length, 3);
   h.status.dispose();
 });
 

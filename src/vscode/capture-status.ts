@@ -11,6 +11,8 @@ export const STATUS_POLL_MS = 2000;
 export const ERROR_NUDGE_GAP_MS = 10 * 60 * 1000;
 
 const SHOW_COMMAND = 'logline.showCaptured';
+/** The query that shows what `isError` counts. */
+export const ERRORS_QUERY = 'level:error OR level:fatal';
 
 export interface CaptureStatusSources {
   store: Pick<LogStore, 'eventsAfter' | 'stats'>;
@@ -51,7 +53,8 @@ export class CaptureStatus implements vscode.Disposable {
   private readonly timer: ReturnType<typeof setInterval>;
   private generation?: number;
   private watermark = 0;
-  private errors = 0;
+  /** Ids of the retained errors, oldest first, so the count follows retention. */
+  private errorIds: number[] = [];
   /** Errors per run. A run is announced, or passed over, when its first errors arrive, and never later. */
   private readonly runs = new Map<string, { errors: number; label: string }>();
   private lastNudge?: number;
@@ -70,7 +73,7 @@ export class CaptureStatus implements vscode.Disposable {
   /** Open the Logs panel from the status bar, on the errors when there are some. */
   async show(): Promise<void> {
     this.sources.entered?.();
-    if (this.errors) await this.sources.showQuery('level:error');
+    if (this.errorIds.length) await this.sources.showQuery(ERRORS_QUERY);
     else await vscode.commands.executeCommand('logline.logs.focus');
   }
 
@@ -78,25 +81,38 @@ export class CaptureStatus implements vscode.Disposable {
   refresh(): void {
     const { store } = this.sources;
     const generation = this.sources.generation();
+    // Event ids only grow, so what was counted before a recount is told from what arrived since.
+    let seen = 0;
     if (generation !== this.generation) {
       this.generation = generation;
+      seen = this.watermark;
       this.watermark = 0;
-      this.errors = 0;
+      this.errorIds = [];
       this.runs.clear();
     }
     const fresh: string[] = [];
     for (const event of store.eventsAfter(this.watermark)) {
       this.watermark = event.id;
       if (!isError(event)) continue;
-      this.errors++;
+      this.errorIds.push(event.id);
       const id = event.sessionId ?? event.serverId;
       if (!id) continue;
       let run = this.runs.get(id);
       if (!run) {
         this.runs.set(id, (run = { errors: 0, label: event.server ?? '' }));
-        fresh.push(id);
+        // A run whose errors were counted before the recount was announced, or passed over, then.
+        if (event.id > seen) fresh.push(id);
       }
       run.errors++;
+    }
+    // A recount of an emptied store must not forget how far the ids went.
+    this.watermark = Math.max(this.watermark, seen);
+    // The oldest events leave first, and their errors with them.
+    const oldest = store.eventsAfter(0).next().value?.id ?? Infinity;
+    if (this.errorIds.length && this.errorIds[0] < oldest) {
+      let gone = 1;
+      while (gone < this.errorIds.length && this.errorIds[gone] < oldest) gone++;
+      this.errorIds = this.errorIds.slice(gone);
     }
     this.render(store.stats().retained);
     if (fresh.length) void this.nudge(fresh);
@@ -108,8 +124,9 @@ export class CaptureStatus implements vscode.Disposable {
       this.item.hide();
       return;
     }
-    this.item.text = statusText(retained, this.errors);
-    this.item.tooltip = this.errors
+    const errors = this.errorIds.length;
+    this.item.text = statusText(retained, errors);
+    this.item.tooltip = errors
       ? 'Logline captured errors. Click to see them in the Logs panel.'
       : 'Logline is capturing logs. Click to search them in the Logs panel.';
     this.item.show();
@@ -137,7 +154,7 @@ export class CaptureStatus implements vscode.Disposable {
     );
     if (answer === 'Show Errors') {
       nudged?.('accepted');
-      await this.sources.showQuery('level:error');
+      await this.sources.showQuery(ERRORS_QUERY);
     } else if (answer === "Don't Show Again") {
       nudged?.('never');
       await Promise.resolve(memento.update(ERROR_NUDGE_OFF_KEY, true)).catch(() => undefined);

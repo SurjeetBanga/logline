@@ -438,7 +438,7 @@ export class LogsController {
           this.shareWithAgent(sourceIds, anchor, sessionIds, chooseRuns),
         stopSharing: () => this.stopSharing(),
         askCopilot: (anchor) => this.askCopilot(anchor),
-        toggleTerminalCapture: (enabled) => this.toggleTerminalCapture(enabled),
+        toggleTerminalCapture: async (enabled) => void (await this.toggleTerminalCapture(enabled)),
         detailLinks: (event) => this.detailLinks(event),
         openLogSite: (id) => this.openLogSite(id),
         traceView: (traceId) => this.traceView(traceId),
@@ -698,7 +698,14 @@ export class LogsController {
   }
   /** Whether agents read this window's logs now, or every window shares from its start. */
   agentReady(): boolean {
-    return this.agentAccess.status().active || this.globalState.get<boolean>(SHARE_ON_START_KEY, false);
+    return this.agentAccess.status().active || this.sharesOnStart();
+  }
+  /** Whether this profile agreed to share every window's logs from its start. */
+  private sharesOnStart(): boolean {
+    return (
+      this.globalState.get<boolean>(SHARE_ON_START_KEY, false) &&
+      this.globalState.get<boolean>(SHARE_ALL_CONFIRMED_KEY, false)
+    );
   }
   /**
    * The one-step setup: capture terminals, share everything captured, in this
@@ -708,24 +715,24 @@ export class LogsController {
   async setUpForAgent(found: DetectedAgent | undefined = detectAgent()): Promise<void> {
     const record = (step: AgentOnboardingStep) =>
       found && this.usage?.record('agent_onboarding', { step, agent: found.kind });
-    try {
-      await this.toggleTerminalCapture(true);
-    } catch {
-      // No workspace to save the setting in: capture is on for this window all the same.
-      this.terminalCapture.setEnabled(true);
-    }
-    if (!this.agentAccess.status().active) {
-      if (!this.globalState.get<boolean>(SHARE_ALL_CONFIRMED_KEY, false)) {
-        if ((await this.confirmShareAll(false)) !== 'Share logs' || this.disposing) {
-          record('failed_share');
-          return;
-        }
-        await this.globalState.update(SHARE_ALL_CONFIRMED_KEY, true);
+    await this.toggleTerminalCapture(true);
+    const sharingAll = () => {
+      const status = this.agentAccess.status();
+      return status.active && status.scope === 'all';
+    };
+    // Sharing from the start of every window is more than sharing this one, or some runs: it is asked for itself.
+    if (!sharingAll() || !this.sharesOnStart()) {
+      if ((await this.confirmShareAll(false, true)) !== 'Share logs' || this.disposing) {
+        record('failed_share');
+        return;
       }
-      this.agentAccess.shareAll();
-      this.countShare('all');
+      await this.globalState.update(SHARE_ALL_CONFIRMED_KEY, true);
+      if (!sharingAll()) {
+        this.agentAccess.shareAll();
+        this.countShare('all');
+      }
+      await this.globalState.update(SHARE_ON_START_KEY, true);
     }
-    await this.globalState.update(SHARE_ON_START_KEY, true);
     this.notifications.send({ type: 'update' });
     const cmd = shellKind(vscode.env?.shell) === 'cmd';
     if (found?.kind === 'copilot') {
@@ -746,12 +753,7 @@ export class LogsController {
   }
   /** Share everything again in a window whose profile asked for that in the one-step setup. */
   restoreSharing(): void {
-    if (
-      this.agentAccess.status().active ||
-      !this.globalState.get<boolean>(SHARE_ON_START_KEY, false) ||
-      !this.globalState.get<boolean>(SHARE_ALL_CONFIRMED_KEY, false)
-    )
-      return;
+    if (this.agentAccess.status().active || !this.sharesOnStart()) return;
     const sources = this.agentAccess.shareAll().sources;
     this.usage?.autoShared(
       sources.length,
@@ -759,13 +761,16 @@ export class LogsController {
     );
     this.notifications.send({ type: 'update' });
   }
-  private confirmShareAll(chooseRuns: boolean): Thenable<string | undefined> {
+  /** Ask before sharing everything: in this window, or with `everyWindow` in this one and each later one. */
+  private confirmShareAll(chooseRuns: boolean, everyWindow = false): Thenable<string | undefined> {
+    const where = everyWindow
+      ? 'in this VS Code window and in every window you open later, from its start'
+      : 'in this VS Code window';
     return vscode.window.showWarningMessage(
       'Share logs with agent?',
       {
         modal: true,
-        detail:
-          'Agents can search captured logs in this VS Code window, including new command runs, until you stop sharing: Copilot, and Claude Code, Codex, or other MCP clients you connected to Logline. Common credentials are automatically redacted, but logs may still contain sensitive information.',
+        detail: `Agents can search captured logs ${where}, including new command runs, until you stop sharing: Copilot, and Claude Code, Codex, or other MCP clients you connected to Logline. Common credentials are automatically redacted, but logs may still contain sensitive information.`,
       },
       'Share logs',
       ...(chooseRuns ? ['Choose specific runs…'] : []),
@@ -795,10 +800,13 @@ export class LogsController {
     await this.breakpoints.breakOnMatchingLogs(query, levels);
   }
   clear(): void {
+    const status = this.agentAccess.status();
+    // Only a window that was sharing everything goes on sharing: a clear never widens what agents read.
+    const keepSharing = status.active && status.scope === 'all' && this.sharesOnStart();
     this.agentAccess.revoke();
-    // A profile that shares from the start keeps sharing what comes after a clear.
-    this.restoreSharing();
     this.store.clear();
+    // A profile that shares from the start keeps sharing what comes after a clear: the same share, not a new one.
+    if (keepSharing) this.agentAccess.shareAll();
     this.ingestion.crashes.clear();
     this.spans.clear();
     this.metrics.clear();
@@ -1074,17 +1082,28 @@ export class LogsController {
   metricList(): MetricSeriesView[] {
     return this.metrics.list(METRIC_TREND_POINTS);
   }
-  /** Turn terminal capture on or off for this workspace, or with `everywhere` for every one. */
-  async toggleTerminalCapture(enabled: boolean, everywhere = false): Promise<void> {
-    await vscode.workspace
-      .getConfiguration('logline')
-      .update(
-        'captureTerminals',
-        enabled,
-        everywhere ? vscode.ConfigurationTarget.Global : vscode.ConfigurationTarget.Workspace,
-      );
+  /**
+   * Turn terminal capture on or off for this workspace, or with `everywhere` for
+   * every one. A window with no folder open has no workspace to save the setting
+   * in: capture changes for that window alone, and the answer is false.
+   */
+  async toggleTerminalCapture(enabled: boolean, everywhere = false): Promise<boolean> {
+    let saved = true;
+    try {
+      await vscode.workspace
+        .getConfiguration('logline')
+        .update(
+          'captureTerminals',
+          enabled,
+          everywhere ? vscode.ConfigurationTarget.Global : vscode.ConfigurationTarget.Workspace,
+        );
+    } catch (error) {
+      if (everywhere || vscode.workspace.workspaceFolders?.length) throw error;
+      saved = false;
+    }
     this.terminalCapture.setEnabled(enabled);
     this.notifications.send({ type: 'update' });
+    return saved;
   }
   async askCopilot(anchor?: number): Promise<boolean> {
     const status = this.agentAccess.status();
