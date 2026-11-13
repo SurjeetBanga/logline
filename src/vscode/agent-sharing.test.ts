@@ -10,9 +10,10 @@ let confirm: () => string | undefined | Promise<string | undefined> = () => 'Sha
 const warnings: { message: string; options: { modal: boolean; detail: string }; actions: string[] }[] = [];
 const preferences = new Map<string, unknown>();
 const mock = {
+  ConfigurationTarget: { Global: 1, Workspace: 2 },
   workspace: {
     onDidChangeConfiguration: () => ({ dispose() {} }),
-    getConfiguration: () => ({ get: (_key: string, fallback: unknown) => fallback }),
+    getConfiguration: () => ({ get: (_key: string, fallback: unknown) => fallback, update: async () => undefined }),
   },
   window: {
     showWarningMessage: async (message: string, options: { modal: boolean; detail: string }, ...actions: string[]) => {

@@ -282,3 +282,38 @@ test('a run is not announced again after retention drops the errors it was annou
   assert.equal(ui.asked.length, 1, 'once per run');
   h.status.dispose();
 });
+
+test('a run that goes on logging after a clear is news again when it fails, and a run retention dropped is forgotten', async () => {
+  const h = setup();
+  h.log('error');
+  h.status.refresh();
+  await h.settle();
+  assert.equal(ui.asked.length, 1);
+  // The clear and the run's next line both come before the next look.
+  h.store.clear();
+  h.state.generation++;
+  h.log('info');
+  h.state.now += ERROR_NUDGE_GAP_MS;
+  h.status.refresh();
+  h.log('error');
+  h.status.refresh();
+  await h.settle();
+  assert.equal(ui.asked.length, 2);
+  h.status.dispose();
+
+  // Without a recount, a run none of whose logs are left is not kept track of.
+  const next = setup();
+  const small = new LogStore(2, 1024 * 1024);
+  const store = next.store as unknown as { eventsAfter: unknown; stats: unknown };
+  store.eventsAfter = small.eventsAfter.bind(small);
+  store.stats = small.stats.bind(small);
+  let id = 0;
+  const log = (level: string, run: string) =>
+    small.add({ id: ++id, level, serverId: 'api', sessionId: run, message: level });
+  log('error', 'run-1');
+  next.status.refresh();
+  for (let line = 0; line < 2; line++) log('info', 'run-2');
+  next.status.refresh();
+  assert.deepEqual([...(next.status as unknown as { announced: Map<string, number> }).announced.keys()], []);
+  next.status.dispose();
+});

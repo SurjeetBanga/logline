@@ -90,31 +90,47 @@ test('a second dev server starting while the question is open does not ask again
   assert.equal(ui.asked.length, 1);
 });
 
-test('a yes that fails is said and asked again, and one that is not saved does not use up the offer', async () => {
+test('a yes that fails is said and asked again in a later session, within the limit', async () => {
   Object.assign(ui, { asked: [], answer: 'Capture in This Workspace' });
   errors.length = 0;
   const global = memento();
   const workspace = memento();
+  const steps: string[] = [];
   let fail = true;
-  const offer = new CaptureOffer({
-    workspace,
-    global,
-    enable: async () => {
-      if (fail) throw new Error('settings.json has unsaved changes');
-      return true;
-    },
-  });
-  assert.equal(await offer.commandStarted('npm run dev'), true);
+  const session = () =>
+    new CaptureOffer({
+      workspace,
+      global,
+      record: (step) => steps.push(step),
+      enable: async () => {
+        if (fail) throw new Error('settings.json has unsaved changes');
+        return true;
+      },
+    });
+  const first = session();
+  assert.equal(await first.commandStarted('npm run dev'), true);
   assert.match(errors[0], /could not turn on terminal capture: settings\.json has unsaved changes/);
+  assert.deepEqual(steps, ['shown'], 'a yes that did nothing is not counted as accepted');
+  assert.equal(await first.commandStarted('npm run dev'), false, 'not again in the same session');
+  // Settings that never can be written stop the offer at its limit.
+  for (let later = 1; later < CAPTURE_OFFER_LIMIT; later++)
+    assert.equal(await session().commandStarted('npm run dev'), true, 'the same workspace is asked again');
+  assert.equal(await session().commandStarted('npm run dev'), false);
+  global.stored.clear();
   fail = false;
-  assert.equal(await offer.commandStarted('npm run dev'), true, 'the same workspace is asked again');
-  assert.equal(await offer.commandStarted('npm run dev'), false);
+  assert.equal(await session().commandStarted('npm run dev'), true);
+  assert.equal(await session().commandStarted('npm run dev'), false);
 
   // Windows with no folder open turn capture on for themselves, however many of them say yes.
   const folderless = memento();
   for (let window = 0; window <= CAPTURE_OFFER_LIMIT; window++) {
-    const next = new CaptureOffer({ workspace: memento(), global: folderless, enable: async () => false });
+    const state = memento();
+    const next = new CaptureOffer({ workspace: state, global: folderless, enable: async () => false });
     assert.equal(await next.commandStarted('npm run dev'), true);
+    assert.equal(await next.commandStarted('npm run dev'), false, 'once while its capture is on');
+    // Reloaded, the window has lost that capture and may be asked again.
+    const reloaded = new CaptureOffer({ workspace: state, global: folderless, enable: async () => false });
+    assert.equal(await reloaded.commandStarted('npm run dev'), true);
   }
 
   // An answer does not undo what another window saved while the question was open.

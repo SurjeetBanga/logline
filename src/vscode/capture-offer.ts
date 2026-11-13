@@ -32,20 +32,25 @@ const NOT_NOW = 'Not Now';
  */
 export class CaptureOffer {
   private asking = false;
+  /** A yes this window could not save: it is not asked again until its next session. */
+  private unsaved = false;
 
   constructor(private readonly options: CaptureOfferOptions) {}
 
   /** A command started in a terminal that is not captured; returns whether it asked. */
   async commandStarted(commandLine: string): Promise<boolean> {
     const { workspace, global, record } = this.options;
-    if (this.asking || !looksLikeDevServer(commandLine)) return false;
+    if (this.asking || this.unsaved || !looksLikeDevServer(commandLine)) return false;
     const state = global.get<OfferState>(CAPTURE_OFFER_KEY) ?? {};
     if (state.done || (state.asked ?? 0) >= CAPTURE_OFFER_LIMIT || workspace.get<boolean>(CAPTURE_OFFER_WORKSPACE_KEY))
       return false;
     this.asking = true;
     try {
-      const save = (next: OfferState) => Promise.resolve(global.update(CAPTURE_OFFER_KEY, next)).catch(() => undefined);
-      await Promise.resolve(workspace.update(CAPTURE_OFFER_WORKSPACE_KEY, true)).catch(() => undefined);
+      // What cannot be remembered is asked again; that is no reason to fail.
+      const put = (memento: CaptureOfferOptions['global'], key: string, value: unknown) =>
+        Promise.resolve(memento.update(key, value)).catch(() => undefined);
+      const save = (next: OfferState) => put(global, CAPTURE_OFFER_KEY, next);
+      await put(workspace, CAPTURE_OFFER_WORKSPACE_KEY, true);
       await save({ ...state, asked: (state.asked ?? 0) + 1 });
       record?.('shown');
       const answer = await vscode.window.showInformationMessage(
@@ -54,24 +59,34 @@ export class CaptureOffer {
         EVERYWHERE,
         NOT_NOW,
       );
-      if (answer === HERE || answer === EVERYWHERE) {
-        record?.('accepted');
-        let saved: boolean | void = false;
-        try {
-          saved = await this.options.enable(answer === EVERYWHERE);
-        } catch (error) {
-          // A yes that could not be turned on is said, and this workspace may be asked again.
-          await Promise.resolve(workspace.update(CAPTURE_OFFER_WORKSPACE_KEY, undefined)).catch(() => undefined);
-          void vscode.window.showErrorMessage(
-            `Logline could not turn on terminal capture: ${error instanceof Error ? error.message : String(error)}`,
-          );
-        }
-        // Other windows may have asked, or been answered, while this one waited.
-        const latest = global.get<OfferState>(CAPTURE_OFFER_KEY) ?? {};
-        if (saved !== false) await save({ ...latest, done: true });
-        // A yes that was not saved is not the last word, and does not count towards the limit: another workspace may ask.
-        else await save({ ...latest, asked: Math.max(0, (latest.asked ?? 1) - 1) });
-      } else record?.('dismissed');
+      if (answer !== HERE && answer !== EVERYWHERE) {
+        record?.('dismissed');
+        return true;
+      }
+      let saved: boolean | void;
+      try {
+        saved = await this.options.enable(answer === EVERYWHERE);
+      } catch (error) {
+        // A yes that could not be turned on is said, and asked again in a later session. It still counts
+        // towards the limit, so settings that never can be written do not make this ask for ever.
+        this.unsaved = true;
+        await put(workspace, CAPTURE_OFFER_WORKSPACE_KEY, undefined);
+        void vscode.window.showErrorMessage(
+          `Logline could not turn on terminal capture: ${error instanceof Error ? error.message : String(error)}`,
+        );
+        return true;
+      }
+      record?.('accepted');
+      // Other windows may have asked, or been answered, while this one waited.
+      const latest = global.get<OfferState>(CAPTURE_OFFER_KEY) ?? {};
+      if (saved !== false) await save({ ...latest, done: true });
+      else {
+        // A yes that lasts only as long as this window is not the last word, and does not count towards
+        // the limit: this window may ask again once that capture is gone, and so may another workspace.
+        this.unsaved = true;
+        await put(workspace, CAPTURE_OFFER_WORKSPACE_KEY, undefined);
+        await save({ ...latest, asked: Math.max(0, (latest.asked ?? 1) - 1) });
+      }
       return true;
     } finally {
       this.asking = false;

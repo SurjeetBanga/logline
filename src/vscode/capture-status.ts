@@ -57,8 +57,11 @@ export class CaptureStatus implements vscode.Disposable {
   private errorIds: number[] = [];
   /** Errors per run. A run is announced, or passed over, when its first errors arrive, and never later. */
   private readonly runs = new Map<string, { errors: number; label: string }>();
-  /** Runs whose errors were announced or passed over, for as long as any of their logs are retained. */
-  private readonly announced = new Set<string>();
+  /**
+   * Runs whose errors were announced or passed over, with the id of the newest log seen from each:
+   * a run stays here for as long as any of its logs are retained.
+   */
+  private readonly announced = new Map<string, number>();
   private lastNudge?: number;
 
   constructor(private readonly sources: CaptureStatusSources) {
@@ -92,13 +95,14 @@ export class CaptureStatus implements vscode.Disposable {
       this.watermark = 0;
       this.errorIds = [];
       this.runs.clear();
+      // A run with nothing left of what was seen, as after a clear, is news again if it fails again.
+      this.forget(store);
     }
     const fresh: string[] = [];
-    const retained = new Set<string>();
     for (const event of store.eventsAfter(this.watermark)) {
       this.watermark = event.id;
       const id = event.sessionId ?? event.serverId;
-      if (recount && id) retained.add(id);
+      if (id && this.announced.has(id)) this.announced.set(id, event.id);
       if (!isError(event)) continue;
       this.errorIds.push(event.id);
       if (!id) continue;
@@ -106,17 +110,15 @@ export class CaptureStatus implements vscode.Disposable {
       if (!run) this.runs.set(id, (run = { errors: 0, label: event.server ?? '' }));
       // A run is news once, even when retention has since dropped the errors it was announced for.
       if (!this.announced.has(id)) {
-        this.announced.add(id);
+        this.announced.set(id, event.id);
         fresh.push(id);
       }
       run.errors++;
     }
-    // A run with nothing left, as after a clear, is news again if it fails again.
-    if (recount) for (const id of [...this.announced]) if (!retained.has(id)) this.announced.delete(id);
     // A recount of an emptied store must not forget how far the ids went.
     this.watermark = Math.max(this.watermark, seen);
     // The oldest events leave first, and their errors with them.
-    const oldest = store.eventsAfter(0).next().value?.id ?? Infinity;
+    const oldest = this.forget(store);
     if (this.errorIds.length && this.errorIds[0] < oldest) {
       let gone = 1;
       while (gone < this.errorIds.length && this.errorIds[gone] < oldest) gone++;
@@ -124,6 +126,13 @@ export class CaptureStatus implements vscode.Disposable {
     }
     this.render(store.stats().retained);
     if (fresh.length) void this.nudge(fresh);
+  }
+
+  /** Drop the announced runs that retention, or a clear, left nothing of; returns the oldest retained id. */
+  private forget(store: CaptureStatusSources['store']): number {
+    const oldest = store.eventsAfter(0).next().value?.id ?? Infinity;
+    for (const [id, newest] of this.announced) if (newest < oldest) this.announced.delete(id);
+    return oldest;
   }
 
   private render(retained: number): void {
