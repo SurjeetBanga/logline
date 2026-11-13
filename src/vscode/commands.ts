@@ -175,17 +175,13 @@ export function registerCommands(
     registerCommand('logline.takeTour', () => controller.startTour()),
     registerCommand('logline.showLogs', () => vscode.commands.executeCommand('logline.logs.focus')),
     registerCommand('logline.enableTerminalCapture', async () => {
-      await vscode.workspace
-        .getConfiguration('logline')
-        .update('captureTerminals', true, vscode.ConfigurationTarget.Workspace);
+      await controller.toggleTerminalCapture(true);
       void vscode.window.showInformationMessage(
         'Logline will capture the next command in a supported terminal. Output from commands already in progress cannot be recovered.',
       );
     }),
     registerCommand('logline.disableTerminalCapture', async () => {
-      await vscode.workspace
-        .getConfiguration('logline')
-        .update('captureTerminals', false, vscode.ConfigurationTarget.Workspace);
+      await controller.toggleTerminalCapture(false);
       void vscode.window.showInformationMessage('Logline terminal capture is off. Running commands are not stopped.');
     }),
     registerCommand('logline.shareWithAgent', () => controller.shareWithAgent()),

@@ -57,6 +57,8 @@ export class CaptureStatus implements vscode.Disposable {
   private errorIds: number[] = [];
   /** Errors per run. A run is announced, or passed over, when its first errors arrive, and never later. */
   private readonly runs = new Map<string, { errors: number; label: string }>();
+  /** Runs whose errors were announced or passed over, for as long as any of their logs are retained. */
+  private readonly announced = new Set<string>();
   private lastNudge?: number;
 
   constructor(private readonly sources: CaptureStatusSources) {
@@ -83,7 +85,8 @@ export class CaptureStatus implements vscode.Disposable {
     const generation = this.sources.generation();
     // Event ids only grow, so what was counted before a recount is told from what arrived since.
     let seen = 0;
-    if (generation !== this.generation) {
+    const recount = generation !== this.generation;
+    if (recount) {
       this.generation = generation;
       seen = this.watermark;
       this.watermark = 0;
@@ -91,20 +94,25 @@ export class CaptureStatus implements vscode.Disposable {
       this.runs.clear();
     }
     const fresh: string[] = [];
+    const retained = new Set<string>();
     for (const event of store.eventsAfter(this.watermark)) {
       this.watermark = event.id;
+      const id = event.sessionId ?? event.serverId;
+      if (recount && id) retained.add(id);
       if (!isError(event)) continue;
       this.errorIds.push(event.id);
-      const id = event.sessionId ?? event.serverId;
       if (!id) continue;
       let run = this.runs.get(id);
-      if (!run) {
-        this.runs.set(id, (run = { errors: 0, label: event.server ?? '' }));
-        // A run whose errors were counted before the recount was announced, or passed over, then.
-        if (event.id > seen) fresh.push(id);
+      if (!run) this.runs.set(id, (run = { errors: 0, label: event.server ?? '' }));
+      // A run is news once, even when retention has since dropped the errors it was announced for.
+      if (!this.announced.has(id)) {
+        this.announced.add(id);
+        fresh.push(id);
       }
       run.errors++;
     }
+    // A run with nothing left, as after a clear, is news again if it fails again.
+    if (recount) for (const id of [...this.announced]) if (!retained.has(id)) this.announced.delete(id);
     // A recount of an emptied store must not forget how far the ids went.
     this.watermark = Math.max(this.watermark, seen);
     // The oldest events leave first, and their errors with them.

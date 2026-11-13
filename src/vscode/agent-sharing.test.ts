@@ -284,9 +284,21 @@ test('clearing the logs never widens or restarts a share', async (t) => {
     sharingStopped() {},
   } as unknown as typeof controller.usage;
   await controller.setUpForAgent({ kind: 'copilot', name: 'Copilot' });
+  const { shareId } = controller.agentAccess.status();
   controller.clear();
   assert.equal(controller.agentAccess.status().scope, 'all');
+  assert.equal(controller.agentAccess.status().shareId, shareId, 'an agent keeps the share id it has');
   assert.deepEqual(counted, [], 'the share that continues is not counted as a new one');
+  // Another window's Stop sharing ends sharing from the start, not what this window shares now.
+  preferences.delete('logline.shareOnStart.v1');
+  controller.clear();
+  assert.equal(controller.agentAccess.status().shareId, shareId);
+  // Share with agent on its own, sharing everything, is kept too.
+  controller.stopSharing();
+  await controller.shareWithAgent();
+  assert.equal(controller.agentAccess.status().scope, 'all');
+  controller.clear();
+  assert.equal(controller.agentAccess.status().active, true);
   // Narrowed to chosen runs, a clear ends the share instead of sharing everything again.
   controller.store.add({ level: 'info', id: 1, serverId: 'api', sessionId: 'a', message: 'first' });
   controller.agentAccess.share(['api'], undefined, ['a']);

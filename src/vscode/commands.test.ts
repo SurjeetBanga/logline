@@ -70,6 +70,7 @@ test('commands register the complete action surface and honor trust/focus/config
       return true;
     },
     terminalCapture: { availableTerminals: () => [], toggleSource: () => undefined },
+    toggleTerminalCapture: async (enabled: boolean) => calls.push({ name: 'capture', value: enabled }),
     connections: Object.fromEntries(
       ['add', 'edit', 'query', 'runSql', 'tail', 'test', 'remove', 'openLink', 'allowAgents', 'revokeAgents'].map(
         (name) => [name, async (...args: unknown[]) => calls.push({ name: `connections.${name}`, value: args })],
@@ -154,8 +155,9 @@ test('commands register the complete action surface and honor trust/focus/config
     ],
   );
   assert.ok(calls.some((call) => call.name === 'command' && call.value === 'logline.logs.focus'));
-  assert.ok(calls.some((call) => call.name === 'config:captureTerminals' && call.value === true));
-  assert.ok(calls.some((call) => call.name === 'config:captureTerminals' && call.value === false));
+  // The capture commands go through the controller, as the panel's toggle does.
+  assert.ok(calls.some((call) => call.name === 'capture' && call.value === true));
+  assert.ok(calls.some((call) => call.name === 'capture' && call.value === false));
   for (const registration of registrations) registration.dispose();
   trusted = false;
   input = 'blocked';

@@ -257,3 +257,28 @@ test('a host without status bar items still announces errors', async () => {
   assert.deepEqual(ui.asked, ['Logline caught 1 error.']);
   status.dispose();
 });
+
+test('a run is not announced again after retention drops the errors it was announced for', async () => {
+  const h = setup();
+  const small = new LogStore(3, 1024 * 1024);
+  const store = h.store as unknown as { eventsAfter: unknown; stats: unknown };
+  store.eventsAfter = small.eventsAfter.bind(small);
+  store.stats = small.stats.bind(small);
+  let id = 0;
+  const log = (level: string) => small.add({ id: ++id, level, serverId: 'api', sessionId: 'run-1', message: level });
+  log('error');
+  h.status.refresh();
+  await h.settle();
+  assert.equal(ui.asked.length, 1);
+  // The error leaves the store, then something else is removed and the rest is recounted.
+  for (let line = 0; line < 3; line++) log('info');
+  h.status.refresh();
+  h.state.generation++;
+  h.state.now += ERROR_NUDGE_GAP_MS;
+  h.status.refresh();
+  log('error');
+  h.status.refresh();
+  await h.settle();
+  assert.equal(ui.asked.length, 1, 'once per run');
+  h.status.dispose();
+});
