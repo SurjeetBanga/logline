@@ -206,12 +206,15 @@ export class TerminalCapture {
 
   private onStart(event: { terminal: TerminalLike; execution: ExecutionLike; shellIntegration?: unknown }): void {
     if (this.disposed || !event?.terminal || !event.execution) return;
+    const terminal = event.terminal as object;
     if (!this.enabled) {
+      // Nothing to offer for a terminal someone excluded, or one an extension writes itself, as a Logline task does.
+      const known = this.terminalIds.get(terminal);
+      const excluded = this.ignored.has(terminal) || (known !== undefined && this.ignoredSourceIds.has(known));
       const commandLine = event.execution.commandLine?.value;
-      if (commandLine) this.uncaptured?.(commandLine);
+      if (commandLine && !excluded && !event.terminal.creationOptions?.pty) this.uncaptured?.(commandLine);
       return;
     }
-    const terminal = event.terminal as object;
     if (this.ignored.has(terminal)) return;
     const id = this.rememberTerminal(event.terminal);
     const command = event.execution.commandLine?.value ?? '';

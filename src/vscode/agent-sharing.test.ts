@@ -222,6 +222,7 @@ test('the one-step setup turns capture on, shares after the usual warning, and k
   assert.equal(controller.terminalCapture.isEnabled, true);
   assert.equal(warnings.length, 1);
   assert.deepEqual(warnings[0].actions, ['Share logs'], 'the setup shares everything or nothing');
+  assert.match(warnings[0].options.detail, /every window you open later/);
   assert.equal(controller.agentAccess.status().scope, 'all');
   assert.equal(preferences.get('logline.shareOnStart.v1'), true);
   assert.equal(controller.agentReady(), true);
@@ -248,6 +249,52 @@ test('the one-step setup turns capture on, shares after the usual warning, and k
   assert.equal(preferences.get('logline.shareOnStart.v1'), undefined);
   later.restoreSharing();
   assert.equal(later.agentAccess.status().active, false);
+});
+
+test('the setup asks for every window even after one window was shared, and widens a share of chosen runs', async (t) => {
+  const controller = setup(t);
+  // Sharing one window was agreed to before: that is not sharing every later one.
+  await controller.shareWithAgent();
+  assert.doesNotMatch(warnings[0].options.detail, /every window/);
+  controller.stopSharing();
+  controller.store.add({ level: 'info', id: 1, serverId: 'api', sessionId: 'a', message: 'first' });
+  controller.agentAccess.share(['api'], undefined, ['a']);
+  assert.equal(controller.agentAccess.status().scope, 'selected');
+  confirm = () => undefined;
+  await controller.setUpForAgent({ kind: 'copilot', name: 'Copilot' });
+  assert.equal(warnings.length, 2, 'asked again');
+  assert.equal(controller.agentAccess.status().scope, 'selected', 'a refusal leaves the share as it was');
+  assert.equal(preferences.has('logline.shareOnStart.v1'), false);
+  confirm = () => 'Share logs';
+  await controller.setUpForAgent({ kind: 'copilot', name: 'Copilot' });
+  assert.equal(controller.agentAccess.status().scope, 'all');
+  assert.equal(preferences.get('logline.shareOnStart.v1'), true);
+  // Set up already, it has nothing more to ask.
+  await controller.setUpForAgent({ kind: 'copilot', name: 'Copilot' });
+  assert.equal(warnings.length, 3);
+});
+
+test('clearing the logs never widens or restarts a share', async (t) => {
+  const controller = setup(t);
+  const counted: string[] = [];
+  controller.usage = {
+    record() {},
+    shared() {},
+    autoShared: () => counted.push('auto'),
+    sharingStopped() {},
+  } as unknown as typeof controller.usage;
+  await controller.setUpForAgent({ kind: 'copilot', name: 'Copilot' });
+  controller.clear();
+  assert.equal(controller.agentAccess.status().scope, 'all');
+  assert.deepEqual(counted, [], 'the share that continues is not counted as a new one');
+  // Narrowed to chosen runs, a clear ends the share instead of sharing everything again.
+  controller.store.add({ level: 'info', id: 1, serverId: 'api', sessionId: 'a', message: 'first' });
+  controller.agentAccess.share(['api'], undefined, ['a']);
+  controller.clear();
+  assert.equal(controller.agentAccess.status().active, false);
+  // So does one that was revoked, as a change of workspace folders does.
+  controller.clear();
+  assert.equal(controller.agentAccess.status().active, false);
 });
 
 test('a refused warning stops the setup, and an agent that cannot be connected is reported', async (t) => {

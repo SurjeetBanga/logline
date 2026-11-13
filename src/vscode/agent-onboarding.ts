@@ -68,7 +68,7 @@ export class AgentOnboarding implements vscode.Disposable {
     await Promise.resolve(memento.update(AGENT_OFFER_KEY, true)).catch(() => undefined);
     record?.('offered', agent.kind);
     const answer = await vscode.window.showInformationMessage(
-      `Let ${agent.name} read your app's logs while it debugs? Logline captures your terminals and shares their logs with it, redacted. They stay on this machine.`,
+      `Let ${agent.name} read your app's logs while it debugs? Logline captures your terminals and shares their logs with it, with common credentials redacted, in this window and later ones.`,
       'Set Up',
       'Not Now',
     );

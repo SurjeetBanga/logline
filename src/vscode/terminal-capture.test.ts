@@ -306,6 +306,11 @@ test('a command that starts while capture is off is reported, so capture can be 
   h.start({ terminal: { name: 'zsh' }, execution: execution('npm run dev') });
   h.start({ terminal: { name: 'zsh' }, execution: execution() });
   await new Promise((resolve) => setImmediate(resolve));
+  // A terminal someone excluded, or one an extension writes itself, has nothing to offer.
+  const excluded = { name: 'excluded' };
+  h.capture.ignoreTerminal(excluded);
+  h.start({ terminal: excluded, execution: execution('npm run dev') });
+  h.start({ terminal: { name: 'task', creationOptions: { pty: {} } }, execution: execution('npm run dev') });
   assert.deepEqual(seen, ['npm run dev']);
   assert.equal(h.store.all().length, 0);
   // Once capture is on, commands are captured and no longer reported.

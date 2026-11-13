@@ -54,6 +54,16 @@ test('a dev server starting with capture off is offered capture, once per worksp
   assert.deepEqual(everywhere.enabled, [true]);
 });
 
+test('a yes that could not be turned on, or saved, does not end the offer elsewhere', async () => {
+  Object.assign(ui, { asked: [], answer: 'Capture in This Workspace' });
+  for (const enable of [async () => false, async () => Promise.reject(new Error('no workspace'))]) {
+    const global = memento();
+    const offer = new CaptureOffer({ workspace: memento(), global, enable });
+    assert.equal(await offer.commandStarted('npm run dev'), true);
+    assert.equal(await setup(global).offer.commandStarted('npm run dev'), true, 'another workspace still asks');
+  }
+});
+
 test('Not Now is asked again in another workspace, and a few times at most', async () => {
   Object.assign(ui, { asked: [], answer: 'Not Now' });
   const global = memento();

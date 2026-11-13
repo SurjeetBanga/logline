@@ -17,8 +17,8 @@ interface OfferState {
 export interface CaptureOfferOptions {
   workspace: Pick<vscode.Memento, 'get' | 'update'>;
   global: Pick<vscode.Memento, 'get' | 'update'>;
-  /** Turn terminal capture on, for this workspace or for every one. */
-  enable: (everywhere: boolean) => Promise<void>;
+  /** Turn terminal capture on, for this workspace or for every one; false when the choice could not be saved. */
+  enable: (everywhere: boolean) => Promise<boolean | void>;
   record?: (step: NudgeStep) => void;
 }
 
@@ -56,8 +56,9 @@ export class CaptureOffer {
       );
       if (answer === HERE || answer === EVERYWHERE) {
         record?.('accepted');
-        await save({ ...state, done: true });
-        await this.options.enable(answer === EVERYWHERE);
+        // A yes that could not be turned on, or saved, is not the last word: another workspace may ask again.
+        const saved = await this.options.enable(answer === EVERYWHERE).catch(() => false);
+        if (saved !== false) await save({ ...state, asked: (state.asked ?? 0) + 1, done: true });
       } else record?.('dismissed');
       return true;
     } finally {
