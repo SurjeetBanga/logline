@@ -3,12 +3,14 @@ import { test } from 'node:test';
 import { withVscode } from '../test/vscode-mock';
 
 const ui = { asked: [] as string[], answer: undefined as string | undefined | Promise<string | undefined> };
+const errors: string[] = [];
 const mock = {
   window: {
     showInformationMessage: async (message: string) => {
       ui.asked.push(message);
       return ui.answer;
     },
+    showErrorMessage: async (message: string) => void errors.push(message),
   },
 };
 const { CaptureOffer, CAPTURE_OFFER_LIMIT } = withVscode(
@@ -86,4 +88,43 @@ test('a second dev server starting while the question is open does not ask again
   answer(undefined);
   assert.equal(await first, true);
   assert.equal(ui.asked.length, 1);
+});
+
+test('a yes that fails is said and asked again, and one that is not saved does not use up the offer', async () => {
+  Object.assign(ui, { asked: [], answer: 'Capture in This Workspace' });
+  errors.length = 0;
+  const global = memento();
+  const workspace = memento();
+  let fail = true;
+  const offer = new CaptureOffer({
+    workspace,
+    global,
+    enable: async () => {
+      if (fail) throw new Error('settings.json has unsaved changes');
+      return true;
+    },
+  });
+  assert.equal(await offer.commandStarted('npm run dev'), true);
+  assert.match(errors[0], /could not turn on terminal capture: settings\.json has unsaved changes/);
+  fail = false;
+  assert.equal(await offer.commandStarted('npm run dev'), true, 'the same workspace is asked again');
+  assert.equal(await offer.commandStarted('npm run dev'), false);
+
+  // Windows with no folder open turn capture on for themselves, however many of them say yes.
+  const folderless = memento();
+  for (let window = 0; window <= CAPTURE_OFFER_LIMIT; window++) {
+    const next = new CaptureOffer({ workspace: memento(), global: folderless, enable: async () => false });
+    assert.equal(await next.commandStarted('npm run dev'), true);
+  }
+
+  // An answer does not undo what another window saved while the question was open.
+  const shared = memento();
+  let answer!: (value: string) => void;
+  ui.answer = new Promise<string | undefined>((resolve) => (answer = resolve));
+  const waiting = setup(shared).offer.commandStarted('npm run dev');
+  await new Promise((resolve) => setImmediate(resolve));
+  shared.stored.set('logline.captureOffer', { asked: 2 });
+  answer('Capture Everywhere');
+  await waiting;
+  assert.deepEqual(shared.stored.get('logline.captureOffer'), { asked: 2, done: true });
 });

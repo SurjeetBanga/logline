@@ -56,9 +56,21 @@ export class CaptureOffer {
       );
       if (answer === HERE || answer === EVERYWHERE) {
         record?.('accepted');
-        // A yes that could not be turned on, or saved, is not the last word: another workspace may ask again.
-        const saved = await this.options.enable(answer === EVERYWHERE).catch(() => false);
-        if (saved !== false) await save({ ...state, asked: (state.asked ?? 0) + 1, done: true });
+        let saved: boolean | void = false;
+        try {
+          saved = await this.options.enable(answer === EVERYWHERE);
+        } catch (error) {
+          // A yes that could not be turned on is said, and this workspace may be asked again.
+          await Promise.resolve(workspace.update(CAPTURE_OFFER_WORKSPACE_KEY, undefined)).catch(() => undefined);
+          void vscode.window.showErrorMessage(
+            `Logline could not turn on terminal capture: ${error instanceof Error ? error.message : String(error)}`,
+          );
+        }
+        // Other windows may have asked, or been answered, while this one waited.
+        const latest = global.get<OfferState>(CAPTURE_OFFER_KEY) ?? {};
+        if (saved !== false) await save({ ...latest, done: true });
+        // A yes that was not saved is not the last word, and does not count towards the limit: another workspace may ask.
+        else await save({ ...latest, asked: Math.max(0, (latest.asked ?? 1) - 1) });
       } else record?.('dismissed');
       return true;
     } finally {

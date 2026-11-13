@@ -46,6 +46,8 @@ export interface SnapshotSources {
   guideStatus: GuideStatus;
   agentAccess: AgentLogAccess;
   terminalCapture?: {
+    /** Whether this window captures, which a window with no folder open can set apart from the setting. */
+    isEnabled?: boolean;
     status(): { state: 'off' | 'waiting' | 'capturing' | 'attention'; detail: string; active: number; failed: number };
   };
   otlp?: { status(): ReceiverStatus };
@@ -203,7 +205,7 @@ export function buildSnapshot(
     newestFirst: config.get('newestFirst', true),
     guideStatus,
     agentSharing: agentAccess.status(),
-    captureTerminals: config.get('captureTerminals', false),
+    captureTerminals: terminalCapture?.isEnabled ?? config.get('captureTerminals', false),
     captureStatus: terminalCapture?.status(),
     otlp: otlp?.status(),
     traceCount: spans?.traceCount ?? 0,

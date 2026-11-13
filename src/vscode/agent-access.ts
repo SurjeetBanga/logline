@@ -323,6 +323,13 @@ export class AgentLogAccess {
     else this.revision++;
   }
 
+  /** The logs were cleared: a share of everything goes on as the same share, and one of chosen runs ends. */
+  cleared(): void {
+    if (!this.shareAllRuns || !this.shareId) return this.revoke();
+    this.shared.clear();
+    this.revision++;
+  }
+
   revoke(): void {
     this.shareAllRuns = false;
     this.shared.clear();

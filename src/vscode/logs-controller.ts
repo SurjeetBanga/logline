@@ -295,7 +295,8 @@ export class LogsController {
           fields: this.config.get<string[]>('redactionFields', []),
           replacement: this.config.get('redactionReplacement', '[REDACTED]'),
         });
-      if (event.affectsConfiguration('logline.captureTerminals'))
+      // A window whose capture was set for itself alone keeps that through a change of the setting.
+      if (event.affectsConfiguration('logline.captureTerminals') && this.windowCapture === undefined)
         this.terminalCapture.setEnabled(this.config.get('captureTerminals', false));
       if (event.affectsConfiguration('logline.servers')) this.notifications.send({ type: 'serversChanged' });
       if (event.affectsConfiguration('logline.connections')) {
@@ -700,6 +701,11 @@ export class LogsController {
   agentReady(): boolean {
     return this.agentAccess.status().active || this.sharesOnStart();
   }
+  /** Whether this window shares everything it captures. */
+  private sharingAll(): boolean {
+    const status = this.agentAccess.status();
+    return status.active && status.scope === 'all';
+  }
   /** Whether this profile agreed to share every window's logs from its start. */
   private sharesOnStart(): boolean {
     return (
@@ -715,19 +721,20 @@ export class LogsController {
   async setUpForAgent(found: DetectedAgent | undefined = detectAgent()): Promise<void> {
     const record = (step: AgentOnboardingStep) =>
       found && this.usage?.record('agent_onboarding', { step, agent: found.kind });
-    await this.toggleTerminalCapture(true);
-    const sharingAll = () => {
-      const status = this.agentAccess.status();
-      return status.active && status.scope === 'all';
-    };
+    try {
+      await this.toggleTerminalCapture(true);
+    } catch {
+      // Settings that cannot be written do not stop the setup: this window captures, and the rest goes on.
+      this.setCapture(true, true);
+    }
     // Sharing from the start of every window is more than sharing this one, or some runs: it is asked for itself.
-    if (!sharingAll() || !this.sharesOnStart()) {
+    if (!this.sharingAll() || !this.sharesOnStart()) {
       if ((await this.confirmShareAll(false, true)) !== 'Share logs' || this.disposing) {
         record('failed_share');
         return;
       }
       await this.globalState.update(SHARE_ALL_CONFIRMED_KEY, true);
-      if (!sharingAll()) {
+      if (!this.sharingAll()) {
         this.agentAccess.shareAll();
         this.countShare('all');
       }
@@ -800,13 +807,9 @@ export class LogsController {
     await this.breakpoints.breakOnMatchingLogs(query, levels);
   }
   clear(): void {
-    const status = this.agentAccess.status();
-    // Only a window that was sharing everything goes on sharing: a clear never widens what agents read.
-    const keepSharing = status.active && status.scope === 'all' && this.sharesOnStart();
-    this.agentAccess.revoke();
+    // A window sharing everything goes on with the same share; a share of chosen runs ends with its runs.
+    this.agentAccess.cleared();
     this.store.clear();
-    // A profile that shares from the start keeps sharing what comes after a clear: the same share, not a new one.
-    if (keepSharing) this.agentAccess.shareAll();
     this.ingestion.crashes.clear();
     this.spans.clear();
     this.metrics.clear();
@@ -1101,9 +1104,15 @@ export class LogsController {
       if (everywhere || vscode.workspace.workspaceFolders?.length) throw error;
       saved = false;
     }
+    this.setCapture(enabled, !saved);
+    return saved;
+  }
+  /** What this window's capture was set to when that could not be saved; it then outlasts changes of the setting. */
+  private windowCapture?: boolean;
+  private setCapture(enabled: boolean, windowOnly: boolean): void {
+    this.windowCapture = windowOnly ? enabled : undefined;
     this.terminalCapture.setEnabled(enabled);
     this.notifications.send({ type: 'update' });
-    return saved;
   }
   async askCopilot(anchor?: number): Promise<boolean> {
     const status = this.agentAccess.status();

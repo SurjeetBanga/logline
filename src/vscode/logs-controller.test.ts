@@ -12,10 +12,17 @@ const mock = {
   commands: { executeCommand: async (id: string) => void commands.push(id) },
   extensions: { getExtension: () => undefined },
   workspace: {
-    onDidChangeConfiguration: () => ({ dispose() {} }),
+    get workspaceFolders() {
+      return host.folders;
+    },
+    onDidChangeConfiguration: (listener: typeof host.configChanged) => {
+      host.configChanged = listener;
+      return { dispose() {} };
+    },
     getConfiguration: () => ({
       get: (_key: string, fallback: unknown) => fallback,
       update: async (key: string, value: unknown, target?: unknown) => {
+        if (host.readOnly) throw new Error('Unable to write to Workspace Settings');
         settings.push(target === 1 ? { key, value, target: 'global' } : { key, value });
       },
     }),
@@ -34,6 +41,11 @@ const mock = {
   },
 };
 let warningAnswer: string | undefined;
+const host = {
+  folders: undefined as unknown[] | undefined,
+  readOnly: false,
+  configChanged: undefined as ((event: { affectsConfiguration(key: string): boolean }) => void) | undefined,
+};
 const { LogsController } = withVscode(mock, () => require('./logs-controller') as typeof import('./logs-controller'));
 
 function setup(t: { after(fn: () => Promise<void>): void }) {
@@ -451,4 +463,33 @@ test('the empty panel’s buttons capture terminals, open a log file, and start 
   settings.length = 0;
   await controller.toggleTerminalCapture(true, true);
   assert.deepEqual(settings, [{ key: 'captureTerminals', value: true, target: 'global' }]);
+});
+
+test('a window with no folder open captures for itself, shows it, and keeps it through a settings change', async (t) => {
+  const controller = setup(t);
+  host.readOnly = true;
+  t.after(async () => void Object.assign(host, { readOnly: false, folders: undefined }));
+  const captureShown = () => controller.snapshot({ type: 'snapshot' } as never).captureTerminals;
+  assert.equal(await controller.toggleTerminalCapture(true), false, 'nothing was saved');
+  assert.equal(controller.terminalCapture.isEnabled, true);
+  assert.equal(captureShown(), true, 'the panel shows what the window does, not the setting');
+  // The setting changing elsewhere, still off for this window, does not switch its capture off.
+  host.configChanged!({ affectsConfiguration: () => true });
+  assert.equal(controller.terminalCapture.isEnabled, true);
+  assert.equal(await controller.toggleTerminalCapture(false), false);
+  assert.equal(captureShown(), false, 'and it can be turned off again');
+  // A choice that is saved follows the setting again.
+  host.readOnly = false;
+  await controller.toggleTerminalCapture(true);
+  host.configChanged!({ affectsConfiguration: () => true });
+  assert.equal(controller.terminalCapture.isEnabled, false, 'the mock setting reads as off');
+
+  // With a folder open, a failed write is an error for a toggle, but does not stop the agent setup.
+  host.readOnly = true;
+  host.folders = [{}];
+  await assert.rejects(controller.toggleTerminalCapture(true), /Unable to write/);
+  warningAnswer = undefined;
+  await controller.setUpForAgent(undefined);
+  assert.equal(controller.terminalCapture.isEnabled, true);
+  assert.match(notices.at(-1)!, /Share logs with agent\?/, 'the setup went on to ask about sharing');
 });
