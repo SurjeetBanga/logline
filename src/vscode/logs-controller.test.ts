@@ -20,9 +20,12 @@ const mock = {
       return { dispose() {} };
     },
     getConfiguration: () => ({
-      get: (_key: string, fallback: unknown) => fallback,
+      get: (key: string, fallback: unknown) => (host.values.has(key) ? host.values.get(key) : fallback),
       update: async (key: string, value: unknown, target?: unknown) => {
         if (host.readOnly) throw new Error('Unable to write to Workspace Settings');
+        // A workspace's own value outlasts what is saved for every workspace.
+        if (target !== 1 || !host.workspaceValues.has(key)) host.values.set(key, value);
+        if (target !== 1) host.workspaceValues.add(key);
         settings.push(target === 1 ? { key, value, target: 'global' } : { key, value });
       },
     }),
@@ -44,6 +47,8 @@ let warningAnswer: string | undefined;
 const host = {
   folders: undefined as unknown[] | undefined,
   readOnly: false,
+  values: new Map<string, unknown>(),
+  workspaceValues: new Set<string>(),
   configChanged: undefined as ((event: { affectsConfiguration(key: string): boolean }) => void) | undefined,
 };
 const { LogsController } = withVscode(mock, () => require('./logs-controller') as typeof import('./logs-controller'));
@@ -51,6 +56,8 @@ const { LogsController } = withVscode(mock, () => require('./logs-controller') a
 function setup(t: { after(fn: () => Promise<void>): void }) {
   notices.length = 0;
   settings.length = 0;
+  host.values.clear();
+  host.workspaceValues.clear();
   pick = () => undefined;
   const controller = new LogsController({
     globalState: { get: (_key: string, fallback: unknown) => fallback, update: async () => undefined },
@@ -465,31 +472,67 @@ test('the empty panel’s buttons capture terminals, open a log file, and start 
   assert.deepEqual(settings, [{ key: 'captureTerminals', value: true, target: 'global' }]);
 });
 
-test('a window with no folder open captures for itself, shows it, and keeps it through a settings change', async (t) => {
+test('a window with no folder open captures for itself, shows it, and keeps it until the setting agrees', async (t) => {
   const controller = setup(t);
   host.readOnly = true;
   t.after(async () => void Object.assign(host, { readOnly: false, folders: undefined }));
+  const changed = () => host.configChanged!({ affectsConfiguration: () => true });
   const captureShown = () => controller.snapshot({ type: 'snapshot' } as never).captureTerminals;
   assert.equal(await controller.toggleTerminalCapture(true), false, 'nothing was saved');
   assert.equal(controller.terminalCapture.isEnabled, true);
   assert.equal(captureShown(), true, 'the panel shows what the window does, not the setting');
-  // The setting changing elsewhere, still off for this window, does not switch its capture off.
-  host.configChanged!({ affectsConfiguration: () => true });
+  // Another setting changing, with this one still off, does not switch the window's capture off.
+  changed();
   assert.equal(controller.terminalCapture.isEnabled, true);
-  assert.equal(await controller.toggleTerminalCapture(false), false);
+  // Off is what the setting says, so there is nothing to save and the window follows the setting again.
+  assert.equal(await controller.toggleTerminalCapture(false), true);
   assert.equal(captureShown(), false, 'and it can be turned off again');
-  // A choice that is saved follows the setting again.
-  host.readOnly = false;
-  await controller.toggleTerminalCapture(true);
-  host.configChanged!({ affectsConfiguration: () => true });
-  assert.equal(controller.terminalCapture.isEnabled, false, 'the mock setting reads as off');
+  host.values.set('captureTerminals', true);
+  changed();
+  assert.equal(
+    controller.terminalCapture.isEnabled,
+    true,
+    'capture turned on everywhere, in another window, reaches it',
+  );
+  // Turned off against the setting, it stays off until the setting agrees, and follows it from then on.
+  assert.equal(await controller.toggleTerminalCapture(false), false);
+  changed();
+  assert.equal(controller.terminalCapture.isEnabled, false);
+  host.values.set('captureTerminals', false);
+  changed();
+  host.values.set('captureTerminals', true);
+  changed();
+  assert.equal(controller.terminalCapture.isEnabled, true);
+});
 
-  // With a folder open, a failed write is an error for a toggle, but does not stop the agent setup.
-  host.readOnly = true;
-  host.folders = [{}];
+test('settings that cannot be written fail a toggle, but not the agent setup, which says so', async (t) => {
+  const controller = setup(t);
+  Object.assign(host, { readOnly: true, folders: [{}] });
+  t.after(async () => void Object.assign(host, { readOnly: false, folders: undefined }));
   await assert.rejects(controller.toggleTerminalCapture(true), /Unable to write/);
+  assert.equal(controller.terminalCapture.isEnabled, false);
   warningAnswer = undefined;
   await controller.setUpForAgent(undefined);
   assert.equal(controller.terminalCapture.isEnabled, true);
+  assert.ok(
+    notices.some((notice) => /on for this window only: the setting could not be saved \(Unable to write/.test(notice)),
+    'the window-only capture is said',
+  );
   assert.match(notices.at(-1)!, /Share logs with agent\?/, 'the setup went on to ask about sharing');
+  // The setting already says off, so the toggle turns this window's capture off without a write.
+  assert.equal(await controller.toggleTerminalCapture(false), true);
+  assert.equal(controller.terminalCapture.isEnabled, false);
+});
+
+test('capture chosen for every workspace holds in a workspace whose own setting says off', async (t) => {
+  const controller = setup(t);
+  host.folders = [{}];
+  t.after(async () => void Object.assign(host, { folders: undefined }));
+  await controller.toggleTerminalCapture(false);
+  host.values.set('captureTerminals', false);
+  host.workspaceValues.add('captureTerminals');
+  assert.equal(await controller.toggleTerminalCapture(true, true), true);
+  assert.equal(controller.terminalCapture.isEnabled, true);
+  host.configChanged!({ affectsConfiguration: () => true });
+  assert.equal(controller.terminalCapture.isEnabled, true, 'the window keeps the yes it was given');
 });

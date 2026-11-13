@@ -295,9 +295,8 @@ export class LogsController {
           fields: this.config.get<string[]>('redactionFields', []),
           replacement: this.config.get('redactionReplacement', '[REDACTED]'),
         });
-      // A window whose capture was set for itself alone keeps that through a change of the setting.
-      if (event.affectsConfiguration('logline.captureTerminals') && this.windowCapture === undefined)
-        this.terminalCapture.setEnabled(this.config.get('captureTerminals', false));
+      if (event.affectsConfiguration('logline.captureTerminals'))
+        this.terminalCapture.followSetting(this.config.get('captureTerminals', false));
       if (event.affectsConfiguration('logline.servers')) this.notifications.send({ type: 'serversChanged' });
       if (event.affectsConfiguration('logline.connections')) {
         this.connections.refresh();
@@ -721,12 +720,18 @@ export class LogsController {
   async setUpForAgent(found: DetectedAgent | undefined = detectAgent()): Promise<void> {
     const record = (step: AgentOnboardingStep) =>
       found && this.usage?.record('agent_onboarding', { step, agent: found.kind });
+    // Settings that cannot be written do not stop the setup: this window captures, and the rest goes on.
+    let unsaved: string | undefined;
     try {
-      await this.toggleTerminalCapture(true);
-    } catch {
-      // Settings that cannot be written do not stop the setup: this window captures, and the rest goes on.
-      this.setCapture(true, true);
+      if (!(await this.toggleTerminalCapture(true))) unsaved = 'no folder is open to save it in';
+    } catch (error) {
+      unsaved = `the setting could not be saved (${error instanceof Error ? error.message : String(error)})`;
+      this.setCapture(true);
     }
+    if (unsaved)
+      void vscode.window.showWarningMessage(
+        `Logline turned terminal capture on for this window only: ${unsaved}. A new or reloaded window will not capture until it is turned on there.`,
+      );
     // Sharing from the start of every window is more than sharing this one, or some runs: it is asked for itself.
     if (!this.sharingAll() || !this.sharesOnStart()) {
       if ((await this.confirmShareAll(false, true)) !== 'Share logs' || this.disposing) {
@@ -1092,6 +1097,11 @@ export class LogsController {
    */
   async toggleTerminalCapture(enabled: boolean, everywhere = false): Promise<boolean> {
     let saved = true;
+    // A workspace whose setting already says so has nothing to save, which lets a window set apart be set back.
+    if (!everywhere && this.captureSetting() === enabled) {
+      this.setCapture(enabled);
+      return true;
+    }
     try {
       await vscode.workspace
         .getConfiguration('logline')
@@ -1104,14 +1114,20 @@ export class LogsController {
       if (everywhere || vscode.workspace.workspaceFolders?.length) throw error;
       saved = false;
     }
-    this.setCapture(enabled, !saved);
+    this.setCapture(enabled);
     return saved;
   }
-  /** What this window's capture was set to when that could not be saved; it then outlasts changes of the setting. */
-  private windowCapture?: boolean;
-  private setCapture(enabled: boolean, windowOnly: boolean): void {
-    this.windowCapture = windowOnly ? enabled : undefined;
-    this.terminalCapture.setEnabled(enabled);
+  /** What `logline.captureTerminals` says for this window now. */
+  private captureSetting(): boolean {
+    this.config.refresh();
+    return this.config.get('captureTerminals', false);
+  }
+  /**
+   * Set this window's capture. Where the setting says otherwise, because it could not be saved
+   * or the workspace overrides what was saved, the window keeps its choice apart from it.
+   */
+  private setCapture(enabled: boolean): void {
+    this.terminalCapture.setEnabled(enabled, this.captureSetting() !== enabled);
     this.notifications.send({ type: 'update' });
   }
   async askCopilot(anchor?: number): Promise<boolean> {

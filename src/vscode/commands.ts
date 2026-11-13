@@ -175,14 +175,16 @@ export function registerCommands(
     registerCommand('logline.takeTour', () => controller.startTour()),
     registerCommand('logline.showLogs', () => vscode.commands.executeCommand('logline.logs.focus')),
     registerCommand('logline.enableTerminalCapture', async () => {
-      await controller.toggleTerminalCapture(true);
+      const saved = await controller.toggleTerminalCapture(true);
       void vscode.window.showInformationMessage(
-        'Logline will capture the next command in a supported terminal. Output from commands already in progress cannot be recovered.',
+        `Logline will capture the next command in a supported terminal${saved ? '' : ', in this window only: no folder is open to save the setting in'}. Output from commands already in progress cannot be recovered.`,
       );
     }),
     registerCommand('logline.disableTerminalCapture', async () => {
-      await controller.toggleTerminalCapture(false);
-      void vscode.window.showInformationMessage('Logline terminal capture is off. Running commands are not stopped.');
+      const saved = await controller.toggleTerminalCapture(false);
+      void vscode.window.showInformationMessage(
+        `Logline terminal capture is off${saved ? '' : ' in this window only: no folder is open to save the setting in'}. Running commands are not stopped.`,
+      );
     }),
     registerCommand('logline.shareWithAgent', () => controller.shareWithAgent()),
     registerCommand('logline.shareSpecificRuns', () =>

@@ -38,6 +38,8 @@ export class TerminalCapture {
   private readonly judged = new WeakSet<object>();
   private readonly checks = new Set<ReturnType<typeof setTimeout>>();
   private enabled = false;
+  /** Whether this window's capture was set apart from the setting, which then reads the other way. */
+  private apart = false;
   private disposed = false;
   private readonly ignored = new Set<object>();
   private readonly terminalIds = new WeakMap<object, string>();
@@ -122,7 +124,14 @@ export class TerminalCapture {
       };
     return { state: 'waiting', detail: 'Ready for the next supported terminal command', active, failed };
   }
-  setEnabled(value: boolean): void {
+  /** The setting was read again. A window set apart from it keeps its choice until the setting comes to agree. */
+  followSetting(value: boolean): void {
+    if (this.apart && value !== this.enabled) return;
+    this.setEnabled(value);
+  }
+  /** Turn capture on or off; `apart` when the setting does not hold this choice, so that it outlasts a reading of it. */
+  setEnabled(value: boolean, apart = false): void {
+    this.apart = apart;
     // Lines already received belong to the capture; release any held trace first.
     if (!value) for (const context of this.active) context.joiner?.flush();
     this.enabled = value;
