@@ -4682,14 +4682,18 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
       if (!connections.length && !detached.length) {
         const empty = document.createElement("div");
         empty.className = "rail-empty";
-        const text2 = document.createElement("p");
-        text2.textContent = "Search Datadog, CloudWatch, Loki, Elasticsearch, Cloud Logging, or a database next to your local runs.";
+        const about = document.createElement("button");
+        about.type = "button";
+        about.className = "rail-info";
+        about.textContent = "i";
+        about.setAttribute("aria-label", "About connections");
+        about.title = "Search Datadog, CloudWatch, Loki, Elasticsearch, Cloud Logging, or a database next to your local runs.";
         const button = document.createElement("button");
         button.type = "button";
         button.className = "rail-empty-add";
         button.textContent = "Add connection";
         scope.listen(button, "click", () => api.postMessage({ type: "addConnection" }));
-        empty.append(text2, button);
+        empty.append(button, about);
         children.push(empty);
       }
       elements.railList.replaceChildren(...children);

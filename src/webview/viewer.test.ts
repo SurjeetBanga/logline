@@ -2162,6 +2162,16 @@ test('the rail lists connections with what they are doing, and offers to add one
   const { get, messages, receive } = viewer({ server: '' });
   const plain = (value: unknown) => JSON.parse(JSON.stringify(value));
   receive({ ...railSnapshot, connections: [] });
+  const about = get('railList').querySelectorAll('.rail-info')[0];
+  assert.equal(about.attributes['aria-label'], 'About connections');
+  assert.match(about.title, /^Search Datadog/, 'what a connection is shows on hover, not in the card');
+  assert.deepEqual(
+    get('railList')
+      .querySelectorAll('.rail-empty')[0]
+      .children.map((child) => child.className),
+    ['rail-empty-add', 'rail-info'],
+    'the card is its button and the i',
+  );
   const empty = get('railList').querySelectorAll('.rail-empty-add')[0];
   empty.listeners.get('click')!();
   assert.deepEqual(plain(messages.at(-1)), { type: 'addConnection' });

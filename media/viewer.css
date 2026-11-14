@@ -755,19 +755,34 @@ body > header {
 }
 .rail-empty {
   display: flex;
-  flex-direction: column;
-  align-items: flex-start;
+  align-items: center;
   gap: 8px;
-  /* As wide as the rows, its text in line with the group labels. */
+  /* Part of the Connections group: no frame, the button's edge in line with the group's label. */
   margin: 4px 0 0;
-  padding: 10px 10px 10px 7px;
-  border: 1px dashed var(--vscode-panel-border, #444);
-  border-radius: 6px;
+  padding: 2px 2px 2px 8px;
 }
-.rail-empty p {
-  margin: 0;
+.rail-info {
+  display: inline-grid;
+  flex: none;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  min-height: 0;
+  padding: 0;
+  border: 1px solid currentColor;
+  border-radius: 50%;
+  background: transparent;
   color: var(--vscode-descriptionForeground, #aaa);
-  font-size: 12px;
+  font-family: Georgia, 'Times New Roman', serif;
+  font-size: 11px;
+  font-style: italic;
+  line-height: 1;
+  cursor: help;
+}
+.rail-info:hover,
+.rail-info:focus {
+  background: transparent;
+  color: var(--vscode-foreground, #d4d4d4);
 }
 .rail-empty-add {
   border-color: transparent;
@@ -838,7 +853,7 @@ body > header {
 .source-rail.collapsed .rail-agents,
 .source-rail.collapsed .rail-actions,
 .source-rail.collapsed .rail-runs,
-.source-rail.collapsed .rail-empty p {
+.source-rail.collapsed .rail-info {
   display: none;
 }
 /* Outranks the rules that show a pointed-at or selected row's actions in place of its dot. */
