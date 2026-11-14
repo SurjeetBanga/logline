@@ -180,6 +180,16 @@ class Element {
   }
 }
 
+/** A click whose target answers only the one selector that `closest` is asked for. */
+const clickOn = (selector: string, target: Element | undefined) => ({
+  target: { closest: (wanted: string) => (wanted === selector ? target : undefined) },
+});
+const eventRow = (get: (id: string) => Element, id: number) =>
+  get('logs')
+    .querySelectorAll('.event-row')
+    .find((row) => String(row.dataset.id) === String(id))!;
+const rowButton = (get: (id: string) => Element, id: number) => eventRow(get, id).querySelector('.message-button')!;
+
 const disposables: { dispose(): void }[] = [];
 afterEach(() => {
   for (const item of disposables.splice(0)) item.dispose();
@@ -306,17 +316,16 @@ function viewer(
   return { get, messages, savedStates, timers, app, runtime, dom: document, renderDetails, receive, flushFrames };
 }
 
-test('context preserves search, levels, server, paging, pause state and scroll position', () => {
+test('context preserves search, levels, server, paging, selected event and scroll position', () => {
   const { get, app, receive, messages } = viewer();
   get('older').listeners.get('click')!();
-  app.table.toggleExpand(42);
+  app.table.select(42);
   get('viewport').scrollTop = 450;
   const state = () =>
     JSON.stringify({
       page: app.state.page,
       before: app.state.before,
       following: app.state.following,
-      paused: app.state.paused,
       selected: app.state.selected,
       selectedServer: app.state.selectedServer,
       levels: [...app.state.checkedLevels],
@@ -353,7 +362,7 @@ test('context preserves search, levels, server, paging, pause state and scroll p
 test('context handles evicted anchors and source links send only frame coordinates', () => {
   const { get, app, renderDetails, receive, messages } = viewer();
   (() => {
-    app.table.toggleExpand(42);
+    app.table.select(42);
     app.inspection.showContext(42);
   })();
   receive({ type: 'context', id: 42, missing: true, events: [] });
@@ -881,12 +890,12 @@ test('right-clicking a table value offers an additional field-value filter', () 
   assert.equal(messages.at(-1)?.query, 'timeout level:"error"');
 });
 
-test('Exclude saves the narrowed query and preserves scope while leaving inspection', () => {
+test('Exclude saves the narrowed query and preserves scope while the event stays selected', () => {
   const { get, app, messages, savedStates, timers, receive } = viewer();
   get('search').value = 'service:api OR service:worker';
   get('search').listeners.get('input')!();
   assert.equal(timers.size, 2);
-  app.table.toggleExpand(42);
+  app.table.select(42);
   app.state.page = 1;
   const row = get('logs').querySelectorAll('.event-row')[0];
   const cell = row.children.find((cell) => cell.dataset.column === 'base:level')!;
@@ -899,9 +908,7 @@ test('Exclude saves the narrowed query and preserves scope while leaving inspect
   assert.equal(messages.at(-1)?.serverId, 'api');
   assert.deepEqual([...messages.at(-1)?.levels], ['error']);
   assert.equal(app.state.page, 0);
-  assert.equal(app.state.following, false);
-  assert.equal(app.state.paused, false);
-  assert.equal(app.state.selected, undefined);
+  assert.equal(app.state.selected, 42, 'filtering does not close the event');
   assert.equal(get('cellFilterMenu').hidden, true);
   assert.equal(timers.size, 0);
   assert.equal(get('fieldSuggestions').children.length, 0);
@@ -1100,7 +1107,6 @@ test('in terminal order, Live settles at the new bottom after layout and resumes
   flushFrames();
   assert.equal(get('viewport').scrollTop, 32000);
   (() => {
-    app.state.paused = true;
     app.state.following = false;
     app.state.before = 50;
     app.state.page = 3;
@@ -1112,20 +1118,16 @@ test('in terminal order, Live settles at the new bottom after layout and resumes
   flushFrames();
   assert.equal(get('viewport').scrollTop, 32000);
   assert.equal(
-    app.state.following &&
-      !app.state.paused &&
-      app.state.page === 0 &&
-      app.state.before === undefined &&
-      app.state.selectedSort === '' &&
-      app.state.selected === undefined,
+    app.state.following && app.state.page === 0 && app.state.before === undefined && app.state.selectedSort === '',
     true,
   );
+  assert.equal(app.state.selected, 42, 'resuming Live leaves the open event alone');
   assert.equal(app.state.lastRows, undefined, 'the same result IDs must still be rendered after resuming');
 });
 
-test('opening a live row freezes its result set while a snapshot is in flight', () => {
-  const { app, receive } = viewer();
-  app.table.toggleExpand(42);
+test('live rows keep arriving and rendering while an event is selected', () => {
+  const { app, receive, get } = viewer();
+  app.table.select(42);
   receive({
     type: 'snapshot',
     generation: 1,
@@ -1136,17 +1138,25 @@ test('opening a live row freezes its result set while a snapshot is in flight', 
     bytes: 1000,
     maxBytes: 10000,
     columns: [],
-    events: [{ id: 101, level: 'info', message: 'new line' }],
+    events: [
+      { id: 101, level: 'info', message: 'new line' },
+      { id: 42, level: 'error', message: 'timeout' },
+    ],
     page: 0,
     pages: 1,
     matched: 101,
   });
   assert.equal(app.state.selected, 42);
-  assert.equal(app.table.events[0].id, 42, 'the selected row remains available until Live is resumed');
+  assert.equal(app.state.following, true, 'selecting does not stop Live');
+  assert.equal(app.table.events[0].id, 101, 'the new row is shown');
+  const rows = get('logs').querySelectorAll('.event-row');
+  assert.ok(rows.some((row) => String(row.dataset.id) === '101'));
+  const selected = rows.find((row) => String(row.dataset.id) === '42')!;
+  assert.equal(selected.classList.contains('selected'), true, 'the selection stays marked as rows change');
 });
 
-test('a history reset during inspection is applied once inspection ends', () => {
-  const { app, receive } = viewer();
+test('clearing the logs while an event is selected applies at once and closes the inspector', () => {
+  const { app, receive, get } = viewer();
   const snapshot = (generation: number, id: number) =>
     receive({
       type: 'snapshot',
@@ -1164,15 +1174,16 @@ test('a history reset during inspection is applied once inspection ends', () => 
       matched: 1,
     });
   snapshot(1, 42);
-  app.table.toggleExpand(42);
-  snapshot(2, 7);
-  assert.equal(app.state.selected, 42, 'inspection stays open across the reset');
-  assert.equal(app.state.generation, 1, 'the reset is deferred rather than forgotten');
-  app.state.resume();
+  get('logs').listeners.get('click')!(clickOn('.message-button', rowButton(get, 42)));
+  assert.equal(app.state.selected, 42);
+  assert.equal(get('inspector').hidden, false);
   app.state.page = 3;
   snapshot(2, 7);
-  assert.equal(app.state.generation, 2);
-  assert.equal(app.state.page, 0, 'the deferred reset clears paging once inspection ends');
+  assert.equal(app.state.generation, 2, 'the reset is applied immediately');
+  assert.equal(app.state.page, 0);
+  assert.equal(app.state.selected, undefined);
+  assert.equal(get('inspector').hidden, true);
+  assert.equal(app.table.events.length, 0, 'the old rows are dropped until the next snapshot');
 });
 
 test('snapshot errors release the bridge and keep the next refresh possible', () => {
@@ -1187,21 +1198,19 @@ test('snapshot errors release the bridge and keep the next refresh possible', ()
   assert.equal(messages.at(-1)?.type, 'snapshot');
 });
 
-test('explicit paging, filtering, sorting and column selection leave inspection in Browse', () => {
+test('explicit paging, filtering, sorting and column selection keep the selected event open', () => {
   for (const action of ['page', 'filter', 'sort', 'columns']) {
     const { app, get, receive, messages } = viewer();
-    app.table.toggleExpand(42);
+    app.table.select(42);
     if (action === 'page') get('older').listeners.get('click')!();
     if (action === 'filter') get('levelMenu').children[0].children[0].listeners.get('click')!({ stopPropagation() {} });
     if (action === 'sort') get('head-row').children[0].querySelector('.column-sort')!.listeners.get('click')!();
     if (action === 'columns') get('fieldsAll').listeners.get('click')!();
     const request = messages.at(-1)!;
     assert.equal(request.type, 'snapshot', action);
-    assert.equal(request.statsOnly, false, action);
-    assert.equal(request.before, 100, action);
-    assert.equal(app.state.paused, false, action);
-    assert.equal(app.state.following, false, action);
-    assert.equal(app.state.selected, undefined, action);
+    assert.equal('statsOnly' in request, false, action);
+    assert.equal(app.state.selected, 42, action);
+    if (action === 'page' || action === 'sort') assert.equal(app.state.following, false, action);
     receive({
       type: 'snapshot',
       generation: 1,
@@ -1221,6 +1230,7 @@ test('explicit paging, filtering, sorting and column selection leave inspection 
       matched: 1,
     });
     assert.equal(app.table.events[0].id, 43, action);
+    assert.equal(app.state.selected, 42, action);
   }
 });
 
@@ -1247,33 +1257,38 @@ test('autocomplete ignores changed input or server and inserts a complete query'
   assert.equal(get('fieldSuggestions').children.length, 0);
 });
 
-test('scrolling past expanded details keeps their DOM state and does not repeatedly replace rows', () => {
+test('scrolling past the selected row keeps rows in place and adds no detail row or spacer height', () => {
   const { get, app, flushFrames, receive } = viewer();
   app.state.newestFirst = false; // terminal order: these rows are laid out oldest first
   get('viewport').scrollTop = 0;
   (() => {
     app.state.following = false;
     app.table.renderRows(Array.from({ length: 100 }, (_, i) => ({ id: i + 1, level: 'info', message: 'line ' + i })));
-    app.table.toggleExpand(10);
+    app.table.select(10);
   })();
   receive({ type: 'details', id: 10, text: 'large payload', exceptions: [] });
-  const detail = get('logs').querySelector('.detail-row')!;
-  detail.height = 350;
-  detail.querySelector('.event-details')!.scrollTop = 200;
   flushFrames();
+  assert.equal(get('logs').querySelector('.detail-row'), undefined, 'nothing expands inside the table');
+  assert.equal(get('logs').querySelector('.detail-cell'), undefined);
+  const row = get('logs').querySelector('tr.event-row[data-id="10"] .message-button')!.closest('tr')!;
   const children = get('logs').children;
   get('viewport').scrollTop = 1;
   app.table.renderWindow();
   assert.equal(get('logs').children, children, 'a scroll within the same virtual window preserves the DOM');
-  assert.equal(detail.scrollIntoViewCalls.length, 0, 'detail responses must not yank the viewport');
+  assert.equal(row.scrollIntoViewCalls.length, 0, 'detail responses must not yank the viewport');
   get('viewport').scrollTop = 2300;
   app.table.renderWindow();
   assert.equal(get('viewport').scrollTop, 2300);
   get('viewport').scrollTop = 0;
   app.table.renderWindow();
-  assert.equal(get('logs').querySelector('.detail-row'), detail);
-  assert.equal(detail.querySelector('.event-details')!.scrollTop, 200);
-  assert.equal(app.table.expandedHeight, 350);
+  assert.equal(
+    get('logs')
+      .querySelector('tr.event-row[data-id="10"] .message-button')!
+      .closest('tr')!
+      .classList.contains('selected'),
+    true,
+    'the selected row is still marked after scrolling back',
+  );
 });
 
 test('restoring row focus during scrolling uses preventScroll', () => {
@@ -1731,6 +1746,276 @@ test('the rail is resized by dragging its edge or with the arrow keys, and the w
 
   const restored = viewer({ railWidth: 2000 });
   assert.equal(restored.dom.body.style['--rail-width'], '560px', 'a saved width is fitted to the panel');
+});
+
+test('the inspector width is set by dragging its left edge or with the arrow keys, and is kept', () => {
+  const { get, dom, savedStates } = viewer();
+  const handle = get('inspectorResizer');
+  assert.equal(handle.attributes['aria-valuenow'], '440');
+  assert.equal(handle.attributes['aria-valuemin'], '280');
+  assert.equal(handle.attributes['aria-valuemax'], '680', 'the list beside it keeps 320px of the 1000px panel');
+  handle.listeners.get('pointerdown')!({ clientX: 600, button: 0 });
+  dom.listeners.get('pointermove')!({ clientX: 500 });
+  assert.equal(dom.body.style['--inspector-width'], '540px', 'dragging left widens it');
+  dom.listeners.get('pointerup')!();
+  assert.equal(savedStates.at(-1)?.inspectorWidth, 540);
+  assert.equal(savedStates.at(-1)?.railWidth, undefined, 'the rails keep their own width');
+  // Never narrower than 280, nor wider than the panel less 320.
+  handle.listeners.get('pointerdown')!({ clientX: 500, button: 0 });
+  dom.listeners.get('pointermove')!({ clientX: 5000 });
+  dom.listeners.get('pointerup')!();
+  assert.equal(savedStates.at(-1)?.inspectorWidth, 280);
+  handle.listeners.get('pointerdown')!({ clientX: 500, button: 0 });
+  dom.listeners.get('pointermove')!({ clientX: -5000 });
+  dom.listeners.get('pointerup')!();
+  assert.equal(savedStates.at(-1)?.inspectorWidth, 680);
+  // ArrowLeft widens, ArrowRight narrows, and Shift takes bigger steps.
+  handle.listeners.get('keydown')!({ key: 'ArrowRight', preventDefault() {} });
+  assert.equal(savedStates.at(-1)?.inspectorWidth, 664);
+  handle.listeners.get('keydown')!({ key: 'ArrowLeft', preventDefault() {} });
+  assert.equal(savedStates.at(-1)?.inspectorWidth, 680);
+  handle.listeners.get('keydown')!({ key: 'ArrowRight', shiftKey: true, preventDefault() {} });
+  assert.equal(savedStates.at(-1)?.inspectorWidth, 632);
+  handle.listeners.get('dblclick')!();
+  assert.equal(savedStates.at(-1)?.inspectorWidth, undefined);
+  assert.equal(dom.body.style['--inspector-width'], undefined);
+
+  const restored = viewer({ inspectorWidth: 2000 });
+  assert.equal(restored.dom.body.style['--inspector-width'], '680px', 'a saved width is fitted to the panel');
+  assert.equal(viewer({ inspectorWidth: 500 }).dom.body.style['--inspector-width'], '500px');
+});
+
+test('clicking a row opens the event in the inspector with its message, meta, details, and the one-time tip', () => {
+  const { get, app, dom, messages, savedStates } = viewer();
+  assert.equal(get('inspector').hidden, false, 'the fake page starts with it visible; opening keeps it shown');
+  get('inspector').hidden = true;
+  get('logs').listeners.get('click')!(clickOn('.message-button', rowButton(get, 42)));
+  assert.equal(app.state.selected, 42);
+  assert.deepEqual(JSON.parse(JSON.stringify(messages.at(-1))), { type: 'details', id: 42 });
+  assert.equal(get('inspector').hidden, false);
+  assert.equal(dom.body.dataset.inspector, 'event');
+  assert.equal(get('inspectorTitle').textContent, 'timeout');
+  assert.match(get('inspectorMeta').textContent, /^ERROR · .+ · stderr$/);
+  assert.equal(get('inspectorMeta').hidden, false);
+  const [details, hint] = get('inspectorBody').children;
+  assert.equal(details.classList.contains('event-details'), true);
+  assert.equal(details.querySelector('.context-button')?.dataset.id, '42', 'Surrounding logs leads the actions');
+  assert.equal(get('logs').querySelector('.detail-row'), undefined, 'nothing opens inside the table');
+  assert.equal(hint.classList.contains('detail-hint'), true);
+  assert.equal(hint.children.length, 2, 'the tip text and its Got it button');
+  const dismiss = hint.querySelector('.dismiss-hint')!;
+  assert.equal(dismiss.textContent, 'Got it');
+  get('inspectorBody').listeners.get('click')!(clickOn('.dismiss-hint', dismiss));
+  assert.equal(app.state.cellHintDismissed, true);
+  assert.equal(savedStates.at(-1)?.cellHintDismissed, true);
+  // Once dismissed the tip is not offered again.
+  get('inspectorClose').listeners.get('click')!();
+  get('logs').listeners.get('click')!(clickOn('.message-button', rowButton(get, 42)));
+  assert.equal(get('inspectorBody').querySelector('.detail-hint'), undefined);
+  assert.equal(viewer({ cellHintDismissed: true }).get('inspectorBody').querySelector('.detail-hint'), undefined);
+});
+
+test('the selected row is marked, and choosing it again clears the mark', () => {
+  const { get, app } = viewer();
+  app.table.renderRows([
+    { id: 1, level: 'info', message: 'one' },
+    { id: 2, level: 'info', message: 'two' },
+  ]);
+  get('logs').listeners.get('click')!(clickOn('.message-button', rowButton(get, 2)));
+  const marked = eventRow(get, 2);
+  assert.equal(marked.classList.contains('selected'), true);
+  assert.equal(marked.attributes['aria-selected'], 'true');
+  const button = rowButton(get, 2);
+  assert.equal(button.attributes['aria-expanded'], 'true');
+  assert.equal(button.attributes['aria-controls'], 'inspector');
+  assert.equal(eventRow(get, 1).classList.contains('selected'), false);
+  assert.equal(eventRow(get, 1).attributes['aria-selected'], undefined);
+  assert.equal(rowButton(get, 1).attributes['aria-expanded'], 'false');
+  // Another row takes the mark.
+  get('logs').listeners.get('click')!(clickOn('.message-button', rowButton(get, 1)));
+  assert.equal(eventRow(get, 1).classList.contains('selected'), true);
+  assert.equal(eventRow(get, 2).classList.contains('selected'), false);
+  assert.equal(get('inspectorTitle').textContent, 'one');
+  // The same row again closes it.
+  get('logs').listeners.get('click')!(clickOn('.message-button', rowButton(get, 1)));
+  assert.equal(eventRow(get, 1).classList.contains('selected'), false);
+  assert.equal(eventRow(get, 1).attributes['aria-selected'], undefined);
+  assert.equal(rowButton(get, 1).attributes['aria-expanded'], 'false');
+  assert.equal(app.state.selected, undefined);
+});
+
+test('the inspector closes by the same row, its close button, Escape, Clear logs, or another tab', () => {
+  const routes: [string, (t: ReturnType<typeof viewer>) => void][] = [
+    ['the same row', ({ get }) => get('logs').listeners.get('click')!(clickOn('.message-button', rowButton(get, 42)))],
+    ['the close button', ({ get }) => get('inspectorClose').listeners.get('click')!()],
+    [
+      'Escape in the inspector',
+      ({ get }) => get('inspector').listeners.get('keydown')!({ key: 'Escape', stopPropagation() {} }),
+    ],
+    [
+      'Escape on the row',
+      ({ get }) =>
+        get('logs').listeners.get('keydown')!({ key: 'Escape', target: rowButton(get, 42), preventDefault() {} }),
+    ],
+    ['Clear logs', ({ get }) => get('clear').listeners.get('click')!()],
+    ['another tab', ({ get }) => get('analyze').listeners.get('click')!()],
+  ];
+  for (const [name, close] of routes) {
+    const t = viewer();
+    const { get, app, dom } = t;
+    get('logs').listeners.get('click')!(clickOn('.message-button', rowButton(get, 42)));
+    assert.equal(get('inspector').hidden, false, name);
+    assert.equal(dom.body.dataset.inspector, 'event', name);
+    close(t);
+    assert.equal(get('inspector').hidden, true, name);
+    assert.equal(dom.body.dataset.inspector, undefined, name);
+    assert.equal(app.state.selected, undefined, name);
+    if (name !== 'Clear logs' && name !== 'another tab')
+      assert.equal(eventRow(get, 42).classList.contains('selected'), false, name);
+  }
+});
+
+test('Escape elsewhere in the table leaves the inspector open', () => {
+  const { get, app } = viewer();
+  get('logs').listeners.get('click')!(clickOn('.message-button', rowButton(get, 42)));
+  let prevented = false;
+  get('logs').listeners.get('keydown')!({
+    key: 'Escape',
+    target: { closest: () => undefined },
+    preventDefault() {
+      prevented = true;
+    },
+  });
+  assert.equal(prevented, false);
+  assert.equal(app.state.selected, 42);
+  assert.equal(get('inspector').hidden, false);
+});
+
+test('the details reply rebuilds the inspector body for the selected event and ignores other ids', () => {
+  const { get, receive } = viewer();
+  const raw = () => get('inspectorBody').children[0].children.at(-1)?.textContent;
+  get('logs').listeners.get('click')!(clickOn('.message-button', rowButton(get, 42)));
+  assert.equal(raw(), 'Loading…');
+  receive({ type: 'details', id: 7, text: 'someone else', exceptions: [] });
+  assert.equal(raw(), 'Loading…', 'another id is ignored');
+  receive({ type: 'details', id: 42, text: 'the full text', exceptions: [] });
+  assert.equal(raw(), 'the full text');
+  assert.equal(get('inspectorBody').querySelector('.detail-hint')?.classList.contains('detail-hint'), true);
+  get('inspectorClose').listeners.get('click')!();
+  receive({ type: 'details', id: 42, text: 'late', exceptions: [] });
+  assert.equal(get('inspectorBody').children.length, 0, 'a reply after closing does not reopen or fill it');
+  assert.equal(get('inspector').hidden, true);
+});
+
+test('a JSON event lists its fields, and each field adds or excludes its value in the search', () => {
+  const { get, receive, messages } = viewer();
+  get('logs').listeners.get('click')!(clickOn('.message-button', rowButton(get, 42)));
+  assert.equal(get('inspectorBody').querySelector('.event-fields'), undefined, 'no list while the text loads');
+  receive({
+    type: 'details',
+    id: 42,
+    text: JSON.stringify({ user: 'ana', count: 3, nested: { a: 1 }, empty: '' }),
+    exceptions: [],
+  });
+  const rows = get('inspectorBody').querySelectorAll('.event-field');
+  assert.deepEqual(
+    rows.map((row) => row.querySelector('.event-field-name')!.textContent),
+    ['user', 'count', 'nested', 'empty'],
+  );
+  const buttons = get('inspectorBody').querySelectorAll('.field-filter');
+  assert.equal(buttons.length, 4, 'a nested or empty value has no filter buttons');
+  const [include, exclude] = buttons;
+  const click = (button: Element) => get('inspectorBody').listeners.get('click')!(clickOn('.field-filter', button));
+  click(include);
+  assert.equal(get('search').value, 'timeout user:"ana"');
+  assert.equal(messages.at(-1)?.type, 'snapshot');
+  assert.equal(messages.at(-1)?.query, 'timeout user:"ana"');
+  click(exclude);
+  assert.equal(get('search').value, 'timeout user:"ana" -user:"ana"');
+  // A field name the search cannot express explains itself instead.
+  const odd = buttons[0].cloneNode();
+  odd.dataset.field = 'bad-key';
+  odd.dataset.value = 'x';
+  click(odd);
+  assert.equal(get('search').value, 'timeout user:"ana" -user:"ana"');
+  assert.match(odd.title, /cannot be used/);
+});
+
+test('with an event open, ArrowDown and ArrowUp on a row select the next and previous row in display order', () => {
+  const { get, app, dom } = viewer();
+  app.table.renderRows(Array.from({ length: 4 }, (_, i) => ({ id: i + 1, level: 'info', message: `line ${i + 1}` })));
+  const order = () =>
+    get('logs')
+      .querySelectorAll('.event-row')
+      .map((row) => Number(row.dataset.id));
+  const [first, second, third] = order();
+  const key = (name: string, id: number) => {
+    let prevented = false;
+    get('logs').listeners.get('keydown')!({
+      key: name,
+      target: rowButton(get, id),
+      preventDefault() {
+        prevented = true;
+      },
+    });
+    return prevented;
+  };
+  assert.equal(key('ArrowDown', first), false, 'nothing happens while no event is open');
+  assert.equal(app.state.selected, undefined);
+  get('logs').listeners.get('click')!(clickOn('.message-button', rowButton(get, second)));
+  assert.equal(key('ArrowDown', second), true);
+  assert.equal(app.state.selected, third);
+  assert.equal(get('inspectorTitle').textContent, `line ${third}`);
+  assert.equal(dom.activeElement, rowButton(get, third), 'focus follows the selection');
+  assert.equal(key('ArrowUp', third), true);
+  assert.equal(app.state.selected, second);
+  key('ArrowUp', second);
+  assert.equal(app.state.selected, first);
+  assert.equal(key('ArrowUp', first), false, 'the first row has no row above it');
+  assert.equal(app.state.selected, first);
+  const last = order().at(-1)!;
+  get('logs').listeners.get('click')!(clickOn('.message-button', rowButton(get, last)));
+  assert.equal(key('ArrowDown', last), false);
+  assert.equal(app.state.selected, last);
+});
+
+test('the Live button is only Live or Browse, and selecting an event never says paused', () => {
+  const { get, app } = viewer();
+  assert.equal(get('follow').dataset.mode, 'live');
+  get('logs').listeners.get('click')!(clickOn('.message-button', rowButton(get, 42)));
+  assert.equal(get('follow').dataset.mode, 'live', 'an open event does not stop Live');
+  assert.doesNotMatch(get('mode').textContent, /Paused/);
+  get('older').listeners.get('click')!();
+  assert.equal(get('follow').dataset.mode, 'browse');
+  assert.doesNotMatch(get('mode').textContent, /Paused/);
+  assert.equal(app.state.selected, 42);
+  get('follow').listeners.get('click')!();
+  assert.equal(get('follow').dataset.mode, 'live');
+  assert.equal(app.state.selected, 42, 'returning to Live keeps the open event');
+});
+
+test('the table controller selects an event, reports its details, and finds neighbours', () => {
+  const { app, messages } = viewer();
+  app.table.renderRows([
+    { id: 1, level: 'info', message: 'one' },
+    { id: 2, level: 'warn', message: 'two' },
+  ]);
+  assert.equal(app.table.selectedEvent(), undefined);
+  assert.equal(app.table.neighbor(1), undefined, 'no neighbour without a selection');
+  assert.equal(app.table.select(1), true);
+  assert.deepEqual(JSON.parse(JSON.stringify(messages.at(-1))), { type: 'details', id: 1 });
+  assert.equal(app.table.selectedEvent()?.message, 'one');
+  const sent = messages.length;
+  assert.equal(app.table.select(1), false, 'choosing it again clears it');
+  assert.equal(messages.length, sent, 'closing asks the host for nothing');
+  assert.equal(app.table.selectedEvent(), undefined);
+  app.table.select(2);
+  assert.equal(app.table.receiveDetails({ type: 'details', id: 2, text: 'x', exceptions: [] } as never), true);
+  assert.equal(app.table.receiveDetails({ type: 'details', id: 1, text: 'x', exceptions: [] } as never), false);
+  app.table.clearSelection();
+  assert.equal(app.state.selected, undefined);
+  assert.equal(app.table.selectedEvent(), undefined);
+  assert.equal(app.table.receiveDetails({ type: 'details', id: 2, text: 'x', exceptions: [] } as never), false);
 });
 
 test('a connection source without its settings stays under Connections, offering to remove it', () => {
@@ -2566,7 +2851,7 @@ test('rows show their code link and log doctor finding, with actions, and the Is
   assert.equal(slot.children.length, 2, 'hovering again does not add more');
   click(slot.children[1], '.row-icon, .row-action');
   assert.deepEqual(JSON.parse(JSON.stringify(messages.at(-1))), { type: 'breakOnEvent', id: 43 });
-  app.table.resetDetails();
+  app.table.invalidateRows();
   app.table.renderWindow();
   const rebuilt = get('logs')
     .querySelectorAll('.event-row')
@@ -2581,9 +2866,10 @@ test('rows show their code link and log doctor finding, with actions, and the Is
   assert.deepEqual(
     JSON.parse(JSON.stringify(messages.at(-1))),
     { type: 'details', id: 43 },
-    'the badge opens the event, where the finding is explained',
+    'the badge opens the event in the inspector, where the finding is explained',
   );
-  assert.equal(get('rowHint').hidden, true, 'expanding a row dismisses the tip');
+  assert.equal(get('rowHint').hidden, true, 'opening an event dismisses the tip');
+  assert.equal(get('inspector').hidden, false);
   receive({
     type: 'details',
     id: 43,
@@ -2594,9 +2880,9 @@ test('rows show their code link and log doctor finding, with actions, and the Is
     findings: [finding],
   });
   assert.match(
-    get('logs').querySelector('.event-finding')!.className,
+    get('inspectorBody').querySelector('.event-finding')!.className,
     /severity-warning/,
-    'the expanded event explains the finding',
+    'the open event explains the finding',
   );
 
   assert.equal(get('doctor').hidden, true, 'the Issues tab shows only while its view is open');
@@ -2908,7 +3194,7 @@ test('a pointer resting on the table stops holding live rows after two seconds',
   assert.deepEqual(ids(), [44, 43, 42], 'a resting pointer no longer holds new rows');
 });
 
-test('an expanded event explains log doctor findings on its statement', () => {
+test('an open event explains log doctor findings on its statement', () => {
   const { renderDetails } = viewer();
   const details = renderDetails(42, 'raw', [], {
     site: 'src/pay.ts:4',
@@ -2937,18 +3223,18 @@ test('an expanded event explains log doctor findings on its statement', () => {
   assert.equal(renderDetails(42, 'raw', []).querySelector('.event-finding'), undefined);
 });
 
-test('event details link to the log statement and the trace', () => {
-  const { get, renderDetails, messages } = viewer();
-  const details = renderDetails(42, 'raw', [], { site: 'src/auth.ts:18', traceId: 'abc123' });
+test('the inspector links the event to its log statement and the trace', () => {
+  const { get, renderDetails, messages, receive } = viewer();
+  get('logs').listeners.get('click')!(clickOn('.message-button', rowButton(get, 42)));
+  receive({ type: 'details', id: 42, text: 'raw', exceptions: [], site: 'src/auth.ts:18', traceId: 'abc123' });
+  const details = get('inspectorBody').querySelector('.event-details')!;
   const site = details.querySelector('.log-site-button')!;
   const trace = details.querySelector('.trace-button')!;
   assert.equal(site.querySelector('.event-action-label')!.textContent, 'Open code · auth.ts:18');
   assert.match(site.title, /src\/auth\.ts:18/);
   assert.equal(trace.dataset.traceId, 'abc123');
   const click = (target: Element, selector: string) =>
-    get('contextDetails').listeners.get('click')!({
-      target: { closest: (wanted: string) => (wanted === selector ? target : undefined) },
-    });
+    get('inspectorBody').listeners.get('click')!(clickOn(selector, target));
   click(site, '.log-site-button');
   assert.deepEqual(JSON.parse(JSON.stringify(messages.at(-1))), { type: 'openLogSite', id: 42 });
   click(trace, '.trace-button');
@@ -2961,11 +3247,7 @@ test('event details link to the log statement and the trace', () => {
   assert.equal(unavailable.attributes['aria-disabled'], 'true');
   assert.match(String(plain.querySelector('.log-site-button')!.dataset.unavailable), /No code location/);
   const sent = messages.length;
-  get('contextDetails').listeners.get('click')!({
-    target: {
-      closest: (wanted: string) => (wanted === '.event-action' ? plain.querySelector('.log-site-button') : undefined),
-    },
-  });
+  get('inspectorBody').listeners.get('click')!(clickOn('.event-action', plain.querySelector('.log-site-button')));
   assert.equal(messages.length, sent);
   assert.equal(get('traceView').hidden, false, 'unchanged');
   assert.match(
@@ -2999,7 +3281,7 @@ test('a JSON error shows the crash that followed it, and the crash links back', 
   assert.equal(back.querySelector('.context-button')!.dataset.id, '42');
 });
 
-test('an expanded JSON error in the table shows its crash, and the crash row links back', () => {
+test('an open JSON error shows its crash in the inspector, and the crash row links back', () => {
   const { get, receive, messages } = viewer();
   receive({
     type: 'snapshot',
@@ -3055,8 +3337,11 @@ test('an expanded JSON error in the table shows its crash, and the crash row lin
     exceptions: [],
     crash: { id: 2, message: 'TypeError: x', exceptions },
   });
-  assert.equal(get('logs').querySelector('.event-attachment')?.querySelector('.context-button')?.dataset.id, '2');
-  assert.equal(get('logs').querySelector('.source-link')?.dataset.id, '2');
+  assert.equal(
+    get('inspectorBody').querySelector('.event-attachment')?.querySelector('.context-button')?.dataset.id,
+    '2',
+  );
+  assert.equal(get('inspectorBody').querySelector('.source-link')?.dataset.id, '2');
 });
 
 test('the trace dialog renders a waterfall with logs and opens their context', () => {

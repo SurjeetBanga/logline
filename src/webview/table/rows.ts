@@ -38,8 +38,13 @@ export function createRows(
     const button = document.createElement('button');
     button.className = 'message-button';
     button.textContent = `${event.message}${event.truncated ? ' [truncated]' : ''}`;
-    // No tooltip: it would repeat a possibly long message. Clicking the row shows all of it.
+    // No tooltip: it would repeat a possibly long message. Clicking the row shows all of it in the inspector.
     button.setAttribute('aria-expanded', String(event.id === state.selected));
+    button.setAttribute('aria-controls', 'inspector');
+    if (event.id === state.selected) {
+      row.classList.add('selected');
+      row.setAttribute('aria-selected', 'true');
+    }
     messageContent.append(button);
     // Room for the quick actions a hovered row shows. The space is kept on
     // every row, so hovering neither covers other icons nor shifts where the
@@ -101,38 +106,6 @@ export function createRows(
     return row;
   }
 
-  function buildDetailRow(event: LogEvent) {
-    const details = document.createElement('tr');
-    details.className = 'detail-row';
-    const container = cell('', 'detail-cell');
-    container.colSpan = columns().length;
-    const context = eventAction(
-      'context-button',
-      'context',
-      'Surrounding logs',
-      'Show the logs just before and after this event from the same run',
-    );
-    context.dataset.id = String(event.id);
-    container.append(
-      buildEventDetails(event.id, state.selectedDetailText, state.selectedExceptions, state.selectedLinks, [context]),
-    );
-    if (!state.cellHintDismissed) {
-      const hint = document.createElement('p');
-      hint.className = 'detail-hint';
-      const dismiss = document.createElement('button');
-      dismiss.type = 'button';
-      dismiss.className = 'dismiss-hint';
-      dismiss.textContent = 'Got it';
-      hint.append(
-        document.createTextNode('Tip: right-click any cell in the table to include or exclude its value.'),
-        dismiss,
-      );
-      container.append(hint);
-    }
-    details.append(container);
-    return details;
-  }
-
   /** Build the hovered row's quick actions into its reserved space. */
   function fillQuickActions(row: HTMLElement) {
     const slot = row.querySelector<HTMLElement>('.row-quick');
@@ -159,5 +132,5 @@ export function createRows(
     slot.append(...quick);
   }
 
-  return { buildRow, buildDetailRow, fillQuickActions };
+  return { buildRow, fillQuickActions };
 }

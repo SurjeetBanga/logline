@@ -760,7 +760,6 @@
         type: "snapshot",
         requestId,
         ...params,
-        statsOnly: state.paused && !force,
         doctorRevision: this.doctorRevision(),
         ...this.pendingHave ? { have: this.pendingHave } : {}
       });
@@ -966,6 +965,13 @@
       statusIssuesText: element("statusIssuesText"),
       statusTroubleshoot: element("statusTroubleshoot"),
       issuesChip: element("issuesChip"),
+      inspector: element("inspector"),
+      inspectorTitle: element("inspectorTitle"),
+      inspectorMeta: element("inspectorMeta"),
+      inspectorNav: element("inspectorNav"),
+      inspectorBody: element("inspectorBody"),
+      inspectorClose: element("inspectorClose"),
+      inspectorResizer: element("inspectorResizer"),
       railAdd: element("railAdd"),
       railAddMenu: element("railAddMenu"),
       railAddRun: element("railAddRun"),
@@ -1516,7 +1522,7 @@
     section.append(title, stack);
     return section;
   }
-  function buildEventDetails(id, text2, exceptions, links = {}, leadingActions = []) {
+  function buildEventDetails(id, text2, exceptions, links = {}, leadingActions = [], beforeRaw) {
     const container = document.createElement("div");
     container.className = "event-details";
     const actions = document.createElement("div");
@@ -1609,6 +1615,7 @@
         (exception, blockIndex) => container.append(exceptionSection(links.crash.id, exception, blockIndex))
       );
     }
+    if (beforeRaw) container.append(beforeRaw);
     const pre2 = document.createElement("pre");
     pre2.textContent = text2 ?? "Loading\u2026";
     if (exceptions.length || links.crash) {
@@ -1619,6 +1626,56 @@
       container.append(raw);
     } else container.append(pre2);
     return container;
+  }
+  function buildEventFields(text2) {
+    if (!text2?.trimStart().startsWith("{")) return void 0;
+    let parsed;
+    try {
+      parsed = JSON.parse(text2);
+    } catch {
+      return void 0;
+    }
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return void 0;
+    const entries = Object.entries(parsed);
+    if (!entries.length) return void 0;
+    const list = document.createElement("div");
+    list.className = "event-fields";
+    list.setAttribute("role", "list");
+    list.setAttribute("aria-label", "Fields");
+    for (const [name, value] of entries) {
+      const row = document.createElement("div");
+      row.className = "event-field";
+      row.setAttribute("role", "listitem");
+      const key = document.createElement("span");
+      key.className = "event-field-name";
+      key.textContent = name;
+      const shown2 = document.createElement("span");
+      shown2.className = "event-field-value";
+      const scalar = value === null || typeof value !== "object";
+      shown2.textContent = scalar ? String(value) : JSON.stringify(value);
+      shown2.title = shown2.textContent;
+      row.append(key, shown2);
+      if (scalar && value !== null && value !== "") {
+        const filters = document.createElement("span");
+        filters.className = "event-field-filters";
+        for (const exclude of [false, true]) {
+          const button = document.createElement("button");
+          button.type = "button";
+          button.className = "field-filter";
+          button.textContent = exclude ? "\u2212" : "+";
+          const label = exclude ? `Exclude ${name}: ${String(value)}` : `Show only ${name}: ${String(value)}`;
+          button.title = label;
+          button.setAttribute("aria-label", label);
+          button.dataset.field = name;
+          button.dataset.value = String(value);
+          if (exclude) button.dataset.exclude = "true";
+          filters.append(button);
+        }
+        row.append(filters);
+      }
+      list.append(row);
+    }
+    return list;
   }
 
   // src/webview/inspection/context.ts
@@ -1743,6 +1800,52 @@
         elements.contextDetails.replaceChildren(buildEventDetails(data.id, data.text, data.exceptions, data));
     }
     return { showContext, selectContextEvent, handleDetailAction, receiveContext, receiveDetails };
+  }
+
+  // src/webview/inspector.ts
+  function createInspector(elements, scope, changed = () => void 0) {
+    let current;
+    function fill(content) {
+      elements.inspectorTitle.textContent = content.title;
+      elements.inspectorTitle.title = content.title;
+      elements.inspectorMeta.textContent = content.meta ?? "";
+      elements.inspectorMeta.hidden = !content.meta;
+      elements.inspectorNav.replaceChildren(...content.nav ?? []);
+      elements.inspectorBody.replaceChildren(...content.body);
+    }
+    function open(kind, content, closed = () => void 0) {
+      const previous = current;
+      current = { kind, closed };
+      if (previous && previous.kind !== kind) previous.closed();
+      fill(content);
+      elements.inspector.hidden = false;
+      if (document.body) document.body.dataset.inspector = kind;
+      changed(kind);
+    }
+    function update(kind, content) {
+      if (current?.kind !== kind) return;
+      const top = elements.inspectorBody.scrollTop;
+      fill(content);
+      elements.inspectorBody.scrollTop = top;
+    }
+    function close(kind) {
+      if (!current || kind && current.kind !== kind) return;
+      const { closed } = current;
+      current = void 0;
+      elements.inspector.hidden = true;
+      elements.inspectorNav.replaceChildren();
+      elements.inspectorBody.replaceChildren();
+      if (document.body) delete document.body.dataset.inspector;
+      closed();
+      changed(void 0);
+    }
+    scope.listen(elements.inspectorClose, "click", () => close());
+    scope.listen(elements.inspector, "keydown", (event) => {
+      if (event.key !== "Escape") return;
+      event.stopPropagation();
+      close();
+    });
+    return { open, update, close, kind: () => current?.kind };
   }
 
   // src/webview/inspection/trace.ts
@@ -3355,7 +3458,6 @@ Span ${call.spanId}`;
   // src/webview/state.ts
   var LEVELS = ["trace", "debug", "info", "warn", "error", "fatal", "unclassified"];
   var ViewerState = class {
-    paused = false;
     following;
     page = 0;
     pages = 1;
@@ -3395,10 +3497,14 @@ Span ${call.spanId}`;
     railCollapsed;
     /** The rails' width when resized by hand; undefined keeps the default. */
     railWidth;
+    /** The inspector's width when resized by hand; undefined keeps the default. */
+    inspectorWidth;
     constructor(saved = {}) {
       if (saved.rail === "collapsed" || saved.rail === "open") this.railCollapsed = saved.rail === "collapsed";
       if (typeof saved.railWidth === "number" && Number.isFinite(saved.railWidth) && saved.railWidth > 0)
         this.railWidth = saved.railWidth;
+      if (typeof saved.inspectorWidth === "number" && Number.isFinite(saved.inspectorWidth) && saved.inspectorWidth > 0)
+        this.inspectorWidth = saved.inspectorWidth;
       this.view = typeof saved.view === "string" ? saved.view : "logs";
       this.connectionRange = typeof saved.range === "string" && RANGE_CHOICES.includes(saved.range) ? saved.range : "1h";
       const native = {
@@ -3445,36 +3551,22 @@ Span ${call.spanId}`;
       this.selectedExceptions = [];
       this.selectedLinks = {};
     }
-    /** Explicit changes close inspection while keeping a fixed history boundary. */
-    browseFromInspection() {
-      if (!this.paused) return;
-      this.paused = false;
-      this.resetSelection();
-      this.following = false;
-      this.before ??= this.newest;
-      this.lastRows = void 0;
-    }
     resume() {
-      this.paused = false;
-      this.resetSelection();
       this.selectedSort = "";
       this.filterChanged();
       this.setFollowing(true);
     }
+    /** Selects an event for the inspector, or clears the selection when it is chosen again; true when it opened. */
     inspect(id) {
       const opening = this.selected !== id;
       this.resetSelection();
-      if (opening) {
-        this.selected = id;
-        this.paused = true;
-        this.before ??= this.newest;
-      }
+      if (opening) this.selected = id;
       return opening;
     }
     sort(field) {
       this.selectedSortDirection = this.selectedSort === field && this.selectedSortDirection === "desc" ? "asc" : "desc";
       this.selectedSort = field;
-      if (!this.paused) this.setFollowing(false);
+      this.setFollowing(false);
       this.filterChanged();
     }
     persist(query) {
@@ -3497,7 +3589,8 @@ Span ${call.spanId}`;
         ...this.connectionRange !== "1h" ? { range: this.connectionRange } : {},
         ...Object.keys(this.native).length ? { native: this.persistedNative() } : {},
         ...this.railCollapsed !== void 0 ? { rail: this.railCollapsed ? "collapsed" : "open" } : {},
-        ...this.railWidth !== void 0 ? { railWidth: this.railWidth } : {}
+        ...this.railWidth !== void 0 ? { railWidth: this.railWidth } : {},
+        ...this.inspectorWidth !== void 0 ? { inspectorWidth: this.inspectorWidth } : {}
       };
     }
     /** The query typed in a kind of connection's own syntax, and whether Run and Tail send it. */
@@ -6239,22 +6332,54 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
   function widest() {
     return Math.max(RAIL_WIDTH.min, Math.min(RAIL_WIDTH.max, (window.innerWidth || 0) - 240));
   }
-  function clampRailWidth(width) {
-    return Math.round(Math.max(RAIL_WIDTH.min, Math.min(widest(), width)));
-  }
+  var INSPECTOR_WIDTH = { min: 280, max: 900, default: 440 };
   function createRailResize(handles, state, scope, actions) {
+    return createEdgeResize(
+      {
+        handles,
+        variable: "--rail-width",
+        bounds: RAIL_WIDTH,
+        widest,
+        grows: 1,
+        get: () => state.railWidth,
+        set: (width) => state.railWidth = width,
+        saveState: actions.saveState
+      },
+      scope
+    );
+  }
+  function createInspectorResize(handle, state, scope, actions) {
+    return createEdgeResize(
+      {
+        handles: [handle],
+        variable: "--inspector-width",
+        bounds: INSPECTOR_WIDTH,
+        // The list beside it keeps at least 320px of the panel.
+        widest: () => Math.max(INSPECTOR_WIDTH.min, Math.min(INSPECTOR_WIDTH.max, (window.innerWidth || 0) - 320)),
+        grows: -1,
+        get: () => state.inspectorWidth,
+        set: (width) => state.inspectorWidth = width,
+        saveState: actions.saveState
+      },
+      scope
+    );
+  }
+  function createEdgeResize(edge, scope) {
+    const { handles, bounds } = edge;
+    const clamp = (width) => Math.round(Math.max(bounds.min, Math.min(edge.widest(), width)));
     function apply() {
-      const width = state.railWidth === void 0 ? RAIL_WIDTH.default : clampRailWidth(state.railWidth);
-      if (state.railWidth === void 0) document.body.style.removeProperty("--rail-width");
-      else document.body.style.setProperty("--rail-width", `${width}px`);
+      const chosen = edge.get();
+      const width = chosen === void 0 ? bounds.default : clamp(chosen);
+      if (chosen === void 0) document.body.style.removeProperty(edge.variable);
+      else document.body.style.setProperty(edge.variable, `${width}px`);
       for (const handle of handles) {
         handle.setAttribute("aria-valuenow", String(width));
-        handle.setAttribute("aria-valuemin", String(RAIL_WIDTH.min));
-        handle.setAttribute("aria-valuemax", String(widest()));
+        handle.setAttribute("aria-valuemin", String(bounds.min));
+        handle.setAttribute("aria-valuemax", String(edge.widest()));
       }
     }
     function set(width) {
-      state.railWidth = width === void 0 ? void 0 : clampRailWidth(width);
+      edge.set(width === void 0 ? void 0 : clamp(width));
       apply();
     }
     for (const handle of handles) {
@@ -6262,15 +6387,15 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
         if (event.button !== void 0 && event.button !== 0) return;
         handle.setPointerCapture?.(event.pointerId);
         const startX = event.clientX;
-        const startWidth = state.railWidth ?? RAIL_WIDTH.default;
+        const startWidth = edge.get() ?? bounds.default;
         handle.classList.add("dragging");
-        const move = (pointer) => set(startWidth + pointer.clientX - startX);
+        const move = (pointer) => set(startWidth + (pointer.clientX - startX) * edge.grows);
         const finish = () => {
           document.removeEventListener?.("pointermove", move);
           document.removeEventListener?.("pointerup", finish);
           document.removeEventListener?.("pointercancel", finish);
           handle.classList.remove("dragging");
-          actions.saveState();
+          edge.saveState();
         };
         scope.listen(document, "pointermove", move);
         scope.listen(document, "pointerup", finish, { once: true });
@@ -6279,14 +6404,14 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
       });
       scope.listen(handle, "dblclick", () => {
         set(void 0);
-        actions.saveState();
+        edge.saveState();
       });
       scope.listen(handle, "keydown", (event) => {
         if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
         event.preventDefault();
-        const step = event.shiftKey ? STEP * 3 : STEP;
-        set((state.railWidth ?? RAIL_WIDTH.default) + (event.key === "ArrowLeft" ? -step : step));
-        actions.saveState();
+        const step = (event.shiftKey ? STEP * 3 : STEP) * edge.grows;
+        set((edge.get() ?? bounds.default) + (event.key === "ArrowLeft" ? -step : step));
+        edge.saveState();
       });
     }
     scope.listen(window, "resize", apply);
@@ -7782,6 +7907,11 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
       button.className = "message-button";
       button.textContent = `${event.message}${event.truncated ? " [truncated]" : ""}`;
       button.setAttribute("aria-expanded", String(event.id === state.selected));
+      button.setAttribute("aria-controls", "inspector");
+      if (event.id === state.selected) {
+        row.classList.add("selected");
+        row.setAttribute("aria-selected", "true");
+      }
       messageContent.append(button);
       const quick = document.createElement("span");
       quick.className = event.site ? "row-quick has-site" : "row-quick";
@@ -7834,37 +7964,6 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
       }
       return row;
     }
-    function buildDetailRow(event) {
-      const details2 = document.createElement("tr");
-      details2.className = "detail-row";
-      const container = cell("", "detail-cell");
-      container.colSpan = columns().length;
-      const context = eventAction(
-        "context-button",
-        "context",
-        "Surrounding logs",
-        "Show the logs just before and after this event from the same run"
-      );
-      context.dataset.id = String(event.id);
-      container.append(
-        buildEventDetails(event.id, state.selectedDetailText, state.selectedExceptions, state.selectedLinks, [context])
-      );
-      if (!state.cellHintDismissed) {
-        const hint = document.createElement("p");
-        hint.className = "detail-hint";
-        const dismiss = document.createElement("button");
-        dismiss.type = "button";
-        dismiss.className = "dismiss-hint";
-        dismiss.textContent = "Got it";
-        hint.append(
-          document.createTextNode("Tip: right-click any cell in the table to include or exclude its value."),
-          dismiss
-        );
-        container.append(hint);
-      }
-      details2.append(container);
-      return details2;
-    }
     function fillQuickActions(row) {
       const slot = row.querySelector(".row-quick");
       if (!slot || slot.firstChild) return;
@@ -7889,7 +7988,7 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
       for (const item of quick) item.tabIndex = -1;
       slot.append(...quick);
     }
-    return { buildRow, buildDetailRow, fillQuickActions };
+    return { buildRow, fillQuickActions };
   }
 
   // src/webview/table/controller.ts
@@ -7899,7 +7998,7 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
     function totalColumnCount() {
       return displayedColumns.length;
     }
-    const { buildRow, buildDetailRow, fillQuickActions } = createRows(state, () => displayedColumns, formatTimestamp);
+    const { buildRow, fillQuickActions } = createRows(state, () => displayedColumns, formatTimestamp);
     let hoveredId;
     scope.listen(elements.logs, "pointerover", (event) => {
       const row = event.target.closest?.("tr.event-row");
@@ -7916,13 +8015,10 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
     let rowHeightMeasured = false;
     let topSpacer;
     let bottomSpacer;
-    let expandedHeight = 0;
-    let expandedRow;
     let renderRevision = 0;
     let renderedWindow;
     let rowCache = /* @__PURE__ */ new Map();
     let rowCacheRevision = -1;
-    const detailResizeObserver = scope.observer(() => scheduleRenderWindow());
     let measured;
     function viewportTop() {
       return measured?.top ?? scrollViewport.scrollTop;
@@ -7972,26 +8068,19 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
       ensureSpacers();
       ensureRowHeight();
       const total = virtualEvents.length;
-      const selectedIndex = virtualEvents.findIndex((event) => event.id === state.selected);
-      if (selectedIndex < 0) expandedHeight = 0;
-      else {
-        const detail = elements.logs.querySelector(".detail-row");
-        if (detail) expandedHeight = detail.getBoundingClientRect().height;
-      }
       const overscan = 8;
       const top = viewportTop();
       const height = viewportHeight();
       const visibleCount = Math.max(1, Math.ceil(height / rowHeight)) + overscan * 2;
-      const detailTop = (selectedIndex + 1) * rowHeight;
-      const offset = atTail ? Math.max(0, total * rowHeight - height) : selectedIndex >= 0 && top > detailTop ? top - Math.min(expandedHeight, top - detailTop) : top;
+      const offset = atTail ? Math.max(0, total * rowHeight - height) : top;
       let start = Math.floor(offset / rowHeight) - overscan;
       start = Math.max(0, Math.min(start, Math.max(0, total - visibleCount)));
       const end = Math.min(total, start + visibleCount);
       const totalCols = totalColumnCount();
       topSpacer.firstChild.colSpan = totalCols;
-      topSpacer.firstChild.style.height = `${start * rowHeight + (selectedIndex >= 0 && selectedIndex < start ? expandedHeight : 0)}px`;
+      topSpacer.firstChild.style.height = `${start * rowHeight}px`;
       bottomSpacer.firstChild.colSpan = totalCols;
-      bottomSpacer.firstChild.style.height = `${(total - end) * rowHeight + (selectedIndex >= end ? expandedHeight : 0)}px`;
+      bottomSpacer.firstChild.style.height = `${(total - end) * rowHeight}px`;
       const windowKey = `${start}:${end}:${renderRevision}:${rowsVersion}`;
       if (renderedWindow === windowKey) return;
       renderedWindow = windowKey;
@@ -7999,9 +8088,6 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
       const focusedRow = !!focused && elements.logs.contains(focused) ? focused.closest("tr") : void 0;
       const refocusId = focusedRow?.classList.contains("event-row") ? focusedRow.dataset.id : void 0;
       const refocusColumn = focused?.dataset.column;
-      const detailScrollers = [...expandedRow?.querySelectorAll(".event-details, pre") ?? []].map(
-        (element2) => ({ element: element2, top: element2.scrollTop, left: element2.scrollLeft })
-      );
       if (rowCacheRevision !== renderRevision) {
         rowCache = /* @__PURE__ */ new Map();
         rowCacheRevision = renderRevision;
@@ -8014,15 +8100,6 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
         const row = cached?.event === event ? cached.row : buildRow(event);
         builtRows.set(event.id, { event, row });
         wanted.push(row);
-        if (event.id === state.selected) {
-          if (!expandedRow) {
-            detailResizeObserver.disconnect();
-            expandedRow = buildDetailRow(event);
-            detailResizeObserver.observe(expandedRow);
-          }
-          expandedRow.firstChild.colSpan = totalCols;
-          wanted.push(expandedRow);
-        }
       }
       placeRows(wanted);
       rowCache = builtRows;
@@ -8033,10 +8110,6 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
         if (hovered) fillQuickActions(hovered);
       }
       onRowsChanged();
-      for (const { element: element2, top: top2, left } of detailScrollers) {
-        element2.scrollTop = top2;
-        element2.scrollLeft = left;
-      }
       if (focused && !!focused && elements.logs.contains(focused)) focused.focus({ preventScroll: true });
       else if (refocusId !== void 0) {
         const row = [...elements.logs.querySelectorAll(".event-row")].find(
@@ -8046,11 +8119,6 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
           (cell2) => cell2.dataset.column === refocusColumn
         ) : row?.querySelector(".message-button");
         target?.focus({ preventScroll: true });
-      }
-      const measured2 = elements.logs.querySelector(".detail-row")?.getBoundingClientRect().height;
-      if (measured2 !== void 0 && measured2 !== expandedHeight) {
-        expandedHeight = measured2;
-        scheduleRenderWindow();
       }
     }
     function placeRows(wanted) {
@@ -8078,7 +8146,7 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
         const followTail2 = followTailRequested;
         followTailRequested = false;
         renderWindow();
-        if (followTail2 && state.following && !state.paused && !state.selectedSort) {
+        if (followTail2 && state.following && !state.selectedSort) {
           const edge = liveAtTop() ? 0 : scrollViewport.scrollHeight;
           if (scrollViewport.scrollTop !== edge) {
             scrollViewport.scrollTop = edge;
@@ -8092,13 +8160,13 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
       rowHeightMeasured = false;
       renderRevision++;
       layoutColumns();
-      scheduleRenderWindow(state.following && !state.paused && !state.selectedSort);
+      scheduleRenderWindow(state.following && !state.selectedSort);
     }).observe(scrollViewport);
     function liveAtTop() {
       return state.newestFirst && !state.selectedSort;
     }
     function renderRows(events) {
-      const followTail = state.following && !state.paused && !state.selectedSort;
+      const followTail = state.following && !state.selectedSort;
       const anchorIndex = !followTail && liveAtTop() ? Math.floor(viewportTop() / rowHeight) : -1;
       const anchor = anchorIndex > 0 ? virtualEvents[anchorIndex] : void 0;
       sourceEvents = events;
@@ -8383,35 +8451,31 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
         })
       );
     }
-    function toggleExpand(id) {
-      const oldRow = elements.logs.querySelector(`tr.event-row[data-id="${id}"]`);
-      const viewportTop2 = scrollViewport.getBoundingClientRect().top;
-      const oldTop = oldRow?.getBoundingClientRect().top;
-      const rowOffset = oldTop === void 0 ? void 0 : oldTop - viewportTop2;
-      expandedHeight = 0;
-      expandedRow = void 0;
-      detailResizeObserver.disconnect();
+    let selectedEvent;
+    function select(id) {
+      const opening = state.inspect(id);
+      selectedEvent = opening ? sourceEvents.find((event) => event.id === id) : void 0;
       renderRevision++;
-      if (state.inspect(id)) api.postMessage({ type: "details", id });
-      updateFollowControl();
-      updateModeLabel();
+      if (opening) api.postMessage({ type: "details", id });
       renderWindow();
-      if (rowOffset !== void 0 && Number.isFinite(rowOffset)) {
-        const newTop = elements.logs.querySelector(`tr.event-row[data-id="${id}"]`)?.getBoundingClientRect().top;
-        if (newTop !== void 0 && Number.isFinite(newTop)) scrollViewport.scrollTop += newTop - viewportTop2 - rowOffset;
-      }
+      return opening;
+    }
+    function clearSelection() {
+      if (state.selected === void 0) return;
+      state.resetSelection();
+      selectedEvent = void 0;
+      renderRevision++;
+      renderWindow();
+    }
+    function neighbor(offset) {
+      const index = virtualEvents.findIndex((event) => event.id === state.selected);
+      return index < 0 ? void 0 : virtualEvents[index + offset];
     }
     function invalidateRows() {
       renderRevision++;
     }
-    function resetDetails() {
-      expandedHeight = 0;
-      expandedRow = void 0;
-      detailResizeObserver.disconnect();
-      renderRevision++;
-    }
     function receiveDetails(data) {
-      if (data.id !== state.selected) return;
+      if (data.id !== state.selected) return false;
       state.selectedDetailText = data.text;
       state.selectedExceptions = data.exceptions;
       state.selectedLinks = {
@@ -8421,8 +8485,7 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
         crash: data.crash,
         attachedTo: data.attachedTo
       };
-      resetDetails();
-      renderWindow();
+      return true;
     }
     return {
       updateColumns,
@@ -8433,8 +8496,10 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
       renderRows,
       renderWindow,
       scheduleRenderWindow,
-      toggleExpand,
-      resetDetails,
+      select,
+      clearSelection,
+      selectedEvent: () => selectedEvent,
+      neighbor,
       receiveDetails,
       invalidateRows,
       measureViewport,
@@ -8447,9 +8512,6 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
       },
       get events() {
         return sourceEvents;
-      },
-      get expandedHeight() {
-        return expandedHeight;
       }
     };
   }
@@ -8647,6 +8709,8 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
       collapsedChanged: () => rail.applyCollapsed()
     });
     createRailResize([elements.railResizer, elements.tabRailResizer], state, scope, { saveState: () => saveState() });
+    createInspectorResize(elements.inspectorResizer, state, scope, { saveState: () => saveState() });
+    const inspector = createInspector(elements, scope);
     createTooltips(scope);
     let restoreTab;
     const views = createViews(
@@ -8946,7 +9010,7 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
       }
       if (data.type === "details") {
         if (data.target === "context") inspection.receiveDetails(data);
-        else table.receiveDetails(data);
+        else if (table.receiveDetails(data)) inspector.update("event", eventContent());
         return;
       }
       if (data.type === "autocomplete") {
@@ -9020,20 +9084,17 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
       }
       minimumSnapshotGeneration = 0;
       const generationChanged = state.generation !== void 0 && state.generation !== data.generation;
-      if (generationChanged && !state.paused) {
+      if (generationChanged) {
         state.before = void 0;
         state.page = 0;
         state.lastRows = void 0;
-        state.selected = void 0;
-        state.selectedDetailText = void 0;
-        state.selectedExceptions = [];
-        table.resetDetails();
+        inspector.close("event");
         table.resetAutomaticColumns();
         bridge.forget();
         table.renderRows([]);
         bridge.refreshRequested = true;
       }
-      if (!generationChanged || !state.paused) state.generation = data.generation;
+      state.generation = data.generation;
       if (data.timezone && data.timezone !== state.displayTimezone) {
         state.displayTimezone = data.timezone;
         state.lastRows = void 0;
@@ -9117,10 +9178,10 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
       table.renderFieldList();
       if (Array.isArray(data.fields)) state.allFields = data.fields;
       if (data.searches) search.renderSearchState(data.searches);
-      if (rows && !bridge.refreshRequested && !state.paused && holdingLive()) {
+      if (rows && !bridge.refreshRequested && holdingLive()) {
         heldEvents = rows;
         updateModeLabel();
-      } else if (rows && !bridge.refreshRequested && !state.paused) {
+      } else if (rows && !bridge.refreshRequested) {
         heldEvents = void 0;
         state.page = data.page ?? 0;
         state.pages = data.pages ?? 1;
@@ -9144,7 +9205,7 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
         elements.empty.textContent = connectionEmpty ?? (data.total ? "No matching events in retained history." : data.captureTerminals ? "Capture is on. Run your app in a terminal, or press F5, and its logs appear here." : "Nothing captured yet. Run your app with F5 and its logs appear here, or start with one of these:");
         elements.emptyActions.hidden = rows.length > 0 || data.total > 0 || connectionEmpty !== void 0;
         elements.emptyCapture.hidden = data.captureTerminals;
-        if (state.following && !state.paused && !state.selectedSort) table.scheduleRenderWindow(true);
+        if (state.following && !state.selectedSort) table.scheduleRenderWindow(true);
       }
       bridge.flush();
     }
@@ -9174,7 +9235,7 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
     function releaseHeld() {
       const events = heldEvents;
       heldEvents = void 0;
-      if (events && state.following && !state.paused) {
+      if (events && state.following) {
         state.lastRows = events.map((event) => event.id).join(",");
         table.renderRows(events);
         elements.empty.hidden = events.length > 0;
@@ -9184,14 +9245,6 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
       updateModeLabel();
     }
     function updateFollowControl() {
-      if (state.paused) {
-        elements.follow.setAttribute("aria-pressed", "false");
-        elements.follow.setAttribute("aria-label", "Resume live updates");
-        elements.follow.title = "Paused while you inspect an event; capture continues. Click to resume live logs.";
-        elements.follow.dataset.mode = "resume";
-        setLabel(elements.follow, "Resume");
-        return;
-      }
       elements.follow.setAttribute("aria-pressed", String(state.following));
       elements.follow.setAttribute("aria-label", state.following ? "Live updates" : "Browse retained history");
       elements.follow.title = state.following ? "Live: new logs appear as they arrive. Click to stop following and browse history." : "Browsing history: the table stays where it is. Click to follow live logs.";
@@ -9205,9 +9258,9 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
       elements.older.title = older;
       elements.newer.setAttribute("aria-label", newer);
       elements.newer.title = newer;
-      elements.mode.textContent = state.paused ? "Paused \u2014 collection continues" : state.selectedSort ? `Sorted ${state.selectedSortDirection === "asc" ? "ascending" : "descending"}${state.following ? " \xB7 Live updates" : ""}` : state.following ? heldEvents ? "Live \xB7 new rows held while you point at the table" : "Live \xB7 newest 1,000" : state.newestFirst && state.page === 0 && state.before !== void 0 && state.newest > state.before ? "Browsing \xB7 newer logs arrived \u2014 scroll to the top for Live" : "Browsing retained history";
-      elements.mode.className = state.following && !state.paused ? "live-mode" : "";
-      elements.mode.hidden = state.following && !state.paused && !heldEvents && !state.selectedSort;
+      elements.mode.textContent = state.selectedSort ? `Sorted ${state.selectedSortDirection === "asc" ? "ascending" : "descending"}${state.following ? " \xB7 Live updates" : ""}` : state.following ? heldEvents ? "Live \xB7 new rows held while you point at the table" : "Live \xB7 newest 1,000" : state.newestFirst && state.page === 0 && state.before !== void 0 && state.newest > state.before ? "Browsing \xB7 newer logs arrived \u2014 scroll to the top for Live" : "Browsing retained history";
+      elements.mode.className = state.following ? "live-mode" : "";
+      elements.mode.hidden = state.following && !heldEvents && !state.selectedSort;
     }
     function setFollowing(value) {
       state.setFollowing(value);
@@ -9250,11 +9303,6 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
       elements.help.title = status.unread ? `Open the Logline Guide \xB7 New in ${status.version}` : "Open the Logline Guide";
     }
     function requestInteraction() {
-      if (state.paused) {
-        state.browseFromInspection();
-        table.resetDetails();
-        table.renderWindow();
-      }
       updateFollowControl();
       updateModeLabel();
       request(true);
@@ -9270,14 +9318,6 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
     }
     scope.listen(elements.logs, "click", (event) => {
       const target = event.target;
-      const dismiss = target.closest(".dismiss-hint");
-      if (dismiss) {
-        state.cellHintDismissed = true;
-        saveState();
-        dismiss.closest(".detail-hint")?.remove();
-        return;
-      }
-      if (doctor.handleAction(event) || inspection.handleDetailAction(event)) return;
       const rowButton = target.closest(".row-icon, .row-action");
       const rowId = Number(rowButton?.dataset.id);
       if (rowButton && Number.isSafeInteger(rowId)) {
@@ -9285,7 +9325,7 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
         else if (rowButton.classList.contains("row-break-button")) api.postMessage({ type: "breakOnEvent", id: rowId });
         else if (rowButton.classList.contains("row-context-button") || rowButton.classList.contains("row-attached-button"))
           inspection.showContext(rowId);
-        else if (rowButton.classList.contains("row-finding-button") && state.selected !== rowId) toggleExpand(rowId);
+        else if (rowButton.classList.contains("row-finding-button") && state.selected !== rowId) selectEvent(rowId);
         return;
       }
       const trace = event.target.closest(".row-trace-button");
@@ -9295,7 +9335,43 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
       }
       const button = event.target.closest(".message-button");
       if (!button) return;
-      toggleExpand(Number(button.closest("tr").dataset.id));
+      selectEvent(Number(button.closest("tr").dataset.id));
+    });
+    scope.listen(elements.logs, "keydown", (event) => {
+      if (inspector.kind() !== "event" || !event.target.closest?.(".message-button")) return;
+      if (event.key === "Escape") {
+        event.preventDefault();
+        inspector.close("event");
+        return;
+      }
+      if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
+      const next = table.neighbor(event.key === "ArrowDown" ? 1 : -1);
+      if (!next) return;
+      event.preventDefault();
+      selectEvent(next.id);
+      elements.logs.querySelector(`tr.event-row[data-id="${next.id}"] .message-button`)?.focus({ preventScroll: false });
+    });
+    scope.listen(elements.inspectorBody, "click", (event) => {
+      const target = event.target;
+      const dismiss = target.closest(".dismiss-hint");
+      if (dismiss) {
+        state.cellHintDismissed = true;
+        saveState();
+        dismiss.closest(".detail-hint")?.remove();
+        return;
+      }
+      const filter = target.closest(".field-filter");
+      if (filter?.dataset.field) {
+        const choice = cellFilterQuery(
+          search.query(),
+          { field: filter.dataset.field, value: filter.dataset.value },
+          filter.dataset.exclude === "true"
+        );
+        if (choice.query === void 0) filter.title = choice.reason;
+        else search.setQuery(choice.query, true);
+        return;
+      }
+      if (inspector.kind() === "event" && !doctor.handleAction(event)) inspection.handleDetailAction(event);
     });
     scope.listen(elements.search, "input", () => {
       search.clearAutocomplete();
@@ -9350,9 +9426,50 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
       }
       elements.rowHint.hidden = true;
     }
-    function toggleExpand(id) {
+    function selectEvent(id) {
       dismissRowHint();
-      table.toggleExpand(id);
+      if (table.select(id)) inspector.open("event", eventContent(), () => table.clearSelection());
+      else inspector.close("event");
+    }
+    function eventContent() {
+      const id = state.selected;
+      const event = table.selectedEvent();
+      const context = eventAction(
+        "context-button",
+        "context",
+        "Surrounding logs",
+        "Show the logs just before and after this event from the same run"
+      );
+      context.dataset.id = String(id);
+      const body = [
+        buildEventDetails(
+          id,
+          state.selectedDetailText,
+          state.selectedExceptions,
+          state.selectedLinks,
+          [context],
+          buildEventFields(state.selectedDetailText)
+        )
+      ];
+      if (!state.cellHintDismissed) {
+        const hint = document.createElement("p");
+        hint.className = "detail-hint";
+        const dismiss = document.createElement("button");
+        dismiss.type = "button";
+        dismiss.className = "dismiss-hint";
+        dismiss.textContent = "Got it";
+        hint.append(
+          document.createTextNode("Tip: right-click any cell in the table to include or exclude its value."),
+          dismiss
+        );
+        body.push(hint);
+      }
+      const source = event?.serverId ? visibleSources.find((server) => server.id === event.serverId)?.label ?? event.serverId : void 0;
+      return {
+        title: event?.message ?? "Event",
+        meta: event ? [event.level.toUpperCase(), formatTimestamp(event), source, event.stream].filter(Boolean).join(" \xB7 ") : void 0,
+        body
+      };
     }
     const actionsMenu = createPopover(actionsContainer, elements.moreActions, elements.actionsMenu);
     const actionItems = [
@@ -9581,13 +9698,13 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
       if (previous === "aiCalls") aiCalls.hide();
       if (previous === "aiCall") aiCalls.close();
       if (previous === "doctor") elements.doctor.hidden = true;
+      if (tabOf(view) !== "logs") inspector.close("event");
       state.view = tabOf(view);
       tabRail.show(tabOf(view));
       saveState();
     }
     function resumeLive() {
       state.resume();
-      table.resetDetails();
       saveState();
       table.updateColumns(table.automaticColumns, true);
       updateFollowControl();
@@ -9596,7 +9713,7 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
       table.scheduleRenderWindow(true);
     }
     scope.listen(elements.follow, "click", () => {
-      if (state.paused || !state.following) resumeLive();
+      if (!state.following) resumeLive();
       else {
         setFollowing(false);
         updateFollowControl();
@@ -9608,12 +9725,12 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
       const top = scrollViewport.scrollTop;
       const wasAtTop = lastScrollTop <= 1;
       lastScrollTop = top;
-      if (!state.newestFirst || state.paused || state.selectedSort) return;
+      if (!state.newestFirst || state.selectedSort) return;
       if (state.following && top > 1) setFollowing(false);
       else if (!state.following && top <= 1 && !wasAtTop && state.page === 0) resumeLive();
     });
     scope.listen(elements.older, "click", () => {
-      if (state.following && !state.paused) setFollowing(false);
+      if (state.following) setFollowing(false);
       state.page = Math.min(state.pages - 1, state.page + 1);
       requestInteraction();
     });
@@ -9628,8 +9745,7 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
       table.updateColumns([], true);
       table.renderFieldList();
       search.clearAutocomplete();
-      state.browseFromInspection();
-      table.resetDetails();
+      inspector.close("event");
       api.postMessage({ type: "clear" });
       requestInteraction();
     });

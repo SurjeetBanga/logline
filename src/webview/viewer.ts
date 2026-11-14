@@ -2,13 +2,15 @@ import type { WelcomeChoice } from '../core/usage-events';
 import type { UpdateStatus } from '../protocol/messages';
 import type { HostMessage, Snapshot } from '../protocol/messages';
 import { createAnalysis } from './analysis/charts';
-import { addFilterTerm } from './search/cell-filter';
+import { addFilterTerm, cellFilterQuery } from './search/cell-filter';
 import { hasChangedScope, withChangedScope } from '../core/changed-query';
 import { SnapshotBridge } from './bridge';
 import { getElements, setLabel } from './dom';
 import { createTooltips } from './tooltip';
 import { EventScope } from './event-scope';
 import { createInspection } from './inspection/context';
+import { buildEventDetails, buildEventFields, eventAction } from './inspection/details';
+import { createInspector, type InspectorContent } from './inspector';
 import { createTraceView } from './inspection/trace';
 import { createTraceList } from './inspection/traces';
 import { createMetricList } from './inspection/metrics';
@@ -20,7 +22,7 @@ import { createConnectionBar } from './search/connection-bar';
 import { createSourceRail } from './search/source-rail';
 import { createSharePanel } from './share-panel';
 import { createConnectionTab } from './connection-tab';
-import { createRailResize } from './rail-resize';
+import { createInspectorResize, createRailResize } from './rail-resize';
 import { createTabRail } from './tab-rail';
 import { createTour } from './tour';
 import { createFeedbackForm } from './feedback-form';
@@ -55,6 +57,9 @@ export function createViewer(api: WebviewApi) {
     collapsedChanged: () => rail.applyCollapsed(),
   });
   createRailResize([elements.railResizer, elements.tabRailResizer], state, scope, { saveState: () => saveState() });
+  createInspectorResize(elements.inspectorResizer, state, scope, { saveState: () => saveState() });
+  // What is selected in a list shows beside it, so the list stays in view and nothing in it moves.
+  const inspector = createInspector(elements, scope);
   createTooltips(scope);
   // The remembered tab, until the first snapshot says whether it has data.
   let restoreTab: TabName | undefined;
@@ -365,7 +370,7 @@ export function createViewer(api: WebviewApi) {
     }
     if (data.type === 'details') {
       if (data.target === 'context') inspection.receiveDetails(data);
-      else table.receiveDetails(data);
+      else if (table.receiveDetails(data)) inspector.update('event', eventContent());
       return;
     }
     if (data.type === 'autocomplete') {
@@ -460,22 +465,18 @@ export function createViewer(api: WebviewApi) {
     }
     minimumSnapshotGeneration = 0;
     const generationChanged = state.generation !== undefined && state.generation !== data.generation;
-    if (generationChanged && !state.paused) {
+    if (generationChanged) {
       state.before = undefined;
       state.page = 0;
       state.lastRows = undefined;
-      state.selected = undefined;
-      state.selectedDetailText = undefined;
-      state.selectedExceptions = [];
-      table.resetDetails();
+      // The logs were cleared, so the selected event is gone with them.
+      inspector.close('event');
       table.resetAutomaticColumns();
       bridge.forget();
       table.renderRows([]);
       bridge.refreshRequested = true;
     }
-    // While a row is open the reset is deferred, so keep the old generation
-    // until then; the first snapshot after inspection ends applies it.
-    if (!generationChanged || !state.paused) state.generation = data.generation;
+    state.generation = data.generation;
     if (data.timezone && data.timezone !== state.displayTimezone) {
       state.displayTimezone = data.timezone;
       state.lastRows = undefined;
@@ -598,11 +599,11 @@ export function createViewer(api: WebviewApi) {
     table.renderFieldList();
     if (Array.isArray(data.fields)) state.allFields = data.fields;
     if (data.searches) search.renderSearchState(data.searches);
-    if (rows && !bridge.refreshRequested && !state.paused && holdingLive()) {
+    if (rows && !bridge.refreshRequested && holdingLive()) {
       // Rows would move under the pointer; show them when it leaves the table.
       heldEvents = rows;
       updateModeLabel();
-    } else if (rows && !bridge.refreshRequested && !state.paused) {
+    } else if (rows && !bridge.refreshRequested) {
       heldEvents = undefined;
       state.page = data.page ?? 0;
       state.pages = data.pages ?? 1;
@@ -640,7 +641,7 @@ export function createViewer(api: WebviewApi) {
       // Nothing captured at all: offer the ways in, not only a sentence about them.
       elements.emptyActions.hidden = rows.length > 0 || data.total > 0 || connectionEmpty !== undefined;
       elements.emptyCapture.hidden = data.captureTerminals;
-      if (state.following && !state.paused && !state.selectedSort) table.scheduleRenderWindow(true);
+      if (state.following && !state.selectedSort) table.scheduleRenderWindow(true);
     }
     bridge.flush();
   }
@@ -678,7 +679,7 @@ export function createViewer(api: WebviewApi) {
   function releaseHeld() {
     const events = heldEvents;
     heldEvents = undefined;
-    if (events && state.following && !state.paused) {
+    if (events && state.following) {
       state.lastRows = events.map((event) => event.id).join(',');
       table.renderRows(events);
       elements.empty.hidden = events.length > 0;
@@ -689,14 +690,6 @@ export function createViewer(api: WebviewApi) {
   }
 
   function updateFollowControl() {
-    if (state.paused) {
-      elements.follow.setAttribute('aria-pressed', 'false');
-      elements.follow.setAttribute('aria-label', 'Resume live updates');
-      elements.follow.title = 'Paused while you inspect an event; capture continues. Click to resume live logs.';
-      elements.follow.dataset.mode = 'resume';
-      setLabel(elements.follow, 'Resume');
-      return;
-    }
     elements.follow.setAttribute('aria-pressed', String(state.following));
     elements.follow.setAttribute('aria-label', state.following ? 'Live updates' : 'Browse retained history');
     elements.follow.title = state.following
@@ -713,20 +706,18 @@ export function createViewer(api: WebviewApi) {
     elements.older.title = older;
     elements.newer.setAttribute('aria-label', newer);
     elements.newer.title = newer;
-    elements.mode.textContent = state.paused
-      ? 'Paused — collection continues'
-      : state.selectedSort
-        ? `Sorted ${state.selectedSortDirection === 'asc' ? 'ascending' : 'descending'}${state.following ? ' · Live updates' : ''}`
-        : state.following
-          ? heldEvents
-            ? 'Live · new rows held while you point at the table'
-            : 'Live · newest 1,000'
-          : state.newestFirst && state.page === 0 && state.before !== undefined && state.newest > state.before
-            ? 'Browsing · newer logs arrived — scroll to the top for Live'
-            : 'Browsing retained history';
-    elements.mode.className = state.following && !state.paused ? 'live-mode' : '';
+    elements.mode.textContent = state.selectedSort
+      ? `Sorted ${state.selectedSortDirection === 'asc' ? 'ascending' : 'descending'}${state.following ? ' · Live updates' : ''}`
+      : state.following
+        ? heldEvents
+          ? 'Live · new rows held while you point at the table'
+          : 'Live · newest 1,000'
+        : state.newestFirst && state.page === 0 && state.before !== undefined && state.newest > state.before
+          ? 'Browsing · newer logs arrived — scroll to the top for Live'
+          : 'Browsing retained history';
+    elements.mode.className = state.following ? 'live-mode' : '';
     // Plain Live is what the Live button already says; anything else is worth a word.
-    elements.mode.hidden = state.following && !state.paused && !heldEvents && !state.selectedSort;
+    elements.mode.hidden = state.following && !heldEvents && !state.selectedSort;
   }
 
   function setFollowing(value: boolean) {
@@ -786,11 +777,6 @@ export function createViewer(api: WebviewApi) {
       : 'Open the Logline Guide';
   }
   function requestInteraction() {
-    if (state.paused) {
-      state.browseFromInspection();
-      table.resetDetails();
-      table.renderWindow();
-    }
     updateFollowControl();
     updateModeLabel();
     request(true);
@@ -808,14 +794,6 @@ export function createViewer(api: WebviewApi) {
 
   scope.listen(elements.logs, 'click', (event) => {
     const target = event.target as HTMLElement;
-    const dismiss = target.closest<HTMLElement>('.dismiss-hint');
-    if (dismiss) {
-      state.cellHintDismissed = true;
-      saveState();
-      dismiss.closest('.detail-hint')?.remove();
-      return;
-    }
-    if (doctor.handleAction(event) || inspection.handleDetailAction(event)) return;
     const rowButton = target.closest<HTMLElement>('.row-icon, .row-action');
     const rowId = Number(rowButton?.dataset.id);
     if (rowButton && Number.isSafeInteger(rowId)) {
@@ -826,7 +804,7 @@ export function createViewer(api: WebviewApi) {
         rowButton.classList.contains('row-attached-button')
       )
         inspection.showContext(rowId);
-      else if (rowButton.classList.contains('row-finding-button') && state.selected !== rowId) toggleExpand(rowId);
+      else if (rowButton.classList.contains('row-finding-button') && state.selected !== rowId) selectEvent(rowId);
       return;
     }
     const trace = (event.target as HTMLElement).closest<HTMLElement>('.row-trace-button');
@@ -836,7 +814,47 @@ export function createViewer(api: WebviewApi) {
     }
     const button = (event.target as HTMLElement).closest<HTMLElement>('.message-button');
     if (!button) return;
-    toggleExpand(Number(button.closest('tr')!.dataset.id));
+    selectEvent(Number(button.closest('tr')!.dataset.id));
+  });
+  // With an event open, the arrow keys move to the one above or below, and Escape closes it.
+  scope.listen(elements.logs, 'keydown', (event) => {
+    if (inspector.kind() !== 'event' || !(event.target as HTMLElement).closest?.('.message-button')) return;
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      inspector.close('event');
+      return;
+    }
+    if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return;
+    const next = table.neighbor(event.key === 'ArrowDown' ? 1 : -1);
+    if (!next) return;
+    event.preventDefault();
+    selectEvent(next.id);
+    elements.logs
+      .querySelector<HTMLElement>(`tr.event-row[data-id="${next.id}"] .message-button`)
+      ?.focus({ preventScroll: false });
+  });
+  // The buttons of the event in the inspector: its actions, its findings, and its fields' filters.
+  scope.listen(elements.inspectorBody, 'click', (event) => {
+    const target = event.target as HTMLElement;
+    const dismiss = target.closest<HTMLElement>('.dismiss-hint');
+    if (dismiss) {
+      state.cellHintDismissed = true;
+      saveState();
+      dismiss.closest('.detail-hint')?.remove();
+      return;
+    }
+    const filter = target.closest<HTMLElement>('.field-filter');
+    if (filter?.dataset.field) {
+      const choice = cellFilterQuery(
+        search.query(),
+        { field: filter.dataset.field, value: filter.dataset.value },
+        filter.dataset.exclude === 'true',
+      );
+      if (choice.query === undefined) filter.title = choice.reason;
+      else search.setQuery(choice.query, true);
+      return;
+    }
+    if (inspector.kind() === 'event' && !doctor.handleAction(event)) inspection.handleDetailAction(event);
   });
 
   scope.listen(elements.search, 'input', () => {
@@ -906,9 +924,56 @@ export function createViewer(api: WebviewApi) {
     }
     elements.rowHint.hidden = true;
   }
-  function toggleExpand(id: number) {
+  /** Shows an event in the inspector; choosing the open one again closes it. */
+  function selectEvent(id: number) {
     dismissRowHint();
-    table.toggleExpand(id);
+    if (table.select(id)) inspector.open('event', eventContent(), () => table.clearSelection());
+    else inspector.close('event');
+  }
+  /** The selected event for the inspector: its message, where and when it was logged, its actions and fields. */
+  function eventContent(): InspectorContent {
+    const id = state.selected!;
+    const event = table.selectedEvent();
+    const context = eventAction(
+      'context-button',
+      'context',
+      'Surrounding logs',
+      'Show the logs just before and after this event from the same run',
+    );
+    context.dataset.id = String(id);
+    const body: Node[] = [
+      buildEventDetails(
+        id,
+        state.selectedDetailText,
+        state.selectedExceptions,
+        state.selectedLinks,
+        [context],
+        buildEventFields(state.selectedDetailText),
+      ),
+    ];
+    if (!state.cellHintDismissed) {
+      const hint = document.createElement('p');
+      hint.className = 'detail-hint';
+      const dismiss = document.createElement('button');
+      dismiss.type = 'button';
+      dismiss.className = 'dismiss-hint';
+      dismiss.textContent = 'Got it';
+      hint.append(
+        document.createTextNode('Tip: right-click any cell in the table to include or exclude its value.'),
+        dismiss,
+      );
+      body.push(hint);
+    }
+    const source = event?.serverId
+      ? (visibleSources.find((server) => server.id === event.serverId)?.label ?? event.serverId)
+      : undefined;
+    return {
+      title: event?.message ?? 'Event',
+      meta: event
+        ? [event.level.toUpperCase(), formatTimestamp(event), source, event.stream].filter(Boolean).join(' · ')
+        : undefined,
+      body,
+    };
   }
   const actionsMenu = createPopover(actionsContainer, elements.moreActions, elements.actionsMenu);
   const actionItems = [
@@ -1155,6 +1220,8 @@ export function createViewer(api: WebviewApi) {
     if (previous === 'aiCalls') aiCalls.hide();
     if (previous === 'aiCall') aiCalls.close();
     if (previous === 'doctor') elements.doctor.hidden = true;
+    // A selection belongs to its list; another tab has nothing to show beside it.
+    if (tabOf(view) !== 'logs') inspector.close('event');
     state.view = tabOf(view);
     tabRail.show(tabOf(view));
     saveState();
@@ -1162,7 +1229,6 @@ export function createViewer(api: WebviewApi) {
 
   function resumeLive() {
     state.resume();
-    table.resetDetails();
     saveState();
     table.updateColumns(table.automaticColumns, true);
     updateFollowControl();
@@ -1171,7 +1237,7 @@ export function createViewer(api: WebviewApi) {
     table.scheduleRenderWindow(true);
   }
   scope.listen(elements.follow, 'click', () => {
-    if (state.paused || !state.following) resumeLive();
+    if (!state.following) resumeLive();
     else {
       setFollowing(false);
       updateFollowControl();
@@ -1186,12 +1252,12 @@ export function createViewer(api: WebviewApi) {
     const top = scrollViewport.scrollTop;
     const wasAtTop = lastScrollTop <= 1;
     lastScrollTop = top;
-    if (!state.newestFirst || state.paused || state.selectedSort) return;
+    if (!state.newestFirst || state.selectedSort) return;
     if (state.following && top > 1) setFollowing(false);
     else if (!state.following && top <= 1 && !wasAtTop && state.page === 0) resumeLive();
   });
   scope.listen(elements.older, 'click', () => {
-    if (state.following && !state.paused) setFollowing(false);
+    if (state.following) setFollowing(false);
     state.page = Math.min(state.pages - 1, state.page + 1);
     requestInteraction();
   });
@@ -1211,8 +1277,7 @@ export function createViewer(api: WebviewApi) {
     table.updateColumns([], true);
     table.renderFieldList();
     search.clearAutocomplete();
-    state.browseFromInspection();
-    table.resetDetails();
+    inspector.close('event');
     api.postMessage({ type: 'clear' });
     requestInteraction();
   });

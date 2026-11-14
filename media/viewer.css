@@ -79,10 +79,6 @@
   text-decoration: underline;
   background: transparent;
 }
-.detail-cell > .event-details {
-  max-height: 320px;
-  overflow: auto;
-}
 .exception-block {
   margin: 12px 0;
 }
@@ -2772,15 +2768,164 @@ td.time {
 .source {
   color: var(--vscode-descriptionForeground, #aaa);
 }
-.detail-cell {
-  background: var(--vscode-textCodeBlock-background, #252526);
-  padding: 10px 20px;
+/* The list and, beside it, what is selected in it. In a narrow panel the selection shows below the list. */
+.content-split {
+  display: flex;
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
 }
-.detail-cell pre {
-  white-space: pre;
+.content-split > .views {
+  min-width: 0;
+}
+.inspector {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  flex: none;
+  width: var(--inspector-width, clamp(320px, 38%, 560px));
+  min-height: 0;
+  border-left: 1px solid var(--vscode-panel-border, #444);
+  background: var(--vscode-editor-background, #1e1e1e);
+}
+.inspector-resizer {
+  right: auto;
+  left: -2px;
+}
+.inspector-header {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: none;
+  min-height: 30px;
+  padding: 2px 6px 0 12px;
+}
+.inspector-title {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: var(--vscode-editor-font-size, 13px);
+  font-weight: 600;
+}
+.inspector-nav {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  flex: none;
+  color: var(--vscode-descriptionForeground, #aaa);
+  font-size: 12px;
+}
+.inspector-meta {
+  flex: none;
+  margin: 0;
+  padding: 0 12px 6px;
+  color: var(--vscode-descriptionForeground, #aaa);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+.inspector-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  padding: 0 12px 10px;
+  overflow: auto;
+  border-top: 1px solid var(--vscode-panel-border, #444);
+}
+.inspector-body .event-actions {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  gap: 0 8px;
+  margin: 0 -12px 6px;
+  padding: 3px 6px;
+  background: var(--vscode-editor-background, #1e1e1e);
+  font-size: 12px;
+}
+.inspector-body .event-action-group {
+  gap: 0;
+}
+.inspector-body .event-actions .event-action {
+  padding: 2px 6px;
+}
+.inspector-body pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
   tab-size: 4;
   margin: 8px 0;
-  font: inherit;
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: var(--vscode-editor-font-size, 13px);
+}
+/* An event's fields, each value with buttons to search for it or exclude it. */
+.event-fields {
+  margin: 0 -12px 8px;
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: var(--vscode-editor-font-size, 13px);
+}
+.event-field {
+  display: grid;
+  grid-template-columns: minmax(72px, 30%) minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  min-height: 22px;
+  padding: 0 8px 0 12px;
+}
+.event-field:hover,
+.event-field:focus-within {
+  background: var(--vscode-list-hoverBackground, #2a2d2e);
+}
+.event-field-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--vscode-descriptionForeground, #aaa);
+}
+.event-field-value {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.event-field-filters {
+  display: inline-flex;
+  gap: 2px;
+  visibility: hidden;
+}
+.event-field:hover .event-field-filters,
+.event-field:focus-within .event-field-filters {
+  visibility: visible;
+}
+.field-filter {
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border-color: transparent;
+  background: transparent;
+  color: var(--vscode-icon-foreground, #c5c5c5);
+  line-height: 1;
+}
+.field-filter:hover {
+  background: var(--vscode-toolbar-hoverBackground, rgba(90, 93, 94, 0.31));
+}
+@media (hover: none) {
+  .event-field-filters {
+    visibility: visible;
+  }
+}
+@media (max-width: 899.98px) {
+  .content-split {
+    flex-direction: column;
+  }
+  .inspector {
+    width: auto;
+    height: 45%;
+    min-height: 120px;
+    border-left: 0;
+    border-top: 1px solid var(--vscode-panel-border, #444);
+  }
+  .inspector-resizer {
+    display: none;
+  }
 }
 #empty {
   padding: 18px 14px;
@@ -3584,26 +3729,15 @@ td[data-column]:focus-visible {
   }
 }
 /* Rows show what they link to, and reveal quick actions on hover or focus. */
-/* Messages start after their expand marker, so the header starts there too. */
-th[data-column='base:message'] .column-label {
-  padding-left: 16px;
+/* The event shown in the inspector. */
+.event-row.selected,
+.event-row.selected:hover {
+  background: var(--vscode-list-activeSelectionBackground, #04395e);
+  color: var(--vscode-list-activeSelectionForeground, #fff);
 }
-.message-button::before {
-  content: '›';
-  display: inline-block;
-  width: 12px;
-  margin-right: 4px;
-  color: var(--vscode-descriptionForeground, #888);
-  opacity: 0;
-  transition: transform 0.1s;
-}
-.event-row:hover .message-button::before,
-.message-button:focus-visible::before,
-.message-button[aria-expanded='true']::before {
-  opacity: 1;
-}
-.message-button[aria-expanded='true']::before {
-  transform: rotate(90deg);
+.event-row.selected .level,
+.event-row.selected .source {
+  color: inherit;
 }
 .row-icon {
   flex: none;

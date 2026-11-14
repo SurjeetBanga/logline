@@ -152,6 +152,8 @@ export function buildEventDetails(
   exceptions: ExceptionBlock[],
   links: DetailLinks = {},
   leadingActions: HTMLElement[] = [],
+  /** Shown above the raw event, such as its fields as a list. */
+  beforeRaw?: Node,
 ) {
   const container = document.createElement('div');
   container.className = 'event-details';
@@ -252,6 +254,7 @@ export function buildEventDetails(
       container.append(exceptionSection(links.crash!.id, exception, blockIndex)),
     );
   }
+  if (beforeRaw) container.append(beforeRaw);
   const pre = document.createElement('pre');
   pre.textContent = text ?? 'Loading…';
   if (exceptions.length || links.crash) {
@@ -262,4 +265,60 @@ export function buildEventDetails(
     container.append(raw);
   } else container.append(pre);
   return container;
+}
+
+/**
+ * An event's top-level fields as a list, each value with buttons that add it to the search or exclude it.
+ * Undefined when the event's text is not a JSON object, which has no fields to list.
+ */
+export function buildEventFields(text: string | undefined): HTMLElement | undefined {
+  if (!text?.trimStart().startsWith('{')) return undefined;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    return undefined;
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return undefined;
+  const entries = Object.entries(parsed as Record<string, unknown>);
+  if (!entries.length) return undefined;
+  const list = document.createElement('div');
+  list.className = 'event-fields';
+  list.setAttribute('role', 'list');
+  list.setAttribute('aria-label', 'Fields');
+  for (const [name, value] of entries) {
+    const row = document.createElement('div');
+    row.className = 'event-field';
+    row.setAttribute('role', 'listitem');
+    const key = document.createElement('span');
+    key.className = 'event-field-name';
+    key.textContent = name;
+    const shown = document.createElement('span');
+    shown.className = 'event-field-value';
+    const scalar = value === null || typeof value !== 'object';
+    shown.textContent = scalar ? String(value) : JSON.stringify(value);
+    shown.title = shown.textContent;
+    row.append(key, shown);
+    // A nested value has no single term to search for.
+    if (scalar && value !== null && value !== '') {
+      const filters = document.createElement('span');
+      filters.className = 'event-field-filters';
+      for (const exclude of [false, true]) {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'field-filter';
+        button.textContent = exclude ? '−' : '+';
+        const label = exclude ? `Exclude ${name}: ${String(value)}` : `Show only ${name}: ${String(value)}`;
+        button.title = label;
+        button.setAttribute('aria-label', label);
+        button.dataset.field = name;
+        button.dataset.value = String(value);
+        if (exclude) button.dataset.exclude = 'true';
+        filters.append(button);
+      }
+      row.append(filters);
+    }
+    list.append(row);
+  }
+  return list;
 }
