@@ -864,9 +864,14 @@ export class LogsController {
     this.stop(serverId);
     const removed = this.store.removeSource(serverId);
     // A run that is still capturing, such as OpenTelemetry, a terminal, or a process that is
-    // shutting down, keeps adding logs under its record, so only finished runs are dropped.
+    // shutting down, keeps adding logs under its record, so only finished runs are dropped. A
+    // browser that is closing adds nothing more, so its run goes now, not at a second press.
     for (const [id, record] of this.registry.records)
-      if (belongsTo(record.serverId) && record.status !== 'running' && record.status !== 'stopping')
+      if (
+        belongsTo(record.serverId) &&
+        record.status !== 'running' &&
+        (record.status !== 'stopping' || record.sourceKind === 'browser')
+      )
         this.registry.records.delete(id);
     this.agentAccess.forgetSource(serverId);
     this.state.status = `Removed ${label}${removed ? ` and its ${removed.toLocaleString()} log${removed === 1 ? '' : 's'}` : ''}`;

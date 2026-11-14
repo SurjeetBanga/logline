@@ -202,6 +202,29 @@ test('removing a source drops its logs, runs, and share, and says so', async (t)
   assert.equal(await controller.removeSource(''), 0);
 });
 
+test('removing a browser that is closing takes its run at once, while a process shutting down keeps its own', async (t) => {
+  const controller = setup(t);
+  const closing = (id: string, serverId: string, sourceKind: 'browser' | 'process') => {
+    controller.registry.records.set(id, {
+      id,
+      serverId,
+      server: serverId,
+      status: 'stopping',
+      startedAt: 1,
+      events: 1,
+      sourceKind,
+    });
+    controller.ingestion.accept('{"message":"last words"}', 'stdout', { serverId, server: serverId, sessionId: id });
+  };
+  // Stop has been pressed on both; neither process has gone yet.
+  closing('browser-1', 'browser:localhost:5173', 'browser');
+  closing('api-1', 'api', 'process');
+  assert.equal(await controller.removeSource('browser:localhost:5173'), 1);
+  assert.equal(controller.registry.records.has('browser-1'), false, 'gone with one press');
+  assert.equal(await controller.removeSource('api'), 1);
+  assert.equal(controller.registry.records.has('api-1'), true, 'it may still log as it shuts down');
+});
+
 test('removing a finished run drops its logs and record, and keeps a running one', async (t) => {
   const controller = setup(t);
   controller.store.add({ level: 'info', id: 1, serverId: 'db', sessionId: 'f1', message: 'one' });
