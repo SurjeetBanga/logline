@@ -392,6 +392,8 @@
 }
 body {
   margin: 0;
+  /* VS Code gives every webview's body 20px of padding at each side; the panel runs edge to edge. */
+  padding: 0;
   height: 100vh;
   overflow: hidden;
   display: flex;

@@ -15,16 +15,20 @@ const media = join(__dirname, '..', '..', 'media');
 const origin = 'https://logline.test';
 const nonce = 'layout';
 // Filled as src/vscode/webview-html.ts fills it, Content Security Policy included.
-const html = readFileSync(join(media, 'viewer.html'), 'utf8').replace(
-  /\{\{([A-Z_]+)\}\}/g,
-  (_, key: string) =>
-    ({
-      CSP_SOURCE: origin,
-      NONCE: nonce,
-      STYLE_URI: `${origin}/viewer.css`,
-      SCRIPT_URI: `${origin}/viewer.js`,
-    })[key] ?? '',
-);
+// VS Code puts its own default styles ahead of the page's, the body's side padding among them.
+const VSCODE_DEFAULTS = 'body { margin: 0; padding: 0 20px; }';
+const html = readFileSync(join(media, 'viewer.html'), 'utf8')
+  .replace('<head>', `<head><link rel="stylesheet" href="${origin}/vscode-defaults.css" />`)
+  .replace(
+    /\{\{([A-Z_]+)\}\}/g,
+    (_, key: string) =>
+      ({
+        CSP_SOURCE: origin,
+        NONCE: nonce,
+        STYLE_URI: `${origin}/viewer.css`,
+        SCRIPT_URI: `${origin}/viewer.js`,
+      })[key] ?? '',
+  );
 
 // A short panel docked under the editor, a narrow one in the side bar, and the narrowest side bar.
 const SIZES = [
@@ -217,6 +221,7 @@ async function open(
   await page.route(`${origin}/**`, (route) => {
     const name = new URL(route.request().url()).pathname.slice(1);
     if (name === '') return route.fulfill({ contentType: 'text/html', body: html });
+    if (name === 'vscode-defaults.css') return route.fulfill({ contentType: 'text/css', body: VSCODE_DEFAULTS });
     return route.fulfill({ path: join(media, name) });
   });
   await page.addInitScript((state) => {
@@ -300,6 +305,21 @@ for (const size of SIZES) {
         await tab.click();
         await assertPageFits(page, label);
       }
+    } finally {
+      await page.close();
+    }
+  });
+
+  test(`the ${name} panel runs edge to edge, without VS Code's padding at its sides`, async () => {
+    const page = await open(size);
+    try {
+      const edges = await page.evaluate(() => {
+        const bar = document.querySelector('.view-bar')!.getBoundingClientRect();
+        const rail = document.getElementById('sourceRail')!.getBoundingClientRect();
+        return { bar: [bar.left, bar.right], rail: rail.left, width: window.innerWidth };
+      });
+      assert.deepEqual(edges.bar, [0, edges.width], 'the top row spans the panel');
+      assert.equal(edges.rail, 0, 'the Sources rail starts at the left edge');
     } finally {
       await page.close();
     }

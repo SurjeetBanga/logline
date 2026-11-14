@@ -26,6 +26,7 @@ All notable changes to Logline are documented in this file.
 
 ### Fixes
 
+- The Logs panel runs edge to edge: the 20 pixels VS Code leaves at each side of a webview no longer frame the tabs, the Sources rail, and the table.
 - **Clear logs** keeps any window that shares everything sharing, as the same share: an agent's share id stays valid and a wait for new logs goes on. A share of chosen runs still ends with a clear.
 - A filter typed in the search box but not yet entered is no longer left out: **Run** and **Tail** on a connection apply it first, and choosing a whole term from the suggestions, such as `appname:"prod"`, applies it as Enter does. A highlighted suggestion no longer turns the search box white.
 - What a connection's search found, such as `Fetched 1,000 of 57,253 logs`, wraps in a narrow panel instead of ending in an ellipsis. In a short or narrow panel, a connection's controls scroll within their bar, rather than pushing the table out of view and scrolling the whole panel, and the tip about rows waits for a taller panel.
