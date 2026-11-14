@@ -333,6 +333,9 @@ export async function handleMessage(
     case 'openBrowser':
       await vscode.commands.executeCommand('logline.openBrowser');
       return;
+    case 'followFile':
+      await vscode.commands.executeCommand('logline.followFile');
+      return;
     case 'feedbackSend': {
       const { type: _type, ...request } = msg;
       const result = await services.feedback?.(request);

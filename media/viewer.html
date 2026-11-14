@@ -106,7 +106,7 @@
                 stroke-width="1.6"
                 stroke-linecap="round"
               /></svg
-            ><span class="button-label">Traces</span><span id="traceCount" class="count-badge" hidden></span>
+            ><span class="button-label">Traces</span>
           </button>
           <button
             id="aiCalls"
@@ -132,7 +132,7 @@
             >
               <path d="M2.5 3.5h11v7h-6l-3 2.5v-2.5h-2z" />
               <path d="M5.5 7h.01M8 7h.01M10.5 7h.01" stroke-width="1.8" /></svg
-            ><span class="button-label">AI calls</span><span id="aiCallCount" class="count-badge"></span>
+            ><span class="button-label">AI calls</span>
           </button>
           <button
             id="metrics"
@@ -153,7 +153,7 @@
                 stroke-linecap="round"
                 stroke-linejoin="round"
               /></svg
-            ><span class="button-label">Metrics</span><span id="metricCount" class="count-badge"></span>
+            ><span class="button-label">Metrics</span>
           </button>
           <button
             id="doctor"
@@ -179,7 +179,7 @@
             >
               <path d="M8 2.5 14.5 13.5h-13zM8 6.5v3" />
               <circle cx="8" cy="11.6" r=".4" fill="currentColor" /></svg
-            ><span class="button-label">Issues</span><span id="doctorCount" class="count-badge"></span>
+            ><span class="button-label">Issues</span>
           </button>
           <button
             id="connectionTab"
@@ -210,291 +210,6 @@
             ><span id="connectionTabLabel" class="button-label">Add connection</span>
           </button>
         </div>
-        <div class="view-bar-actions">
-          <button id="updateButton" class="update-button" type="button" hidden>Update</button>
-          <div id="shareSplit" class="share-split popover-container">
-            <button
-              id="shareAgent"
-              type="button"
-              aria-pressed="false"
-              title="Share existing and new captured logs in this window until stopped"
-            >
-              <svg
-                class="tb-icon"
-                aria-hidden="true"
-                viewBox="0 0 16 16"
-                width="14"
-                height="14"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="1.4"
-                stroke-linecap="round"
-                stroke-linejoin="round"
-              >
-                <path d="M8 2l1.4 4.6L14 8l-4.6 1.4L8 14l-1.4-4.6L2 8l4.6-1.4z" /></svg
-              ><span class="button-label">Share with agent</span>
-            </button>
-            <button
-              id="shareMenuButton"
-              class="share-chevron"
-              type="button"
-              aria-haspopup="dialog"
-              aria-expanded="false"
-              aria-controls="sharePanel"
-              aria-label="Sharing scope, agents, and production access"
-              title="What agents can read, which agents are connected, and production access"
-            >
-              <svg
-                aria-hidden="true"
-                viewBox="0 0 16 16"
-                width="12"
-                height="12"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="1.5"
-                stroke-linecap="round"
-                stroke-linejoin="round"
-              >
-                <path d="M4 6l4 4 4-4" />
-              </svg>
-            </button>
-            <div id="sharePanel" class="popover share-panel" role="dialog" aria-labelledby="sharePanelTitle" hidden>
-              <div class="share-panel-header">
-                <h3 id="sharePanelTitle">Share with agents</h3>
-                <span id="shareState" class="share-state">Off</span>
-              </div>
-              <section class="share-section" aria-labelledby="shareScopeTitle">
-                <h4 id="shareScopeTitle">What agents can read</h4>
-                <label class="share-choice"
-                  ><input id="shareScopeAll" type="radio" name="shareScope" value="all" checked /><span
-                    ><span>Everything captured in this window</span
-                    ><span class="share-hint">Existing and new logs, until you stop sharing</span></span
-                  ></label
-                >
-                <label class="share-choice"
-                  ><input id="shareScopeRuns" type="radio" name="shareScope" value="runs" /><span
-                    ><span>Specific runs</span
-                    ><span id="shareRunsHint" class="share-hint">Choose runs; later commands stay private</span></span
-                  ></label
-                >
-                <button id="shareSpecificRuns" class="share-choose" type="button" hidden>Choose runs…</button>
-                <p class="share-note">Read-only and always redacted. Agents cannot run or stop commands.</p>
-              </section>
-              <section class="share-section" aria-labelledby="shareAgentsTitle">
-                <h4 id="shareAgentsTitle">Agents</h4>
-                <div id="shareAgentList" class="share-agent-list"></div>
-              </section>
-              <section id="shareProduction" class="share-section" aria-labelledby="shareProductionTitle" hidden>
-                <h4 id="shareProductionTitle">Production access</h4>
-                <div id="shareConnectionList" class="share-connection-list"></div>
-                <p class="share-note">Allowed agents fetch up to 24 hours at a time, at most 10 times a minute.</p>
-              </section>
-              <div class="share-footer">
-                <button id="statusAction" class="link-button" type="button">Status and troubleshooting…</button>
-                <button id="shareToggle" class="share-toggle" type="button">Start sharing</button>
-              </div>
-            </div>
-          </div>
-          <div class="popover-container">
-            <button
-              id="moreActions"
-              class="more-actions"
-              type="button"
-              aria-label="More actions"
-              title="More actions"
-              aria-haspopup="menu"
-              aria-expanded="false"
-              aria-controls="actionsMenu"
-            >
-              <span aria-hidden="true">⋯</span>
-            </button>
-            <div id="actionsMenu" class="popover actions-menu" role="menu" aria-labelledby="moreActions" hidden>
-              <button
-                id="copyResults"
-                type="button"
-                role="menuitem"
-                tabindex="-1"
-                hidden
-                title="Copy up to 1,000 filtered log rows as JSON Lines"
-              >
-                Copy filtered results
-              </button>
-              <button
-                id="export"
-                type="button"
-                role="menuitem"
-                tabindex="-1"
-                title="Export filtered logs as JSON Lines, JSON, CSV, or AI context (Markdown)"
-              >
-                Export logs…
-              </button>
-              <button id="import" type="button" role="menuitem" tabindex="-1">Import logs…</button>
-              <button
-                id="openBrowser"
-                type="button"
-                role="menuitem"
-                tabindex="-1"
-                title="Open your app in a browser whose console, errors, and requests appear here"
-              >
-                Open browser…
-              </button>
-              <button
-                id="clear"
-                type="button"
-                role="menuitem"
-                tabindex="-1"
-                title="Remove every retained log and span. Capture keeps running."
-              >
-                Clear logs
-              </button>
-              <div class="menu-separator" role="separator"></div>
-              <button
-                id="breakOnLogs"
-                type="button"
-                role="menuitem"
-                tabindex="-1"
-                title="Pause debug sessions when they log an event matching the current filter"
-              >
-                Break on matching logs
-              </button>
-              <button id="manage" type="button" role="menuitem" tabindex="-1">Manage servers…</button>
-              <div class="menu-separator" role="separator"></div>
-              <button id="config" type="button" role="menuitem" tabindex="-1">Settings</button>
-              <button
-                id="help"
-                type="button"
-                role="menuitem"
-                tabindex="-1"
-                aria-label="Open the Logline Guide"
-                title="Open the Logline Guide"
-              >
-                <span id="helpLabel">Help</span><span id="helpBadge" class="new-badge" hidden>New</span>
-              </button>
-              <button id="takeTour" type="button" role="menuitem" tabindex="-1">Take the tour</button>
-              <div class="menu-separator" role="separator"></div>
-              <button
-                id="suggestFeature"
-                type="button"
-                role="menuitem"
-                tabindex="-1"
-                title="Tell the Logline developers what to build"
-              >
-                Suggest a feature…
-              </button>
-              <button
-                id="voteOnNext"
-                type="button"
-                role="menuitem"
-                tabindex="-1"
-                title="Pick what Logline should do next"
-              >
-                Vote on what's next…
-              </button>
-            </div>
-          </div>
-        </div>
-      </div>
-    </header>
-    <div class="workspace">
-      <nav id="sourceRail" class="source-rail" aria-label="Sources">
-        <div class="rail-header">
-          <span class="rail-title">Sources</span>
-          <button
-            id="railStopAll"
-            class="icon-button rail-icon"
-            type="button"
-            hidden
-            title="Stop every command Logline started, and every tail"
-            aria-label="Stop all"
-          >
-            <svg
-              aria-hidden="true"
-              viewBox="0 0 16 16"
-              width="14"
-              height="14"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="1.4"
-              stroke-linecap="round"
-            >
-              <rect x="2.5" y="4.5" width="7" height="7" rx="1" />
-              <path d="M11.5 6.5v5.5a1.5 1.5 0 0 1-1.5 1.5H5" />
-            </svg>
-          </button>
-          <button
-            id="railToggle"
-            class="icon-button rail-icon rail-toggle"
-            type="button"
-            aria-expanded="true"
-            aria-controls="railList"
-            title="Collapse sources"
-            aria-label="Collapse sources"
-          >
-            <svg
-              aria-hidden="true"
-              viewBox="0 0 16 16"
-              width="14"
-              height="14"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="1.4"
-              stroke-linecap="round"
-              stroke-linejoin="round"
-            >
-              <path d="M8 4 4 8l4 4M12.5 4l-4 4 4 4" />
-            </svg>
-          </button>
-        </div>
-        <div id="railList" class="rail-list"></div>
-        <div
-          id="railResizer"
-          class="rail-resizer"
-          role="separator"
-          aria-orientation="vertical"
-          aria-label="Resize sources"
-          title="Drag to resize · double-click to reset"
-          tabindex="0"
-        ></div>
-      </nav>
-      <nav id="tabRail" class="source-rail tab-rail" aria-labelledby="tabRailTitle" hidden>
-        <div class="rail-header">
-          <span id="tabRailTitle" class="rail-title"></span>
-          <button
-            id="tabRailToggle"
-            class="icon-button rail-icon rail-toggle"
-            type="button"
-            aria-expanded="true"
-            aria-controls="tabRailList"
-            title="Collapse filters"
-            aria-label="Collapse filters"
-          >
-            <svg
-              aria-hidden="true"
-              viewBox="0 0 16 16"
-              width="14"
-              height="14"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="1.4"
-              stroke-linecap="round"
-              stroke-linejoin="round"
-            >
-              <path d="M8 4 4 8l4 4M12.5 4l-4 4 4 4" />
-            </svg>
-          </button>
-        </div>
-        <div id="tabRailList" class="rail-list"></div>
-        <div
-          id="tabRailResizer"
-          class="rail-resizer"
-          role="separator"
-          aria-orientation="vertical"
-          aria-label="Resize sources"
-          title="Drag to resize · double-click to reset"
-          tabindex="0"
-        ></div>
-      </nav>
-      <div class="workspace-main">
         <div class="search-toolbar" role="group" aria-label="Search and filter logs">
           <div class="popover-container search-group">
             <div id="searchEditor" class="search-editor">
@@ -754,6 +469,350 @@
             </div>
           </div>
         </div>
+        <div class="view-bar-actions">
+          <button id="updateButton" class="update-button" type="button" hidden>Update</button>
+          <div id="shareSplit" class="share-split popover-container">
+            <button
+              id="shareAgent"
+              type="button"
+              aria-pressed="false"
+              title="Share existing and new captured logs in this window until stopped"
+            >
+              <svg
+                class="tb-icon"
+                aria-hidden="true"
+                viewBox="0 0 16 16"
+                width="14"
+                height="14"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.4"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              >
+                <path d="M8 2l1.4 4.6L14 8l-4.6 1.4L8 14l-1.4-4.6L2 8l4.6-1.4z" /></svg
+              ><span class="button-label">Share with agent</span>
+            </button>
+            <button
+              id="shareMenuButton"
+              class="share-chevron"
+              type="button"
+              aria-haspopup="dialog"
+              aria-expanded="false"
+              aria-controls="sharePanel"
+              aria-label="Sharing scope, agents, and production access"
+              title="What agents can read, which agents are connected, and production access"
+            >
+              <svg
+                aria-hidden="true"
+                viewBox="0 0 16 16"
+                width="12"
+                height="12"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.5"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              >
+                <path d="M4 6l4 4 4-4" />
+              </svg>
+            </button>
+            <div id="sharePanel" class="popover share-panel" role="dialog" aria-labelledby="sharePanelTitle" hidden>
+              <div class="share-panel-header">
+                <h3 id="sharePanelTitle">Share with agents</h3>
+                <span id="shareState" class="share-state">Off</span>
+              </div>
+              <section class="share-section" aria-labelledby="shareScopeTitle">
+                <h4 id="shareScopeTitle">What agents can read</h4>
+                <label class="share-choice"
+                  ><input id="shareScopeAll" type="radio" name="shareScope" value="all" checked /><span
+                    ><span>Everything captured in this window</span
+                    ><span class="share-hint">Existing and new logs, until you stop sharing</span></span
+                  ></label
+                >
+                <label class="share-choice"
+                  ><input id="shareScopeRuns" type="radio" name="shareScope" value="runs" /><span
+                    ><span>Specific runs</span
+                    ><span id="shareRunsHint" class="share-hint">Choose runs; later commands stay private</span></span
+                  ></label
+                >
+                <button id="shareSpecificRuns" class="share-choose" type="button" hidden>Choose runs…</button>
+                <p class="share-note">Read-only and always redacted. Agents cannot run or stop commands.</p>
+              </section>
+              <section class="share-section" aria-labelledby="shareAgentsTitle">
+                <h4 id="shareAgentsTitle">Agents</h4>
+                <div id="shareAgentList" class="share-agent-list"></div>
+              </section>
+              <section id="shareProduction" class="share-section" aria-labelledby="shareProductionTitle" hidden>
+                <h4 id="shareProductionTitle">Production access</h4>
+                <div id="shareConnectionList" class="share-connection-list"></div>
+                <p class="share-note">Allowed agents fetch up to 24 hours at a time, at most 10 times a minute.</p>
+              </section>
+              <div class="share-footer">
+                <button id="statusAction" class="link-button" type="button">Status and troubleshooting…</button>
+                <button id="shareToggle" class="share-toggle" type="button">Start sharing</button>
+              </div>
+            </div>
+          </div>
+          <div class="popover-container">
+            <button
+              id="moreActions"
+              class="more-actions"
+              type="button"
+              aria-label="More actions"
+              title="More actions"
+              aria-haspopup="menu"
+              aria-expanded="false"
+              aria-controls="actionsMenu"
+            >
+              <span aria-hidden="true">⋯</span>
+            </button>
+            <div id="actionsMenu" class="popover actions-menu" role="menu" aria-labelledby="moreActions" hidden>
+              <button
+                id="copyResults"
+                type="button"
+                role="menuitem"
+                tabindex="-1"
+                hidden
+                title="Copy up to 1,000 filtered log rows as JSON Lines"
+              >
+                Copy filtered results
+              </button>
+              <button
+                id="export"
+                type="button"
+                role="menuitem"
+                tabindex="-1"
+                title="Export filtered logs as JSON Lines, JSON, CSV, or AI context (Markdown)"
+              >
+                Export logs…
+              </button>
+              <div class="menu-separator" role="separator"></div>
+              <button
+                id="breakOnLogs"
+                type="button"
+                role="menuitem"
+                tabindex="-1"
+                title="Pause debug sessions when they log an event matching the current filter"
+              >
+                Break on matching logs
+              </button>
+              <button id="manage" type="button" role="menuitem" tabindex="-1">Manage servers…</button>
+              <div class="menu-separator" role="separator"></div>
+              <button id="config" type="button" role="menuitem" tabindex="-1">Settings</button>
+              <button
+                id="help"
+                type="button"
+                role="menuitem"
+                tabindex="-1"
+                aria-label="Open the Logline Guide"
+                title="Open the Logline Guide"
+              >
+                <span id="helpLabel">Help</span><span id="helpBadge" class="new-badge" hidden>New</span>
+              </button>
+              <button id="takeTour" type="button" role="menuitem" tabindex="-1">Take the tour</button>
+              <button
+                id="suggestFeature"
+                type="button"
+                role="menuitem"
+                tabindex="-1"
+                title="Suggest a feature, or vote on what Logline should do next"
+              >
+                Send feedback…
+              </button>
+              <div class="menu-separator" role="separator"></div>
+              <button
+                id="clear"
+                class="menu-danger"
+                type="button"
+                role="menuitem"
+                tabindex="-1"
+                title="Remove every retained log and span. Capture keeps running."
+              >
+                Clear logs
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </header>
+    <div class="workspace">
+      <nav id="sourceRail" class="source-rail" aria-label="Sources">
+        <div class="rail-header">
+          <span class="rail-title">Sources</span>
+          <div class="popover-container rail-add">
+            <button
+              id="railAdd"
+              class="icon-button rail-icon"
+              type="button"
+              aria-haspopup="menu"
+              aria-expanded="false"
+              aria-controls="railAddMenu"
+              title="Add logs: run a command, follow a file, open a browser, import, or connect"
+              aria-label="Add logs"
+            >
+              <svg
+                aria-hidden="true"
+                viewBox="0 0 16 16"
+                width="14"
+                height="14"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.4"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              >
+                <path d="M8 3v10M3 8h10" />
+              </svg>
+            </button>
+            <div id="railAddMenu" class="popover actions-menu" role="menu" aria-labelledby="railAdd" hidden>
+              <button
+                id="railAddRun"
+                type="button"
+                role="menuitem"
+                tabindex="-1"
+                title="Run a command and capture its output"
+              >
+                Run a command…
+              </button>
+              <button
+                id="railAddFile"
+                type="button"
+                role="menuitem"
+                tabindex="-1"
+                title="Follow a log file as it grows"
+              >
+                Follow a log file…
+              </button>
+              <button
+                id="openBrowser"
+                type="button"
+                role="menuitem"
+                tabindex="-1"
+                title="Open your app in a browser whose console, errors, and requests appear here"
+              >
+                Open a browser…
+              </button>
+              <button id="import" type="button" role="menuitem" tabindex="-1" title="Import a file of logs">
+                Import logs…
+              </button>
+              <div class="menu-separator" role="separator"></div>
+              <button
+                id="railAddConnectionItem"
+                type="button"
+                role="menuitem"
+                tabindex="-1"
+                title="Search Datadog, CloudWatch, Loki, Elasticsearch, Cloud Logging, or a database"
+              >
+                Add a connection…
+              </button>
+              <button
+                id="railAddOtlp"
+                type="button"
+                role="menuitem"
+                tabindex="-1"
+                title="Receive OpenTelemetry logs, traces, and metrics from instrumented apps on this machine"
+              >
+                Receive OpenTelemetry
+              </button>
+            </div>
+          </div>
+          <button
+            id="railStopAll"
+            class="icon-button rail-icon"
+            type="button"
+            hidden
+            title="Stop every command Logline started, and every tail"
+            aria-label="Stop all"
+          >
+            <svg
+              aria-hidden="true"
+              viewBox="0 0 16 16"
+              width="14"
+              height="14"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.4"
+              stroke-linecap="round"
+            >
+              <rect x="2.5" y="4.5" width="7" height="7" rx="1" />
+              <path d="M11.5 6.5v5.5a1.5 1.5 0 0 1-1.5 1.5H5" />
+            </svg>
+          </button>
+          <button
+            id="railToggle"
+            class="icon-button rail-icon rail-toggle"
+            type="button"
+            aria-expanded="true"
+            aria-controls="railList"
+            title="Collapse sources"
+            aria-label="Collapse sources"
+          >
+            <svg
+              aria-hidden="true"
+              viewBox="0 0 16 16"
+              width="14"
+              height="14"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.4"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            >
+              <path d="M8 4 4 8l4 4M12.5 4l-4 4 4 4" />
+            </svg>
+          </button>
+        </div>
+        <div id="railList" class="rail-list"></div>
+        <div
+          id="railResizer"
+          class="rail-resizer"
+          role="separator"
+          aria-orientation="vertical"
+          aria-label="Resize sources"
+          title="Drag to resize · double-click to reset"
+          tabindex="0"
+        ></div>
+      </nav>
+      <nav id="tabRail" class="source-rail tab-rail" aria-labelledby="tabRailTitle" hidden>
+        <div class="rail-header">
+          <span id="tabRailTitle" class="rail-title"></span>
+          <button
+            id="tabRailToggle"
+            class="icon-button rail-icon rail-toggle"
+            type="button"
+            aria-expanded="true"
+            aria-controls="tabRailList"
+            title="Collapse filters"
+            aria-label="Collapse filters"
+          >
+            <svg
+              aria-hidden="true"
+              viewBox="0 0 16 16"
+              width="14"
+              height="14"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.4"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            >
+              <path d="M8 4 4 8l4 4M12.5 4l-4 4 4 4" />
+            </svg>
+          </button>
+        </div>
+        <div id="tabRailList" class="rail-list"></div>
+        <div
+          id="tabRailResizer"
+          class="rail-resizer"
+          role="separator"
+          aria-orientation="vertical"
+          aria-label="Resize sources"
+          title="Drag to resize · double-click to reset"
+          tabindex="0"
+        ></div>
+      </nav>
+      <div class="workspace-main">
         <div id="connectionBar" class="connection-bar" role="group" aria-label="Search connection" hidden>
           <div class="connection-controls">
             <label class="connection-range"
@@ -823,8 +882,13 @@
           <code id="connectionPreview" class="connection-note connection-preview"></code>
         </div>
         <p id="rowHint" class="detail-hint table-hint" hidden>
-          Click an event to see its details and actions. Hover a row for quick actions, and hover any icon to see what
-          it does.<button id="rowHintDismiss" class="dismiss-hint" type="button">Got it</button>
+          Click an event to see its details and actions beside the list.<button
+            id="rowHintDismiss"
+            class="dismiss-hint"
+            type="button"
+          >
+            Got it
+          </button>
         </p>
         <main class="views">
           <section id="logsView" class="view-panel logs-view" role="tabpanel" aria-labelledby="logsTab">
@@ -1183,6 +1247,23 @@
         <span id="status" class="status-notice" role="status" aria-live="polite" hidden>Ready</span>
       </div>
       <div class="status-right">
+        <button id="issuesChip" class="status-chip issues-chip" type="button" hidden>
+          <svg
+            class="tb-icon"
+            aria-hidden="true"
+            viewBox="0 0 16 16"
+            width="13"
+            height="13"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.3"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          >
+            <path d="M8 2.5 14.5 13.5h-13zM8 6.5v3" />
+            <circle cx="8" cy="11.6" r=".4" fill="currentColor" /></svg
+          ><span id="doctorCount" class="button-label"></span>
+        </button>
         <button id="shareScope" class="status-chip share-chip" type="button" hidden></button>
         <button
           id="captureToggle"
@@ -1209,47 +1290,66 @@
         <button id="otlpStatus" class="status-chip otlp-chip" type="button" aria-pressed="false">
           OpenTelemetry off
         </button>
-        <div class="popover-container memory-control">
+        <button id="counts" class="status-chip memory-chip" type="button" hidden>
+          <span class="memory-meter" aria-hidden="true"><span id="memoryFill" class="memory-fill"></span></span
+          ><span id="memoryText"></span>
+        </button>
+        <div class="popover-container status-control">
           <button
-            id="counts"
-            class="status-chip memory-chip"
+            id="statusIcon"
+            class="status-chip status-icon"
             type="button"
+            aria-label="Status"
             aria-haspopup="dialog"
             aria-expanded="false"
-            aria-controls="memoryPanel"
+            aria-controls="statusPanel"
+            title="Status: terminal capture, the OpenTelemetry receiver, agents, and memory"
           >
-            <span class="memory-meter" aria-hidden="true"><span id="memoryFill" class="memory-fill"></span></span
-            ><span id="memoryText"></span>
+            <svg
+              aria-hidden="true"
+              viewBox="0 0 16 16"
+              width="13"
+              height="13"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.4"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            >
+              <circle cx="8" cy="8" r="5.5" />
+              <path d="M5.8 8.2l1.6 1.6 3-3.2" />
+            </svg>
           </button>
-          <div id="memoryPanel" class="popover memory-panel" role="dialog" aria-labelledby="memoryTitle" hidden>
-            <h3 id="memoryTitle">Kept in memory</h3>
-            <p id="memorySummary" class="memory-summary"></p>
-            <dl id="memoryDetails" class="memory-details"></dl>
-            <button id="memorySettings" class="link-button" type="button">Change limits in Settings</button>
+          <div id="statusPanel" class="popover status-panel" role="dialog" aria-labelledby="statusTitle" hidden>
+            <h3 id="statusTitle">Status</h3>
+            <div class="status-row">
+              <div><strong>Terminal capture</strong><span id="statusCaptureText" class="status-row-detail"></span></div>
+              <button id="statusCapture" type="button"></button>
+            </div>
+            <div class="status-row">
+              <div>
+                <strong>OpenTelemetry receiver</strong><span id="statusOtlpText" class="status-row-detail"></span>
+              </div>
+              <button id="statusOtlp" type="button"></button>
+            </div>
+            <div class="status-row">
+              <div><strong>Agents</strong><span id="statusAgentsText" class="status-row-detail"></span></div>
+              <button id="statusAgents" type="button">Manage</button>
+            </div>
+            <div id="statusIssuesRow" class="status-row" hidden>
+              <div><strong>Log issues</strong><span id="statusIssuesText" class="status-row-detail"></span></div>
+              <button id="statusIssues" type="button">Open</button>
+            </div>
+            <div class="status-row status-memory">
+              <div>
+                <strong>Memory</strong><span id="memorySummary" class="status-row-detail"></span>
+                <dl id="memoryDetails" class="memory-details"></dl>
+              </div>
+              <button id="memorySettings" type="button">Limits</button>
+            </div>
+            <button id="statusTroubleshoot" class="link-button" type="button">Troubleshooting…</button>
           </div>
         </div>
-        <button
-          id="statusIcon"
-          class="status-chip status-icon"
-          type="button"
-          aria-label="Status and troubleshooting"
-          title="Status and troubleshooting: the receiver, agent connections, sharing, and capture"
-        >
-          <svg
-            aria-hidden="true"
-            viewBox="0 0 16 16"
-            width="13"
-            height="13"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="1.4"
-            stroke-linecap="round"
-            stroke-linejoin="round"
-          >
-            <circle cx="8" cy="8" r="5.5" />
-            <path d="M5.8 8.2l1.6 1.6 3-3.2" />
-          </svg>
-        </button>
       </div>
     </footer>
     <dialog id="contextDialog" aria-labelledby="contextTitle">

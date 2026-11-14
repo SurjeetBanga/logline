@@ -260,6 +260,7 @@ test('Connect names only a known agent, and Settings opens only a Logline settin
     assert.deepEqual(parseViewRequest({ type: 'emptyAction', action }), { type: 'emptyAction', action });
   assert.equal(parseViewRequest({ type: 'emptyAction', action: 'rm' }), undefined);
   assert.deepEqual(parseViewRequest({ type: 'openBrowser', url: 'ignored' }), { type: 'openBrowser' });
+  assert.deepEqual(parseViewRequest({ type: 'followFile', path: 'ignored' }), { type: 'followFile' });
 });
 
 test('removing a source names it, and removing a connection names the connection', () => {

@@ -160,8 +160,6 @@ export function createAiCalls(
    */
   function update(calls: Snapshot['aiCalls'], receiverRunning = false) {
     elements.aiCalls.hidden = !calls && !receiverRunning;
-    elements.aiCallCount.hidden = !calls;
-    elements.aiCallCount.textContent = calls ? whole.format(calls.calls) : '';
     elements.aiCalls.title = calls
       ? `${whole.format(calls.calls)} LLM calls, tool executions, and agent runs from OpenTelemetry. Show their models, tokens, and conversations.`
       : 'LLM calls, tool executions, and agent runs from apps that send OpenTelemetry GenAI spans.';

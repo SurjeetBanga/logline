@@ -111,7 +111,7 @@ export type ViewRequest =
   | { type: 'connectionAgents'; connectionId: string; enabled: boolean }
   | ({ type: 'compare' } & CompareRequest)
   | { type: 'config'; setting?: string }
-  | { type: 'import' | 'clear' | 'manageServers' | 'addConnection' | 'openBrowser' }
+  | { type: 'import' | 'clear' | 'manageServers' | 'addConnection' | 'openBrowser' | 'followFile' }
   /** Suggest a feature or vote on what's next, from the More actions menu. */
   | { type: 'suggestFeature' | 'voteOnNext' }
   /** What the feedback form submitted. */
@@ -603,6 +603,7 @@ export function parseViewRequest(value: unknown): ViewRequest | undefined {
     case 'manageServers':
     case 'addConnection':
     case 'openBrowser':
+    case 'followFile':
     case 'suggestFeature':
     case 'voteOnNext':
       return { type: msg.type };

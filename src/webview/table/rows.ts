@@ -29,7 +29,8 @@ export function createRows(
 ) {
   function buildRow(event: RowEvent) {
     const row = document.createElement('tr');
-    row.className = 'event-row';
+    // The level, for the mark at the row's edge.
+    row.className = /^[a-z]+$/.test(event.level) ? `event-row level-${event.level}` : 'event-row';
     row.dataset.id = String(event.id);
     const messageCell = cell('', 'message-cell');
     const messageContent = document.createElement('div');

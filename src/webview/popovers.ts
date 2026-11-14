@@ -41,7 +41,7 @@ export function createPopovers(scope: EventScope) {
           panel.classList.contains('saved-searches') ||
           panel.classList.contains('actions-menu') ||
           panel.classList.contains('share-panel') ||
-          panel.classList.contains('memory-panel')
+          panel.classList.contains('status-panel')
         ) {
           const trigger = button.getBoundingClientRect();
           const margin = 8;

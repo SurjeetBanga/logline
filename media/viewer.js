@@ -915,7 +915,6 @@
       updateButton: element("updateButton"),
       takeTour: element("takeTour"),
       suggestFeature: element("suggestFeature"),
-      voteOnNext: element("voteOnNext"),
       welcomeDialog: element("welcomeDialog"),
       welcomeTour: element("welcomeTour"),
       welcomeExplore: element("welcomeExplore"),
@@ -955,7 +954,24 @@
       pageNumber: element("pageNumber"),
       memoryFill: element("memoryFill"),
       memoryText: element("memoryText"),
-      memoryPanel: element("memoryPanel"),
+      statusPanel: element("statusPanel"),
+      statusCapture: element("statusCapture"),
+      statusCaptureText: element("statusCaptureText"),
+      statusOtlp: element("statusOtlp"),
+      statusOtlpText: element("statusOtlpText"),
+      statusAgents: element("statusAgents"),
+      statusAgentsText: element("statusAgentsText"),
+      statusIssuesRow: element("statusIssuesRow"),
+      statusIssues: element("statusIssues"),
+      statusIssuesText: element("statusIssuesText"),
+      statusTroubleshoot: element("statusTroubleshoot"),
+      issuesChip: element("issuesChip"),
+      railAdd: element("railAdd"),
+      railAddMenu: element("railAddMenu"),
+      railAddRun: element("railAddRun"),
+      railAddFile: element("railAddFile"),
+      railAddConnectionItem: element("railAddConnectionItem"),
+      railAddOtlp: element("railAddOtlp"),
       memorySummary: element("memorySummary"),
       memoryDetails: element("memoryDetails"),
       memorySettings: element("memorySettings"),
@@ -971,20 +987,17 @@
       traceView: element("traceView"),
       traceBack: element("traceBack"),
       traces: element("traces"),
-      traceCount: element("traceCount"),
       tracesView: element("tracesView"),
       tracesStatus: element("tracesStatus"),
       tracesRows: element("tracesRows"),
       tracesStartReceiver: element("tracesStartReceiver"),
       metrics: element("metrics"),
-      metricCount: element("metricCount"),
       metricsView: element("metricsView"),
       metricsFilter: element("metricsFilter"),
       metricsStatus: element("metricsStatus"),
       metricsCards: element("metricsCards"),
       metricDetail: element("metricDetail"),
       aiCalls: element("aiCalls"),
-      aiCallCount: element("aiCallCount"),
       aiCallsView: element("aiCallsView"),
       aiCallsStatus: element("aiCallsStatus"),
       aiCallsKind: element("aiCallsKind"),
@@ -1233,12 +1246,13 @@
     showEvents: "Filter the Logs panel to the events this statement logged",
     open: "Open the log statement in the editor"
   };
-  function createDoctor(button, count, panel, list, api, scope, hostActionTaken, showExample = () => void 0, showTrace = () => void 0) {
+  function createDoctor(button, count, panel, list, api, scope, hostActionTaken, showExample = () => void 0, showTrace = () => void 0, stateChanged = () => void 0) {
     let revision;
     let findings = [];
     const voted = /* @__PURE__ */ new Set();
     function receive(doctor) {
-      button.hidden = !doctor;
+      button.hidden = !doctor?.total;
+      stateChanged(Boolean(doctor), doctor?.total ?? 0);
       if (!doctor) {
         revision = void 0;
         return;
@@ -1250,7 +1264,7 @@
         findings = doctor.findings;
       }
       count.hidden = !total;
-      count.textContent = total.toLocaleString();
+      count.textContent = `${total.toLocaleString()} issue${total === 1 ? "" : "s"}`;
       const warnings = findings.filter((finding) => finding.severity === "warning").length;
       if (total) button.classList.remove("is-clear");
       else button.classList.add("is-clear");
@@ -2395,8 +2409,6 @@ Trace ${trace.traceId}`;
     }
     function update(summary2, receiverRunning = false) {
       elements.metrics.hidden = !summary2 && !receiverRunning;
-      elements.metricCount.hidden = !summary2;
-      elements.metricCount.textContent = summary2 ? summary2.series.toLocaleString() : "";
       elements.metrics.title = summary2 ? `${summary2.series.toLocaleString()} OpenTelemetry metric series. Show their latest values and trends.` : "Metrics from apps that send OpenTelemetry metrics to the receiver.";
       const changed = summary2?.revision !== revision;
       revision = summary2?.revision;
@@ -2677,8 +2689,6 @@ Trace ${trace.traceId}`;
     scope.listen(elements.aiCallNext, "click", () => step(1));
     function update(calls, receiverRunning = false) {
       elements.aiCalls.hidden = !calls && !receiverRunning;
-      elements.aiCallCount.hidden = !calls;
-      elements.aiCallCount.textContent = calls ? whole.format(calls.calls) : "";
       elements.aiCalls.title = calls ? `${whole.format(calls.calls)} LLM calls, tool executions, and agent runs from OpenTelemetry. Show their models, tokens, and conversations.` : "LLM calls, tool executions, and agent runs from apps that send OpenTelemetry GenAI spans.";
       const changed = calls?.revision !== revision;
       revision = calls?.revision;
@@ -2968,7 +2978,7 @@ Span ${call.spanId}`;
           panel.style.bottom = "";
           panel.style.maxHeight = "";
           panel.style.position = "";
-          if (panel.classList.contains("fields-panel") || panel.classList.contains("cheat-sheet") || panel.classList.contains("level-menu") || panel.classList.contains("saved-searches") || panel.classList.contains("actions-menu") || panel.classList.contains("share-panel") || panel.classList.contains("memory-panel")) {
+          if (panel.classList.contains("fields-panel") || panel.classList.contains("cheat-sheet") || panel.classList.contains("level-menu") || panel.classList.contains("saved-searches") || panel.classList.contains("actions-menu") || panel.classList.contains("share-panel") || panel.classList.contains("status-panel")) {
             const trigger = button.getBoundingClientRect();
             const margin2 = 8;
             const spaceBelow2 = window.innerHeight - trigger.bottom - margin2;
@@ -7685,7 +7695,7 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
     if (!columnElements.size) return;
     const defaults = { "base:time": 140, "base:level": 110, "base:source": 110 };
     const messageFloor = 300;
-    const messageMin = 140;
+    let messageMin = 140;
     const minWidth = 72;
     const floors = { "base:time": 124, "base:level": 80 };
     const floorFor = (key) => floors[key] ?? minWidth;
@@ -7698,16 +7708,24 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
     const sourceElement = columnElements.get("base:source");
     const collapseSource = Boolean(sourceElement) && available > 0 && fullOtherWidth + messageFloor > available;
     const collapsed = new Set(collapseSource ? ["base:source"] : []);
+    let needed = () => 0;
     if (available > 0) {
       const fields = displayedColumns.filter((column) => !column.key.startsWith("base:")).reverse();
-      const needed = () => displayedColumns.filter((column) => column.key !== "base:message" && !collapsed.has(column.key)).reduce((sum, column) => sum + (isExplicit(column.key) ? widthFor(column.key) : floorFor(column.key)), 0) + messageMin;
+      needed = () => displayedColumns.filter((column) => column.key !== "base:message" && !collapsed.has(column.key)).reduce((sum, column) => sum + (isExplicit(column.key) ? widthFor(column.key) : floorFor(column.key)), 0) + messageMin;
       for (const field of fields) {
         if (needed() <= available) break;
         collapsed.add(field.key);
       }
     }
+    const compact2 = available > 0 && columnElements.has("base:level") && !isExplicit("base:level") && needed() > available;
+    if (compact2) {
+      collapsed.add("base:level");
+      floors["base:time"] = 72;
+      messageMin = 120;
+    }
+    table.dataset.compact = String(compact2);
     for (const [key, element2] of columnElements)
-      if (key === "base:source" || !key.startsWith("base:"))
+      if (key === "base:source" || key === "base:level" || !key.startsWith("base:"))
         element2.style.visibility = collapsed.has(key) ? "collapse" : "";
     const columns = displayedColumns.filter((column) => !collapsed.has(column.key));
     const explicitWidth = columns.filter((column) => isExplicit(column.key)).reduce((sum, column) => sum + widthFor(column.key), 0);
@@ -7755,7 +7773,7 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
   function createRows(state, columns, formatTimestamp) {
     function buildRow(event) {
       const row = document.createElement("tr");
-      row.className = "event-row";
+      row.className = /^[a-z]+$/.test(event.level) ? `event-row level-${event.level}` : "event-row";
       row.dataset.id = String(event.id);
       const messageCell = cell("", "message-cell");
       const messageContent = document.createElement("div");
@@ -8775,8 +8793,10 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
       callVisible: () => views.active() === "aiCall",
       receiver: () => ({ running: otlpRunning, endpoint: otlpEndpoint })
     });
+    elements.doctor.hidden = true;
+    let doctorEnabled = false;
     const doctor = createDoctor(
-      elements.doctor,
+      elements.issuesChip,
       elements.doctorCount,
       elements.doctorView,
       elements.doctorList,
@@ -8787,7 +8807,13 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
         if (action === "showEvents") views.show("logs");
       },
       (id) => inspection.showContext(id),
-      (traceId) => traceView.show(traceId)
+      (traceId) => traceView.show(traceId),
+      (enabled, total) => {
+        doctorEnabled = enabled;
+        if (!enabled) elements.doctor.hidden = true;
+        elements.statusIssuesRow.hidden = !enabled;
+        elements.statusIssuesText.textContent = total ? `${numberFormat.format(total)} problem${total === 1 ? "" : "s"} with log statements` : "No problems found so far";
+      }
     );
     let otlpRunning = false;
     let changedFiles;
@@ -8972,6 +8998,10 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
       otlpRunning = data.otlp?.running === true;
       otlpEndpoint = data.otlp?.endpoint;
       if (otlpRunning !== receiverWasRunning) traceList.receiverChanged();
+      elements.otlpStatus.hidden = !otlpRunning && !data.otlp?.error;
+      elements.statusOtlpText.textContent = otlpRunning ? `On \xB7 ${data.otlp?.endpoint?.replace(/^https?:\/\//, "") ?? "localhost"}${data.otlp?.error ? ` \xB7 ${data.otlp.error}` : ""}` : data.otlp?.error ?? "Off";
+      elements.statusOtlp.textContent = otlpRunning ? "Stop" : "Start";
+      elements.railAddOtlp.hidden = otlpRunning;
       elements.otlpStatus.setAttribute("aria-pressed", String(otlpRunning));
       elements.otlpStatus.textContent = otlpRunning ? `OpenTelemetry ${data.otlp?.endpoint?.replace(/^https?:\/\//, "") ?? ""}`.trim() : "OpenTelemetry off";
       elements.otlpStatus.title = otlpRunning ? `Receiving OpenTelemetry logs, traces, and metrics on ${data.otlp?.endpoint ?? "localhost"}${data.otlp?.error ? ` (${data.otlp.error})` : ""}. Click to stop the receiver.` : "Receive OpenTelemetry logs, traces, and metrics from instrumented apps on this machine. Click to start the receiver.";
@@ -8983,8 +9013,6 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
       metricList.setConnections(data.connections);
       aiCalls.update(data.aiCalls, otlpRunning);
       views.ensureVisible();
-      elements.traceCount.hidden = !data.traceCount;
-      elements.traceCount.textContent = data.traceCount ? numberFormat.format(data.traceCount) : "";
       elements.traces.title = data.traceCount ? `${numberFormat.format(data.traceCount)} traces received from OpenTelemetry. Show requests across services.` : "Requests across services, from OpenTelemetry spans and logs with a trace id";
       if (data.generation < minimumSnapshotGeneration) {
         bridge.flush();
@@ -9025,6 +9053,8 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
         data.captureStatus?.state === "capturing" ? "Capturing\u2026" : data.captureStatus?.state === "attention" ? "Capture needs attention" : data.captureTerminals ? "Capture on" : "Capture off"
       );
       elements.captureToggle.setAttribute("aria-pressed", String(data.captureTerminals));
+      elements.statusCaptureText.textContent = data.captureStatus?.state === "capturing" ? "Capturing\u2026" : data.captureStatus?.state === "attention" ? "Needs attention" : data.captureTerminals ? "On" : "Off";
+      elements.statusCapture.textContent = data.captureTerminals ? "Turn off" : "Turn on";
       elements.captureToggle.title = data.captureStatus?.detail || (data.captureTerminals ? "Terminal capture is on. Click to turn it off." : "Terminal capture is off. Click to turn it on.");
       const sharing = data.agentSharing?.active;
       sharePanel.update(data);
@@ -9037,6 +9067,7 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
       const readers = sharing && data.agentClients?.length ? ` \xB7 read by ${data.agentClients.join(", ")}` : "";
       elements.shareScope.textContent = (sharingAll ? "Sharing all runs" : sharing ? `Sharing ${sharedRuns} run${sharedRuns === 1 ? "" : "s"}` : "") + readers;
       elements.shareScope.title = sharingAll ? "Agents can read existing and new runs in this window, redacted, until you stop sharing." : sharing ? `Agents can read ${sharedRuns} selected run${sharedRuns === 1 ? "" : "s"} in this window, redacted, until you stop sharing. Later commands are not included.` : "";
+      elements.statusAgentsText.textContent = sharing ? elements.shareScope.textContent : "Not sharing";
       let selectionChanged = false;
       if (data.servers) {
         visibleSources = data.servers;
@@ -9053,7 +9084,7 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
       if (restoreTab) {
         const tab = restoreTab;
         restoreTab = void 0;
-        if (views.available(tab)) openView(tab);
+        if (tab === "doctor" ? doctorEnabled : views.available(tab)) openView(tab);
       }
       if (data.openCompare) compareView.open(data.openCompare);
       if (data.sessions) {
@@ -9094,8 +9125,10 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
         state.page = data.page ?? 0;
         state.pages = data.pages ?? 1;
         const matched = data.matched ?? 0;
-        elements.page.textContent = matched ? `${number2(matched)} match${matched === 1 ? "" : "es"}` : "No matches";
+        elements.page.textContent = matched ? `${number2(matched)} match${matched === 1 ? "" : "es"}` : data.total ? "No matches" : "No logs yet";
         elements.pageNumber.textContent = `${state.page + 1} / ${state.pages}`;
+        if (elements.pageNumber.parentElement) elements.pageNumber.parentElement.hidden = state.pages <= 1;
+        if (document.body) document.body.dataset.empty = String(!data.total);
         elements.older.disabled = state.page >= state.pages - 1;
         elements.newer.disabled = state.page === 0;
         if (rows !== table.events || state.lastRows === void 0) {
@@ -9318,49 +9351,23 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
       elements.rowHint.hidden = true;
     }
     function toggleExpand(id) {
+      dismissRowHint();
       table.toggleExpand(id);
     }
     const actionsMenu = createPopover(actionsContainer, elements.moreActions, elements.actionsMenu);
     const actionItems = [
       elements.copyResults,
       elements.export,
-      elements.import,
-      elements.openBrowser,
-      elements.clear,
       elements.breakOnLogs,
       elements.manage,
       elements.config,
       elements.help,
       elements.takeTour,
       elements.suggestFeature,
-      elements.voteOnNext
+      elements.clear
     ];
     const shownActions = () => actionItems.filter((item) => !item.hidden);
-    scope.listen(elements.moreActions, "click", () => {
-      if (actionsMenu.isOpen()) shownActions()[0].focus();
-    });
-    scope.listen(elements.moreActions, "keydown", (event) => {
-      if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
-      event.preventDefault();
-      actionsMenu.open();
-      const items = shownActions();
-      items[event.key === "ArrowUp" ? items.length - 1 : 0].focus();
-    });
-    scope.listen(elements.actionsMenu, "keydown", (event) => {
-      if (event.key === "Tab") {
-        actionsMenu.close(true);
-        return;
-      }
-      const items = shownActions();
-      const index = items.indexOf(document.activeElement);
-      const next = event.key === "Home" ? 0 : event.key === "End" ? items.length - 1 : event.key === "ArrowDown" ? (index + 1) % items.length : event.key === "ArrowUp" ? (index - 1 + items.length) % items.length : void 0;
-      if (next === void 0) return;
-      event.preventDefault();
-      items[next].focus();
-    });
-    scope.listen(actionsContainer, "focusout", (event) => {
-      if (!actionsContainer.contains(event.relatedTarget)) actionsMenu.close();
-    });
+    menuKeys(actionsContainer, elements.moreActions, elements.actionsMenu, actionsMenu, shownActions);
     for (const item of actionItems) scope.listen(item, "click", () => actionsMenu.close(true));
     scope.listen(elements.copyResults, "click", () => {
       if (!hasActiveFilter()) return;
@@ -9380,7 +9387,37 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
       event.stopPropagation();
       sharePanel.open();
     });
-    scope.listen(elements.statusIcon, "click", () => api.postMessage({ type: "showStatus" }));
+    const statusPanel = createPopover(
+      elements.statusIcon.closest(".popover-container"),
+      elements.statusIcon,
+      elements.statusPanel
+    );
+    scope.listen(elements.counts, "click", (event) => {
+      event.stopPropagation();
+      statusPanel.open();
+    });
+    scope.listen(
+      elements.statusCapture,
+      "click",
+      () => api.postMessage({
+        type: "toggleTerminalCapture",
+        enabled: elements.captureToggle.getAttribute("aria-pressed") !== "true"
+      })
+    );
+    scope.listen(elements.statusOtlp, "click", () => api.postMessage({ type: "toggleOtlp", enabled: !otlpRunning }));
+    scope.listen(elements.statusAgents, "click", (event) => {
+      event.stopPropagation();
+      sharePanel.open();
+    });
+    scope.listen(elements.statusIssues, "click", () => {
+      statusPanel.close();
+      openIssues();
+    });
+    scope.listen(elements.issuesChip, "click", () => openIssues());
+    scope.listen(elements.statusTroubleshoot, "click", () => {
+      statusPanel.close();
+      api.postMessage({ type: "showStatus" });
+    });
     const feedback = createFeedbackForm(
       {
         dialog: elements.feedbackDialog,
@@ -9483,7 +9520,6 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
     }
     if (globalThis.innerWidth > 0) api.postMessage({ type: "panelSize", width: globalThis.innerWidth });
     scope.listen(elements.updateButton, "click", () => api.postMessage({ type: "installUpdate" }));
-    createPopover(elements.counts.closest(".popover-container"), elements.counts, elements.memoryPanel);
     scope.listen(
       elements.memorySettings,
       "click",
@@ -9529,7 +9565,13 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
       else if (tab === "metrics") metricList.show();
       else if (tab === "compare") compareView.show();
       else if (tab === "aiCalls") aiCalls.show();
+      else if (tab === "doctor") openIssues();
       else views.show(tab);
+    }
+    function openIssues() {
+      if (!doctorEnabled) return;
+      elements.doctor.hidden = false;
+      views.show("doctor");
     }
     function viewChanged(view, previous) {
       restoreTab = void 0;
@@ -9538,6 +9580,7 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
       if (previous === "compare") compareView.hide();
       if (previous === "aiCalls") aiCalls.hide();
       if (previous === "aiCall") aiCalls.close();
+      if (previous === "doctor") elements.doctor.hidden = true;
       state.view = tabOf(view);
       tabRail.show(tabOf(view));
       saveState();
@@ -9611,7 +9654,28 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
     scope.listen(elements.import, "click", () => api.postMessage({ type: "import" }));
     scope.listen(elements.openBrowser, "click", () => api.postMessage({ type: "openBrowser" }));
     scope.listen(elements.suggestFeature, "click", () => api.postMessage({ type: "suggestFeature" }));
-    scope.listen(elements.voteOnNext, "click", () => api.postMessage({ type: "voteOnNext" }));
+    const addContainer = elements.railAdd.closest(".popover-container");
+    const addMenu = createPopover(addContainer, elements.railAdd, elements.railAddMenu);
+    const addItems = [
+      elements.railAddRun,
+      elements.railAddFile,
+      elements.openBrowser,
+      elements.import,
+      elements.railAddConnectionItem,
+      elements.railAddOtlp
+    ];
+    menuKeys(
+      addContainer,
+      elements.railAdd,
+      elements.railAddMenu,
+      addMenu,
+      () => addItems.filter((item) => !item.hidden)
+    );
+    for (const item of addItems) scope.listen(item, "click", () => addMenu.close(true));
+    scope.listen(elements.railAddRun, "click", () => api.postMessage({ type: "run" }));
+    scope.listen(elements.railAddFile, "click", () => api.postMessage({ type: "followFile" }));
+    scope.listen(elements.railAddConnectionItem, "click", () => api.postMessage({ type: "addConnection" }));
+    scope.listen(elements.railAddOtlp, "click", () => api.postMessage({ type: "toggleOtlp", enabled: true }));
     scope.listen(
       elements.breakOnLogs,
       "click",
@@ -9647,6 +9711,33 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
         window.removeEventListener("message", onMessage);
       }
     };
+    function menuKeys(container, trigger, menu, popover, shownItems) {
+      scope.listen(trigger, "click", () => {
+        if (popover.isOpen()) shownItems()[0].focus();
+      });
+      scope.listen(trigger, "keydown", (event) => {
+        if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
+        event.preventDefault();
+        popover.open();
+        const items = shownItems();
+        items[event.key === "ArrowUp" ? items.length - 1 : 0].focus();
+      });
+      scope.listen(menu, "keydown", (event) => {
+        if (event.key === "Tab") {
+          popover.close(true);
+          return;
+        }
+        const items = shownItems();
+        const index = items.indexOf(document.activeElement);
+        const next = event.key === "Home" ? 0 : event.key === "End" ? items.length - 1 : event.key === "ArrowDown" ? (index + 1) % items.length : event.key === "ArrowUp" ? (index - 1 + items.length) % items.length : void 0;
+        if (next === void 0) return;
+        event.preventDefault();
+        items[next].focus();
+      });
+      scope.listen(container, "focusout", (event) => {
+        if (!container.contains(event.relatedTarget)) popover.close();
+      });
+    }
     function tabForPanel(id) {
       const tabs = {
         logsView: "logs",
@@ -9668,13 +9759,15 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
     }
     function bringIntoView(element2) {
       if (elements.actionsMenu.contains(element2)) actionsMenu.open();
+      else if (elements.railAddMenu.contains(element2)) addMenu.open();
+      else if (elements.statusPanel.contains(element2)) statusPanel.open();
       else if (elements.sharePanel.contains(element2)) sharePanel.open();
       const panel = element2.closest(".view-panel");
       if (panel?.classList.contains("view-panel")) {
         const tab = tabForPanel(panel.id);
         if (!tab || !views.available(tab)) return false;
         if (tabOf(views.active()) !== tab) openView(tab);
-      } else if ((elements.sourceRail.contains(element2) || element2.closest(".workspace-main")) && views.active() !== "logs" && views.active() !== "analysis")
+      } else if ((elements.sourceRail.contains(element2) || element2.closest(".workspace-main") || element2.closest(".search-toolbar")) && views.active() !== "logs" && views.active() !== "analysis")
         views.show("logs");
       return shown2(element2);
     }
@@ -9697,6 +9790,7 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
       elements.memoryFill.classList[share >= 0.9 ? "add" : "remove"]("full");
       const memory = `${used.toFixed(used < 10 ? 1 : 0)} / ${budget ? budget.toFixed(0) : "?"} MiB`;
       elements.memoryText.textContent = memory;
+      elements.counts.hidden = share < 0.8;
       elements.counts.title = `${number2(data.retained)} logs kept, using ${memory}. Click for details.`;
       elements.memorySummary.textContent = `${memory} of memory for ${number2(data.retained)} logs. The oldest go first when it fills.`;
       const rows = [

@@ -432,7 +432,7 @@ body {
   font: 13px/1.5 var(--vscode-font-family, system-ui);
 }
 header {
-  padding: 4px 14px 6px;
+  padding: 4px 14px 0;
   flex: none;
 }
 /* The divider under the tabs spans the panel, so it meets the rails' edge and the table's. */
@@ -548,9 +548,9 @@ body > header {
   min-width: 0;
   min-height: 0;
 }
-.workspace-main > .search-toolbar,
 .workspace-main > .connection-bar,
 .workspace-main > .table-hint {
+  margin-top: 6px;
   /* In line with the tabs above and the table's first column below. */
   margin-left: 14px;
   margin-right: 14px;
@@ -577,9 +577,6 @@ body > header {
   min-width: 0;
   min-height: 0;
   overflow: hidden;
-  /* Up through the header's bottom padding, so its edge meets the divider under the tabs. */
-  margin-top: -6px;
-  padding-top: 6px;
   border-right: 1px solid var(--vscode-panel-border, #444);
 }
 .rail-header {
@@ -863,6 +860,7 @@ body > header {
 }
 .source-rail.collapsed .rail-title,
 .source-rail.collapsed #railStopAll,
+.source-rail.collapsed .rail-add,
 .source-rail.collapsed .rail-group-label,
 .source-rail.collapsed .rail-text,
 .source-rail.collapsed .rail-meta,
@@ -1023,6 +1021,10 @@ body:not([data-view='compare']):not([data-view='traces']):not([data-view='metric
   background: transparent;
   color: var(--vscode-menu-foreground, var(--vscode-foreground, #d4d4d4));
 }
+/* Clear logs cannot be undone, so it sits apart, in the error color. */
+.actions-menu .menu-danger {
+  color: var(--vscode-errorForeground, #f48771);
+}
 .menu-separator {
   margin: 4px 6px;
   border-top: 1px solid var(--vscode-menu-separatorBackground, var(--vscode-panel-border, #444));
@@ -1053,10 +1055,17 @@ body:not([data-view='compare']):not([data-view='traces']):not([data-view='metric
   overflow-x: auto;
   scrollbar-width: thin;
   overscroll-behavior-x: contain;
-  /* Each row above the views (toolbar, connection bar, hint) keeps 8px below it and none above,
-     so the table never meets the search box, whichever rows are showing. The 3px above, with the
-     header's padding, matches the gap below. */
-  margin: 3px 0 8px;
+  /* Between the tabs and the actions: the search box takes the room the two leave. */
+  flex: 1 1 320px;
+  margin: 3px 0;
+}
+/* A panel too narrow for tabs, search, and actions in one row gives the search a row of its own. */
+@media (max-width: 1099.98px) {
+  .view-bar > .search-toolbar {
+    order: 3;
+    flex: 1 0 100%;
+    margin: 0 0 6px;
+  }
 }
 .search-toolbar > .popover-container:not(.search-group),
 .search-toolbar > button {
@@ -2460,7 +2469,7 @@ button:disabled {
   min-height: 60px;
   overflow: auto;
   overflow-anchor: none;
-  border-block: 1px solid var(--vscode-panel-border, #444);
+  border-bottom: 1px solid var(--vscode-panel-border, #444);
 }
 /* Each tab's view fills the space between the toolbar and the status bar. */
 .views {
@@ -2545,7 +2554,7 @@ body[data-view='connection'] .table-hint {
 }
 table {
   width: 100%;
-  min-width: 380px;
+  min-width: 200px;
   border-collapse: collapse;
   table-layout: fixed;
 }
@@ -2655,10 +2664,25 @@ th:hover .remove-column,
     opacity: 1;
   }
 }
+/* Rows are as tall as the editor's own lists, with no rule between them: more events fit, and the eye
+   follows the level colors down the table. */
 th,
 td {
-  padding: 5px 14px;
+  padding: 1px 14px;
+}
+th {
   border-bottom: 1px solid var(--vscode-panel-border, #333);
+}
+/* A narrow panel gives the columns' padding to the message. */
+table[data-compact='true'] th,
+table[data-compact='true'] td {
+  padding-left: 8px;
+  padding-right: 8px;
+}
+/* Its time is cut after the seconds rather than ending in an ellipsis. */
+table[data-compact='true'] td.time {
+  padding-right: 0;
+  text-overflow: clip;
 }
 .resize-handle {
   position: absolute;
@@ -2688,7 +2712,16 @@ td {
 td {
   font-family: var(--vscode-editor-font-family, monospace);
   font-size: var(--vscode-editor-font-size, 13px);
-  line-height: 1.6;
+  line-height: 20px;
+}
+/* An error or a warning is marked at the row's edge, so it shows while scrolling and when the Level
+   column has given way in a narrow panel. */
+.event-row.level-error > td:first-child,
+.event-row.level-fatal > td:first-child {
+  box-shadow: inset 3px 0 0 var(--vscode-errorForeground, #f48771);
+}
+.event-row.level-warn > td:first-child {
+  box-shadow: inset 3px 0 0 var(--vscode-charts-yellow, #e2c08d);
 }
 td.time {
   white-space: nowrap;
@@ -2752,6 +2785,24 @@ td.time {
 #empty {
   padding: 18px 14px;
   color: var(--vscode-descriptionForeground, #aaa);
+}
+/* Nothing captured: no header over an empty table, and the ways to get logs in at the center. */
+body[data-empty='true'] #eventsTable thead {
+  display: none;
+}
+body[data-empty='true'] #empty {
+  padding-top: 32px;
+  text-align: center;
+}
+body[data-empty='true'] .empty-actions {
+  justify-content: center;
+}
+#emptyCapture {
+  background: var(--vscode-button-background, #0e639c);
+  color: var(--vscode-button-foreground, #fff);
+}
+#emptyCapture:hover {
+  background: var(--vscode-button-hoverBackground, #1177bb);
 }
 /* With nothing captured yet, the three ways to get logs in, one click each. */
 .empty-actions {
@@ -2817,6 +2868,13 @@ td.time {
   background: transparent;
   color: inherit;
 }
+.pager svg {
+  width: 14px;
+  height: 14px;
+}
+.pager:not(:disabled) {
+  color: var(--vscode-foreground, #d4d4d4);
+}
 .pager:hover:not(:disabled) {
   background: var(--vscode-toolbar-hoverBackground, rgba(90, 93, 94, 0.31));
 }
@@ -2868,23 +2926,52 @@ td.time {
 .memory-fill.full {
   background: var(--vscode-editorWarning-foreground, #cca700);
 }
-.popover.memory-panel {
-  width: 280px;
-  padding: 10px 12px;
+/* Issues found by log doctor, in the warning color so they read as something to look at. */
+.issues-chip {
+  color: var(--vscode-editorWarning-foreground, #cca700);
 }
-.memory-panel h3 {
-  margin: 0 0 6px;
+/* The status panel: what is running, each with its switch, then memory. */
+.popover.status-panel {
+  width: 320px;
+  max-width: calc(100vw - 16px);
+  padding: 10px 12px;
+  white-space: normal;
+}
+.status-panel h3 {
+  margin: 0 0 4px;
   font-size: 13px;
 }
-.memory-summary {
-  margin: 0 0 8px;
-  white-space: normal;
+.status-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  padding: 7px 0;
+  border-bottom: 1px solid var(--vscode-panel-border, #444);
+}
+.status-row strong {
+  display: block;
+  font-weight: 600;
+  color: var(--vscode-foreground, #d4d4d4);
+}
+.status-row-detail {
+  display: block;
+  overflow-wrap: anywhere;
+}
+.status-row button {
+  padding: 2px 10px;
+}
+.status-memory {
+  align-items: start;
+}
+.status-panel > .link-button {
+  margin-top: 8px;
 }
 .memory-details {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   gap: 2px 12px;
-  margin: 0 0 8px;
+  margin: 4px 0 0;
 }
 .memory-details dt {
   color: var(--vscode-descriptionForeground, #aaa);
@@ -3975,8 +4062,12 @@ th[data-column='base:message'] .column-label {
     margin-right: 0;
   }
 }
-/* The narrowest side bars: the memory meter gives up width so the pager's arrows still fit. */
+/* The narrowest side bars: the issues chip keeps its icon, and the memory meter gives up width, so the
+   pager's arrows still fit. */
 @media (max-width: 280px) {
+  .issues-chip .button-label {
+    display: none;
+  }
   .memory-meter {
     width: 14px;
   }

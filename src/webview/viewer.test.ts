@@ -111,6 +111,12 @@ class Element {
   removeAttribute(name: string) {
     delete this.attributes[name];
   }
+  getAttribute(name: string) {
+    return this.attributes[name] ?? null;
+  }
+  get parentElement() {
+    return this.parent;
+  }
   setAttribute(name: string, value: string) {
     this.attributes[name] = value;
     if (name === 'class') this.className = value;
@@ -491,11 +497,11 @@ test('More actions supports keyboard navigation and restores focus on dismissal'
   assert.equal(dom.activeElement, get('copyResults'));
   const key = (value: string) => get('actionsMenu').listeners.get('keydown')!({ key: value, preventDefault() {} });
   key('ArrowUp');
-  assert.equal(dom.activeElement, get('voteOnNext'));
+  assert.equal(dom.activeElement, get('clear'));
   key('ArrowDown');
   assert.equal(dom.activeElement, get('copyResults'));
   key('End');
-  assert.equal(dom.activeElement, get('voteOnNext'));
+  assert.equal(dom.activeElement, get('clear'));
   key('Home');
   assert.equal(dom.activeElement, get('copyResults'));
   key('ArrowDown');
@@ -504,7 +510,7 @@ test('More actions supports keyboard navigation and restores focus on dismissal'
   assert.equal(get('actionsMenu').hidden, true);
   assert.equal(dom.activeElement, get('moreActions'));
   get('moreActions').listeners.get('keydown')!({ key: 'ArrowUp', preventDefault() {} });
-  assert.equal(dom.activeElement, get('voteOnNext'));
+  assert.equal(dom.activeElement, get('clear'));
   dom.listeners.get('keydown')!({ key: 'Escape' });
   assert.equal(get('actionsMenu').hidden, true);
   assert.equal(dom.activeElement, get('moreActions'));
@@ -514,17 +520,17 @@ test('More actions preserves commands and closes after selection or an outside c
   const { get, dom, messages } = viewer();
   for (const [id, type] of [
     ['export', 'export'],
-    ['import', 'import'],
     ['manage', 'manageServers'],
     ['config', 'config'],
     ['help', 'showGuide'],
     ['suggestFeature', 'suggestFeature'],
-    ['voteOnNext', 'voteOnNext'],
+    ['clear', 'clear'],
   ]) {
     get('actionsMenu').hidden = true;
+    const before = messages.length;
     get('moreActions').listeners.get('click')!({ stopPropagation() {} });
     get(id).listeners.get('click')!();
-    assert.equal(messages.at(-1)?.type, type);
+    assert.equal(messages.find((message, index) => index >= before && message.type === type)?.type, type);
     assert.equal(get('actionsMenu').hidden, true);
     assert.equal(get('moreActions').attributes['aria-expanded'], 'false');
     assert.equal(dom.activeElement, get('moreActions'));
@@ -2180,7 +2186,11 @@ test('the status bar counts matches, pages compactly, and shows memory with its 
   assert.ok(details.includes('Lines cut short') && details.includes('3'));
   get('memorySettings').listeners.get('click')!();
   assert.deepEqual(JSON.parse(JSON.stringify(messages.at(-1))), { type: 'config', setting: 'logline.maxMemoryMb' });
-  get('statusIcon').listeners.get('click')!();
+  assert.equal(get('counts').hidden, true, 'memory stays out of the status bar below 80% of the limit');
+  get('statusPanel').hidden = true;
+  get('statusIcon').listeners.get('click')!({ stopPropagation() {} });
+  assert.equal(get('statusPanel').hidden, false, 'the status icon opens the status panel');
+  get('statusTroubleshoot').listeners.get('click')!();
   assert.equal(messages.at(-1)?.type, 'showStatus');
   assert.equal(get('mode').hidden, true, 'plain Live is what the Live button says');
 });
@@ -2424,7 +2434,10 @@ test('More actions holds the data actions, and its keys skip Copy filtered resul
 });
 
 test('views are tabs: one shows at a time, arrow keys move between visible tabs, and the panel remembers its tab', () => {
-  const { get, app, messages, savedStates } = viewer();
+  const { get, app, messages, savedStates } = viewer(
+    {},
+    { snapshot: { doctor: { revision: 1, total: 1, findings: [] } } },
+  );
   assert.equal(app.views.active(), 'logs');
   assert.equal(get('logsTab').attributes['aria-selected'], 'true');
   assert.equal(get('logsTab').tabIndex, 0);
@@ -2455,6 +2468,8 @@ test('views are tabs: one shows at a time, arrow keys move between visible tabs,
   assert.equal(app.views.active(), 'doctor', 'Metrics is skipped');
   key('doctor', 'ArrowRight');
   assert.equal(app.views.active(), 'logs', 'the last tab wraps to the first');
+  assert.equal(get('doctor').hidden, true, 'the Issues tab hides again once its view is left');
+  get('doctor').hidden = false;
   key('logsTab', 'End');
   assert.equal(app.views.active(), 'doctor');
   key('doctor', 'Home');
@@ -2568,7 +2583,7 @@ test('rows show their code link and log doctor finding, with actions, and the Is
     { type: 'details', id: 43 },
     'the badge opens the event, where the finding is explained',
   );
-  assert.equal(get('rowHint').hidden, false, 'the tip stays until it is dismissed');
+  assert.equal(get('rowHint').hidden, true, 'expanding a row dismisses the tip');
   receive({
     type: 'details',
     id: 43,
@@ -2584,16 +2599,18 @@ test('rows show their code link and log doctor finding, with actions, and the Is
     'the expanded event explains the finding',
   );
 
-  assert.equal(get('doctor').hidden, false);
-  assert.equal(get('doctorCount').textContent, '1');
-  assert.match(get('doctor').className, /has-warnings/);
+  assert.equal(get('doctor').hidden, true, 'the Issues tab shows only while its view is open');
+  assert.equal(get('issuesChip').hidden, false);
+  assert.equal(get('doctorCount').textContent, '1 issue');
+  assert.match(get('issuesChip').className, /has-warnings/);
   const item = get('doctorList').querySelectorAll('.doctor-item')[0];
   assert.equal(item.querySelector('.doctor-location')!.textContent, 'pay.ts:4');
   const fix = item.querySelectorAll('.doctor-action').find((button) => button.textContent === 'Fix…')!;
   // As in the page, the list sits inside the Issues view.
   get('doctorView').append(get('doctorList'));
-  get('doctor').listeners.get('click')!();
+  get('issuesChip').listeners.get('click')!();
   assert.equal(app.views.active(), 'doctor');
+  assert.equal(get('doctor').hidden, false);
   assert.equal(get('doctorView').hidden, false);
   get('doctorView').listeners.get('click')!({
     target: { closest: (wanted: string) => (wanted === '[data-doctor-action]' ? fix : undefined) },
@@ -2665,8 +2682,8 @@ test('rows show their code link and log doctor finding, with actions, and the Is
     matched: 0,
     doctor: { revision: 4, total: 0, findings: [] },
   });
-  assert.equal(get('doctor').hidden, false, 'with nothing found the tab stays visible');
-  assert.match(get('doctor').className, /is-clear/);
+  assert.equal(get('issuesChip').hidden, true, 'with nothing found the chip is hidden');
+  assert.match(get('issuesChip').className, /is-clear/);
   assert.equal(get('doctorCount').hidden, true);
   assert.match(get('doctorList').querySelector('.popover-empty')!.textContent, /No problems found so far/);
   get('doctorView').listeners.get('click')!({
@@ -3279,18 +3296,19 @@ test('snapshots apply editor requests once and reflect the OpenTelemetry receive
     status: 'OpenTelemetry receiver on http://127.0.0.1:4318',
   });
   assert.equal(app.search.query(), 'message:/user.*logged\\s+in/');
+  assert.equal(get('otlpStatus').hidden, false, 'the chip shows while the receiver runs');
   assert.equal(get('otlpStatus').textContent, 'OpenTelemetry 127.0.0.1:4318');
   assert.equal(get('otlpStatus').attributes['aria-pressed'], 'true');
   assert.equal(get('status').textContent, 'Ready', 'the chip replaces the receiver status text');
   assert.equal(get('status').hidden, true, 'a steady state is not news');
-  assert.equal(get('traceCount').textContent, '12');
+  assert.match(get('traces').title, /12 traces/);
   get('otlpStatus').listeners.get('click')!();
   assert.deepEqual(JSON.parse(JSON.stringify(messages.at(-1))), { type: 'toggleOtlp', enabled: false });
   snapshot({ openTrace: 'abc123', otlp: { running: false } });
   assert.equal(get('traceView').hidden, false);
   assert.equal(get('otlpStatus').textContent, 'OpenTelemetry off');
   assert.equal(get('otlpStatus').attributes['aria-pressed'], 'false');
-  assert.equal(get('traceCount').hidden, true);
+  assert.equal(get('otlpStatus').hidden, true, 'the chip hides once the receiver stops without an error');
   get('otlpStatus').listeners.get('click')!();
   assert.deepEqual(JSON.parse(JSON.stringify(messages.at(-1))), { type: 'toggleOtlp', enabled: true });
 });
@@ -3347,7 +3365,7 @@ test('the AI calls tab lists calls with totals and opens a conversation with its
   assert.equal(app.views.active(), 'logs', 'stopping the receiver with no calls leaves the tab');
   snapshot({ aiCalls: { calls: 3, revision: 1 } });
   assert.equal(get('aiCalls').hidden, false);
-  assert.equal(get('aiCallCount').textContent, '3');
+  assert.match(get('aiCalls').title, /3/);
   get('aiCalls').listeners.get('click')!();
   assert.equal(app.views.active(), 'aiCalls');
   assert.deepEqual(JSON.parse(JSON.stringify(messages.at(-1))), { type: 'aiCalls' });
@@ -3608,7 +3626,7 @@ test('the Metrics tab appears once metrics arrive and lists series with their la
   assert.equal(get('metrics').hidden, true, 'no tab before any metric arrives');
   snapshot({ metrics: { series: 2, revision: 5 } });
   assert.equal(get('metrics').hidden, false);
-  assert.equal(get('metricCount').textContent, '2');
+  assert.match(get('metrics').title, /2/);
   get('metrics').listeners.get('click')!();
   assert.equal(get('metricsView').hidden, false);
   assert.deepEqual(JSON.parse(JSON.stringify(messages.at(-1))), { type: 'metrics' });
@@ -4916,4 +4934,172 @@ test('an empty panel offers the ways to get logs in, until something is captured
   snapshot(100, true);
   assert.equal(get('emptyActions').hidden, true);
   assert.equal(get('empty').textContent, 'No matching events in retained history.');
+});
+
+const quietSnapshot = {
+  type: 'snapshot',
+  generation: 1,
+  newest: 100,
+  status: 'Ready',
+  command: '',
+  running: false,
+  total: 0,
+  retained: 0,
+  discarded: 0,
+  bytes: 0,
+  maxBytes: 10000,
+  truncated: 0,
+  events: [],
+  columns: [],
+  page: 0,
+  pages: 1,
+  matched: 0,
+};
+
+test('the status icon opens a status panel showing capture, receiver and agents, with a switch for each', () => {
+  const { get, receive, messages } = viewer();
+  receive({
+    ...quietSnapshot,
+    captureTerminals: true,
+    otlp: { running: true, endpoint: 'http://127.0.0.1:4318' },
+    agentSharing: { active: true, scope: 'all', revision: 1, sources: [] },
+  });
+  get('statusPanel').hidden = true;
+  get('statusIcon').listeners.get('click')!({ stopPropagation() {} });
+  assert.equal(get('statusPanel').hidden, false);
+  assert.equal(get('statusIcon').attributes['aria-expanded'], 'true');
+  assert.equal(get('statusCaptureText').textContent, 'On');
+  assert.equal(get('statusCapture').textContent, 'Turn off');
+  assert.equal(get('statusOtlpText').textContent, 'On · 127.0.0.1:4318');
+  assert.equal(get('statusOtlp').textContent, 'Stop');
+  assert.equal(get('statusAgentsText').textContent, get('shareScope').textContent);
+  assert.notEqual(get('statusAgentsText').textContent, 'Not sharing');
+  get('statusCapture').listeners.get('click')!();
+  assert.deepEqual(JSON.parse(JSON.stringify(messages.at(-1))), { type: 'toggleTerminalCapture', enabled: false });
+  get('statusOtlp').listeners.get('click')!();
+  assert.deepEqual(JSON.parse(JSON.stringify(messages.at(-1))), { type: 'toggleOtlp', enabled: false });
+
+  receive({ ...quietSnapshot, captureTerminals: false, otlp: { running: false } });
+  assert.equal(get('statusCaptureText').textContent, 'Off');
+  assert.equal(get('statusCapture').textContent, 'Turn on');
+  assert.equal(get('statusOtlpText').textContent, 'Off');
+  assert.equal(get('statusOtlp').textContent, 'Start');
+  assert.equal(get('statusAgentsText').textContent, 'Not sharing');
+  get('statusCapture').listeners.get('click')!();
+  assert.deepEqual(JSON.parse(JSON.stringify(messages.at(-1))), { type: 'toggleTerminalCapture', enabled: true });
+  get('statusOtlp').listeners.get('click')!();
+  assert.deepEqual(JSON.parse(JSON.stringify(messages.at(-1))), { type: 'toggleOtlp', enabled: true });
+
+  get('statusTroubleshoot').listeners.get('click')!();
+  assert.deepEqual(JSON.parse(JSON.stringify(messages.at(-1))), { type: 'showStatus' });
+  assert.equal(get('statusPanel').hidden, true, 'troubleshooting closes the panel');
+});
+
+test('the Issues chip shows a count, opens the Issues view with its tab, and the tab goes when the view is left', () => {
+  const { get, receive, app } = viewer();
+  const finding = { siteId: 'a\u00001', code: 'secret', severity: 'warning', message: 'm', file: 'a.ts', line: 1 };
+  assert.equal(get('issuesChip').hidden, true, 'hidden while log doctor is off');
+  receive({ ...quietSnapshot, doctor: { revision: 1, total: 0, findings: [] } });
+  assert.equal(get('issuesChip').hidden, true, 'hidden with nothing found');
+  assert.equal(get('statusIssuesRow').hidden, false);
+  assert.equal(get('statusIssuesText').textContent, 'No problems found so far');
+  receive({ ...quietSnapshot, doctor: { revision: 2, total: 4, findings: [finding] } });
+  assert.equal(get('issuesChip').hidden, false);
+  assert.equal(get('doctorCount').textContent, '4 issues');
+  assert.equal(get('statusIssuesText').textContent, '4 problems with log statements');
+  assert.equal(get('doctor').hidden, true);
+  get('issuesChip').listeners.get('click')!();
+  assert.equal(app.views.active(), 'doctor');
+  assert.equal(get('doctor').hidden, false);
+  assert.equal(get('doctorView').hidden, false);
+  get('logsTab').listeners.get('click')!();
+  assert.equal(app.views.active(), 'logs');
+  assert.equal(get('doctor').hidden, true);
+  get('statusIssues').listeners.get('click')!();
+  assert.equal(app.views.active(), 'doctor', 'the status panel opens the view too');
+  receive({ ...quietSnapshot, doctor: { revision: 3, total: 1, findings: [finding] } });
+  assert.equal(get('doctorCount').textContent, '1 issue');
+  receive(quietSnapshot);
+  assert.equal(get('issuesChip').hidden, true);
+  assert.equal(get('statusIssuesRow').hidden, true, 'no row when log doctor is off');
+  assert.equal(get('doctor').hidden, true);
+});
+
+test('the Add logs menu offers each way to bring logs in, and hides the receiver item while it runs', () => {
+  const { get, receive, messages } = viewer();
+  get('railAddMenu').hidden = true;
+  const expected: [string, Record<string, unknown>][] = [
+    ['railAddRun', { type: 'run' }],
+    ['railAddFile', { type: 'followFile' }],
+    ['openBrowser', { type: 'openBrowser' }],
+    ['import', { type: 'import' }],
+    ['railAddConnectionItem', { type: 'addConnection' }],
+    ['railAddOtlp', { type: 'toggleOtlp', enabled: true }],
+  ];
+  for (const [id, message] of expected) {
+    get('railAdd').listeners.get('click')!({ stopPropagation() {} });
+    assert.equal(get('railAddMenu').hidden, false);
+    get(id).listeners.get('click')!();
+    assert.deepEqual(JSON.parse(JSON.stringify(messages.at(-1))), message, id);
+    assert.equal(get('railAddMenu').hidden, true, `${id} closes the menu`);
+  }
+  assert.equal(get('railAddOtlp').hidden, false);
+  receive({ ...quietSnapshot, otlp: { running: true, endpoint: 'http://127.0.0.1:4318' } });
+  assert.equal(get('railAddOtlp').hidden, true);
+  receive({ ...quietSnapshot, otlp: { running: false } });
+  assert.equal(get('railAddOtlp').hidden, false);
+});
+
+test('the Add logs menu moves between its shown items with the arrow, Home, and End keys', () => {
+  const { get, dom, receive } = viewer();
+  receive({ ...quietSnapshot, otlp: { running: true, endpoint: 'http://127.0.0.1:4318' } });
+  get('railAddMenu').hidden = true;
+  get('railAdd').listeners.get('click')!({ stopPropagation() {} });
+  assert.equal(dom.activeElement, get('railAddRun'));
+  const key = (value: string) => get('railAddMenu').listeners.get('keydown')!({ key: value, preventDefault() {} });
+  key('End');
+  assert.equal(dom.activeElement, get('railAddConnectionItem'), 'the hidden receiver item is skipped');
+  key('ArrowDown');
+  assert.equal(dom.activeElement, get('railAddRun'));
+  key('ArrowUp');
+  assert.equal(dom.activeElement, get('railAddConnectionItem'));
+  key('Home');
+  assert.equal(dom.activeElement, get('railAddRun'));
+  key('Tab');
+  assert.equal(get('railAddMenu').hidden, true);
+});
+
+test('the receiver chip shows only while it runs or has failed, and the memory chip only near the limit', () => {
+  const { get, receive } = viewer();
+  receive({ ...quietSnapshot, otlp: { running: false } });
+  assert.equal(get('otlpStatus').hidden, true);
+  receive({ ...quietSnapshot, otlp: { running: false, error: 'port in use' } });
+  assert.equal(get('otlpStatus').hidden, false);
+  receive({ ...quietSnapshot, otlp: { running: true, endpoint: 'http://127.0.0.1:4318' } });
+  assert.equal(get('otlpStatus').hidden, false);
+
+  receive({ ...quietSnapshot, total: 5, retained: 5, bytes: 79, maxBytes: 100 * 1048576 });
+  assert.equal(get('counts').hidden, true);
+  receive({ ...quietSnapshot, total: 5, retained: 5, bytes: 85 * 1048576, maxBytes: 100 * 1048576 });
+  assert.equal(get('counts').hidden, false);
+  assert.equal(get('memoryText').textContent, '85 / 100 MiB');
+  get('statusPanel').hidden = true;
+  get('counts').listeners.get('click')!({ stopPropagation() {} });
+  assert.equal(get('statusPanel').hidden, false, 'the memory chip opens the status panel');
+});
+
+test('the pager hides with one page, and an empty panel says there are no logs yet', () => {
+  const { get, receive } = viewer();
+  const pager = new Element();
+  get('pageNumber').parent = pager;
+  receive({ ...quietSnapshot, total: 10, retained: 10, matched: 10, pages: 3 });
+  assert.equal(pager.hidden, false);
+  assert.equal(get('page').textContent, '10 matches');
+  receive({ ...quietSnapshot, total: 10, retained: 10, matched: 10, pages: 1 });
+  assert.equal(pager.hidden, true);
+  receive({ ...quietSnapshot, total: 10, retained: 10, matched: 0 });
+  assert.equal(get('page').textContent, 'No matches');
+  assert.equal(get('page').textContent === 'No logs yet', false);
+  receive(quietSnapshot);
+  assert.equal(get('page').textContent, 'No logs yet');
 });

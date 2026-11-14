@@ -209,6 +209,19 @@ test('message router dispatches every public action and preserves normalized inp
   assert.equal((mockVscode.workspace as any).isTrusted, true);
 });
 
+test('message router follows a file through its command', async () => {
+  calls.length = 0;
+  await handleMessage(services() as any, () => undefined, { type: 'followFile', path: 'ignored' });
+  assert.deepEqual(
+    calls.filter((call) => call.name === 'command').map((call) => call.value),
+    ['logline.followFile'],
+  );
+  assert.equal(
+    calls.some((call) => call.name === 'commandArgs'),
+    false,
+  );
+});
+
 test('message router enforces workspace trust for run and ignores malformed requests', async () => {
   calls.length = 0;
   const service = services();

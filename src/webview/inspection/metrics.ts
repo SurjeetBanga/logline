@@ -174,8 +174,6 @@ export function createMetricList(
   /** Shows the tab once metrics arrive or while the receiver runs, so the view can be found before any do. */
   function update(summary: { series: number; revision: number } | undefined, receiverRunning = false) {
     elements.metrics.hidden = !summary && !receiverRunning;
-    elements.metricCount.hidden = !summary;
-    elements.metricCount.textContent = summary ? summary.series.toLocaleString() : '';
     elements.metrics.title = summary
       ? `${summary.series.toLocaleString()} OpenTelemetry metric series. Show their latest values and trends.`
       : 'Metrics from apps that send OpenTelemetry metrics to the receiver.';
