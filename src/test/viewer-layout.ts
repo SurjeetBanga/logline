@@ -82,6 +82,117 @@ const traces = {
   ],
 };
 
+const traceDetail = {
+  type: 'trace',
+  trace: {
+    traceId: 'f1',
+    durationMs: 120,
+    services: ['api', 'payments'],
+    errors: 1,
+    omitted: 0,
+    hotspots: [{ service: 'api', name: 'POST /checkout', count: 1, selfMs: 80, share: 0.66, errors: 0 }],
+    spans: [
+      {
+        spanId: 'a',
+        name: 'POST /checkout',
+        service: 'api',
+        kind: 'server',
+        offsetMs: 0,
+        durationMs: 120,
+        selfMs: 80,
+        depth: 0,
+        error: false,
+        critical: true,
+        attributes: { 'http.route': '/checkout' },
+        events: [],
+      },
+      {
+        spanId: 'b',
+        name: 'charge card',
+        service: 'payments',
+        kind: 'client',
+        offsetMs: 20,
+        durationMs: 40,
+        selfMs: 40,
+        depth: 1,
+        error: true,
+        critical: false,
+        attributes: {},
+        events: [],
+        statusMessage: 'declined',
+      },
+    ],
+    logs: [{ id: 7, level: 'warn', message: 'slow query', offsetMs: 12, spanId: 'b', server: 'OTel · payments' }],
+  },
+};
+
+const aiCall = {
+  traceId: 't1',
+  spanId: 's1',
+  kind: 'model',
+  operation: 'chat',
+  name: 'chat gpt-4o',
+  service: 'agent',
+  startMs: 0,
+  durationMs: 1200,
+  error: false,
+  hasContent: true,
+  model: 'gpt-4o',
+  inputTokens: 100,
+  outputTokens: 20,
+};
+const aiCalls = {
+  type: 'aiCalls',
+  aiCalls: {
+    calls: [aiCall, { ...aiCall, spanId: 's2', kind: 'tool', tool: 'get_weather', model: undefined }],
+    total: 2,
+    modelCalls: 1,
+    toolCalls: 1,
+    errors: 0,
+    inputTokens: 100,
+    outputTokens: 20,
+    cachedTokens: 0,
+    p50Ms: 1200,
+    p95Ms: 1200,
+    models: [
+      {
+        model: 'gpt-4o',
+        provider: 'openai',
+        calls: 1,
+        errors: 0,
+        inputTokens: 100,
+        outputTokens: 20,
+        cachedTokens: 0,
+        p50Ms: 1200,
+        p95Ms: 1200,
+      },
+    ],
+    tools: [{ tool: 'get_weather', calls: 1, errors: 0, p95Ms: 180 }],
+  },
+};
+const aiCallDetail = {
+  type: 'aiCall',
+  traceId: 't1',
+  spanId: 's1',
+  detail: {
+    call: { ...aiCall, provider: 'openai' },
+    messages: [
+      { role: 'user', parts: [{ kind: 'text', text: 'Weather in Paris?' }] },
+      {
+        role: 'assistant',
+        output: true,
+        parts: [{ kind: 'tool_call', name: 'get_weather', id: 'c1', value: '{ "city": "Paris" }' }],
+      },
+    ],
+    toolRuns: { c1: { spanId: 's2', tool: 'get_weather', durationMs: 180, error: false, result: '{ "high": 14 }' } },
+    conversation: [
+      { traceId: 't1', spanId: 's1' },
+      { traceId: 't1', spanId: 's2' },
+    ],
+    position: 0,
+  },
+};
+
 let browser: Browser;
 before(async () => {
   browser = await chromium.launch();
@@ -294,4 +405,74 @@ for (const size of SIZES) {
       await page.close();
     }
   });
+
+  test(`a log event open in the inspector fits a ${name} panel`, async () => {
+    const page = await open(size);
+    try {
+      await page.locator('#logs tr.event-row .message-button').first().click();
+      await post(page, {
+        type: 'details',
+        id: 20,
+        target: 'main',
+        text: '{"level":"error","msg":"x","service":"api"}',
+        exceptions: [],
+      });
+      assert.equal(await page.locator('#inspector').isVisible(), true, 'the inspector opens for an event');
+      await assertPageFits(page, 'an event open in the inspector');
+      await page.locator('#inspectorClose').click();
+      await assertPageFits(page, 'the event closed again');
+    } finally {
+      await page.close();
+    }
+  });
+
+  test(`a trace open in the inspector fits a ${name} panel`, async () => {
+    const page = await open(size);
+    try {
+      await page.locator('#viewTabs [role=tab]', { hasText: 'Traces' }).click();
+      await post(page, traces);
+      await page.locator('#tracesRows tr').first().click();
+      await post(page, traceDetail);
+      assert.equal(await page.locator('#inspector').isVisible(), true, 'the inspector opens for a trace');
+      assert.equal(await page.locator('#traceView').isVisible(), true);
+      await assertPageFits(page, 'a trace open in the inspector');
+      await page.locator('#inspectorClose').click();
+      await assertPageFits(page, 'the trace closed again');
+    } finally {
+      await page.close();
+    }
+  });
+
+  test(`an AI call open in the inspector fits a ${name} panel`, async () => {
+    const page = await open(size, undefined, { ...snapshot, aiCalls: { calls: 2, revision: 1 } });
+    try {
+      await page.locator('#viewTabs [role=tab]', { hasText: 'AI calls' }).click();
+      await post(page, aiCalls);
+      await assertPageFits(page, 'the AI calls list with its rail');
+      await page.locator('#aiCallRows tr').first().click();
+      await post(page, aiCallDetail);
+      assert.equal(await page.locator('#inspector').isVisible(), true, 'the inspector opens for a call');
+      assert.equal(await page.locator('#aiCallView').isVisible(), true);
+      await assertPageFits(page, 'an AI call open in the inspector');
+      await page.locator('#inspectorClose').click();
+      await assertPageFits(page, 'the call closed again');
+    } finally {
+      await page.close();
+    }
+  });
 }
+
+test('at the narrowest width the Logs table keeps at least half its width for the Message column', async () => {
+  const page = await open({ width: 220, height: 600 });
+  try {
+    const { message, table } = await page.evaluate(() => {
+      const cell = document.querySelector<HTMLElement>('#logs td[data-column="base:message"]');
+      const table = document.getElementById('eventsTable')!;
+      return { message: cell?.getBoundingClientRect().width ?? 0, table: table.getBoundingClientRect().width };
+    });
+    assert.ok(message > 0, 'the table has a Message cell');
+    assert.ok(message >= table / 2, `the Message column is ${message}px of a ${table}px table`);
+  } finally {
+    await page.close();
+  }
+});

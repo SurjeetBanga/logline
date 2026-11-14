@@ -975,38 +975,6 @@
                 </table>
               </div>
             </section>
-            <section id="traceView" class="view-panel" role="tabpanel" aria-labelledby="traces" hidden>
-              <div class="view-header">
-                <span class="view-header-title"
-                  ><button id="traceBack" class="back-button" type="button" title="Close the waterfall">Close</button
-                  ><strong id="traceTitle">Trace</strong></span
-                >
-                <span class="view-header-actions"
-                  ><button id="traceFilter" type="button" title="Show every retained event with this trace id">
-                    Filter logs by trace
-                  </button></span
-                >
-              </div>
-              <p id="traceStatus" class="view-status" role="status">Loading…</p>
-              <section id="traceHotspots" class="trace-hotspots" aria-labelledby="traceHotspotsTitle" hidden>
-                <h3 id="traceHotspotsTitle">Where the time went</h3>
-                <ol id="traceHotspotList"></ol>
-              </section>
-              <div class="trace-scroll">
-                <table class="trace-table" aria-label="Spans and logs in this trace">
-                  <thead>
-                    <tr>
-                      <th>Operation</th>
-                      <th>Service</th>
-                      <th>Timeline</th>
-                      <th>Duration</th>
-                      <th title="Time not spent in child spans">Self</th>
-                    </tr>
-                  </thead>
-                  <tbody id="traceRows"></tbody>
-                </table>
-              </div>
-            </section>
             <section id="metricsView" class="view-panel" role="tabpanel" aria-labelledby="metrics" hidden>
               <div id="metricQuery" class="metric-query" role="group" aria-label="Metric query" hidden>
                 <div class="metric-query-controls">
@@ -1066,12 +1034,6 @@
               <div class="view-header">
                 <p id="aiCallsStatus" class="view-status" role="status">Loading…</p>
                 <span id="aiCallsControls" class="view-header-actions"
-                  ><select id="aiCallsKind" aria-label="Show">
-                    <option value="">All calls</option>
-                    <option value="model">Model calls</option>
-                    <option value="tool">Tool calls</option>
-                    <option value="agent">Agent runs</option></select
-                  ><label class="traces-filter"><input id="aiCallsErrorsOnly" type="checkbox" /> Errors only</label
                   ><input
                     id="aiCallsFilter"
                     type="search"
@@ -1081,19 +1043,6 @@
               </div>
               <div class="ai-scroll">
                 <div id="aiCallsTiles" class="analysis-tiles ai-tiles"></div>
-                <table id="aiModelsTable" class="trace-table ai-models-table" aria-label="Totals per model">
-                  <thead>
-                    <tr>
-                      <th>Model</th>
-                      <th>Calls</th>
-                      <th>Input</th>
-                      <th>Output</th>
-                      <th>p95</th>
-                      <th>Errors</th>
-                    </tr>
-                  </thead>
-                  <tbody id="aiModelRows"></tbody>
-                </table>
                 <table id="aiCallsTable" class="trace-table ai-calls-table" aria-label="AI calls">
                   <thead>
                     <tr>
@@ -1108,69 +1057,6 @@
                   <tbody id="aiCallRows"></tbody>
                 </table>
               </div>
-            </section>
-            <section id="aiCallView" class="view-panel" role="tabpanel" aria-labelledby="aiCalls" hidden>
-              <div class="view-header">
-                <span class="view-header-title"
-                  ><button id="aiCallBack" class="back-button" type="button" title="Back to the list of AI calls">
-                    ← All AI calls</button
-                  ><strong id="aiCallTitle">AI call</strong></span
-                >
-                <span class="view-header-actions"
-                  ><span id="aiCallNavigation" class="ai-navigation" hidden
-                    ><button
-                      id="aiCallPrevious"
-                      class="icon-button"
-                      type="button"
-                      title="The previous call in this conversation"
-                      aria-label="Previous call"
-                    >
-                      <svg
-                        aria-hidden="true"
-                        viewBox="0 0 16 16"
-                        width="14"
-                        height="14"
-                        fill="none"
-                        stroke="currentColor"
-                        stroke-width="1.4"
-                        stroke-linecap="round"
-                        stroke-linejoin="round"
-                      >
-                        <path d="M10 3.5L5.5 8l4.5 4.5" />
-                      </svg></button
-                    ><span id="aiCallPosition"></span
-                    ><button
-                      id="aiCallNext"
-                      class="icon-button"
-                      type="button"
-                      title="The next call in this conversation"
-                      aria-label="Next call"
-                    >
-                      <svg
-                        aria-hidden="true"
-                        viewBox="0 0 16 16"
-                        width="14"
-                        height="14"
-                        fill="none"
-                        stroke="currentColor"
-                        stroke-width="1.4"
-                        stroke-linecap="round"
-                        stroke-linejoin="round"
-                      >
-                        <path d="M6 3.5l4.5 4.5L6 12.5" />
-                      </svg></button></span
-                  ><button id="aiCallTrace" type="button" title="Open the trace this call belongs to">Trace</button
-                  ><button
-                    id="aiCallCopy"
-                    type="button"
-                    title="Copy the conversation as Markdown, redacted like exports when logline.redactExports is on"
-                  >
-                    Copy
-                  </button></span
-                >
-              </div>
-              <p id="aiCallStatus" class="view-status" role="status">Loading…</p>
-              <div id="aiCallTranscript" class="ai-transcript"></div>
             </section>
             <section id="doctorView" class="view-panel doctor-view" role="tabpanel" aria-labelledby="doctor" hidden>
               <div class="view-header">
@@ -1231,6 +1117,91 @@
             <div id="inspectorBody" class="inspector-body"></div>
           </aside>
         </div>
+      </div>
+    </div>
+    <div id="inspectorParts" hidden>
+      <span id="aiCallNavigation" class="ai-navigation" hidden
+        ><button
+          id="aiCallPrevious"
+          class="icon-button"
+          type="button"
+          title="The previous call in this conversation"
+          aria-label="Previous call"
+        >
+          <svg
+            aria-hidden="true"
+            viewBox="0 0 16 16"
+            width="14"
+            height="14"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.4"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          >
+            <path d="M10 3.5L5.5 8l4.5 4.5" />
+          </svg></button
+        ><span id="aiCallPosition"></span
+        ><button
+          id="aiCallNext"
+          class="icon-button"
+          type="button"
+          title="The next call in this conversation"
+          aria-label="Next call"
+        >
+          <svg
+            aria-hidden="true"
+            viewBox="0 0 16 16"
+            width="14"
+            height="14"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.4"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          >
+            <path d="M6 3.5l4.5 4.5L6 12.5" />
+          </svg></button
+      ></span>
+      <div id="traceView" class="inspector-part">
+        <div class="inspector-actions">
+          <button id="traceFilter" type="button" title="Show every retained event with this trace id">
+            Show this trace's logs
+          </button>
+        </div>
+        <p id="traceStatus" class="view-status" role="status">Loading…</p>
+        <section id="traceHotspots" class="trace-hotspots" aria-labelledby="traceHotspotsTitle" hidden>
+          <h3 id="traceHotspotsTitle">Where the time went</h3>
+          <ol id="traceHotspotList"></ol>
+        </section>
+        <div class="trace-scroll">
+          <table class="trace-table" aria-label="Spans and logs in this trace">
+            <thead>
+              <tr>
+                <th>Operation</th>
+                <th>Service</th>
+                <th>Timeline</th>
+                <th>Duration</th>
+                <th title="Time not spent in child spans">Self</th>
+              </tr>
+            </thead>
+            <tbody id="traceRows"></tbody>
+          </table>
+        </div>
+      </div>
+      <div id="aiCallView" class="inspector-part">
+        <div class="inspector-actions">
+          <button id="aiCallTrace" type="button" title="Open the trace this call belongs to">Trace</button>
+          <button
+            id="aiCallCopy"
+            type="button"
+            title="Copy the conversation as Markdown, redacted like exports when logline.redactExports is on"
+          >
+            Copy as Markdown
+          </button>
+        </div>
+        <p id="aiCallStatus" class="view-status" role="status">Loading…</p>
+        <div id="aiCallTranscript" class="ai-transcript"></div>
       </div>
     </div>
     <div

@@ -60,10 +60,22 @@ export function createTraceList(
   });
 
   function open(traceId: string) {
+    mark(traceId);
+    actions.showTrace(traceId);
+  }
+
+  /** Marks the trace whose waterfall is open, however it was opened; a list still loading marks it once it renders. */
+  function mark(traceId: string) {
     opened = traceId;
     for (const row of elements.tracesRows.querySelectorAll<HTMLElement>('.traces-row'))
       row.classList[row.dataset.traceId === traceId ? 'add' : 'remove']('selected');
-    actions.showTrace(traceId);
+  }
+
+  /** The waterfall closed: no trace is marked in the list. */
+  function closed() {
+    opened = undefined;
+    for (const row of elements.tracesRows.querySelectorAll<HTMLElement>('.traces-row.selected'))
+      row.classList.remove('selected');
   }
 
   /** Services, with how many traces each is in, and the filters, for the rail. */
@@ -212,5 +224,5 @@ export function createTraceList(
     );
   }
 
-  return { show, receive, receiverChanged };
+  return { show, receive, receiverChanged, mark, closed };
 }

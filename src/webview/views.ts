@@ -1,13 +1,12 @@
 import type { EventScope } from './event-scope';
 
 /**
- * The views of the Logs panel. The Traces tab shows either the list (`traces`)
- * or one trace (`trace`), and the AI calls tab its list (`aiCalls`) or one call (`aiCall`).
+ * The views of the Logs panel, one per tab. One trace, or one AI call, shows in the
+ * inspector beside its list rather than as a view of its own.
  */
-export type ViewName =
-  'logs' | 'analysis' | 'compare' | 'traces' | 'trace' | 'metrics' | 'aiCalls' | 'aiCall' | 'doctor' | 'connection';
-/** A view with its own tab, which is what the panel remembers between sessions. */
-export type TabName = Exclude<ViewName, 'trace' | 'aiCall'>;
+export type ViewName = 'logs' | 'analysis' | 'compare' | 'traces' | 'metrics' | 'aiCalls' | 'doctor' | 'connection';
+/** A view's tab, which is what the panel remembers between sessions. */
+export type TabName = ViewName;
 
 // Log views (production compared with local runs among them), then request-level telemetry (traces and
 // the AI calls inside them link to each other), then aggregate metrics, then the health of the logging itself.
@@ -28,7 +27,7 @@ export function isTabName(value: unknown): value is TabName {
 }
 
 export function tabOf(view: ViewName): TabName {
-  return view === 'trace' ? 'traces' : view === 'aiCall' ? 'aiCalls' : view;
+  return view;
 }
 
 /**
@@ -52,19 +51,14 @@ export function createViews(
   function show(view: ViewName, focus = false) {
     const previous = current;
     current = view;
-    // An open trace's waterfall shows below the list of traces, so another can be chosen from there.
-    for (const name of Object.keys(panels) as ViewName[])
-      panels[name].hidden = name !== view && !(view === 'trace' && name === 'traces');
+    for (const name of Object.keys(panels) as ViewName[]) panels[name].hidden = name !== view;
     const selected = tabOf(view);
     for (const name of TABS) {
       tabs[name].setAttribute('aria-selected', String(name === selected));
       tabs[name].tabIndex = name === selected ? 0 : -1;
     }
     // Lets the stylesheet hide controls that only apply to the table, such as paging.
-    if (document.body) {
-      document.body.dataset.view = selected;
-      document.body.dataset.subview = view;
-    }
+    if (document.body) document.body.dataset.view = selected;
     if (focus) tabs[selected].focus();
     if (view !== previous) changed(view, previous);
   }

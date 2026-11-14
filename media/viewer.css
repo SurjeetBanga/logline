@@ -373,33 +373,6 @@
   .view-panel {
     padding-inline: 8px;
   }
-  .trace-table th:nth-child(1) {
-    width: 48%;
-  }
-  /* Collapsed rather than hidden, so rows spanning every column keep the table's column count. */
-  .trace-table th:nth-child(2),
-  .trace-service {
-    width: 0;
-    padding: 0;
-    overflow: hidden;
-    font-size: 0;
-  }
-  .trace-table th:nth-child(4) {
-    width: 72px;
-  }
-  #traceView .trace-table th:nth-child(5),
-  .trace-self {
-    width: 0;
-    padding: 0;
-    overflow: hidden;
-    font-size: 0;
-  }
-  .trace-hotspot {
-    grid-template-columns: minmax(0, 1fr) 96px;
-  }
-  .trace-hotspot .trace-track {
-    display: none;
-  }
   #contextDialog {
     padding: 8px;
   }
@@ -905,9 +878,10 @@ body > header {
 .source-rail.collapsed .rail-empty-add {
   display: none;
 }
-/* Sources apply to the logs and their analysis; Compare, Traces, and Metrics have a rail of their own. */
+/* Sources apply to the logs and their analysis; Compare, Traces, AI calls, and Metrics have a rail of their own. */
 body:not([data-view='logs']):not([data-view='analysis']) #sourceRail,
-body:not([data-view='compare']):not([data-view='traces']):not([data-view='metrics']) #tabRail {
+body:not([data-view='compare']):not([data-view='traces']):not([data-view='aiCalls']):not([data-view='metrics'])
+  #tabRail {
   display: none;
 }
 .rail-swatch {
@@ -2232,33 +2206,33 @@ select {
   background: var(--vscode-charts-purple, #b180d7);
 }
 /* Analyze: summary tiles, breakdowns and groups. Every row is a button into its logs. */
+/* The totals are one line of figures, each with its name before it and a note after, so the charts
+   and rows below them start near the top of a short panel. */
 .analysis-tiles {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
-  gap: 8px;
-}
-/* A faint wash of the text color reads as a surface in every theme, without an outline. */
-.analysis-tile {
   display: flex;
-  flex-direction: column;
-  gap: 2px;
-  padding: 8px 12px;
-  border-radius: 6px;
-  background: color-mix(in srgb, var(--vscode-foreground, #cccccc) 5%, transparent);
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 22px;
+  padding: 2px 0 6px;
+}
+.analysis-tile {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
   min-width: 0;
+  white-space: nowrap;
 }
 .tile-label {
-  font-size: 11px;
+  font-size: 12px;
   color: var(--vscode-descriptionForeground, #aaa);
 }
 .tile-value {
-  font-size: 20px;
+  font-size: 13px;
   font-weight: 600;
   font-variant-numeric: tabular-nums;
-  line-height: 1.2;
 }
 .tile-detail {
-  font-size: 11px;
+  font-size: 12px;
   color: var(--vscode-descriptionForeground, #aaa);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -2510,19 +2484,6 @@ button:disabled {
 }
 .view-header .view-status {
   margin: 0;
-}
-/* Analyze's line sits under the search toolbar, which already keeps its space. */
-#analysisStatus {
-  margin-top: 0;
-}
-.back-button {
-  padding: 2px 6px;
-  border-color: transparent;
-  background: transparent;
-  color: var(--vscode-textLink-foreground, #3794ff);
-}
-.back-button:hover {
-  background: var(--vscode-toolbar-hoverBackground, rgba(90, 93, 94, 0.31));
 }
 /* Paging, Live, and columns only apply to the table. */
 body:not([data-view='logs']) .pagination,
@@ -2912,6 +2873,60 @@ td.time {
     visibility: visible;
   }
 }
+/* A trace's waterfall or an AI call's conversation, kept out of sight until the inspector shows it. */
+.inspector {
+  container-type: inline-size;
+}
+.inspector-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin: 0 -12px 6px;
+  padding: 3px 6px;
+  border-bottom: 1px solid var(--vscode-panel-border, #444);
+}
+.inspector-actions button {
+  padding: 2px 8px;
+  border-color: transparent;
+  background: transparent;
+  color: var(--vscode-foreground, #d4d4d4);
+  font-size: 12px;
+}
+.inspector-actions button:hover {
+  background: var(--vscode-toolbar-hoverBackground, rgba(90, 93, 94, 0.31));
+}
+.inspector-part .trace-scroll {
+  overflow: visible;
+}
+.inspector-part .view-status {
+  margin: 0 0 6px;
+  white-space: normal;
+}
+/* In a narrow inspector the waterfall keeps the operation, its bar, and its duration. */
+@container (max-width: 520px) {
+  #traceView .trace-table th:nth-child(1) {
+    width: 44%;
+  }
+  /* Collapsed rather than hidden, so rows spanning every column keep the table's column count. */
+  #traceView .trace-table th:nth-child(2),
+  #traceView .trace-service,
+  #traceView .trace-table th:nth-child(5),
+  #traceView .trace-self {
+    width: 0;
+    padding: 0;
+    overflow: hidden;
+    font-size: 0;
+  }
+  #traceView .trace-table th:nth-child(4) {
+    width: 72px;
+  }
+  #traceView .trace-hotspot {
+    grid-template-columns: minmax(0, 1fr) 96px;
+  }
+  #traceView .trace-hotspot .trace-track {
+    display: none;
+  }
+}
 @media (max-width: 899.98px) {
   .content-split {
     flex-direction: column;
@@ -3251,18 +3266,14 @@ td[data-column]:focus-visible {
   overflow: auto;
 }
 .ai-tiles {
-  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
-  margin-bottom: 12px;
+  margin-bottom: 4px;
 }
-.ai-models-table {
-  margin-bottom: 12px;
+.ai-call-row {
+  cursor: pointer;
 }
-.ai-models-table th:nth-child(1) {
-  width: auto;
-}
-.ai-models-table th:nth-child(n + 2) {
-  width: 84px;
-  text-align: right;
+.ai-call-row:hover,
+.ai-call-row:focus-visible {
+  background: var(--vscode-list-hoverBackground, #2a2d2e);
 }
 .ai-calls-table th:nth-child(1) {
   width: 110px;
@@ -3284,21 +3295,6 @@ td[data-column]:focus-visible {
 .ai-calls-table th:nth-child(6) {
   width: 110px;
 }
-.ai-call-row,
-.ai-model-row {
-  cursor: pointer;
-}
-.ai-call-row:hover,
-.ai-call-row:focus-visible,
-.ai-model-row:hover,
-.ai-model-row:focus-visible {
-  background: var(--vscode-list-hoverBackground, #2a2d2e);
-}
-/* The model the list is narrowed to. */
-.ai-model-row.selected {
-  background: var(--vscode-list-inactiveSelectionBackground, #37373d);
-  box-shadow: inset 2px 0 var(--vscode-focusBorder, #007fd4);
-}
 .ai-operation,
 .ai-agent {
   overflow: hidden;
@@ -3306,8 +3302,7 @@ td[data-column]:focus-visible {
   white-space: nowrap;
 }
 .ai-agent,
-.ai-finish,
-.ai-provider {
+.ai-finish {
   color: var(--vscode-descriptionForeground, #aaa);
 }
 .ai-number,
@@ -3687,11 +3682,12 @@ td[data-column]:focus-visible {
   white-space: nowrap;
   font-size: 12px;
 }
-@media (max-width: 640px) {
-  /* Four tiles fold into two rows of two rather than three and one. */
-  .ai-tiles {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
+/* The lists drop their least needed columns when the view is narrow: in a narrow panel, or beside an open
+   rail and inspector. */
+.content-split > .views {
+  container-type: inline-size;
+}
+@container (max-width: 760px) {
   .view-header-actions {
     margin-left: 0;
   }
@@ -3703,20 +3699,11 @@ td[data-column]:focus-visible {
   .traces-table th:nth-child(3),
   .traces-services,
   .traces-table th:nth-child(5),
-  .traces-counts {
-    width: 0;
-    padding: 0;
-    overflow: hidden;
-    font-size: 0;
-  }
+  .traces-counts,
   .ai-calls-table th:nth-child(3),
   .ai-agent,
   .ai-calls-table th:nth-child(6),
   .ai-finish,
-  .ai-models-table th:nth-child(4),
-  .ai-models-table td:nth-child(4),
-  .ai-models-table th:nth-child(6),
-  .ai-models-table td:nth-child(6),
   .metrics-table th:nth-child(3),
   .metric-attributes {
     width: 0;
@@ -3726,6 +3713,27 @@ td[data-column]:focus-visible {
   }
   #metricsFilter {
     width: 140px;
+  }
+}
+/* Narrower still, the operation matters more than when it started: the start time gives way too. */
+@container (max-width: 460px) {
+  .traces-table th:nth-child(1),
+  .traces-table td.time,
+  .ai-calls-table th:nth-child(1),
+  .ai-calls-table td.time {
+    width: 0;
+    padding: 0;
+    overflow: hidden;
+    font-size: 0;
+  }
+  .traces-table th:nth-child(4) {
+    width: 130px;
+  }
+  .ai-calls-table th:nth-child(4) {
+    width: 104px;
+  }
+  .ai-calls-table th:nth-child(5) {
+    width: 68px;
   }
 }
 /* Rows show what they link to, and reveal quick actions on hover or focus. */
@@ -4239,14 +4247,7 @@ td[data-column]:focus-visible {
   }
 }
 
-/* Traces: an open waterfall sits below the list, so another trace can be chosen without going back. */
-body[data-subview='trace'] #tracesView {
-  flex: 0 0 38%;
-  border-bottom: 1px solid var(--vscode-panel-border, #444);
-}
-body[data-subview='trace'] #traceView {
-  flex: 1 1 auto;
-}
+/* Traces: the open trace is marked in the list while its waterfall shows in the inspector. */
 .traces-row.selected {
   background: var(--vscode-list-inactiveSelectionBackground, #37373d);
 }

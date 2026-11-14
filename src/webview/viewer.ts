@@ -79,10 +79,8 @@ export function createViewer(api: WebviewApi) {
       analysis: elements.analysisView,
       compare: elements.compareView,
       traces: elements.tracesView,
-      trace: elements.traceView,
       metrics: elements.metricsView,
       aiCalls: elements.aiCallsView,
-      aiCall: elements.aiCallView,
       doctor: elements.doctorView,
       connection: elements.connectionView,
     },
@@ -150,10 +148,18 @@ export function createViewer(api: WebviewApi) {
       views.show('logs');
       search.setQuery(query, true);
     },
-    showList: () => traceList.show(),
     openAiCall: (traceId, spanId) => aiCalls.open(traceId, spanId),
-    reveal: () => views.show('trace'),
-    visible: () => views.active() === 'trace',
+    inspect: (title, tooltip) => {
+      // A trace opened from a log, a finding, or an AI call shows beside the list of traces.
+      if (views.active() !== 'traces') traceList.show();
+      traceList.mark(tooltip);
+      inspector.open('trace', { title, body: [elements.traceView] }, () => {
+        traceView.hide();
+        traceList.closed();
+      });
+      elements.inspectorTitle.title = tooltip;
+    },
+    inspecting: () => inspector.kind() === 'trace',
   });
   const traceList = createTraceList(elements, api, scope, {
     showTrace: (traceId) => traceView.show(traceId),
@@ -198,9 +204,17 @@ export function createViewer(api: WebviewApi) {
     showTrace: (traceId) => traceView.show(traceId),
     formatTime: (ms) => formatTimestamp({ id: 0, level: '', timestampMs: ms }) ?? '',
     revealList: () => views.show('aiCalls'),
-    revealCall: () => views.show('aiCall'),
+    inspect: (title, tooltip) => {
+      if (views.active() !== 'aiCalls') aiCalls.show();
+      const content = { title, nav: [elements.aiCallNavigation], body: [elements.aiCallView] };
+      // The same call's title arrives with its conversation; another call replaces the one shown.
+      if (inspector.kind() === 'aiCall') inspector.update('aiCall', content);
+      else inspector.open('aiCall', content, () => aiCalls.close());
+      if (tooltip) elements.inspectorTitle.title = tooltip;
+    },
+    inspecting: () => inspector.kind() === 'aiCall',
+    rail: (title, items) => tabRail.set('aiCalls', title, items),
     listVisible: () => views.active() === 'aiCalls',
-    callVisible: () => views.active() === 'aiCall',
     receiver: () => ({ running: otlpRunning, endpoint: otlpEndpoint }),
   });
   // The Issues tab shows only while its view is open; the status bar's chip and the status panel open it.
@@ -1214,14 +1228,14 @@ export function createViewer(api: WebviewApi) {
 
   function viewChanged(view: ViewName, previous: ViewName) {
     restoreTab = undefined;
-    if (previous === 'trace') traceView.hide();
     if (previous === 'metrics') metricList.hide();
     if (previous === 'compare') compareView.hide();
     if (previous === 'aiCalls') aiCalls.hide();
-    if (previous === 'aiCall') aiCalls.close();
     if (previous === 'doctor') elements.doctor.hidden = true;
     // A selection belongs to its list; another tab has nothing to show beside it.
-    if (tabOf(view) !== 'logs') inspector.close('event');
+    if (view !== 'logs') inspector.close('event');
+    if (view !== 'traces') inspector.close('trace');
+    if (view !== 'aiCalls') inspector.close('aiCall');
     state.view = tabOf(view);
     tabRail.show(tabOf(view));
     saveState();
@@ -1418,10 +1432,8 @@ export function createViewer(api: WebviewApi) {
       analysisView: 'analysis',
       compareView: 'compare',
       tracesView: 'traces',
-      traceView: 'traces',
       metricsView: 'metrics',
       aiCallsView: 'aiCalls',
-      aiCallView: 'aiCalls',
       doctorView: 'doctor',
       connectionView: 'connection',
     };

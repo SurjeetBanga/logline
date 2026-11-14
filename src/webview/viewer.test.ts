@@ -7,6 +7,7 @@ import { afterEach, test } from 'node:test';
 import { createContext, runInContext } from 'node:vm';
 import type { buildEventDetails } from './inspection/details';
 import type { createViewer } from './viewer';
+import { isTabName, tabOf } from './views';
 
 // A minimal DOM adapter checks the real webview's message/state transitions.
 // It does not simulate layout; visual verification still needs a browser.
@@ -136,7 +137,13 @@ class Element {
   }
   querySelectorAll(selector: string): Element[] {
     return this.children.flatMap((child) => [
-      ...(selector.startsWith('.') && child.classList.contains(selector.slice(1)) ? [child] : []),
+      ...(selector.startsWith('.') &&
+      selector
+        .slice(1)
+        .split('.')
+        .every((name) => child.classList.contains(name))
+        ? [child]
+        : []),
       ...(selector === 'td[data-column]' && child.dataset.column ? [child] : []),
       ...child.querySelectorAll(selector),
     ]);
@@ -3033,7 +3040,7 @@ test('a leak in output no statement accounts for names its source and opens an e
 });
 
 test('an OpenTelemetry convention finding names its service and opens a trace that shows it', () => {
-  const { get, receive, messages } = viewer();
+  const { get, app, dom, receive, messages } = viewer();
   const finding = {
     code: 'span-name-ids',
     severity: 'warning',
@@ -3072,7 +3079,9 @@ test('an OpenTelemetry convention finding names its service and opens a trace th
   get('doctorView').listeners.get('click')!({
     target: { closest: (wanted: string) => (wanted === '[data-doctor-action]' ? trace : undefined) },
   });
-  assert.equal(get('traceView').hidden, false, 'the trace opens in the Traces tab');
+  assert.equal(app.views.active(), 'traces', 'the trace opens in the Traces tab');
+  assert.equal(dom.body.dataset.inspector, 'trace');
+  assert.equal(get('inspectorTitle').textContent, 'Trace abc123');
   assert.deepEqual(JSON.parse(JSON.stringify(messages.at(-1))), { type: 'trace', traceId: 'abc123' });
 });
 
@@ -3224,7 +3233,7 @@ test('an open event explains log doctor findings on its statement', () => {
 });
 
 test('the inspector links the event to its log statement and the trace', () => {
-  const { get, renderDetails, messages, receive } = viewer();
+  const { get, app, dom, renderDetails, messages, receive } = viewer();
   get('logs').listeners.get('click')!(clickOn('.message-button', rowButton(get, 42)));
   receive({ type: 'details', id: 42, text: 'raw', exceptions: [], site: 'src/auth.ts:18', traceId: 'abc123' });
   const details = get('inspectorBody').querySelector('.event-details')!;
@@ -3238,7 +3247,9 @@ test('the inspector links the event to its log statement and the trace', () => {
   click(site, '.log-site-button');
   assert.deepEqual(JSON.parse(JSON.stringify(messages.at(-1))), { type: 'openLogSite', id: 42 });
   click(trace, '.trace-button');
-  assert.equal(get('traceView').hidden, false, 'the trace opens in the Traces tab');
+  assert.equal(app.views.active(), 'traces', 'the trace opens in the Traces tab');
+  assert.equal(dom.body.dataset.inspector, 'trace', 'the trace replaces the event in the inspector');
+  assert.equal(app.state.selected, undefined, 'the event is no longer selected');
   assert.deepEqual(JSON.parse(JSON.stringify(messages.at(-1))), { type: 'trace', traceId: 'abc123' });
   // Actions that do not apply stay visible, explain why, and do nothing when clicked.
   const plain = renderDetails(43, 'raw', []);
@@ -3249,7 +3260,7 @@ test('the inspector links the event to its log statement and the trace', () => {
   const sent = messages.length;
   get('inspectorBody').listeners.get('click')!(clickOn('.event-action', plain.querySelector('.log-site-button')));
   assert.equal(messages.length, sent);
-  assert.equal(get('traceView').hidden, false, 'unchanged');
+  assert.equal(dom.body.dataset.inspector, 'trace', 'unchanged');
   assert.match(
     String(renderDetails(44, undefined, []).querySelector('.trace-button')!.dataset.unavailable),
     /Checking/,
@@ -3344,10 +3355,11 @@ test('an open JSON error shows its crash in the inspector, and the crash row lin
   assert.equal(get('inspectorBody').querySelector('.source-link')?.dataset.id, '2');
 });
 
-test('the trace dialog renders a waterfall with logs and opens their context', () => {
+test('the trace waterfall renders in the inspector with logs, and opens their context', () => {
   const { get, app, receive, messages } = viewer();
   app.traceView.show('ABC123');
   assert.equal(get('traceStatus').textContent, 'Loading…');
+  assert.equal(get('inspectorBody').children[0], get('traceView'), 'the waterfall is the inspector body');
   const span = (spanId: string, depth: number, extra: Record<string, unknown> = {}) => ({
     spanId,
     name: `op ${spanId}`,
@@ -3420,7 +3432,6 @@ test('the trace dialog renders a waterfall with logs and opens their context', (
   get('traceRows').listeners.get('click')!({
     target: { closest: (selector: string) => (selector === '.trace-log-button' ? log : undefined) },
   });
-  assert.equal(get('traceDialog').open, false);
   assert.equal(get('contextDialog').open, true);
   assert.deepEqual(JSON.parse(JSON.stringify(messages.at(-1))), { type: 'context', id: 7 });
 });
@@ -3435,13 +3446,14 @@ test('a trace without spans explains how to collect them, and Filter logs by tra
   assert.equal(get('traceHotspots').hidden, true);
   assert.match(get('traceStatus').textContent, /Turn on the OpenTelemetry receiver/);
   get('traceFilter').listeners.get('click')!();
-  assert.equal(get('traceDialog').open, false);
+  assert.equal(get('inspector').hidden, true, 'leaving the Traces tab closes the waterfall');
+  assert.equal(app.views.active(), 'logs');
   assert.equal(app.search.query(), 'traceId:abc123');
   assert.equal(messages.at(-1)?.type, 'snapshot');
 });
 
-test('the Traces list shows recent requests and opens a waterfall that can return to the list', () => {
-  const { get, app, receive, messages } = viewer();
+test('the Traces list shows recent requests and opens a waterfall in the inspector beside it', () => {
+  const { get, app, dom, receive, messages } = viewer();
   get('traces').listeners.get('click')!();
   assert.equal(app.views.active(), 'traces');
   assert.equal(get('tracesView').hidden, false);
@@ -3513,17 +3525,18 @@ test('the Traces list shows recent requests and opens a waterfall that can retur
   );
   const row = get('tracesRows').children[0];
   get('tracesRows').listeners.get('click')!({ target: { closest: () => row } });
-  assert.equal(get('tracesView').hidden, false, 'the list stays above the waterfall');
-  assert.equal(get('traceView').hidden, false);
+  assert.equal(get('tracesView').hidden, false, 'the list stays beside the waterfall');
+  assert.equal(dom.body.dataset.inspector, 'trace');
+  assert.equal(get('inspector').hidden, false);
   assert.equal(get('traces').attributes['aria-selected'], 'true', 'a trace belongs to the Traces tab');
   assert.deepEqual(JSON.parse(JSON.stringify(messages.at(-1))), { type: 'trace', traceId: 'f1' });
-  get('traceBack').listeners.get('click')!();
+  get('inspectorClose').listeners.get('click')!();
   assert.equal(get('tracesView').hidden, false);
-  assert.equal(get('traceView').hidden, true);
+  assert.equal(get('inspector').hidden, true);
   railButton('errors').listeners.get('click')!();
   app.traceView.show('abc');
-  assert.equal(get('traceView').hidden, false, 'a trace opened from a row also opens in the Traces tab');
-  get('traceBack').listeners.get('click')!();
+  assert.equal(get('inspector').hidden, false, 'a trace opened from elsewhere also opens in the Traces tab');
+  get('inspectorClose').listeners.get('click')!();
   receive({ type: 'traces', traces: [] });
   assert.match(get('tracesStatus').textContent, /No traces yet. Start the OpenTelemetry receiver/);
   assert.equal(get('tracesStartReceiver').hidden, false);
@@ -3590,7 +3603,9 @@ test('snapshots apply editor requests once and reflect the OpenTelemetry receive
   get('otlpStatus').listeners.get('click')!();
   assert.deepEqual(JSON.parse(JSON.stringify(messages.at(-1))), { type: 'toggleOtlp', enabled: false });
   snapshot({ openTrace: 'abc123', otlp: { running: false } });
-  assert.equal(get('traceView').hidden, false);
+  assert.equal(app.views.active(), 'traces');
+  assert.equal(get('inspectorTitle').textContent, 'Trace abc123');
+  assert.equal(get('inspector').hidden, false);
   assert.equal(get('otlpStatus').textContent, 'OpenTelemetry off');
   assert.equal(get('otlpStatus').attributes['aria-pressed'], 'false');
   assert.equal(get('otlpStatus').hidden, true, 'the chip hides once the receiver stops without an error');
@@ -3599,7 +3614,7 @@ test('snapshots apply editor requests once and reflect the OpenTelemetry receive
 });
 
 test('the AI calls tab lists calls with totals and opens a conversation with its tool results', () => {
-  const { get, app, receive, messages } = viewer();
+  const { get, app, dom, receive, messages } = viewer();
   const snapshot = (extra: Record<string, unknown>) =>
     receive({
       type: 'snapshot',
@@ -3717,31 +3732,34 @@ test('the AI calls tab lists calls with totals and opens a conversation with its
   assert.equal(rows()[0].children[3].textContent, '40 → 4,096');
   assert.match(rows()[0].children[5].className, /ai-cut-short/, 'a response cut off by its limit stands out');
   assert.match(rows()[2].className, /trace-error/);
-  get('aiCallsKind').value = 'tool';
-  get('aiCallsKind').listeners.get('change')!();
+  const railButton = (key: string) =>
+    get('tabRailList')
+      .children.map((child) => child.children[0])
+      .find((button) => button?.dataset.railKey === key)!;
+  railButton('kind:tool').listeners.get('click')!();
   assert.equal(rows().length, 1);
-  get('aiCallsKind').value = '';
-  get('aiCallsErrorsOnly').checked = true;
-  get('aiCallsErrorsOnly').listeners.get('change')!();
+  railButton('kind:tool').listeners.get('click')!();
+  railButton('errors').listeners.get('click')!();
   assert.deepEqual(
     rows().map((row) => row.dataset.spanId),
     ['s1'],
   );
-  get('aiCallsErrorsOnly').checked = false;
-  const chooseModel = () => get('aiModelRows').listeners.get('click')!({ target: get('aiModelRows').children[0] });
-  chooseModel();
+  railButton('errors').listeners.get('click')!();
+  railButton('model:gpt-4o').listeners.get('click')!();
   assert.deepEqual(
     rows().map((row) => row.dataset.spanId),
     ['s3', 's1'],
     'a model narrows the list to exactly its calls',
   );
-  assert.equal(get('aiModelRows').children[0].attributes['aria-pressed'], 'true');
+  assert.equal(railButton('model:gpt-4o').attributes['aria-current'], 'true');
   assert.match(get('aiCallsStatus').textContent, /gpt-4o only/);
-  chooseModel();
+  railButton('model:gpt-4o').listeners.get('click')!();
   assert.equal(rows().length, 3, 'choosing the model again shows every call');
 
   get('aiCallRows').listeners.get('click')!({ target: rows()[0] });
-  assert.equal(app.views.active(), 'aiCall');
+  assert.equal(app.views.active(), 'aiCalls', 'the list stays beside the conversation');
+  assert.equal(dom.body.dataset.inspector, 'aiCall');
+  assert.equal(get('inspectorTitle').textContent, 'AI call', 'until the reply names the call');
   assert.equal(get('aiCalls').attributes['aria-selected'], 'true', 'a call belongs to the AI calls tab');
   assert.deepEqual(JSON.parse(JSON.stringify(messages.at(-1))), { type: 'aiCall', traceId: 't1', spanId: 's3' });
   receive({ type: 'aiCall', traceId: 't1', spanId: 'other', detail: undefined });
@@ -3769,7 +3787,10 @@ test('the AI calls tab lists calls with totals and opens a conversation with its
       position: 1,
     },
   });
-  assert.equal(get('aiCallTitle').textContent, '◆ chat gpt-4o');
+  assert.equal(get('inspectorTitle').textContent, '◆ chat gpt-4o');
+  assert.equal(get('inspectorTitle').title, 'chat gpt-4o\nTrace t1\nSpan s3');
+  assert.equal(get('inspectorNav').children[0], get('aiCallNavigation'));
+  assert.equal(get('inspectorBody').children[0], get('aiCallView'));
   assert.equal(get('aiCallStatus').textContent, 'openai · 1.20 s · 40 in → 4,096 out');
   assert.equal(get('aiCallNavigation').hidden, false);
   assert.equal(get('aiCallPosition').textContent, '2 of 2');
@@ -3807,7 +3828,8 @@ test('the AI calls tab lists calls with totals and opens a conversation with its
   assert.match(get('aiCallTranscript').children[0].textContent, /no message content.*content capture/);
   assert.equal(get('aiCallNavigation').hidden, true, 'a lone call has nothing to step through');
   get('aiCallTrace').listeners.get('click')!();
-  assert.equal(app.views.active(), 'trace');
+  assert.equal(app.views.active(), 'traces');
+  assert.equal(dom.body.dataset.inspector, 'trace', 'the trace replaces the call in the inspector');
   assert.deepEqual(JSON.parse(JSON.stringify(messages.at(-1))), { type: 'trace', traceId: 't1' });
   // The waterfall's chip on a GenAI span opens that call.
   receive({
@@ -3876,10 +3898,11 @@ test('the AI calls tab lists calls with totals and opens a conversation with its
   assert.equal(chipOf(1).attributes['aria-label'], 'Open tool · get_weather in AI calls');
   assert.equal(chipOf(2).children[1].textContent, '2 calls · 1.2K → 98 tok', 'an agent run totals its calls');
   get('traceRows').listeners.get('click')!({ target: chip });
-  assert.equal(app.views.active(), 'aiCall');
-  assert.deepEqual(JSON.parse(JSON.stringify(messages.at(-1))), { type: 'aiCall', traceId: 't1', spanId: 's3' });
-  get('aiCallBack').listeners.get('click')!();
   assert.equal(app.views.active(), 'aiCalls');
+  assert.equal(dom.body.dataset.inspector, 'aiCall', 'the call replaces the trace in the inspector');
+  assert.deepEqual(JSON.parse(JSON.stringify(messages.at(-1))), { type: 'aiCall', traceId: 't1', spanId: 's3' });
+  get('inspectorClose').listeners.get('click')!();
+  assert.equal(app.views.active(), 'aiCalls', 'closing the conversation leaves the list');
   snapshot({});
   assert.equal(app.views.active(), 'logs', 'the tab leaves once its calls are gone');
 });
@@ -5387,4 +5410,521 @@ test('the pager hides with one page, and an empty panel says there are no logs y
   assert.equal(get('page').textContent === 'No logs yet', false);
   receive(quietSnapshot);
   assert.equal(get('page').textContent, 'No logs yet');
+});
+
+const LONG_TRACE = 'abcdef0123456789';
+const tracesReply = (...ids: string[]) => ({
+  type: 'traces',
+  traces: ids.map((traceId, index) => ({
+    traceId,
+    name: `GET /${traceId}`,
+    service: 'api',
+    services: ['api'],
+    startMs: 1000 - index,
+    durationMs: 20,
+    spans: 2,
+    logs: 1,
+    errors: 0,
+  })),
+});
+const traceReply = (traceId: string) => ({
+  type: 'trace',
+  trace: {
+    traceId,
+    durationMs: 20,
+    services: ['api'],
+    errors: 0,
+    omitted: 0,
+    hotspots: [],
+    logs: [],
+    spans: [
+      {
+        spanId: 'a',
+        name: 'GET /x',
+        service: 'api',
+        kind: 'server',
+        offsetMs: 0,
+        durationMs: 20,
+        selfMs: 20,
+        depth: 0,
+        error: false,
+        critical: true,
+        attributes: {},
+        events: [],
+      },
+    ],
+  },
+});
+const aiCallSummary = (spanId: string, extra: Record<string, unknown> = {}) => ({
+  traceId: 't1',
+  spanId,
+  kind: 'model',
+  operation: 'chat',
+  name: 'chat gpt-4o',
+  service: 'agent',
+  startMs: 0,
+  durationMs: 1200,
+  error: false,
+  hasContent: true,
+  model: 'gpt-4o',
+  inputTokens: 100,
+  outputTokens: 20,
+  ...extra,
+});
+const aiCallsReply = () => ({
+  type: 'aiCalls',
+  aiCalls: {
+    calls: [
+      aiCallSummary('s3'),
+      aiCallSummary('s2', { kind: 'tool', operation: 'execute_tool', tool: 'get_weather', model: undefined }),
+      aiCallSummary('s1', { error: true, errorMessage: '429', model: 'claude-sonnet' }),
+    ],
+    total: 3,
+    modelCalls: 2,
+    toolCalls: 1,
+    errors: 1,
+    inputTokens: 200,
+    outputTokens: 40,
+    cachedTokens: 50,
+    p50Ms: 1200,
+    p95Ms: 1200,
+    models: [
+      {
+        model: 'gpt-4o',
+        provider: 'openai',
+        calls: 1,
+        errors: 0,
+        inputTokens: 100,
+        outputTokens: 20,
+        cachedTokens: 50,
+        p50Ms: 900,
+        p95Ms: 1100,
+      },
+      {
+        model: 'claude-sonnet',
+        provider: 'anthropic',
+        calls: 1,
+        errors: 1,
+        inputTokens: 100,
+        outputTokens: 20,
+        cachedTokens: 0,
+        p50Ms: 1300,
+        p95Ms: 1500,
+      },
+    ],
+    tools: [{ tool: 'get_weather', calls: 1, errors: 0, p95Ms: 180 }],
+  },
+});
+const aiCallReply = (spanId: string, conversation: string[], extra: Record<string, unknown> = {}) => ({
+  type: 'aiCall',
+  traceId: 't1',
+  spanId,
+  detail: {
+    call: aiCallSummary(spanId, { provider: 'openai', ...extra }),
+    messages: [],
+    toolRuns: {},
+    conversation: conversation.map((id) => ({ traceId: 't1', spanId: id })),
+    position: conversation.indexOf(spanId),
+  },
+});
+/** A viewer whose AI calls tab shows, already on that tab with its list loaded. */
+function aiCallsViewer() {
+  const t = viewer({}, { snapshot: { aiCalls: { calls: 3, revision: 1 } } });
+  t.get('aiCalls').listeners.get('click')!();
+  t.receive(aiCallsReply());
+  return t;
+}
+const railButtonOf = (get: (id: string) => Element, key: string) =>
+  get('tabRailList')
+    .children.map((child) => child.children[0])
+    .find((button) => button?.dataset.railKey === key)!;
+const sent = (messages: Record<string, any>[]) => messages.map((message) => JSON.parse(JSON.stringify(message)));
+
+test('the views are one per tab: a trace or a conversation is not a view of its own', () => {
+  const { app, dom, get } = viewer({}, { snapshot: { aiCalls: { calls: 3, revision: 1 } } });
+  for (const name of ['trace', 'aiCall']) assert.equal(isTabName(name), false, `${name} is not a view`);
+  assert.equal(tabOf('aiCalls'), 'aiCalls', 'a view is its own tab');
+  assert.equal(app.views.active(), 'logs');
+  get('traces').listeners.get('click')!();
+  app.traceView.show('abc');
+  assert.equal(app.views.active(), 'traces', 'a waterfall belongs to the Traces tab');
+  assert.equal(dom.body.dataset.view, 'traces');
+  assert.equal(dom.body.dataset.subview, undefined);
+  get('aiCalls').listeners.get('click')!();
+  assert.equal(app.views.active(), 'aiCalls');
+  assert.equal(dom.body.dataset.subview, undefined);
+});
+
+test('a trace opens beside the Traces list from every place that names one', () => {
+  const entries: [string, (t: ReturnType<typeof viewer>) => void][] = [
+    [
+      'a trace row',
+      ({ get }) => {
+        get('traces').listeners.get('click')!();
+      },
+    ],
+    [
+      'a log row',
+      ({ get }) =>
+        get('logs').listeners.get('click')!(
+          clickOn('.row-trace-button', { dataset: { traceId: LONG_TRACE } } as unknown as Element),
+        ),
+    ],
+    [
+      'the Trace action of an event',
+      ({ get, receive }) => {
+        get('logs').listeners.get('click')!(clickOn('.message-button', rowButton(get, 42)));
+        receive({ type: 'details', id: 42, text: 'raw', exceptions: [], traceId: LONG_TRACE });
+        const trace = get('inspectorBody').querySelector('.trace-button')!;
+        get('inspectorBody').listeners.get('click')!(clickOn('.trace-button', trace));
+      },
+    ],
+    [
+      'the surrounding logs',
+      ({ get, app, receive }) => {
+        app.inspection.showContext(42);
+        receive({
+          type: 'context',
+          id: 42,
+          missing: false,
+          events: [{ id: 42, message: 'timeout', level: 'error', timestamp: '12:00', stream: 'stderr' }],
+        });
+        receive({ type: 'details', target: 'context', id: 42, text: 'raw', exceptions: [], traceId: LONG_TRACE });
+        const trace = get('contextDetails').querySelector('.trace-button')!;
+        get('contextDetails').listeners.get('click')!(clickOn('.trace-button', trace));
+      },
+    ],
+    [
+      'a snapshot that opens one',
+      ({ receive }) =>
+        receive({
+          type: 'snapshot',
+          generation: 1,
+          newest: 100,
+          status: 'Running',
+          command: '',
+          running: true,
+          total: 0,
+          retained: 0,
+          discarded: 0,
+          bytes: 0,
+          maxBytes: 1,
+          truncated: 0,
+          events: [],
+          columns: [],
+          page: 0,
+          pages: 1,
+          matched: 0,
+          openTrace: LONG_TRACE.toUpperCase(),
+        }),
+    ],
+  ];
+  for (const [name, choose] of entries) {
+    const t = viewer();
+    const { get, app, dom, receive, messages } = t;
+    choose(t);
+    if (name === 'a trace row') {
+      receive(tracesReply(LONG_TRACE, 'other'));
+      const row = get('tracesRows').children[0];
+      get('tracesRows').listeners.get('click')!({ target: { closest: () => row } });
+      assert.equal(row.classList.contains('selected'), true, 'the chosen row is marked');
+      assert.equal(get('tracesRows').children[1].classList.contains('selected'), false, name);
+    }
+    assert.equal(app.views.active(), 'traces', name);
+    assert.equal(get('tracesView').hidden, false, `${name}: the list stays shown`);
+    assert.equal(get('logsView').hidden, true, name);
+    assert.equal(dom.body.dataset.inspector, 'trace', name);
+    assert.equal(get('inspector').hidden, false, name);
+    assert.equal(get('inspectorTitle').textContent, 'Trace abcdef01…6789', name);
+    assert.equal(get('inspectorTitle').title, LONG_TRACE, `${name}: the tooltip has the whole id`);
+    assert.equal(get('inspectorBody').children[0], get('traceView'), name);
+    assert.deepEqual(
+      sent(messages)
+        .filter((message) => message.type === 'traces' || message.type === 'trace')
+        .map((message) => message.type),
+      ['traces', 'trace'],
+      `${name}: the list loads, then the waterfall`,
+    );
+    assert.deepEqual(sent(messages).at(-1), { type: 'trace', traceId: LONG_TRACE }, name);
+    receive(traceReply(LONG_TRACE));
+    assert.equal(get('traceRows').children.length, 1, name);
+  }
+});
+
+test('a short trace id shows whole in the inspector title, and Enter on a list row opens it', () => {
+  const { get, app, receive, messages } = viewer();
+  get('traces').listeners.get('click')!();
+  receive(tracesReply('f1', 'f2'));
+  const row = get('tracesRows').children[1];
+  let prevented = false;
+  get('tracesRows').listeners.get('keydown')!({
+    key: 'Enter',
+    target: { closest: () => row },
+    preventDefault: () => (prevented = true),
+  });
+  assert.equal(prevented, true);
+  assert.equal(get('inspectorTitle').textContent, 'Trace f2');
+  assert.equal(row.classList.contains('selected'), true);
+  assert.deepEqual(sent(messages).at(-1), { type: 'trace', traceId: 'f2' });
+  // Choosing another trace replaces it.
+  const first = get('tracesRows').children[0];
+  get('tracesRows').listeners.get('click')!({ target: { closest: () => first } });
+  assert.equal(get('inspectorTitle').textContent, 'Trace f1');
+  assert.equal(first.classList.contains('selected'), true);
+  assert.equal(row.classList.contains('selected'), false);
+  assert.equal(app.views.active(), 'traces');
+  receive(traceReply('f2'));
+  assert.equal(get('traceRows').children.length, 0, 'the reply for the replaced trace is ignored');
+  receive(traceReply('f1'));
+  assert.equal(get('traceRows').children.length, 1);
+});
+
+test('a trace closes with the inspector, Escape, or leaving the tab, and a late reply is ignored', () => {
+  const routes: [string, (t: ReturnType<typeof viewer>) => void][] = [
+    ['the close button', ({ get }) => get('inspectorClose').listeners.get('click')!()],
+    [
+      'Escape in the inspector',
+      ({ get }) => get('inspector').listeners.get('keydown')!({ key: 'Escape', stopPropagation() {} }),
+    ],
+    ['the Logs tab', ({ get }) => get('logsTab').listeners.get('click')!()],
+    ['another tab', ({ get }) => get('analyze').listeners.get('click')!()],
+    ['Show this trace’s logs', ({ get }) => get('traceFilter').listeners.get('click')!()],
+  ];
+  for (const [name, close] of routes) {
+    const t = viewer();
+    const { get, app, dom, receive } = t;
+    get('traces').listeners.get('click')!();
+    receive(tracesReply('f1', 'f2'));
+    const row = get('tracesRows').children[0];
+    get('tracesRows').listeners.get('click')!({ target: { closest: () => row } });
+    receive(traceReply('f1'));
+    assert.equal(get('traceRows').children.length, 1, name);
+    close(t);
+    assert.equal(get('inspector').hidden, true, name);
+    assert.equal(dom.body.dataset.inspector, undefined, name);
+    assert.equal(get('traceRows').children.length, 0, `${name}: the waterfall is cleared`);
+    assert.equal(row.classList.contains('selected'), false, `${name}: the row is unmarked`);
+    receive(traceReply('f1'));
+    assert.equal(get('traceRows').children.length, 0, `${name}: a late reply is ignored`);
+    if (name === 'the close button' || name.startsWith('Escape'))
+      assert.equal(app.views.active(), 'traces', `${name}: the list stays`);
+  }
+});
+
+test('Show this trace’s logs applies the trace to the search and leaves the Traces tab', () => {
+  const { get, app, dom, receive } = viewer();
+  app.traceView.show('abc123');
+  receive(traceReply('abc123'));
+  get('traceFilter').listeners.get('click')!();
+  assert.equal(app.search.query(), 'traceId:abc123');
+  assert.equal(app.views.active(), 'logs');
+  assert.equal(dom.body.dataset.inspector, undefined);
+});
+
+test('an AI call opens beside the list, steps with previous and next, and closes with the inspector', () => {
+  const { get, app, dom, receive, messages } = aiCallsViewer();
+  const rows = () => get('aiCallRows').children;
+  get('aiCallRows').listeners.get('click')!({ target: rows()[1] });
+  assert.equal(app.views.active(), 'aiCalls');
+  assert.equal(get('aiCallsView').hidden, false, 'the list stays shown');
+  assert.equal(dom.body.dataset.inspector, 'aiCall');
+  assert.equal(get('inspectorTitle').textContent, 'AI call');
+  assert.equal(get('inspectorBody').children[0], get('aiCallView'));
+  assert.deepEqual(sent(messages).at(-1), { type: 'aiCall', traceId: 't1', spanId: 's2' });
+  receive(aiCallReply('s2', ['s1', 's2', 's3'], { kind: 'tool', operation: 'execute_tool', tool: 'get_weather' }));
+  assert.equal(get('inspectorTitle').textContent, '⚙ tool get_weather');
+  assert.equal(get('inspectorNav').children[0], get('aiCallNavigation'));
+  assert.equal(get('aiCallPosition').textContent, '2 of 3');
+  get('aiCallNext').listeners.get('click')!();
+  assert.deepEqual(sent(messages).at(-1), { type: 'aiCall', traceId: 't1', spanId: 's3' });
+  assert.equal(get('inspectorTitle').textContent, 'AI call', 'the call is replaced in place');
+  assert.equal(dom.body.dataset.inspector, 'aiCall');
+  receive(aiCallReply('s2', ['s1', 's2', 's3']));
+  assert.equal(get('inspectorTitle').textContent, 'AI call', 'the reply for the call it replaced is ignored');
+  receive(aiCallReply('s3', ['s1', 's2', 's3']));
+  assert.equal(get('inspectorTitle').textContent, '◆ chat gpt-4o');
+  get('aiCallPrevious').listeners.get('click')!();
+  assert.deepEqual(sent(messages).at(-1), { type: 'aiCall', traceId: 't1', spanId: 's2' });
+  // Enter on a row opens it too.
+  let prevented = false;
+  get('aiCallRows').listeners.get('keydown')!({
+    key: 'Enter',
+    target: rows()[2],
+    preventDefault: () => (prevented = true),
+  });
+  assert.equal(prevented, true);
+  assert.deepEqual(sent(messages).at(-1), { type: 'aiCall', traceId: 't1', spanId: 's1' });
+  get('inspectorClose').listeners.get('click')!();
+  assert.equal(get('inspector').hidden, true);
+  assert.equal(dom.body.dataset.inspector, undefined);
+  assert.equal(app.views.active(), 'aiCalls', 'closing leaves the list');
+  receive(aiCallReply('s1', ['s1']));
+  assert.equal(get('aiCallTranscript').children.length, 0, 'a late reply is ignored');
+  assert.equal(get('inspector').hidden, true);
+});
+
+test('an AI call closes with Escape or when its tab is left', () => {
+  for (const close of [
+    ({ get }: ReturnType<typeof viewer>) =>
+      get('inspector').listeners.get('keydown')!({ key: 'Escape', stopPropagation() {} }),
+    ({ get }: ReturnType<typeof viewer>) => get('logsTab').listeners.get('click')!(),
+  ]) {
+    const t = aiCallsViewer();
+    t.get('aiCallRows').listeners.get('click')!({ target: t.get('aiCallRows').children[0] });
+    assert.equal(t.dom.body.dataset.inspector, 'aiCall');
+    close(t);
+    assert.equal(t.get('inspector').hidden, true);
+    t.receive(aiCallReply('s3', ['s3']));
+    assert.equal(t.get('aiCallTranscript').children.length, 0);
+  }
+});
+
+test('the AI calls rail narrows the list by model and kind, shows only errors, and All calls resets it', () => {
+  const { get, receive } = aiCallsViewer();
+  const rows = () => get('aiCallRows').children.map((row) => row.dataset.spanId);
+  assert.equal(get('tabRailTitle').textContent, 'AI calls');
+  const items = get('tabRailList').children.map(
+    (child) => child.children[0]?.dataset.railKey ?? child.children[0]?.textContent,
+  );
+  assert.deepEqual(
+    items.filter((key) => key !== undefined && !String(key).includes(':')),
+    ['all', 'Models', 'Kind', 'Show', 'errors'],
+    'the items and their headings, with kinds that have no calls left out',
+  );
+  assert.deepEqual(
+    items.filter((key) => String(key).includes(':')),
+    ['model:gpt-4o', 'model:claude-sonnet', 'kind:model', 'kind:tool'],
+  );
+  const parts = (key: string) =>
+    ['.rail-name', '.rail-status', '.rail-meta'].map((name) => railButtonOf(get, key).querySelector(name)?.textContent);
+  assert.deepEqual(parts('model:claude-sonnet'), ['claude-sonnet', 'anthropic', '1 failed · 1']);
+  assert.deepEqual(parts('model:gpt-4o'), ['gpt-4o', 'openai', '1']);
+  assert.equal(railButtonOf(get, 'all').attributes['aria-current'], 'true');
+  assert.deepEqual(rows(), ['s3', 's2', 's1']);
+  // A model.
+  railButtonOf(get, 'model:gpt-4o').listeners.get('click')!();
+  assert.deepEqual(rows(), ['s3']);
+  assert.equal(railButtonOf(get, 'all').attributes['aria-current'], 'false');
+  assert.match(get('aiCallsStatus').textContent, / · gpt-4o only/);
+  railButtonOf(get, 'model:gpt-4o').listeners.get('click')!();
+  assert.deepEqual(rows(), ['s3', 's2', 's1'], 'choosing it again clears it');
+  // A kind.
+  railButtonOf(get, 'kind:tool').listeners.get('click')!();
+  assert.deepEqual(rows(), ['s2']);
+  assert.equal(railButtonOf(get, 'kind:tool').attributes['aria-current'], 'true');
+  railButtonOf(get, 'kind:tool').listeners.get('click')!();
+  assert.deepEqual(rows(), ['s3', 's2', 's1']);
+  railButtonOf(get, 'kind:model').listeners.get('click')!();
+  assert.deepEqual(rows(), ['s3', 's1']);
+  railButtonOf(get, 'kind:model').listeners.get('click')!();
+  // Errors only is a check that turns on and off.
+  railButtonOf(get, 'errors').listeners.get('click')!();
+  assert.deepEqual(rows(), ['s1']);
+  assert.equal(railButtonOf(get, 'errors').attributes['aria-pressed'], 'true');
+  railButtonOf(get, 'errors').listeners.get('click')!();
+  assert.deepEqual(rows(), ['s3', 's2', 's1']);
+  assert.equal(railButtonOf(get, 'errors').attributes['aria-pressed'], 'false');
+  // All calls clears the model and the kind.
+  railButtonOf(get, 'model:claude-sonnet').listeners.get('click')!();
+  railButtonOf(get, 'all').listeners.get('click')!();
+  assert.deepEqual(rows(), ['s3', 's2', 's1']);
+  railButtonOf(get, 'kind:tool').listeners.get('click')!();
+  railButtonOf(get, 'all').listeners.get('click')!();
+  assert.deepEqual(rows(), ['s3', 's2', 's1']);
+  assert.equal(railButtonOf(get, 'all').attributes['aria-current'], 'true');
+  // The text filter still works beside the rail.
+  get('aiCallsFilter').value = 'get_weather';
+  get('aiCallsFilter').listeners.get('input')!();
+  assert.deepEqual(rows(), ['s2']);
+  get('aiCallsFilter').value = '';
+  get('aiCallsFilter').listeners.get('input')!();
+  // With no calls there is nothing in the rail.
+  receive({
+    type: 'aiCalls',
+    aiCalls: {
+      calls: [],
+      total: 0,
+      modelCalls: 0,
+      toolCalls: 0,
+      errors: 0,
+      inputTokens: 0,
+      outputTokens: 0,
+      cachedTokens: 0,
+      models: [],
+      tools: [],
+    },
+  });
+  assert.equal(get('tabRailList').children.length, 0);
+});
+
+test('choosing a model in the AI calls rail replaces the totals with that model’s', () => {
+  const { get } = aiCallsViewer();
+  const tiles = () => get('aiCallsTiles').children.map((tile) => tile.children.map((part) => part.textContent));
+  assert.deepEqual(
+    tiles().map((tile) => tile[0]),
+    ['Model calls', 'Tokens', 'Latency', 'Tool calls'],
+  );
+  railButtonOf(get, 'model:gpt-4o').listeners.get('click')!();
+  assert.deepEqual(tiles(), [
+    ['gpt-4o', '1', 'calls'],
+    ['Tokens', '100 → 20', '50% of input cached'],
+    ['Latency', 'p50 900 ms', 'p95 1.10 s'],
+  ]);
+  railButtonOf(get, 'model:claude-sonnet').listeners.get('click')!();
+  assert.deepEqual(tiles()[0], ['claude-sonnet', '1', '1 failed']);
+  assert.deepEqual(tiles()[1], ['Tokens', '100 → 20', 'input → output']);
+  railButtonOf(get, 'model:claude-sonnet').listeners.get('click')!();
+  assert.equal(tiles().length, 4, 'clearing the model brings the totals back');
+});
+
+test('the inspector shows one thing: leaving a tab closes its selection, and another kind replaces it', () => {
+  const t = viewer({}, { snapshot: { aiCalls: { calls: 3, revision: 1 } } });
+  const { get, app, dom, receive, messages } = t;
+  const kind = () => dom.body.dataset.inspector;
+  // Leaving Logs closes an open event.
+  get('logs').listeners.get('click')!(clickOn('.message-button', rowButton(get, 42)));
+  assert.equal(kind(), 'event');
+  get('traces').listeners.get('click')!();
+  assert.equal(kind(), undefined);
+  assert.equal(app.state.selected, undefined);
+  // Leaving Traces closes an open trace.
+  app.traceView.show('abc');
+  assert.equal(kind(), 'trace');
+  get('aiCalls').listeners.get('click')!();
+  assert.equal(kind(), undefined);
+  receive(aiCallsReply());
+  // Leaving AI calls closes an open call.
+  get('aiCallRows').listeners.get('click')!({ target: get('aiCallRows').children[0] });
+  assert.equal(kind(), 'aiCall');
+  get('logsTab').listeners.get('click')!();
+  assert.equal(kind(), undefined);
+  // A trace opened from an open call replaces it, and the reverse.
+  get('aiCalls').listeners.get('click')!();
+  get('aiCallRows').listeners.get('click')!({ target: get('aiCallRows').children[0] });
+  receive(aiCallReply('s3', ['s3']));
+  get('aiCallTrace').listeners.get('click')!();
+  assert.equal(kind(), 'trace');
+  assert.equal(app.views.active(), 'traces');
+  assert.equal(get('inspectorBody').children[0], get('traceView'));
+  assert.equal(get('aiCallTranscript').children.length, 0, 'the call is forgotten');
+  receive({
+    type: 'trace',
+    trace: {
+      ...traceReply('t1').trace,
+      spans: [
+        {
+          ...traceReply('t1').trace.spans[0],
+          spanId: 's3',
+          genAi: { kind: 'model', label: 'gpt-4o', inputTokens: 1, outputTokens: 1 },
+        },
+      ],
+    },
+  });
+  const chip = get('traceRows').children[0].children[0].children[0].children[1];
+  get('traceRows').listeners.get('click')!({ target: chip });
+  assert.equal(kind(), 'aiCall');
+  assert.equal(app.views.active(), 'aiCalls');
+  assert.equal(get('inspectorBody').children[0], get('aiCallView'));
+  assert.equal(get('traceRows').children.length, 0, 'the trace is forgotten');
+  assert.deepEqual(sent(messages).at(-1), { type: 'aiCall', traceId: 't1', spanId: 's3' });
 });

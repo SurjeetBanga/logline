@@ -991,7 +991,6 @@
       contextLogs: element("contextLogs"),
       contextDetails: element("contextDetails"),
       traceView: element("traceView"),
-      traceBack: element("traceBack"),
       traces: element("traces"),
       tracesView: element("tracesView"),
       tracesStatus: element("tracesStatus"),
@@ -1006,18 +1005,12 @@
       aiCalls: element("aiCalls"),
       aiCallsView: element("aiCallsView"),
       aiCallsStatus: element("aiCallsStatus"),
-      aiCallsKind: element("aiCallsKind"),
-      aiCallsErrorsOnly: element("aiCallsErrorsOnly"),
       aiCallsFilter: element("aiCallsFilter"),
       aiCallsTiles: element("aiCallsTiles"),
-      aiModelsTable: element("aiModelsTable"),
       aiCallsTable: element("aiCallsTable"),
       aiCallsControls: element("aiCallsControls"),
-      aiModelRows: element("aiModelRows"),
       aiCallRows: element("aiCallRows"),
       aiCallView: element("aiCallView"),
-      aiCallBack: element("aiCallBack"),
-      aiCallTitle: element("aiCallTitle"),
       aiCallNavigation: element("aiCallNavigation"),
       aiCallPrevious: element("aiCallPrevious"),
       aiCallPosition: element("aiCallPosition"),
@@ -1027,7 +1020,6 @@
       aiCallStatus: element("aiCallStatus"),
       aiCallTranscript: element("aiCallTranscript"),
       otlpStatus: element("otlpStatus"),
-      traceTitle: element("traceTitle"),
       traceStatus: element("traceStatus"),
       traceRows: element("traceRows"),
       traceHotspots: element("traceHotspots"),
@@ -1858,12 +1850,10 @@
     let current;
     function show(traceId) {
       current = traceId.toLowerCase();
-      elements.traceTitle.textContent = `Trace ${current.length > 12 ? `${current.slice(0, 8)}\u2026${current.slice(-4)}` : current}`;
-      elements.traceTitle.title = current;
       elements.traceStatus.textContent = "Loading\u2026";
       elements.traceRows.replaceChildren();
       elements.traceHotspots.hidden = true;
-      actions.reveal();
+      actions.inspect(`Trace ${current.length > 12 ? `${current.slice(0, 8)}\u2026${current.slice(-4)}` : current}`, current);
       api.postMessage({ type: "trace", traceId: current });
     }
     function hide() {
@@ -1872,7 +1862,6 @@
       elements.traceHotspotList.replaceChildren();
       elements.traceHotspots.hidden = true;
     }
-    scope.listen(elements.traceBack, "click", () => actions.showList());
     scope.listen(elements.traceHotspotList, "click", (event) => {
       const button = event.target.closest(".trace-hotspot");
       const row = button && [...elements.traceRows.querySelectorAll(".trace-span")].find(
@@ -1899,7 +1888,7 @@
       actions.showContext(Number(button.dataset.id));
     });
     function receive(trace) {
-      if (!actions.visible() || trace.traceId !== current) return;
+      if (!actions.inspecting() || trace.traceId !== current) return;
       elements.traceStatus.textContent = summary(trace);
       const shownHotspots = trace.spans.length + trace.omitted > 1 ? trace.hotspots : [];
       const top = shownHotspots[0]?.selfMs ?? 0;
@@ -1937,7 +1926,7 @@
       hide,
       receive,
       get open() {
-        return actions.visible();
+        return actions.inspecting();
       }
     };
   }
@@ -2070,7 +2059,9 @@
     const button = document.createElement("button");
     button.className = "trace-log-button";
     button.dataset.id = String(log.id);
-    button.style.marginInlineStart = `${Math.min(depth, 24) * 14}px`;
+    const indent = Math.min(depth, 24) * 14;
+    button.style.marginInlineStart = `${indent}px`;
+    button.style.maxWidth = `calc(100% - ${indent}px)`;
     button.title = "Show surrounding logs";
     const level = document.createElement("span");
     level.className = `level ${log.level}`;
@@ -2135,10 +2126,18 @@
       open(row.dataset.traceId);
     });
     function open(traceId) {
+      mark(traceId);
+      actions.showTrace(traceId);
+    }
+    function mark(traceId) {
       opened = traceId;
       for (const row of elements.tracesRows.querySelectorAll(".traces-row"))
         row.classList[row.dataset.traceId === traceId ? "add" : "remove"]("selected");
-      actions.showTrace(traceId);
+    }
+    function closed() {
+      opened = void 0;
+      for (const row of elements.tracesRows.querySelectorAll(".traces-row.selected"))
+        row.classList.remove("selected");
     }
     function railItems() {
       const counts = /* @__PURE__ */ new Map();
@@ -2264,7 +2263,7 @@ Trace ${trace.traceId}`;
         })
       );
     }
-    return { show, receive, receiverChanged };
+    return { show, receive, receiverChanged, mark, closed };
   }
 
   // src/core/connection-types.ts
@@ -2709,6 +2708,8 @@ Trace ${trace.traceId}`;
     let current;
     let detail;
     let model;
+    let kind;
+    let errorsOnly = false;
     function load() {
       if (pending) return;
       pending = true;
@@ -2738,11 +2739,10 @@ Trace ${trace.traceId}`;
     function open(traceId, spanId) {
       current = { traceId: traceId.toLowerCase(), spanId: spanId.toLowerCase() };
       detail = void 0;
-      elements.aiCallTitle.textContent = "AI call";
       elements.aiCallStatus.textContent = "Loading\u2026";
       elements.aiCallTranscript.replaceChildren();
       elements.aiCallNavigation.hidden = true;
-      actions.revealCall();
+      actions.inspect("AI call");
       api.postMessage({ type: "aiCall", ...current });
     }
     function close() {
@@ -2761,23 +2761,7 @@ Trace ${trace.traceId}`;
       event.preventDefault();
       openRow(event.target);
     });
-    function chooseModel(target) {
-      const row = target?.closest("[data-model]");
-      if (row?.dataset.model === void 0) return;
-      model = model === row.dataset.model ? void 0 : row.dataset.model;
-      render();
-    }
-    scope.listen(elements.aiModelRows, "click", (event) => chooseModel(event.target));
-    scope.listen(elements.aiModelRows, "keydown", (event) => {
-      const key = event.key;
-      if (key !== "Enter" && key !== " ") return;
-      event.preventDefault();
-      chooseModel(event.target);
-    });
     scope.listen(elements.aiCallsFilter, "input", render);
-    scope.listen(elements.aiCallsKind, "change", render);
-    scope.listen(elements.aiCallsErrorsOnly, "change", render);
-    scope.listen(elements.aiCallBack, "click", show);
     scope.listen(elements.aiCallTrace, "click", () => {
       if (current) actions.showTrace(current.traceId);
     });
@@ -2803,7 +2787,7 @@ Trace ${trace.traceId}`;
       if (actions.listVisible()) render();
     }
     function receiveCall(message) {
-      if (!actions.callVisible() || message.traceId !== current?.traceId || message.spanId !== current.spanId) return;
+      if (!actions.inspecting() || message.traceId !== current?.traceId || message.spanId !== current.spanId) return;
       if (!message.detail) {
         elements.aiCallStatus.textContent = "This call is no longer retained.";
         return;
@@ -2812,8 +2796,6 @@ Trace ${trace.traceId}`;
       renderCall(message.detail);
     }
     function shown2(calls) {
-      const kind = elements.aiCallsKind.value;
-      const errorsOnly = elements.aiCallsErrorsOnly.checked;
       const terms = elements.aiCallsFilter.value.trim().toLowerCase().split(/\s+/).filter(Boolean);
       return calls.filter((call) => {
         if (model !== void 0 && (call.kind !== "model" || (call.model ?? UNKNOWN_MODEL) !== model)) return false;
@@ -2824,6 +2806,61 @@ Trace ${trace.traceId}`;
         return terms.every((term) => text2.includes(term));
       });
     }
+    function railItems(list) {
+      const choose = (change) => () => {
+        change();
+        render();
+      };
+      const kinds = [
+        ["model", "Model calls", list.modelCalls],
+        ["tool", "Tool calls", list.toolCalls],
+        ["agent", "Agent runs", list.calls.filter((call) => call.kind === "agent").length]
+      ];
+      return [
+        {
+          kind: "item",
+          key: "all",
+          label: "All calls",
+          icon: "all",
+          meta: whole.format(list.total),
+          selected: model === void 0 && kind === void 0,
+          onSelect: choose(() => {
+            model = void 0;
+            kind = void 0;
+          })
+        },
+        ...list.models.length ? [{ kind: "group", label: "Models" }] : [],
+        ...list.models.map((totals) => ({
+          kind: "item",
+          key: `model:${totals.model}`,
+          label: totals.model,
+          status: totals.provider,
+          meta: totals.errors ? `${whole.format(totals.errors)} failed \xB7 ${whole.format(totals.calls)}` : whole.format(totals.calls),
+          selected: model === totals.model,
+          title: model === totals.model ? "Show every call" : `Show only ${totals.model} calls, with its totals`,
+          // Choosing the chosen model again shows every call.
+          onSelect: choose(() => model = model === totals.model ? void 0 : totals.model)
+        })),
+        { kind: "group", label: "Kind" },
+        ...kinds.filter(([, , count]) => count > 0).map(([name, label, count]) => ({
+          kind: "item",
+          key: `kind:${name}`,
+          label,
+          meta: whole.format(count),
+          selected: kind === name,
+          onSelect: choose(() => kind = kind === name ? void 0 : name)
+        })),
+        { kind: "group", label: "Show" },
+        {
+          kind: "item",
+          key: "errors",
+          label: "Errors only",
+          meta: whole.format(list.errors),
+          checked: errorsOnly,
+          onSelect: choose(() => errorsOnly = !errorsOnly)
+        }
+      ];
+    }
     function render() {
       if (!summary2) return;
       const empty = !summary2.total;
@@ -2833,17 +2870,16 @@ Trace ${trace.traceId}`;
         const { running, endpoint } = actions.receiver();
         elements.aiCallsStatus.textContent = "No AI calls yet. " + (running ? `Apps instrumented with the OpenTelemetry GenAI conventions, such as OpenLLMetry or the OpenAI and Anthropic instrumentations, send their LLM calls, tool executions, and agent runs to ${endpoint ?? "the receiver"}.` : "Start the OpenTelemetry receiver, then run an app instrumented with the GenAI conventions.");
         elements.aiCallsTiles.replaceChildren();
-        elements.aiModelsTable.hidden = true;
-        elements.aiModelRows.replaceChildren();
         elements.aiCallRows.replaceChildren();
+        actions.rail?.("AI calls", []);
         return;
       }
       if (model !== void 0 && !summary2.models.some((totals) => totals.model === model)) model = void 0;
       const rows = shown2(summary2.calls);
       elements.aiCallsStatus.textContent = `${whole.format(summary2.total)} AI ${summary2.total === 1 ? "call" : "calls"}` + (summary2.errors ? ` \xB7 ${whole.format(summary2.errors)} failed` : "") + (summary2.total > summary2.calls.length ? ` \xB7 newest ${whole.format(summary2.calls.length)} listed` : "") + (rows.length < summary2.calls.length ? ` \xB7 ${whole.format(rows.length)} match` : "") + (model !== void 0 ? ` \xB7 ${model} only` : "") + " \xB7 Choose one to read its conversation";
-      elements.aiCallsTiles.replaceChildren(...tiles(summary2));
-      elements.aiModelRows.replaceChildren(...summary2.models.map((totals) => modelRow(totals, totals.model === model)));
-      elements.aiModelsTable.hidden = !summary2.models.length;
+      const chosen = summary2.models.find((totals) => totals.model === model);
+      elements.aiCallsTiles.replaceChildren(...chosen ? modelTiles(chosen) : tiles(summary2));
+      actions.rail?.("AI calls", railItems(summary2));
       elements.aiCallRows.replaceChildren(...rows.map(callRow));
     }
     function callRow(call) {
@@ -2878,10 +2914,12 @@ Trace ${trace.traceId}`;
     }
     function renderCall(view) {
       const { call } = view;
-      elements.aiCallTitle.textContent = `${KIND_GLYPHS[call.kind]} ${callLabel(call)}`;
-      elements.aiCallTitle.title = `${call.name}
+      actions.inspect(
+        `${KIND_GLYPHS[call.kind]} ${callLabel(call)}`,
+        `${call.name}
 Trace ${call.traceId}
-Span ${call.spanId}`;
+Span ${call.spanId}`
+      );
       elements.aiCallStatus.textContent = [
         call.provider,
         call.agent && `agent ${call.agent}`,
@@ -2951,29 +2989,17 @@ Span ${call.spanId}`;
       tile("Tool calls", whole.format(summary2.toolCalls), toolErrors ? `${whole.format(toolErrors)} failed` : void 0)
     ];
   }
-  function modelRow(model, selected) {
-    const row = document.createElement("tr");
-    row.className = `ai-model-row${selected ? " selected" : ""}`;
-    row.dataset.model = model.model;
-    row.tabIndex = 0;
-    row.setAttribute("aria-pressed", String(selected));
-    row.title = selected ? "Show every call" : `Show only ${model.model} calls`;
-    const name = cell(model.model, "trace-name");
-    if (model.provider) {
-      const provider = document.createElement("span");
-      provider.className = "ai-provider";
-      provider.textContent = ` \xB7 ${model.provider}`;
-      name.append(provider);
-    }
-    row.append(
-      name,
-      cell(whole.format(model.calls), "ai-number"),
-      cell(tokens(model.inputTokens, true), "ai-number"),
-      cell(tokens(model.outputTokens, true), "ai-number"),
-      cell(formatDuration(model.p95Ms), "trace-duration"),
-      cell(model.errors ? whole.format(model.errors) : "", model.errors ? "ai-number ai-errors" : "ai-number")
-    );
-    return row;
+  function modelTiles(model) {
+    const cached = model.inputTokens ? Math.round(model.cachedTokens / model.inputTokens * 100) : 0;
+    return [
+      tile(model.model, whole.format(model.calls), model.errors ? `${whole.format(model.errors)} failed` : "calls"),
+      tile(
+        "Tokens",
+        `${tokens(model.inputTokens, true)} \u2192 ${tokens(model.outputTokens, true)}`,
+        cached ? `${cached}% of input cached` : "input \u2192 output"
+      ),
+      tile("Latency", `p50 ${formatDuration(model.p50Ms)}`, `p95 ${formatDuration(model.p95Ms)}`)
+    ];
   }
   function block(summary2, body, open, className = "ai-block") {
     const details2 = document.createElement("details");
@@ -6197,24 +6223,20 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
     return typeof value === "string" && TABS.includes(value);
   }
   function tabOf(view) {
-    return view === "trace" ? "traces" : view === "aiCall" ? "aiCalls" : view;
+    return view;
   }
   function createViews(tabs, panels, scope, activate, changed) {
     let current = "logs";
     function show(view, focus = false) {
       const previous = current;
       current = view;
-      for (const name of Object.keys(panels))
-        panels[name].hidden = name !== view && !(view === "trace" && name === "traces");
+      for (const name of Object.keys(panels)) panels[name].hidden = name !== view;
       const selected = tabOf(view);
       for (const name of TABS) {
         tabs[name].setAttribute("aria-selected", String(name === selected));
         tabs[name].tabIndex = name === selected ? 0 : -1;
       }
-      if (document.body) {
-        document.body.dataset.view = selected;
-        document.body.dataset.subview = view;
-      }
+      if (document.body) document.body.dataset.view = selected;
       if (focus) tabs[selected].focus();
       if (view !== previous) changed(view, previous);
     }
@@ -8729,10 +8751,8 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
         analysis: elements.analysisView,
         compare: elements.compareView,
         traces: elements.tracesView,
-        trace: elements.traceView,
         metrics: elements.metricsView,
         aiCalls: elements.aiCallsView,
-        aiCall: elements.aiCallView,
         doctor: elements.doctorView,
         connection: elements.connectionView
       },
@@ -8805,10 +8825,17 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
         views.show("logs");
         search.setQuery(query, true);
       },
-      showList: () => traceList.show(),
       openAiCall: (traceId, spanId) => aiCalls.open(traceId, spanId),
-      reveal: () => views.show("trace"),
-      visible: () => views.active() === "trace"
+      inspect: (title, tooltip) => {
+        if (views.active() !== "traces") traceList.show();
+        traceList.mark(tooltip);
+        inspector.open("trace", { title, body: [elements.traceView] }, () => {
+          traceView.hide();
+          traceList.closed();
+        });
+        elements.inspectorTitle.title = tooltip;
+      },
+      inspecting: () => inspector.kind() === "trace"
     });
     const traceList = createTraceList(elements, api, scope, {
       showTrace: (traceId) => traceView.show(traceId),
@@ -8852,9 +8879,16 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
       showTrace: (traceId) => traceView.show(traceId),
       formatTime: (ms) => formatTimestamp({ id: 0, level: "", timestampMs: ms }) ?? "",
       revealList: () => views.show("aiCalls"),
-      revealCall: () => views.show("aiCall"),
+      inspect: (title, tooltip) => {
+        if (views.active() !== "aiCalls") aiCalls.show();
+        const content = { title, nav: [elements.aiCallNavigation], body: [elements.aiCallView] };
+        if (inspector.kind() === "aiCall") inspector.update("aiCall", content);
+        else inspector.open("aiCall", content, () => aiCalls.close());
+        if (tooltip) elements.inspectorTitle.title = tooltip;
+      },
+      inspecting: () => inspector.kind() === "aiCall",
+      rail: (title, items) => tabRail.set("aiCalls", title, items),
       listVisible: () => views.active() === "aiCalls",
-      callVisible: () => views.active() === "aiCall",
       receiver: () => ({ running: otlpRunning, endpoint: otlpEndpoint })
     });
     elements.doctor.hidden = true;
@@ -9692,13 +9726,13 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
     }
     function viewChanged(view, previous) {
       restoreTab = void 0;
-      if (previous === "trace") traceView.hide();
       if (previous === "metrics") metricList.hide();
       if (previous === "compare") compareView.hide();
       if (previous === "aiCalls") aiCalls.hide();
-      if (previous === "aiCall") aiCalls.close();
       if (previous === "doctor") elements.doctor.hidden = true;
-      if (tabOf(view) !== "logs") inspector.close("event");
+      if (view !== "logs") inspector.close("event");
+      if (view !== "traces") inspector.close("trace");
+      if (view !== "aiCalls") inspector.close("aiCall");
       state.view = tabOf(view);
       tabRail.show(tabOf(view));
       saveState();
@@ -9860,10 +9894,8 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
         analysisView: "analysis",
         compareView: "compare",
         tracesView: "traces",
-        traceView: "traces",
         metricsView: "metrics",
         aiCallsView: "aiCalls",
-        aiCallView: "aiCalls",
         doctorView: "doctor",
         connectionView: "connection"
       };
