@@ -173,6 +173,10 @@ test('a Postgres URL fills the form, a test unlocks the tables, and Save waits f
   assert.equal(form.steps()[0].hidden, false);
   assert.equal(form.root().querySelectorAll('.type-card').length, CONNECTION_TYPES.length);
   assert.ok(form.$('.type-card.selected').textContent.startsWith('Postgres'));
+  // What each store is waits behind the i on its card, which describes it without choosing it.
+  const about = form.$('.type-card.selected').querySelector('.type-info')!;
+  assert.equal(about.attributes['aria-label'], 'About Postgres');
+  assert.equal(form.$(`#${about.attributes['aria-describedby']}`).attributes.role, 'tooltip');
   assert.equal(form.save().disabled, true);
   assert.equal(form.note(), '', 'choosing the type needs nothing more');
   form.next().fire('click');

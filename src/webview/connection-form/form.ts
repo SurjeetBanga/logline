@@ -670,7 +670,24 @@ export function createConnectionForm(api: FormApi, root: HTMLElement) {
           onchange: () => chooseType(entryType.type),
         }),
         h('span', { className: 'type-name' }, entryType.label),
-        h('span', { className: 'type-description' }, entryType.description),
+        // What the store is shows from its i, on hover or focus, so the cards stay one line each.
+        h(
+          'button',
+          {
+            type: 'button',
+            className: 'type-info',
+            'aria-label': `About ${entryType.label}`,
+            'aria-describedby': `type-about-${entryType.type}`,
+            // Inside the card's label, a click would otherwise choose the type.
+            onclick: (event: Event) => event.preventDefault(),
+          },
+          'i',
+        ),
+        h(
+          'span',
+          { className: 'type-description', id: `type-about-${entryType.type}`, role: 'tooltip' },
+          entryType.description,
+        ),
       );
     });
   }

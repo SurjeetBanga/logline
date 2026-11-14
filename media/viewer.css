@@ -4686,15 +4686,15 @@ body:not([data-view='logs']) .match-count {
 }
 .connection-view .type-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
-  gap: 8px;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 6px;
 }
 .connection-view .type-card {
   position: relative;
   display: flex;
-  flex-direction: column;
-  gap: 2px;
-  padding: 8px 10px;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 6px 5px 10px;
   border: 1px solid var(--border);
   border-radius: 4px;
   cursor: pointer;
@@ -4720,12 +4720,58 @@ body:not([data-view='logs']) .match-count {
   cursor: default;
 }
 .connection-view .type-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
   font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* The i on a card: what the store is shows over the card while the i is pointed at or focused. Over it, since
+   under the last row it would run past the step in a short panel. */
+.connection-view button.type-info {
+  display: inline-grid;
+  flex: none;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  min-height: 0;
+  padding: 0;
+  border: 1px solid currentColor;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--muted);
+  font-family: Georgia, 'Times New Roman', serif;
+  font-size: 11px;
+  font-style: italic;
+  line-height: 1;
+  cursor: help;
+}
+.connection-view button.type-info:hover:not(:disabled),
+.connection-view button.type-info:focus {
+  background: transparent;
+  color: var(--text);
 }
 .connection-view .type-description {
-  color: var(--muted);
-  font-size: 11px;
+  position: absolute;
+  bottom: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  z-index: 5;
+  display: none;
+  padding: 5px 8px;
+  border: 1px solid var(--vscode-editorHoverWidget-border, #454545);
+  border-radius: 4px;
+  background: var(--vscode-editorHoverWidget-background, #252526);
+  box-shadow: 0 2px 8px var(--vscode-widget-shadow, rgba(0, 0, 0, 0.36));
+  color: var(--vscode-editorHoverWidget-foreground, var(--text));
+  font-size: 12px;
   line-height: 1.35;
+  cursor: default;
+}
+.connection-view .type-info:hover + .type-description,
+.connection-view .type-info:focus + .type-description {
+  display: block;
 }
 
 /* Fields. */
