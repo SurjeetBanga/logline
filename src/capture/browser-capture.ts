@@ -221,10 +221,8 @@ interface Running {
   sweeper?: ReturnType<typeof setInterval>;
 }
 
-const delay = (ms: number) =>
-  new Promise<void>((resolve) => {
-    setTimeout(resolve, ms).unref?.();
-  });
+// Not unref'd: a wait with nothing else pending must still end by its timer, not let the event loop drain.
+const delay = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
 /**
  * Captures a browser Logline opened: console calls, uncaught exceptions, what the browser itself
