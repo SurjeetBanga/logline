@@ -784,7 +784,11 @@ body > header {
   background: transparent;
   color: var(--vscode-foreground, #d4d4d4);
 }
+/* In a narrow rail the button gives up its text before the i is pushed past the edge. */
 .rail-empty-add {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
   border-color: transparent;
   background: var(--vscode-button-background, #0e639c);
   color: var(--vscode-button-foreground, #fff);
