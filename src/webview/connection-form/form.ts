@@ -39,6 +39,15 @@ type TestState =
   /** The fields changed since a good test. */
   | { state: 'stale' };
 
+/** The test's state in a few words, for the Connect step's summary and the line beside the test. */
+const TEST_SUMMARY: Record<TestState['state'], string> = {
+  idle: 'Not checked yet',
+  running: 'Connecting…',
+  ok: 'Connected',
+  failed: 'Could not connect',
+  stale: 'Changed since the last test',
+};
+
 type Child = Node | string | false | undefined | null;
 
 /** An element with attributes, properties starting `on` as listeners, and children. */
@@ -281,16 +290,7 @@ export function createConnectionForm(api: FormApi, root: HTMLElement) {
   function stepSummary(index: number): string {
     const kind = connectionKind(draft.type);
     if (index === 0) return kind.label;
-    if (index === 1)
-      return test.state === 'ok'
-        ? 'Connected'
-        : test.state === 'running'
-          ? 'Connecting…'
-          : test.state === 'failed'
-            ? 'Could not connect'
-            : test.state === 'stale'
-              ? 'Changed since the last check'
-              : 'Not checked yet';
+    if (index === 1) return TEST_SUMMARY[test.state];
     if (index === 2) {
       if (kind.service) return 'No table needed';
       return table ?? (table === null ? 'None' : kind.mappingRequired ? 'Required' : 'Optional');
@@ -1037,6 +1037,7 @@ export function createConnectionForm(api: FormApi, root: HTMLElement) {
       details.querySelector<HTMLElement>('#field-url-entry')?.focus();
       test = { state: 'failed', error: 'Enter a URL Logline can read, or use Fields.' };
       updateTest();
+      updateFooter();
       return;
     }
     const { connection, errors } = result();
@@ -1045,6 +1046,7 @@ export function createConnectionForm(api: FormApi, root: HTMLElement) {
       details.querySelector<HTMLElement>(`#field-${first}`)?.focus();
       test = { state: 'failed', error: Object.values(errors)[0] ?? 'Fill in the connection first.' };
       updateTest();
+      updateFooter();
       return;
     }
     test = { state: 'running' };
@@ -1060,17 +1062,17 @@ export function createConnectionForm(api: FormApi, root: HTMLElement) {
       test.state === 'running' ? 'Testing…' : test.state === 'ok' ? 'Test again' : 'Test connection';
     testStatus.className = `test-status ${test.state}`;
     testStatus.textContent =
-      test.state === 'running'
-        ? 'Connecting…'
-        : test.state === 'ok'
-          ? `✓ Connected · ${test.detail}`
-          : test.state === 'failed'
-            ? test.error
-            : test.state === 'stale'
-              ? 'Changed since the last test. Test again to continue.'
+      test.state === 'ok'
+        ? `✓ ${TEST_SUMMARY.ok} · ${test.detail}`
+        : test.state === 'failed'
+          ? test.error
+          : test.state === 'stale'
+            ? `${TEST_SUMMARY.stale}. Test again to continue.`
+            : test.state === 'running'
+              ? TEST_SUMMARY.running
               : '';
     renderFound();
-    renderSteps();
+    // The steps follow with the footer, which every caller updates next.
   }
 
   /** Under the test's answer: the tables it can read, or what a test is for before one has run. */

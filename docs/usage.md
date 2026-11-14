@@ -180,7 +180,7 @@ Everything is a way into the logs: click a bar to filter to its time range, or d
 
 Click an event to open it in the inspector beside the table, or below it when the panel is narrower than 900 pixels. The inspector shows the event's full message, its level, time, and source; the actions **Surrounding logs**, **Trace**, **Open code**, **Break here**, **Copy**, and **Share with agent**; log doctor findings; exceptions; a list of the event's fields; and the **Original event**. Each field in the list has **+** to show only events with that value and **−** to exclude it, and both edit the search. The list does not pause while an event is open: new logs keep arriving, and the selected row stays marked.
 
-With an event open, **Up** and **Down** on a row move to the previous or next event. **Escape**, the **×** in the inspector, or a click on the selected row again closes it. Drag the inspector's left edge to resize it, or double-click the edge to reset the width; the width is remembered. Traces and AI calls open a trace and a conversation in the same inspector.
+With an event open, **Up** and **Down** on its message move to the previous or next event (on a cell they move between cells). **Escape** from anywhere in the table's rows, the **×** in the inspector, or a click on the selected row again closes it. Drag the inspector's left edge to resize it, or double-click the edge to reset the width; the width is remembered. Traces and AI calls open a trace and a conversation in the same inspector.
 
 ## Exceptions and surrounding context
 

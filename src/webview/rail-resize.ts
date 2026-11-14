@@ -13,8 +13,15 @@ export function clampRailWidth(width: number): number {
   return Math.round(Math.max(RAIL_WIDTH.min, Math.min(widest(), width)));
 }
 
-/** The inspector's width: wide enough for a stack trace, and never so wide the list beside it is lost. */
+/**
+ * The inspector's width: wide enough for a stack trace, and never so wide the
+ * list beside it is lost. Until one is chosen the stylesheet sizes it, so its
+ * drawn width is where a drag or an arrow key starts; the default is only for
+ * an inspector that is not drawn.
+ */
 export const INSPECTOR_WIDTH = { min: 280, max: 900, default: 440 } as const;
+/** The room the list beside the inspector always keeps. */
+const LIST_ROOM = 320;
 
 /**
  * Drag handles on the right edge of the Sources rail and the tabs' rail. Both
@@ -45,6 +52,7 @@ export function createRailResize(
 /** The drag handle on the inspector's left edge; its width is kept with the panel's state like the rails'. */
 export function createInspectorResize(
   handle: HTMLElement,
+  inspector: HTMLElement,
   state: ViewerState,
   scope: EventScope,
   actions: { saveState(): void },
@@ -54,8 +62,13 @@ export function createInspectorResize(
       handles: [handle],
       variable: '--inspector-width',
       bounds: INSPECTOR_WIDTH,
-      // The list beside it keeps at least 320px of the panel.
-      widest: () => Math.max(INSPECTOR_WIDTH.min, Math.min(INSPECTOR_WIDTH.max, (window.innerWidth || 0) - 320)),
+      // The list beside it keeps at least 320px of the space the two share,
+      // which leaves out the rails beside them.
+      widest: () => {
+        const shared = inspector.parentElement?.getBoundingClientRect().width || window.innerWidth || 0;
+        return Math.max(INSPECTOR_WIDTH.min, Math.min(INSPECTOR_WIDTH.max, shared - LIST_ROOM));
+      },
+      drawn: () => (inspector.hidden ? undefined : inspector.getBoundingClientRect().width || undefined),
       grows: -1,
       get: () => state.inspectorWidth,
       set: (width) => (state.inspectorWidth = width),
@@ -71,6 +84,8 @@ interface EdgeResize {
   variable: string;
   bounds: { min: number; max: number; default: number };
   widest(): number;
+  /** The pane's drawn width, used while no width is chosen and the stylesheet sizes it. */
+  drawn?(): number | undefined;
   /** 1 when dragging right widens the pane, -1 when dragging left does. */
   grows: 1 | -1;
   get(): number | undefined;
@@ -81,9 +96,11 @@ interface EdgeResize {
 function createEdgeResize(edge: EdgeResize, scope: EventScope) {
   const { handles, bounds } = edge;
   const clamp = (width: number) => Math.round(Math.max(bounds.min, Math.min(edge.widest(), width)));
+  /** The width on screen: the chosen one, or else what the stylesheet drew. */
+  const current = () => clamp(edge.get() ?? edge.drawn?.() ?? bounds.default);
   function apply(): void {
     const chosen = edge.get();
-    const width = chosen === undefined ? bounds.default : clamp(chosen);
+    const width = current();
     if (chosen === undefined) document.body.style.removeProperty(edge.variable);
     else document.body.style.setProperty(edge.variable, `${width}px`);
     for (const handle of handles) {
@@ -103,7 +120,7 @@ function createEdgeResize(edge: EdgeResize, scope: EventScope) {
       if (event.button !== undefined && event.button !== 0) return;
       handle.setPointerCapture?.(event.pointerId);
       const startX = event.clientX;
-      const startWidth = edge.get() ?? bounds.default;
+      const startWidth = current();
       handle.classList.add('dragging');
       const move = (pointer: PointerEvent) => set(startWidth + (pointer.clientX - startX) * edge.grows);
       const finish = () => {
@@ -126,10 +143,12 @@ function createEdgeResize(edge: EdgeResize, scope: EventScope) {
       if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
       event.preventDefault();
       const step = (event.shiftKey ? STEP * 3 : STEP) * edge.grows;
-      set((edge.get() ?? bounds.default) + (event.key === 'ArrowLeft' ? -step : step));
+      set(current() + (event.key === 'ArrowLeft' ? -step : step));
       edge.saveState();
     });
   }
+  // The drawn width may have changed since the last apply, as when the pane was hidden then.
+  for (const handle of handles) scope.listen(handle, 'focus', apply);
   // A width that fit a wide panel is narrowed with it, without forgetting the choice.
   scope.listen(window, 'resize', apply);
   apply();

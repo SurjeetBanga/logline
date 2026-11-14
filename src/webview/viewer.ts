@@ -57,7 +57,7 @@ export function createViewer(api: WebviewApi) {
     collapsedChanged: () => rail.applyCollapsed(),
   });
   createRailResize([elements.railResizer, elements.tabRailResizer], state, scope, { saveState: () => saveState() });
-  createInspectorResize(elements.inspectorResizer, state, scope, { saveState: () => saveState() });
+  createInspectorResize(elements.inspectorResizer, elements.inspector, state, scope, { saveState: () => saveState() });
   // What is selected in a list shows beside it, so the list stays in view and nothing in it moves.
   const inspector = createInspector(elements, scope);
   createTooltips(scope);
@@ -94,7 +94,7 @@ export function createViewer(api: WebviewApi) {
     {
       show: (view) => views.show(view),
       active: () => views.active(),
-      back: (tab) => openView(views.available(tab) ? tab : 'logs'),
+      back: (tab) => openView(canOpen(tab) ? tab : 'logs'),
     },
     (title, items) => tabRail.set('connection', title, items),
   );
@@ -149,15 +149,20 @@ export function createViewer(api: WebviewApi) {
       search.setQuery(query, true);
     },
     openAiCall: (traceId, spanId) => aiCalls.open(traceId, spanId),
-    inspect: (title, tooltip) => {
+    inspect: (title, traceId) => {
       // A trace opened from a log, a finding, or an AI call shows beside the list of traces.
       if (views.active() !== 'traces') traceList.show();
-      traceList.mark(tooltip);
-      inspector.open('trace', { title, body: [elements.traceView] }, () => {
-        traceView.hide();
-        traceList.closed();
-      });
-      elements.inspectorTitle.title = tooltip;
+      traceList.mark(traceId);
+      inspector.open(
+        'trace',
+        { title, tooltip: traceId, body: [elements.traceView] },
+        {
+          closed: () => {
+            traceView.hide();
+            traceList.closed();
+          },
+        },
+      );
     },
     inspecting: () => inspector.kind() === 'trace',
   });
@@ -206,11 +211,10 @@ export function createViewer(api: WebviewApi) {
     revealList: () => views.show('aiCalls'),
     inspect: (title, tooltip) => {
       if (views.active() !== 'aiCalls') aiCalls.show();
-      const content = { title, nav: [elements.aiCallNavigation], body: [elements.aiCallView] };
+      const content = { title, tooltip, nav: [elements.aiCallNavigation], body: [elements.aiCallView] };
       // The same call's title arrives with its conversation; another call replaces the one shown.
       if (inspector.kind() === 'aiCall') inspector.update('aiCall', content);
-      else inspector.open('aiCall', content, () => aiCalls.close());
-      if (tooltip) elements.inspectorTitle.title = tooltip;
+      else inspector.open('aiCall', content, { closed: () => aiCalls.close() });
     },
     inspecting: () => inspector.kind() === 'aiCall',
     rail: (title, items) => tabRail.set('aiCalls', title, items),
@@ -578,7 +582,7 @@ export function createViewer(api: WebviewApi) {
     if (restoreTab) {
       const tab = restoreTab;
       restoreTab = undefined;
-      if (tab === 'doctor' ? doctorEnabled : views.available(tab)) openView(tab);
+      if (canOpen(tab)) openView(tab);
     }
     if (data.openCompare) compareView.open(data.openCompare);
     if (data.sessions) {
@@ -830,15 +834,17 @@ export function createViewer(api: WebviewApi) {
     if (!button) return;
     selectEvent(Number(button.closest('tr')!.dataset.id));
   });
-  // With an event open, the arrow keys move to the one above or below, and Escape closes it.
+  // With an event open, Escape anywhere in a row closes it, and the arrow keys on a message move to
+  // the one above or below. On a cell they move between cells instead.
   scope.listen(elements.logs, 'keydown', (event) => {
-    if (inspector.kind() !== 'event' || !(event.target as HTMLElement).closest?.('.message-button')) return;
+    const target = event.target as HTMLElement;
+    if (inspector.kind() !== 'event' || !target.closest?.('tr.event-row')) return;
     if (event.key === 'Escape') {
       event.preventDefault();
       inspector.close('event');
       return;
     }
-    if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return;
+    if ((event.key !== 'ArrowDown' && event.key !== 'ArrowUp') || !target.closest('.message-button')) return;
     const next = table.neighbor(event.key === 'ArrowDown' ? 1 : -1);
     if (!next) return;
     event.preventDefault();
@@ -941,7 +947,12 @@ export function createViewer(api: WebviewApi) {
   /** Shows an event in the inspector; choosing the open one again closes it. */
   function selectEvent(id: number) {
     dismissRowHint();
-    if (table.select(id)) inspector.open('event', eventContent(), () => table.clearSelection());
+    if (table.select(id))
+      inspector.open('event', eventContent(), {
+        closed: () => table.clearSelection(),
+        // Rows are rebuilt as logs arrive, so the event's row is looked up when the pane closes.
+        home: () => elements.logs.querySelector<HTMLElement>(`tr.event-row[data-id="${id}"] .message-button`),
+      });
     else inspector.close('event');
   }
   /** The selected event for the inspector: its message, where and when it was logged, its actions and fields. */
@@ -1219,6 +1230,15 @@ export function createViewer(api: WebviewApi) {
     else views.show(tab);
   }
 
+  /**
+   * Whether a tab can be opened now. The Issues tab is hidden except while its
+   * view is open, so it can be opened whenever log doctor is on; every other tab
+   * can be opened while it is shown.
+   */
+  function canOpen(tab: TabName): boolean {
+    return tab === 'doctor' ? doctorEnabled : views.available(tab);
+  }
+
   /** Shows log doctor's findings; their tab appears while they are open. */
   function openIssues() {
     if (!doctorEnabled) return;
@@ -1355,7 +1375,7 @@ export function createViewer(api: WebviewApi) {
   // else once the first snapshot says whether it has data.
   views.show('logs');
   if (state.view !== 'logs' && isTabName(state.view)) {
-    if (views.available(state.view)) openView(state.view);
+    if (canOpen(state.view)) openView(state.view);
     else restoreTab = state.view;
   }
 
@@ -1455,7 +1475,7 @@ export function createViewer(api: WebviewApi) {
     const panel = element.closest<HTMLElement>('.view-panel');
     if (panel?.classList.contains('view-panel')) {
       const tab = tabForPanel(panel.id);
-      if (!tab || !views.available(tab)) return false;
+      if (!tab || !canOpen(tab)) return false;
       if (tabOf(views.active()) !== tab) openView(tab);
     } else if (
       (elements.sourceRail.contains(element) ||

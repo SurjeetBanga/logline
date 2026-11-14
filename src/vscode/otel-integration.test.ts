@@ -227,7 +227,7 @@ test('the controller runs the receiver from settings and points new processes at
   assert.equal(controller.otlp.endpoint, endpoint);
   if (!process.env.OTEL_EXPORTER_OTLP_ENDPOINT) assert.equal(environment.get('OTEL_EXPORTER_OTLP_ENDPOINT'), endpoint);
   assert.equal(environment.has('OTEL_SERVICE_NAME'), false, "terminals keep the app's own service name");
-  assert.deepEqual(controller.snapshot({ type: 'snapshot', statsOnly: true }).otlp, {
+  assert.deepEqual(controller.snapshot({ type: 'snapshot' }).otlp, {
     running: true,
     endpoint,
     error: undefined,

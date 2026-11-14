@@ -675,6 +675,7 @@ export const emptyAiCalls = {
   total: 0,
   modelCalls: 0,
   toolCalls: 0,
+  agentRuns: 0,
   errors: 0,
   inputTokens: 0,
   outputTokens: 0,

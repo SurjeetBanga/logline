@@ -148,6 +148,7 @@ const aiCalls = {
     total: 2,
     modelCalls: 1,
     toolCalls: 1,
+    agentRuns: 0,
     errors: 0,
     inputTokens: 100,
     outputTokens: 20,

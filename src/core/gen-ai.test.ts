@@ -341,8 +341,16 @@ test('the summary totals calls, tokens, and latency per model and tool, newest f
     'newest first, limited',
   );
   assert.deepEqual(
-    [summary.modelCalls, summary.toolCalls, summary.errors, summary.inputTokens, summary.outputTokens],
-    [3, 1, 1, 2600, 300],
+    [
+      summary.modelCalls,
+      summary.toolCalls,
+      summary.agentRuns,
+      summary.errors,
+      summary.inputTokens,
+      summary.outputTokens,
+    ],
+    [3, 1, 1, 1, 2600, 300],
+    'counted over every call, beyond the limit too',
   );
   assert.deepEqual(
     summary.models.map((model) => [model.model, model.calls, model.errors, model.inputTokens, model.p95Ms]),

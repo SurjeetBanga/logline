@@ -17,22 +17,6 @@ export interface GuideRelease {
 
 export const GUIDE_RELEASES: GuideRelease[] = [
   {
-    version: '1.21.0',
-    date: '2026-11-14',
-    highlights: [
-      {
-        title: 'A calmer Logs panel',
-        text: 'The tabs, search, filters, Share with agent, and More actions share one row, rows are denser, and error and warning rows carry a colored mark. Add logs from the + in the Sources rail, and the check mark in the status bar opens a Status panel for capture, OpenTelemetry, agents, and memory.',
-        section: 'capture',
-      },
-      {
-        title: 'Open an event beside the list',
-        text: 'Click an event to read it in an inspector beside the list while live logs keep arriving. Traces and AI calls open in the same inspector, and AI calls has a rail for models, kinds, and errors.',
-        section: 'inspect',
-      },
-    ],
-  },
-  {
     version: '1.20.0',
     date: '2026-11-05',
     highlights: [
@@ -678,7 +662,7 @@ export const GUIDE_CARDS: GuideCard[] = [
     section: 'inspect',
     title: 'Open an event',
     where: ['Table', 'click a message'],
-    text: 'An inspector beside the list shows its message, fields, exceptions, and raw event, and opens the line that logged it and the logs around it from the same run. The list keeps updating. Up and Down move between events, and Escape closes it. Drag its left edge to resize it.',
+    text: 'An inspector beside the list shows its message, fields, exceptions, and raw event, and opens the line that logged it and the logs around it from the same run. The list keeps updating. Up and Down on a message move between events, and Escape closes it. Drag its left edge to resize it.',
     target: 'eventsTable',
   },
   {
@@ -862,7 +846,7 @@ export const GUIDE_KEYS: [keys: string, action: string][] = [
   ['Enter', 'Apply the filter you typed'],
   ['Escape', 'Close a menu, panel, the inspector, or surrounding logs'],
   ['Arrow keys in the table', 'Move between cells; Enter opens a cell’s actions'],
-  ['↑ ↓ on a row', 'Open the previous or next event while one is open'],
+  ['↑ ↓ on a message', 'Open the previous or next event while one is open'],
 ];
 
 /** How far someone has got, for the guide's Get started steps. */

@@ -39,12 +39,10 @@ export function createRows(
     button.className = 'message-button';
     button.textContent = `${event.message}${event.truncated ? ' [truncated]' : ''}`;
     // No tooltip: it would repeat a possibly long message. Clicking the row shows all of it in the inspector.
-    button.setAttribute('aria-expanded', String(event.id === state.selected));
+    // A toggle: pressed while the inspector shows this event, and pressing it again closes it.
+    button.setAttribute('aria-pressed', String(event.id === state.selected));
     button.setAttribute('aria-controls', 'inspector');
-    if (event.id === state.selected) {
-      row.classList.add('selected');
-      row.setAttribute('aria-selected', 'true');
-    }
+    if (event.id === state.selected) row.classList.add('selected');
     messageContent.append(button);
     // Room for the quick actions a hovered row shows. The space is kept on
     // every row, so hovering neither covers other icons nor shifts where the

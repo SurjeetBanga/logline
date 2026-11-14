@@ -42,7 +42,6 @@ export type ViewRequest =
   | ({
       type: 'snapshot';
       columns?: string[];
-      statsOnly?: boolean;
       requestId?: number;
       doctorRevision?: number;
       have?: HeldRows;
@@ -395,7 +394,6 @@ export function parseViewRequest(value: unknown): ViewRequest | undefined {
         sort: string('sort'),
         sortDirection: msg.sortDirection === 'desc' ? 'desc' : 'asc',
         columns: strings('columns'),
-        statsOnly: msg.statsOnly === true,
         requestId: index('requestId'),
         doctorRevision: index('doctorRevision'),
         have: heldRows(msg.have),

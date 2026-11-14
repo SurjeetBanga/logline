@@ -64,7 +64,7 @@ export function createAiCalls(
   let refresh: ReturnType<typeof setTimeout> | undefined;
   let current: { traceId: string; spanId: string } | undefined;
   let detail: GenAiCallDetail | undefined;
-  /** The model chosen in the rail; the list shows only its calls. */
+  /** The model chosen in the rail; the list shows only its calls. A model and a kind are never chosen together. */
   let model: string | undefined;
   /** The kind of call chosen in the rail; none shows every kind. */
   let kind: GenAiCall['kind'] | undefined;
@@ -197,11 +197,6 @@ export function createAiCalls(
       change();
       render();
     };
-    const kinds: [GenAiCall['kind'], string, number][] = [
-      ['model', 'Model calls', list.modelCalls],
-      ['tool', 'Tool calls', list.toolCalls],
-      ['agent', 'Agent runs', list.calls.filter((call) => call.kind === 'agent').length],
-    ];
     return [
       {
         kind: 'item',
@@ -226,11 +221,14 @@ export function createAiCalls(
           : whole.format(totals.calls),
         selected: model === totals.model,
         title: model === totals.model ? 'Show every call' : `Show only ${totals.model} calls, with its totals`,
-        // Choosing the chosen model again shows every call.
-        onSelect: choose(() => (model = model === totals.model ? undefined : totals.model)),
+        // Choosing the chosen model again shows every call. A model's calls are all model calls, so it replaces a kind.
+        onSelect: choose(() => {
+          model = model === totals.model ? undefined : totals.model;
+          kind = undefined;
+        }),
       })),
       { kind: 'group', label: 'Kind' },
-      ...kinds
+      ...kindCounts(list)
         .filter(([, , count]) => count > 0)
         .map(([name, label, count]): TabRailItem => ({
           kind: 'item',
@@ -238,7 +236,11 @@ export function createAiCalls(
           label,
           meta: whole.format(count),
           selected: kind === name,
-          onSelect: choose(() => (kind = kind === name ? undefined : name)),
+          // A kind replaces a model: a model's calls are never tool calls or agent runs.
+          onSelect: choose(() => {
+            kind = kind === name ? undefined : name;
+            model = undefined;
+          }),
         })),
       { kind: 'group', label: 'Show' },
       {
@@ -269,7 +271,10 @@ export function createAiCalls(
       actions.rail?.('AI calls', []);
       return;
     }
+    // A choice whose calls are no longer retained has left the rail, so it no longer narrows the list.
     if (model !== undefined && !summary.models.some((totals) => totals.model === model)) model = undefined;
+    if (kind !== undefined && !kindCounts(summary).some(([name, , count]) => name === kind && count > 0))
+      kind = undefined;
     const rows = shown(summary.calls);
     elements.aiCallsStatus.textContent =
       `${whole.format(summary.total)} AI ${summary.total === 1 ? 'call' : 'calls'}` +
@@ -402,6 +407,15 @@ function tiles(summary: GenAiSummary): HTMLElement[] {
       ? [tile('Latency', `p50 ${formatDuration(summary.p50Ms)}`, `p95 ${formatDuration(summary.p95Ms!)}`)]
       : []),
     tile('Tool calls', whole.format(summary.toolCalls), toolErrors ? `${whole.format(toolErrors)} failed` : undefined),
+  ];
+}
+
+/** The kinds of call the rail offers, with how many of each are retained. */
+function kindCounts(summary: GenAiSummary): [GenAiCall['kind'], string, number][] {
+  return [
+    ['model', 'Model calls', summary.modelCalls],
+    ['tool', 'Tool calls', summary.toolCalls],
+    ['agent', 'Agent runs', summary.agentRuns],
   ];
 }
 

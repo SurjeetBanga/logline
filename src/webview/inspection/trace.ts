@@ -20,8 +20,8 @@ export function createTraceView(
     showContext(id: number): void;
     applyQuery(query: string): void;
     openAiCall(traceId: string, spanId: string): void;
-    /** Shows the waterfall in the inspector, under a title. */
-    inspect(title: string, tooltip: string): void;
+    /** Shows the waterfall of a trace in the inspector, under a title. */
+    inspect(title: string, traceId: string): void;
     /** Whether the inspector shows a trace. */
     inspecting(): boolean;
   },

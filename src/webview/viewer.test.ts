@@ -1215,7 +1215,6 @@ test('explicit paging, filtering, sorting and column selection keep the selected
     if (action === 'columns') get('fieldsAll').listeners.get('click')!();
     const request = messages.at(-1)!;
     assert.equal(request.type, 'snapshot', action);
-    assert.equal('statsOnly' in request, false, action);
     assert.equal(app.state.selected, 42, action);
     if (action === 'page' || action === 'sort') assert.equal(app.state.following, false, action);
     receive({
@@ -1756,14 +1755,19 @@ test('the rail is resized by dragging its edge or with the arrow keys, and the w
 });
 
 test('the inspector width is set by dragging its left edge or with the arrow keys, and is kept', () => {
-  const { get, dom, savedStates } = viewer();
+  const { get, dom, savedStates } = viewer({}, { hidden: ['inspector'] });
   const handle = get('inspectorResizer');
-  assert.equal(handle.attributes['aria-valuenow'], '440');
+  assert.equal(handle.attributes['aria-valuenow'], '440', 'a hidden inspector reports the default');
   assert.equal(handle.attributes['aria-valuemin'], '280');
   assert.equal(handle.attributes['aria-valuemax'], '680', 'the list beside it keeps 320px of the 1000px panel');
+  // Until a width is chosen, the stylesheet's width is where a drag starts.
+  get('inspector').hidden = false;
+  get('inspector').width = 532;
+  handle.listeners.get('focus')!();
+  assert.equal(handle.attributes['aria-valuenow'], '532');
   handle.listeners.get('pointerdown')!({ clientX: 600, button: 0 });
-  dom.listeners.get('pointermove')!({ clientX: 500 });
-  assert.equal(dom.body.style['--inspector-width'], '540px', 'dragging left widens it');
+  dom.listeners.get('pointermove')!({ clientX: 592 });
+  assert.equal(dom.body.style['--inspector-width'], '540px', 'dragging left widens it from its drawn width');
   dom.listeners.get('pointerup')!();
   assert.equal(savedStates.at(-1)?.inspectorWidth, 540);
   assert.equal(savedStates.at(-1)?.railWidth, undefined, 'the rails keep their own width');
@@ -1790,6 +1794,14 @@ test('the inspector width is set by dragging its left edge or with the arrow key
   const restored = viewer({ inspectorWidth: 2000 });
   assert.equal(restored.dom.body.style['--inspector-width'], '680px', 'a saved width is fitted to the panel');
   assert.equal(viewer({ inspectorWidth: 500 }).dom.body.style['--inspector-width'], '500px');
+
+  // Beside an open Sources rail, the list keeps its room in what is left.
+  const beside = viewer({ inspectorWidth: 2000 });
+  const split = beside.get('contentSplit');
+  split.width = 764;
+  beside.get('inspector').parent = split;
+  beside.get('inspectorResizer').listeners.get('focus')!();
+  assert.equal(beside.dom.body.style['--inspector-width'], '444px');
 });
 
 test('clicking a row opens the event in the inspector with its message, meta, details, and the one-time tip', () => {
@@ -1831,13 +1843,11 @@ test('the selected row is marked, and choosing it again clears the mark', () => 
   get('logs').listeners.get('click')!(clickOn('.message-button', rowButton(get, 2)));
   const marked = eventRow(get, 2);
   assert.equal(marked.classList.contains('selected'), true);
-  assert.equal(marked.attributes['aria-selected'], 'true');
   const button = rowButton(get, 2);
-  assert.equal(button.attributes['aria-expanded'], 'true');
+  assert.equal(button.attributes['aria-pressed'], 'true', 'the message is a toggle for the inspector');
   assert.equal(button.attributes['aria-controls'], 'inspector');
   assert.equal(eventRow(get, 1).classList.contains('selected'), false);
-  assert.equal(eventRow(get, 1).attributes['aria-selected'], undefined);
-  assert.equal(rowButton(get, 1).attributes['aria-expanded'], 'false');
+  assert.equal(rowButton(get, 1).attributes['aria-pressed'], 'false');
   // Another row takes the mark.
   get('logs').listeners.get('click')!(clickOn('.message-button', rowButton(get, 1)));
   assert.equal(eventRow(get, 1).classList.contains('selected'), true);
@@ -1846,8 +1856,7 @@ test('the selected row is marked, and choosing it again clears the mark', () => 
   // The same row again closes it.
   get('logs').listeners.get('click')!(clickOn('.message-button', rowButton(get, 1)));
   assert.equal(eventRow(get, 1).classList.contains('selected'), false);
-  assert.equal(eventRow(get, 1).attributes['aria-selected'], undefined);
-  assert.equal(rowButton(get, 1).attributes['aria-expanded'], 'false');
+  assert.equal(rowButton(get, 1).attributes['aria-pressed'], 'false');
   assert.equal(app.state.selected, undefined);
 });
 
@@ -1863,6 +1872,15 @@ test('the inspector closes by the same row, its close button, Escape, Clear logs
       'Escape on the row',
       ({ get }) =>
         get('logs').listeners.get('keydown')!({ key: 'Escape', target: rowButton(get, 42), preventDefault() {} }),
+    ],
+    [
+      'Escape on a cell of a row',
+      ({ get }) =>
+        get('logs').listeners.get('keydown')!({
+          key: 'Escape',
+          target: eventRow(get, 42).children[0],
+          preventDefault() {},
+        }),
     ],
     ['Clear logs', ({ get }) => get('clear').listeners.get('click')!()],
     ['another tab', ({ get }) => get('analyze').listeners.get('click')!()],
@@ -1880,6 +1898,16 @@ test('the inspector closes by the same row, its close button, Escape, Clear logs
     if (name !== 'Clear logs' && name !== 'another tab')
       assert.equal(eventRow(get, 42).classList.contains('selected'), false, name);
   }
+});
+
+test('closing the inspector with focus inside it returns focus to the event’s row', () => {
+  const { get, dom } = viewer();
+  get('logs').listeners.get('click')!(clickOn('.message-button', rowButton(get, 42)));
+  get('inspector').append(get('inspectorClose'));
+  get('inspectorClose').focus();
+  get('inspector').listeners.get('keydown')!({ key: 'Escape', stopPropagation() {} });
+  assert.equal(get('inspector').hidden, true);
+  assert.equal(dom.activeElement, rowButton(get, 42));
 });
 
 test('Escape elsewhere in the table leaves the inspector open', () => {
@@ -2789,7 +2817,7 @@ test('views are tabs: one shows at a time, arrow keys move between visible tabs,
 });
 
 test('rows show their code link and log doctor finding, with actions, and the Issues tab lists findings', () => {
-  const { get, receive, messages, app } = viewer();
+  const { get, receive, messages, app, flushFrames } = viewer();
   const finding = {
     siteId: 'src/pay.ts\u00004',
     code: 'secret',
@@ -2930,6 +2958,9 @@ test('rows show their code link and log doctor finding, with actions, and the Is
   app.bridge.pending = false;
   app.bridge.request(true);
   assert.equal(messages.at(-1)!.doctorRevision, 3, 'the host can skip a list the view already has');
+  // The guide can point into the Issues view though its tab is hidden until then.
+  Object.assign(get('doctorView'), { id: 'doctorView' }).classList.add('view-panel');
+  assert.equal(get('doctor').hidden, true);
   receive({
     type: 'snapshot',
     generation: 1,
@@ -2949,7 +2980,11 @@ test('rows show their code link and log doctor finding, with actions, and the Is
     pages: 1,
     matched: 0,
     doctor: { revision: 3, total: 1 },
+    reveal: { target: 'doctorView' },
   });
+  flushFrames();
+  assert.equal(app.views.active(), 'doctor');
+  assert.ok(get('doctorView').classList.contains('reveal-pulse'));
   assert.equal(
     get('doctorList').querySelectorAll('.doctor-item').length,
     1,
@@ -3650,6 +3685,7 @@ test('the AI calls tab lists calls with totals and opens a conversation with its
       total: 0,
       modelCalls: 0,
       toolCalls: 0,
+      agentRuns: 0,
       errors: 0,
       inputTokens: 0,
       outputTokens: 0,
@@ -3692,6 +3728,7 @@ test('the AI calls tab lists calls with totals and opens a conversation with its
       total: 3,
       modelCalls: 2,
       toolCalls: 1,
+      agentRuns: 0,
       errors: 1,
       inputTokens: 1244,
       outputTokens: 4182,
@@ -5482,6 +5519,7 @@ const aiCallsReply = () => ({
     total: 3,
     modelCalls: 2,
     toolCalls: 1,
+    agentRuns: 0,
     errors: 1,
     inputTokens: 200,
     outputTokens: 40,
@@ -5832,6 +5870,26 @@ test('the AI calls rail narrows the list by model and kind, shows only errors, a
   railButtonOf(get, 'all').listeners.get('click')!();
   assert.deepEqual(rows(), ['s3', 's2', 's1']);
   assert.equal(railButtonOf(get, 'all').attributes['aria-current'], 'true');
+  // A model and a kind replace each other, since a model's calls are never tool calls.
+  railButtonOf(get, 'model:gpt-4o').listeners.get('click')!();
+  railButtonOf(get, 'kind:tool').listeners.get('click')!();
+  assert.deepEqual(rows(), ['s2']);
+  assert.equal(railButtonOf(get, 'model:gpt-4o').attributes['aria-current'], 'false');
+  assert.doesNotMatch(get('aiCallsStatus').textContent, /gpt-4o only/);
+  railButtonOf(get, 'model:gpt-4o').listeners.get('click')!();
+  assert.deepEqual(rows(), ['s3']);
+  assert.equal(railButtonOf(get, 'kind:tool').attributes['aria-current'], 'false');
+  railButtonOf(get, 'all').listeners.get('click')!();
+  // A kind whose calls are no longer retained leaves the rail and stops narrowing the list.
+  railButtonOf(get, 'kind:tool').listeners.get('click')!();
+  const reply = aiCallsReply();
+  reply.aiCalls.calls = reply.aiCalls.calls.filter((call) => call.kind !== 'tool');
+  reply.aiCalls.total = 2;
+  reply.aiCalls.toolCalls = 0;
+  receive(reply);
+  assert.deepEqual(rows(), ['s3', 's1']);
+  assert.equal(railButtonOf(get, 'all').attributes['aria-current'], 'true');
+  receive(aiCallsReply());
   // The text filter still works beside the rail.
   get('aiCallsFilter').value = 'get_weather';
   get('aiCallsFilter').listeners.get('input')!();
@@ -5846,6 +5904,7 @@ test('the AI calls rail narrows the list by model and kind, shows only errors, a
       total: 0,
       modelCalls: 0,
       toolCalls: 0,
+      agentRuns: 0,
       errors: 0,
       inputTokens: 0,
       outputTokens: 0,

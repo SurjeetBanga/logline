@@ -89,7 +89,6 @@ test('message boundary preserves an empty level selection and normalizes paginat
     levels: [],
     page: -3,
     before: Infinity,
-    statsOnly: 'yes',
     columns: ['service', null],
     sortDirection: 'other',
     query: 42,
@@ -99,7 +98,6 @@ test('message boundary preserves an empty level selection and normalizes paginat
   assert.deepEqual(request.columns, ['service']);
   assert.equal(request.page, undefined);
   assert.equal(request.before, undefined);
-  assert.equal(request.statsOnly, false);
   assert.equal(request.query, undefined);
   assert.equal(request.sortDirection, 'asc');
   const requestWithId = parseViewRequest({ type: 'snapshot', requestId: 9 });

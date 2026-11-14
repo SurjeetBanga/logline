@@ -14,6 +14,8 @@ export interface InspectorElements {
 
 export interface InspectorContent {
   title: string;
+  /** The title's tooltip, such as a trace's full id; the title itself when left out. */
+  tooltip?: string;
   /** One line under the title, such as an event's level, time, and source. */
   meta?: string;
   /** Controls beside the title, such as previous and next. */
@@ -21,43 +23,43 @@ export interface InspectorContent {
   body: Node[];
 }
 
+export interface InspectorSelection {
+  /** Runs when the pane closes or shows another kind of selection, so the list can clear its own. */
+  closed?(): void;
+  /** Where focus goes when the pane closes with focus inside it, such as the selected row; else where it came from. */
+  home?(): HTMLElement | null | undefined;
+}
+
 /**
  * The pane beside a list that shows what is selected in it. The list stays in view and keeps
  * updating, so another row can be chosen without going back, and nothing in the list moves when
  * a selection opens.
- *
- * @param changed Runs after the pane opens, changes what it shows, or closes.
  */
-export function createInspector(
-  elements: InspectorElements,
-  scope: EventScope,
-  changed: (kind: InspectorKind | undefined) => void = () => undefined,
-) {
-  let current: { kind: InspectorKind; closed: () => void } | undefined;
+export function createInspector(elements: InspectorElements, scope: EventScope) {
+  let current: (InspectorSelection & { kind: InspectorKind }) | undefined;
+  /** What had focus when the pane opened, to return to when it closes. */
+  let opener: HTMLElement | undefined;
 
   function fill(content: InspectorContent): void {
     elements.inspectorTitle.textContent = content.title;
-    elements.inspectorTitle.title = content.title;
+    elements.inspectorTitle.title = content.tooltip ?? content.title;
     elements.inspectorMeta.textContent = content.meta ?? '';
     elements.inspectorMeta.hidden = !content.meta;
     elements.inspectorNav.replaceChildren(...(content.nav ?? []));
     elements.inspectorBody.replaceChildren(...content.body);
   }
 
-  /**
-   * Shows a selection.
-   *
-   * @param closed Runs when the pane closes or shows another kind of selection, so the list can clear its own.
-   */
-  function open(kind: InspectorKind, content: InspectorContent, closed: () => void = () => undefined): void {
+  /** Shows a selection. */
+  function open(kind: InspectorKind, content: InspectorContent, selection: InspectorSelection = {}): void {
     const previous = current;
-    current = { kind, closed };
+    current = { ...selection, kind };
+    const focused = document.activeElement as HTMLElement | null;
+    if (focused && focused !== document.body && !elements.inspector.contains(focused)) opener = focused;
     // Another list's selection gives way; the same list choosing another row does not count as closing.
-    if (previous && previous.kind !== kind) previous.closed();
+    if (previous && previous.kind !== kind) previous.closed?.();
     fill(content);
     elements.inspector.hidden = false;
     if (document.body) document.body.dataset.inspector = kind;
-    changed(kind);
   }
 
   /** Replaces what an open selection shows, such as once its details arrive; ignored after it closed. */
@@ -71,14 +73,21 @@ export function createInspector(
   /** Closes the pane; with a kind, only while it shows that kind. */
   function close(kind?: InspectorKind): void {
     if (!current || (kind && current.kind !== kind)) return;
-    const { closed } = current;
+    const { closed, home } = current;
+    // Emptying the pane would drop focus to the page; it goes back to the list instead.
+    const focused = document.activeElement;
+    const refocus = Boolean(focused && elements.inspector.contains(focused));
+    const from = opener;
     current = undefined;
+    opener = undefined;
     elements.inspector.hidden = true;
     elements.inspectorNav.replaceChildren();
     elements.inspectorBody.replaceChildren();
     if (document.body) delete document.body.dataset.inspector;
-    closed();
-    changed(undefined);
+    closed?.();
+    // Looked up after the list cleared its selection, which may rebuild its rows.
+    const target = refocus ? (home?.() ?? from) : undefined;
+    if (target && target.isConnected !== false) target.focus({ preventScroll: true });
   }
 
   scope.listen(elements.inspectorClose, 'click', () => close());
