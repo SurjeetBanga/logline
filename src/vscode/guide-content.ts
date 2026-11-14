@@ -101,7 +101,7 @@ export const GUIDE_RELEASES: GuideRelease[] = [
     highlights: [
       {
         title: 'Add a connection in one form',
-        text: 'Add Connection opens a Connection tab in the Logs panel: choose the service or database, test it, pick the log table with a preview of its rows, and name it. Nothing is saved until you add it.',
+        text: 'Add Connection opens a Connection tab in the Logs panel that walks through four steps one at a time: choose the service or database, test it, pick the log table with a preview of its rows, and name it. Nothing is saved until you add it.',
         section: 'connections',
       },
       {

@@ -4472,7 +4472,9 @@ body:not([data-view='logs']) .match-count {
   box-shadow: 0 6px 24px var(--vscode-widget-shadow, rgba(0, 0, 0, 0.5));
 }
 
-/* The Connection form: a tab of its own while a connection is added or edited, scrolling under its pinned footer. */
+/* The Connection form: a tab of its own while a connection is added or edited. One step shows at a time,
+   between the list of steps and what the test found. In a narrow panel the three stack and scroll together
+   under the pinned footer; in a wide one they sit side by side and each scrolls by itself. */
 .view-panel.connection-view {
   /* Positioned, so a hidden radio placed absolutely scrolls with the form rather than the page. */
   position: relative;
@@ -4505,53 +4507,175 @@ body:not([data-view='logs']) .match-count {
 }
 
 .connection-view .form {
-  max-width: 820px;
-  margin: 0 auto;
-  padding: 12px 16px 0;
+  display: flex;
+  flex-direction: column;
+  min-height: 100%;
 }
-.connection-view header h1 {
-  margin: 0 0 2px;
-  font-size: 15px;
+/* The step and the footer are laid out as the form's own children, so the test's result can sit between them. */
+.connection-view .wizard-main {
+  display: contents;
+}
+.connection-view .wizard-nav {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 12px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+}
+.connection-view .wizard-nav h1 {
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  font-size: 13px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.connection-view .wizard-steps {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px;
+  min-width: 0;
+}
+.connection-view button.wizard-step {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  min-height: 0;
+  padding: 3px 8px;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+}
+.connection-view button.wizard-step:hover:not(:disabled) {
+  background: var(--vscode-list-hoverBackground, rgba(255, 255, 255, 0.04));
+}
+.connection-view button.wizard-step.current,
+.connection-view button.wizard-step.current:hover {
+  background: var(--vscode-list-activeSelectionBackground, #04395e);
+  color: var(--vscode-list-activeSelectionForeground, #fff);
+}
+.connection-view button.wizard-step:disabled {
+  opacity: 1;
+  color: var(--muted);
+}
+.connection-view .wizard-marker {
+  display: inline-grid;
+  flex: none;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  border: 1px solid currentColor;
+  border-radius: 50%;
+  font-size: 10px;
+  line-height: 1;
+}
+.connection-view .wizard-step.done .wizard-marker {
+  border-color: transparent;
+  color: var(--ok);
+  font-size: 13px;
+}
+.connection-view .wizard-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  line-height: 1.3;
+}
+/* Where each step stands shows in the side list of a wide panel; a narrow one has room for the names only. */
+.connection-view .wizard-summary {
+  display: none;
+  overflow: hidden;
+  font-size: 11px;
+  opacity: 0.8;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.connection-view .wizard-body {
+  flex: 1 0 auto;
+  min-width: 0;
+  padding: 12px 16px 16px;
+}
+.connection-view .step {
+  max-width: 680px;
+}
+.connection-view .step h2 {
+  margin: 0 0 12px;
+  font-size: 14px;
   font-weight: 600;
 }
+.connection-view .step h2:focus {
+  outline: none;
+}
 .connection-view .lead {
-  margin: 0 0 16px;
-  max-width: 64ch;
+  margin: -6px 0 14px;
   color: var(--muted);
 }
 
-/* Steps sit flat on the page, divided by a rule; a locked one waits for the test. */
-.connection-view .step {
-  padding: 16px 0 20px;
+/* What the test found. */
+.connection-view .wizard-result {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+  padding: 10px 16px 12px;
   border-top: 1px solid var(--border);
 }
-.connection-view .step h2 {
+.connection-view .result-header {
   display: flex;
   align-items: center;
   gap: 10px;
-  margin: 0 0 12px;
-  font-size: 13px;
+}
+.connection-view .result-header strong {
+  flex: 1;
   font-weight: 600;
 }
-.connection-view .step-number {
-  display: inline-grid;
-  place-items: center;
-  width: 20px;
-  height: 20px;
-  border-radius: 50%;
-  background: var(--vscode-badge-background, #4d4d4d);
-  color: var(--vscode-badge-foreground, #fff);
-  font-size: 11px;
+.connection-view .result-header button {
+  min-height: 24px;
+  padding: 1px 10px;
 }
-.connection-view .step.locked {
-  opacity: 0.6;
+.connection-view .found:empty,
+.connection-view .test-status:empty {
+  display: none;
+}
+.connection-view .found-caption {
+  margin-bottom: 4px;
+  color: var(--muted);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.connection-view .found-list {
+  margin: 0;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--surface);
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: 12px;
+  list-style: none;
+}
+.connection-view .found-list li {
+  padding: 3px 8px;
+  overflow: hidden;
+  border-bottom: 1px solid var(--border);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.connection-view .found-list li:last-child {
+  border-bottom: 0;
+}
+.connection-view .found-list .more {
+  color: var(--muted);
+  font-family: var(--vscode-font-family, sans-serif);
 }
 
 /* Step 1: a card for each kind of store, log services apart from databases. */
 .connection-view .type-groups {
   display: grid;
-  grid-template-columns: minmax(140px, 1fr) minmax(0, 4fr);
-  gap: 16px;
+  gap: 12px;
 }
 .connection-view .type-caption {
   margin-bottom: 6px;
@@ -4559,9 +4683,6 @@ body:not([data-view='logs']) .match-count {
   font-size: 11px;
   text-transform: uppercase;
   letter-spacing: 0.04em;
-}
-.connection-view .type-group.service .type-grid {
-  grid-template-columns: 1fr;
 }
 .connection-view .type-grid {
   display: grid;
@@ -4787,17 +4908,9 @@ body:not([data-view='logs']) .match-count {
   cursor: default;
 }
 
-/* The test: its button and what it found. */
-.connection-view .test-row {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 12px;
-  margin-top: 16px;
-}
+/* The test's answer. */
 .connection-view .test-status {
-  flex: 1;
-  min-width: 200px;
+  overflow-wrap: anywhere;
 }
 .connection-view .test-status.running,
 .connection-view .test-status.stale {
@@ -4904,18 +5017,19 @@ body:not([data-view='logs']) .match-count {
 .connection-view footer {
   position: sticky;
   bottom: 0;
+  /* After the test's result, which follows it in the markup. */
+  order: 1;
   display: flex;
   align-items: center;
   flex-wrap: wrap;
-  gap: 12px;
-  margin: 0 -16px;
+  gap: 8px 12px;
   padding: 10px 16px;
   border-top: 1px solid var(--border);
   background: var(--surface);
 }
 .connection-view .footer-note {
   flex: 1;
-  min-width: 180px;
+  min-width: 140px;
   color: var(--muted);
 }
 .connection-view .footer-note.error {
@@ -4926,18 +5040,86 @@ body:not([data-view='logs']) .match-count {
   gap: 8px;
 }
 
-@media (max-width: 640px) {
-  .connection-view .type-groups {
-    grid-template-columns: 1fr;
+/* A wide panel: the steps down the left, the step shown, and the test's result on the right. */
+@media (min-width: 860px) {
+  .view-panel.connection-view {
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
   }
-}
-@media (max-width: 520px) {
+  .connection-view > div {
+    display: flex;
+    flex: 1 1 auto;
+    min-height: 0;
+  }
   .connection-view .form {
-    padding: 10px 10px 0;
+    display: grid;
+    flex: 1 1 auto;
+    grid-template-columns: 200px minmax(0, 1fr) minmax(260px, 30%);
+    grid-template-rows: minmax(0, 1fr) auto;
+    min-height: 0;
+  }
+  .connection-view .wizard-nav {
+    grid-column: 1;
+    grid-row: 1 / -1;
+    flex-direction: column;
+    flex-wrap: nowrap;
+    align-items: stretch;
+    gap: 8px;
+    padding: 10px 0;
+    overflow-y: auto;
+    border-right: 1px solid var(--border);
+    border-bottom: 0;
+  }
+  .connection-view .wizard-nav h1 {
+    flex: none;
+    padding: 0 14px;
+  }
+  .connection-view .wizard-steps {
+    flex-direction: column;
+    flex-wrap: nowrap;
+    gap: 0;
+  }
+  .connection-view button.wizard-step {
+    gap: 10px;
+    padding: 5px 14px;
+    border-radius: 0;
+  }
+  .connection-view .wizard-summary {
+    display: block;
+  }
+  .connection-view .wizard-body {
+    /* Positioned for the same reason as the view: a hidden radio scrolls with the step. */
+    position: relative;
+    grid-column: 2;
+    grid-row: 1;
+    padding: 14px 20px 20px;
+    overflow-y: auto;
   }
   .connection-view footer {
-    margin: 0 -10px;
-    padding: 10px;
+    position: static;
+    grid-column: 2;
+    grid-row: 2;
+    padding: 10px 20px;
+  }
+  .connection-view .wizard-result {
+    grid-column: 3;
+    grid-row: 1 / -1;
+    padding: 10px 14px 12px;
+    overflow-y: auto;
+    border-top: 0;
+    border-left: 1px solid var(--border);
+    background: var(--raised);
+  }
+}
+
+@media (max-width: 520px) {
+  .connection-view .wizard-nav,
+  .connection-view .wizard-body,
+  .connection-view .wizard-result,
+  .connection-view footer {
+    padding-left: 10px;
+    padding-right: 10px;
   }
   .connection-view .mapping-row,
   .connection-view .grid.server {

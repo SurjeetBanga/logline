@@ -5191,6 +5191,7 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
     return element2;
   }
   var SERVER_TYPES = ["postgres", "mysql"];
+  var FOUND_TABLES = 12;
   function createConnectionForm(api, root) {
     let mode = "add";
     let draft = emptyDraft();
@@ -5215,13 +5216,15 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
     let savedMapping;
     let saving = false;
     let saveError = "";
+    let current = -1;
+    let visited = 0;
     let testing = "";
     const tested = () => JSON.stringify({ ...draft, label: "" });
     const title = h("h1", {}, "Add connection");
     const lead = h(
       "p",
       { className: "lead" },
-      "Search a log service next to your local runs, or query a database. Every connection is read-only, and passwords and keys stay in VS Code secret storage."
+      "Every connection is read-only, and passwords and keys stay in VS Code secret storage."
     );
     const types = h("div", { className: "type-groups", role: "radiogroup", "aria-label": "What to connect" });
     const details2 = h("div", { className: "details" });
@@ -5231,6 +5234,7 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
       "Test connection"
     );
     const testStatus = h("div", { className: "test-status", role: "status", "aria-live": "polite" });
+    const found = h("div", { className: "found" });
     const logs = h("div", { className: "logs" });
     const labelInput = h("input", {
       id: "field-label",
@@ -5241,6 +5245,9 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
         draft.label = labelInput.value;
         labelEdited = true;
         updateFooter();
+      },
+      onkeydown: (event) => {
+        if (event.key === "Enter") save();
       }
     });
     const saveButton = h("button", { type: "button", onclick: () => save() }, "Add connection");
@@ -5249,34 +5256,148 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
       { type: "button", className: "secondary", onclick: () => api.postMessage({ type: "cancel" }) },
       "Cancel"
     );
+    const backButton = h("button", { type: "button", className: "secondary", onclick: () => go(current - 1) }, "Back");
+    const nextButton = h("button", { type: "button", onclick: () => next() }, "Next");
     const footerNote = h("span", { className: "footer-note", role: "status", "aria-live": "polite" });
-    const step = (number2, heading, ...children) => h(
+    const step = (name, heading, ...children) => h(
       "section",
-      { className: "step" },
-      h("h2", {}, h("span", { className: "step-number", "aria-hidden": "true" }, String(number2)), heading),
+      { className: "step", "aria-labelledby": `step-${name}`, hidden: true },
+      h("h2", { id: `step-${name}`, tabindex: "-1" }, heading),
       ...children
     );
+    const connectHeading = h("span", {}, "Connect");
     const logsHeading = h("span", {}, "Logs");
-    const typeStep = step(1, "What are you connecting?", types);
-    const connectStep = step(2, "Connect", details2, h("div", { className: "test-row" }, testButton, testStatus));
-    const logsStep = step(3, logsHeading, logs);
+    const typeStep = step("type", "What are you connecting?", lead, types);
+    const connectStep = step("connect", connectHeading, details2);
+    const logsStep = step("logs", logsHeading, logs);
     const nameStep = step(
-      4,
+      "name",
       "Name",
       h("div", { className: "field" }, h("label", { for: "field-label" }, "Shown in the Sources list"), labelInput)
     );
+    const sections = [typeStep, connectStep, logsStep, nameStep];
+    const body = h("div", { className: "wizard-body" }, ...sections);
+    const stepButtons = sections.map((_, index) => {
+      const marker = h("span", { className: "wizard-marker", "aria-hidden": "true" }, String(index + 1));
+      const name = h("span", { className: "wizard-name" });
+      const summary2 = h("span", { className: "wizard-summary" });
+      const button = h(
+        "button",
+        { type: "button", className: "wizard-step", onclick: () => go(index) },
+        marker,
+        h("span", { className: "wizard-text" }, name, summary2)
+      );
+      return { button, marker, name, summary: summary2 };
+    });
     root.replaceChildren(
       h(
         "main",
         { className: "form" },
-        h("header", {}, title, lead),
-        typeStep,
-        connectStep,
-        logsStep,
-        nameStep,
-        h("footer", {}, footerNote, h("div", { className: "buttons" }, cancelButton, saveButton))
+        h(
+          "nav",
+          { className: "wizard-nav", "aria-label": "Steps" },
+          title,
+          h("div", { className: "wizard-steps" }, ...stepButtons.map((entry2) => entry2.button))
+        ),
+        h(
+          "div",
+          { className: "wizard-main" },
+          body,
+          h(
+            "footer",
+            {},
+            cancelButton,
+            footerNote,
+            h("div", { className: "buttons" }, backButton, nextButton, saveButton)
+          )
+        ),
+        h(
+          "aside",
+          { className: "wizard-result", "aria-label": "Test result" },
+          h("div", { className: "result-header" }, h("strong", {}, "Test result"), testButton),
+          testStatus,
+          found
+        )
       )
     );
+    function blockedAt(index) {
+      if (index === 1) {
+        if (test.state === "running") return "Testing the connection\u2026";
+        if (test.state !== "ok") return "Test the connection to continue.";
+      }
+      if (index === 2) {
+        const kind = connectionKind(draft.type);
+        if (!kind.service) {
+          const word = kind.container ?? "table";
+          if (table === void 0 || table === null && kind.mappingRequired)
+            return `Choose the log ${word}${kind.mappingRequired ? "" : ", or None"}.`;
+          if (table && columnsState !== "ready") return `Reading ${table}\u2026`;
+          if (table && !mapping.timestamp) return "Choose the time column.";
+        }
+      }
+      if (index === 3 && !draft.label.trim()) return "Give the connection a name.";
+      return void 0;
+    }
+    function reachable(index) {
+      for (let before = 0; before < index; before++) if (blockedAt(before)) return false;
+      return true;
+    }
+    function go(index) {
+      if (index < 0 || index >= sections.length || !reachable(index)) return;
+      current = index;
+      updateFooter();
+      focusStep();
+    }
+    function next() {
+      if (current === 1 && test.state !== "ok") runTest();
+      else go(current + 1);
+    }
+    function focusStep() {
+      const section = sections[current];
+      if (!section) return;
+      const controls = [...section.querySelectorAll("input, select, textarea")];
+      const first = controls.find((control) => !control.disabled && (control.type !== "radio" || control.checked));
+      (first ?? section.querySelector("h2"))?.focus({ preventScroll: true });
+      body.scrollTop = 0;
+    }
+    function settle() {
+      while (current > 0 && !reachable(current)) current--;
+    }
+    function stepSummary(index) {
+      const kind = connectionKind(draft.type);
+      if (index === 0) return kind.label;
+      if (index === 1)
+        return test.state === "ok" ? "Connected" : test.state === "running" ? "Connecting\u2026" : test.state === "failed" ? "Could not connect" : test.state === "stale" ? "Changed since the last check" : "Not checked yet";
+      if (index === 2) {
+        if (kind.service) return "No table needed";
+        return table ?? (table === null ? "None" : kind.mappingRequired ? "Required" : "Optional");
+      }
+      return draft.label.trim() || "Not named yet";
+    }
+    function renderSteps() {
+      if (current < 0) return;
+      settle();
+      visited = Math.max(visited, current);
+      const last = sections.length - 1;
+      const names = ["Type", "Connect", logsHeading.textContent ?? "Logs", "Name"];
+      sections.forEach((section, index) => section.hidden = index !== current);
+      stepButtons.forEach((entry2, index) => {
+        const open = reachable(index);
+        const done = open && index !== current && index <= visited && !blockedAt(index);
+        entry2.button.className = `wizard-step${index === current ? " current" : ""}${done ? " done" : ""}`;
+        entry2.button.disabled = !open;
+        entry2.button.setAttribute("aria-current", index === current ? "step" : "false");
+        entry2.marker.textContent = done ? "\u2713" : String(index + 1);
+        entry2.name.textContent = names[index];
+        entry2.summary.textContent = stepSummary(index);
+      });
+      backButton.hidden = current === 0;
+      nextButton.hidden = current === last;
+      saveButton.hidden = current !== last;
+      const testFirst = current === 1 && test.state !== "ok";
+      nextButton.disabled = test.state === "running" ? current === 1 : !testFirst && !!blockedAt(current);
+      nextButton.textContent = !testFirst ? "Next" : test.state === "running" ? "Testing\u2026" : "Test connection";
+    }
     function result() {
       return readDraft(draft, { secret: keepsSecret2() });
     }
@@ -5578,12 +5699,12 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
     function chooseType(type) {
       if (type === draft.type) return;
       const keep = SERVER_TYPES.includes(type) && SERVER_TYPES.includes(draft.type);
-      const next = emptyDraft(type);
+      const next2 = emptyDraft(type);
       draft = keep ? {
         ...draft,
         type,
-        port: draft.port === emptyDraft(draft.type).port ? next.port : draft.port
-      } : { ...next, label: labelEdited ? draft.label : "" };
+        port: draft.port === emptyDraft(draft.type).port ? next2.port : draft.port
+      } : { ...next2, label: labelEdited ? draft.label : "" };
       urlText = keep && entry === "url" ? draftUrl(draft) : "";
       urlInvalid = false;
       outsideWorkspace = false;
@@ -5625,6 +5746,7 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
           break;
       }
       details2.replaceChildren(...children.filter((child) => !!child));
+      connectHeading.textContent = `Connect to ${connectionKind(draft.type).label}`;
       updateErrors();
     }
     function serverDetails() {
@@ -5651,13 +5773,13 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
         "aria-describedby": "error-url-entry",
         oninput: () => {
           urlText = urlInput.value;
-          const next = applyUrl(draft, urlInput.value);
-          urlInvalid = !next;
-          urlError.hidden = !!next || !urlInput.value.trim();
-          urlError.textContent = next ? "" : `Enter a URL such as ${example}`;
-          if (next) {
+          const next2 = applyUrl(draft, urlInput.value);
+          urlInvalid = !next2;
+          urlError.hidden = !!next2 || !urlInput.value.trim();
+          urlError.textContent = next2 ? "" : `Enter a URL such as ${example}`;
+          if (next2) {
             const movedPassword = withoutPassword(urlInput.value) !== urlInput.value;
-            draft = next;
+            draft = next2;
             if (movedPassword) {
               const password = details2.querySelector("#field-password");
               if (password) password.value = draft.password;
@@ -5765,10 +5887,10 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
           wide: true,
           hint: "A password in the URL moves to the password field, so the saved URL never holds one.",
           onInput: (value) => {
-            const next = applyUrl(draft, value);
-            if (next) {
+            const next2 = applyUrl(draft, value);
+            if (next2) {
               const movedPassword = withoutPassword(value) !== value;
-              draft = next;
+              draft = next2;
               const input = details2.querySelector("#field-url");
               if (input && movedPassword) input.value = draft.url;
               const passwordInput = details2.querySelector("#field-password");
@@ -5912,6 +6034,32 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
       testButton.textContent = test.state === "running" ? "Testing\u2026" : test.state === "ok" ? "Test again" : "Test connection";
       testStatus.className = `test-status ${test.state}`;
       testStatus.textContent = test.state === "running" ? "Connecting\u2026" : test.state === "ok" ? `\u2713 Connected \xB7 ${test.detail}` : test.state === "failed" ? test.error : test.state === "stale" ? "Changed since the last test. Test again to continue." : "";
+      renderFound();
+      renderSteps();
+    }
+    function renderFound() {
+      if (test.state === "idle") {
+        found.replaceChildren(
+          h("p", { className: "hint" }, "Test the connection to see what Logline can reach. Nothing is saved yet.")
+        );
+        return;
+      }
+      const tables = test.state === "ok" ? test.tables ?? [] : [];
+      if (!tables.length) {
+        found.replaceChildren();
+        return;
+      }
+      const word = connectionKind(draft.type).container ?? "table";
+      const shown2 = tables.slice(0, FOUND_TABLES);
+      found.replaceChildren(
+        h("div", { className: "found-caption" }, `${tables.length} ${word}${tables.length === 1 ? "" : "s"}`),
+        h(
+          "ul",
+          { className: "found-list" },
+          ...shown2.map((name) => h("li", { title: name }, name)),
+          tables.length > shown2.length ? h("li", { className: "more" }, `and ${tables.length - shown2.length} more`) : void 0
+        )
+      );
     }
     function renderLogs() {
       const kind = connectionKind(draft.type);
@@ -5978,14 +6126,14 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
       }
       logs.replaceChildren(...children.filter((child) => !!child && typeof child !== "string"));
     }
-    function chooseTable(next) {
-      table = next;
+    function chooseTable(next2) {
+      table = next2;
       columns = [];
       rows = [];
       previewError = "";
       mapping = {};
-      columnsState = next ? "loading" : "idle";
-      if (next) api.postMessage({ type: "table", table: next });
+      columnsState = next2 ? "loading" : "idle";
+      if (next2) api.postMessage({ type: "table", table: next2 });
       renderLogs();
       updateFooter();
     }
@@ -6102,25 +6250,17 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
       );
     }
     function missing() {
-      if (test.state === "running") return "Testing the connection\u2026";
-      if (test.state !== "ok") return "Test the connection to continue.";
-      const kind = connectionKind(draft.type);
-      if (!kind.service) {
-        const word = kind.container ?? "table";
-        if (table === void 0 || table === null && kind.mappingRequired)
-          return `Choose the log ${word}${kind.mappingRequired ? "" : ", or None"}.`;
-        if (table && columnsState !== "ready") return `Reading ${table}\u2026`;
-        if (table && !mapping.timestamp) return "Choose the time column.";
-      }
-      if (!draft.label.trim()) return "Give the connection a name.";
-      return void 0;
+      return blockedAt(1) ?? blockedAt(2) ?? blockedAt(3);
     }
     function updateFooter() {
+      settle();
       const blocked = missing();
+      const needed = current === sections.length - 1 ? blocked : blockedAt(current);
       saveButton.disabled = saving || !!blocked;
       saveButton.textContent = saving ? "Saving\u2026" : mode === "edit" ? "Save changes" : "Add connection";
       footerNote.className = `footer-note${saveError ? " error" : ""}`;
-      footerNote.textContent = saveError || blocked || "";
+      footerNote.textContent = saveError || needed || "";
+      renderSteps();
     }
     function save() {
       if (missing() || saving) return;
@@ -6145,14 +6285,15 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
           if (!labelEdited) draft.label = suggestedLabel(draft);
           labelInput.value = draft.label;
           title.textContent = mode === "edit" ? `Edit ${draft.label}` : "Add connection";
-          typeStep.hidden = false;
+          current = mode === "edit" ? 1 : 0;
+          visited = current;
           renderTypes();
           renderDetails();
           updateTest();
           renderLogs();
           updateFooter();
           if (mode === "edit" && result().connection) runTest();
-          else details2.querySelector("input")?.focus();
+          else focusStep();
           return;
         case "tested":
           test = tested() !== testing ? { state: "stale" } : update.ok ? { state: "ok", detail: update.detail, tables: update.tables } : { state: "failed", error: update.error };
@@ -6203,7 +6344,6 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
           return;
       }
     }
-    typeStep.hidden = true;
     updateFooter();
     return { receive };
   }

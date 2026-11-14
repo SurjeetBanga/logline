@@ -358,10 +358,14 @@ for (const size of SIZES) {
       await post(page, { type: 'connectionForm', session: 1, update: { type: 'close' } });
       await openForm(page, 2, 'add');
       await assertPageFits(page, 'a second Add connection');
+      await page.locator('#connectionView footer button', { hasText: 'Next' }).click();
+      await assertPageFits(page, 'the Connect step');
       await page.locator('#connectionView .segment', { hasText: 'Fields' }).click();
       await assertPageFits(page, 'Fields');
-      await page.locator('#connectionView button', { hasText: 'Test connection' }).click();
+      await page.locator('#connectionView footer button', { hasText: 'Test connection' }).click();
       await assertPageFits(page, 'Test connection with fields missing');
+      await page.locator('#connectionView .wizard-step', { hasText: 'Type' }).click();
+      await assertPageFits(page, 'back at the Type step');
       await post(page, { type: 'connectionForm', session: 2, update: { type: 'close' } });
       await openForm(page, 3, 'edit');
       await assertPageFits(page, 'Edit connection');
