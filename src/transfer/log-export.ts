@@ -74,17 +74,19 @@ function* exportParts(
   yield descriptors.map((descriptor) => csvCell(descriptor.column)).join(',') + '\n';
   for (const original of events) {
     const event = transform(original);
-    yield descriptors
-      .map((descriptor) =>
-        'field' in descriptor
-          ? csvCell(
-              event.fields && Object.hasOwn(event.fields, descriptor.field)
-                ? event.fields[descriptor.field]
-                : undefined,
-            )
-          : csvCell(event[descriptor.key]),
-      )
-      .join(',') + '\n';
+    yield (
+      descriptors
+        .map((descriptor) =>
+          'field' in descriptor
+            ? csvCell(
+                event.fields && Object.hasOwn(event.fields, descriptor.field)
+                  ? event.fields[descriptor.field]
+                  : undefined,
+              )
+            : csvCell(event[descriptor.key]),
+        )
+        .join(',') + '\n'
+    );
   }
 }
 
