@@ -4523,6 +4523,22 @@ body:not([data-view='logs']) .match-count {
   padding: 8px 12px;
   border-bottom: 1px solid var(--border);
 }
+.connection-view .form-title {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+/* Below the title, since nothing sits above it. */
+.connection-view .form-title .type-description {
+  top: calc(100% + 4px);
+  bottom: auto;
+  right: auto;
+  width: max-content;
+  max-width: min(320px, calc(100vw - 32px));
+  font-weight: normal;
+}
 .connection-view .wizard-nav h1 {
   min-width: 0;
   margin: 0;
@@ -5117,9 +5133,12 @@ body:not([data-view='logs']) .match-count {
     border-right: 1px solid var(--border);
     border-bottom: 0;
   }
-  .connection-view .wizard-nav h1 {
+  .connection-view .wizard-nav .form-title {
     flex: none;
     padding: 0 14px;
+  }
+  .connection-view .form-title .type-description {
+    left: 14px;
   }
   .connection-view .wizard-steps {
     flex-direction: column;

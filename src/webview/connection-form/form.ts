@@ -124,6 +124,29 @@ export function createConnectionForm(api: FormApi, root: HTMLElement) {
   const tested = () => JSON.stringify({ ...draft, label: '' });
 
   const title = h('h1', {}, 'Add connection');
+  // What a connection is shows from the i beside the title, on hover or focus, like the type cards' i.
+  const heading = h(
+    'div',
+    { className: 'form-title' },
+    title,
+    h(
+      'button',
+      {
+        type: 'button',
+        className: 'type-info',
+        'aria-label': 'About connections',
+        'aria-describedby': 'connection-about',
+      },
+      'i',
+    ),
+    h(
+      'span',
+      { className: 'type-description', id: 'connection-about', role: 'tooltip' },
+      `A connection searches the logs in ${new Intl.ListFormat('en', { type: 'disjunction' }).format(
+        CONNECTION_TYPES.map((entry) => entry.label),
+      )} beside your local runs. It only reads, and nothing is saved until you add it.`,
+    ),
+  );
   const lead = h(
     'p',
     { className: 'lead' },
@@ -205,7 +228,7 @@ export function createConnectionForm(api: FormApi, root: HTMLElement) {
       h(
         'nav',
         { className: 'wizard-nav', 'aria-label': 'Steps' },
-        title,
+        heading,
         h('div', { className: 'wizard-steps' }, ...stepButtons.map((entry) => entry.button)),
       ),
       h(

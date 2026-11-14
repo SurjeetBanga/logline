@@ -177,6 +177,11 @@ test('a Postgres URL fills the form, a test unlocks the tables, and Save waits f
   const about = form.$('.type-card.selected').querySelector('.type-info')!;
   assert.equal(about.attributes['aria-label'], 'About Postgres');
   assert.equal(form.$(`#${about.attributes['aria-describedby']}`).attributes.role, 'tooltip');
+  // The title's i says what a connection is, naming every type the form offers.
+  const aboutConnections = form.$('.form-title').querySelector('.type-info')!;
+  assert.equal(aboutConnections.attributes['aria-label'], 'About connections');
+  const explained = form.$(`#${aboutConnections.attributes['aria-describedby']}`).textContent;
+  for (const entry of CONNECTION_TYPES) assert.ok(explained.includes(entry.label), entry.label);
   assert.equal(form.save().disabled, true);
   assert.equal(form.note(), '', 'choosing the type needs nothing more');
   form.next().fire('click');

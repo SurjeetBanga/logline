@@ -5246,6 +5246,28 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
     let testing = "";
     const tested = () => JSON.stringify({ ...draft, label: "" });
     const title = h("h1", {}, "Add connection");
+    const heading = h(
+      "div",
+      { className: "form-title" },
+      title,
+      h(
+        "button",
+        {
+          type: "button",
+          className: "type-info",
+          "aria-label": "About connections",
+          "aria-describedby": "connection-about"
+        },
+        "i"
+      ),
+      h(
+        "span",
+        { className: "type-description", id: "connection-about", role: "tooltip" },
+        `A connection searches the logs in ${new Intl.ListFormat("en", { type: "disjunction" }).format(
+          CONNECTION_TYPES.map((entry2) => entry2.label)
+        )} beside your local runs. It only reads, and nothing is saved until you add it.`
+      )
+    );
     const lead = h(
       "p",
       { className: "lead" },
@@ -5284,10 +5306,10 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
     const backButton = h("button", { type: "button", className: "secondary", onclick: () => go(current - 1) }, "Back");
     const nextButton = h("button", { type: "button", onclick: () => next() }, "Next");
     const footerNote = h("span", { className: "footer-note", role: "status", "aria-live": "polite" });
-    const step = (name, heading, ...children) => h(
+    const step = (name, heading2, ...children) => h(
       "section",
       { className: "step", "aria-labelledby": `step-${name}`, hidden: true },
-      h("h2", { id: `step-${name}`, tabindex: "-1" }, heading),
+      h("h2", { id: `step-${name}`, tabindex: "-1" }, heading2),
       ...children
     );
     const connectHeading = h("span", {}, "Connect");
@@ -5321,7 +5343,7 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
         h(
           "nav",
           { className: "wizard-nav", "aria-label": "Steps" },
-          title,
+          heading,
           h("div", { className: "wizard-steps" }, ...stepButtons.map((entry2) => entry2.button))
         ),
         h(
