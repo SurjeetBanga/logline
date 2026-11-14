@@ -620,6 +620,7 @@
               >
                 Send feedback…
               </button>
+              <button id="about" type="button" role="menuitem" tabindex="-1">About Logline</button>
               <div class="menu-separator" role="separator"></div>
               <button
                 id="clear"
@@ -1441,6 +1442,84 @@
       <p class="welcome-note">
         This shows once. Logline keeps everything on this machine; nothing is sent anywhere unless you share it.
       </p>
+    </dialog>
+    <dialog id="aboutDialog" class="about-dialog" aria-labelledby="aboutTitle" aria-describedby="aboutTagline">
+      <button id="aboutClose" class="about-close" type="button" aria-label="Close" title="Close">×</button>
+      <div class="about-hero">
+        <span class="about-mark" aria-hidden="true"
+          ><svg width="100%" height="100%" viewBox="0 0 128 128" xmlns="http://www.w3.org/2000/svg">
+            <defs>
+              <linearGradient id="about-c" x1="0" y1="0" x2="1" y2="1">
+                <stop offset="0" stop-color="#0f172a" />
+                <stop offset="1" stop-color="#020617" />
+              </linearGradient>
+              <linearGradient id="about-cg" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0" stop-color="#22d3ee" />
+                <stop offset="1" stop-color="#a78bfa" />
+              </linearGradient>
+            </defs>
+            <rect width="128" height="128" rx="30" fill="url(#about-c)" />
+            <g fill="none" stroke="url(#about-cg)" stroke-width="10" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M44 30c-9 0-11 5-11 12v10c0 7-3 12-11 12 8 0 11 5 11 12v10c0 7 2 12 11 12" />
+              <path d="M84 30c9 0 11 5 11 12v10c0 7 3 12 11 12-8 0-11 5-11 12v10c0 7-2 12-11 12" />
+            </g>
+            <circle cx="48" cy="64" r="6.5" fill="#e0f2fe" />
+            <circle cx="64" cy="64" r="6.5" fill="#e0f2fe" />
+            <circle cx="80" cy="64" r="6.5" fill="#f472b6" /></svg
+        ></span>
+        <div class="about-name">
+          <h2 id="aboutTitle">Logline</h2>
+          <span id="aboutVersion" class="about-version"></span>
+        </div>
+        <p id="aboutTagline" class="about-tagline">All your logs in one searchable view, ready for your AI agent.</p>
+        <p class="about-legal">MIT License · Your logs stay on this machine</p>
+      </div>
+      <div class="about-body">
+        <div class="about-links">
+          <button id="aboutWhatsNew" type="button">
+            <svg class="about-icon" aria-hidden="true" viewBox="0 0 16 16" width="16" height="16">
+              <path d="M8 1.5l1.6 4.2 4.4.3-3.4 2.8 1.1 4.3L8 10.7l-3.7 2.4 1.1-4.3L2 6l4.4-.3z" /></svg
+            ><span>What's new</span>
+          </button>
+          <button id="aboutGithub" type="button">
+            <svg class="about-icon" aria-hidden="true" viewBox="0 0 16 16" width="16" height="16">
+              <path
+                d="M8 1.2a6.8 6.8 0 0 0-2.15 13.25c.34.06.46-.15.46-.33v-1.2c-1.9.41-2.3-.8-2.3-.8-.31-.79-.76-1-.76-1-.62-.42.05-.41.05-.41.69.05 1.05.7 1.05.7.61 1.05 1.6.75 1.99.57.06-.44.24-.75.43-.92-1.51-.17-3.1-.76-3.1-3.36 0-.74.27-1.35.7-1.83-.07-.17-.3-.86.07-1.8 0 0 .57-.18 1.87.7a6.5 6.5 0 0 1 3.4 0c1.3-.88 1.87-.7 1.87-.7.37.94.14 1.63.07 1.8.44.48.7 1.09.7 1.83 0 2.61-1.6 3.19-3.11 3.36.24.21.46.62.46 1.25v1.85c0 .18.12.4.47.33A6.8 6.8 0 0 0 8 1.2z"
+              /></svg
+            ><span>GitHub</span>
+          </button>
+          <button id="aboutIssue" type="button">
+            <svg class="about-icon" aria-hidden="true" viewBox="0 0 16 16" width="16" height="16">
+              <path
+                d="M8 2.5a2.5 2.5 0 0 1 2.45 2H5.55A2.5 2.5 0 0 1 8 2.5zM4.5 6h7v4a3.5 3.5 0 0 1-7 0zM2 8h2.5M11.5 8H14M2.5 12l2-1M13.5 12l-2-1M2.5 4.5l2 1.5M13.5 4.5l-2 1.5"
+              /></svg
+            ><span>Report an issue</span>
+          </button>
+        </div>
+        <div class="about-author">
+          <span class="about-avatar" aria-hidden="true">SB</span>
+          <div class="about-author-text">
+            <strong>Made by Surjeet Banga</strong><span>Logline is free and open source.</span>
+          </div>
+          <button id="aboutAuthor" type="button">About me</button>
+        </div>
+        <button id="aboutSponsor" class="about-sponsor" type="button">
+          <svg class="about-icon" aria-hidden="true" viewBox="0 0 16 16" width="16" height="16">
+            <path d="M8 13.8S1.8 10.2 1.8 5.9A3.3 3.3 0 0 1 8 4.3a3.3 3.3 0 0 1 6.2 1.6c0 4.3-6.2 7.9-6.2 7.9z" /></svg
+          ><span><strong>Sponsor Logline</strong><small>If it saves you time, help keep it going.</small></span>
+        </button>
+        <div class="about-details">
+          <dl>
+            <dt>Editor</dt>
+            <dd id="aboutEditor"></dd>
+            <dt>System</dt>
+            <dd id="aboutSystem"></dd>
+          </dl>
+          <button id="aboutCopy" type="button" title="Copy the version, editor, and system for a bug report">
+            Copy
+          </button>
+        </div>
+      </div>
     </dialog>
     <div id="tourHint" class="tour-hint" role="status" hidden>
       <span>Take the tour any time from <strong>More actions → Take the tour</strong>.</span>

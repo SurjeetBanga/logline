@@ -38,6 +38,16 @@ export interface UpdateStatus {
   state: 'available' | 'installing' | 'ready';
 }
 
+/** What the About dialog shows: Logline's version, the editor, and the system. */
+export interface AboutInfo {
+  version: string;
+  editor: string;
+  system: string;
+}
+/** A button in the About dialog. */
+export type AboutAction = 'whatsNew' | 'sponsor' | 'author' | 'github' | 'issue' | 'copy';
+const ABOUT_ACTIONS: readonly AboutAction[] = ['whatsNew', 'sponsor', 'author', 'github', 'issue', 'copy'];
+
 export type ViewRequest =
   | ({
       type: 'snapshot';
@@ -66,6 +76,8 @@ export type ViewRequest =
   | { type: 'installUpdate' }
   | { type: 'panelSize'; width: number }
   | { type: 'showStatus' }
+  | { type: 'showAbout' }
+  | { type: 'aboutAction'; action: AboutAction; info?: AboutInfo }
   | { type: 'emptyAction'; action: 'capture' | 'openFile' | 'browser' | 'agent' }
   | ({ type: 'breakOnQuery' } & Filter)
   | { type: 'trace'; traceId: string }
@@ -225,6 +237,8 @@ export interface Snapshot extends Stats {
   startTour?: boolean;
   /** Open the feedback form, applied once. */
   openFeedback?: FeedbackOpen;
+  /** Open the About dialog, applied once. */
+  openAbout?: AboutInfo;
   /** Open the Connection form as a tab, applied once; its messages carry `session`. */
   openConnectionForm?: { session: number; title: string; connectionId?: string };
   otlp?: ReceiverStatus;
@@ -486,8 +500,23 @@ export function parseViewRequest(value: unknown): ViewRequest | undefined {
         : { type: msg.type };
     case 'stopSharing':
     case 'showStatus':
+    case 'showAbout':
     case 'installUpdate':
       return { type: msg.type };
+    case 'aboutAction': {
+      if (!ABOUT_ACTIONS.includes(msg.action as AboutAction)) return undefined;
+      const info = msg.info as Record<string, unknown> | undefined;
+      const field = (key: string) =>
+        typeof info?.[key] === 'string' ? (info[key] as string).slice(0, 200) : undefined;
+      const version = field('version');
+      const editor = field('editor');
+      const system = field('system');
+      return {
+        type: msg.type,
+        action: msg.action as AboutAction,
+        ...(version && editor && system ? { info: { version, editor, system } } : {}),
+      };
+    }
     case 'emptyAction':
       return msg.action === 'capture' || msg.action === 'openFile' || msg.action === 'browser' || msg.action === 'agent'
         ? { type: msg.type, action: msg.action }

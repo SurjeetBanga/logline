@@ -362,6 +362,15 @@ test('the More actions menu suggests a feature and votes through the same comman
   );
 });
 
+test('About Logline in More actions runs the same command as the Command Palette', async () => {
+  calls.length = 0;
+  await handleMessage(services() as any, () => undefined, { type: 'showAbout' });
+  assert.deepEqual(
+    calls.filter((call) => call.name === 'command').map((call) => call.value),
+    ['logline.about'],
+  );
+});
+
 test('the feedback form’s request is sent, and its result goes back to the panel', async () => {
   const service = services() as any;
   const asked: unknown[] = [];

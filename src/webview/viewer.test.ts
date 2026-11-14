@@ -540,6 +540,7 @@ test('More actions preserves commands and closes after selection or an outside c
     ['config', 'config'],
     ['help', 'showGuide'],
     ['suggestFeature', 'suggestFeature'],
+    ['about', 'showAbout'],
     ['clear', 'clear'],
   ]) {
     get('actionsMenu').hidden = true;
@@ -4943,6 +4944,47 @@ test('a Datadog connection lists its services to choose one, and can send a quer
   get('connectionSyntax').listeners.get('click')!();
   assert.equal(get('connectionNative').hidden, true);
   assert.equal(get('connectionTail').textContent, 'Stop tail');
+});
+
+test('About Logline is a dialog in the panel with the version, links, and a copy of the details', () => {
+  const { get, receive, messages, flushFrames } = viewer();
+  const info = { version: '1.20.0', editor: 'Visual Studio Code 1.99.0', system: 'Darwin arm64 25.0.0' };
+  receive({
+    type: 'snapshot',
+    generation: 1,
+    newest: 0,
+    total: 0,
+    retained: 0,
+    discarded: 0,
+    bytes: 0,
+    maxBytes: 1,
+    truncated: 0,
+    events: [],
+    columns: [],
+    page: 0,
+    pages: 1,
+    matched: 0,
+    openAbout: info,
+  });
+  flushFrames();
+  assert.equal(get('aboutDialog').open, true, 'the Command Palette or More actions opens it');
+  assert.equal(get('aboutVersion').textContent, 'v1.20.0');
+  assert.equal(get('aboutEditor').textContent, 'Visual Studio Code 1.99.0');
+  assert.equal(get('aboutSystem').textContent, 'Darwin arm64 25.0.0');
+  for (const [id, action] of [
+    ['aboutWhatsNew', 'whatsNew'],
+    ['aboutSponsor', 'sponsor'],
+    ['aboutAuthor', 'author'],
+    ['aboutGithub', 'github'],
+    ['aboutIssue', 'issue'],
+  ]) {
+    get(id).listeners.get('click')!();
+    assert.deepEqual(JSON.parse(JSON.stringify(messages.at(-1))), { type: 'aboutAction', action });
+  }
+  get('aboutCopy').listeners.get('click')!();
+  assert.deepEqual(JSON.parse(JSON.stringify(messages.at(-1))), { type: 'aboutAction', action: 'copy', info });
+  get('aboutClose').listeners.get('click')!();
+  assert.equal(get('aboutDialog').open, false);
 });
 
 test('Suggest a feature and Vote on what’s next are a dialog in the panel that shows what it will send', () => {

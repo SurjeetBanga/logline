@@ -914,6 +914,7 @@
       updateButton: element("updateButton"),
       takeTour: element("takeTour"),
       suggestFeature: element("suggestFeature"),
+      about: element("about"),
       welcomeDialog: element("welcomeDialog"),
       welcomeTour: element("welcomeTour"),
       welcomeExplore: element("welcomeExplore"),
@@ -1028,6 +1029,17 @@
       breakOnLogs: element("breakOnLogs"),
       saveSearchDialog: element("saveSearchDialog"),
       feedbackDialog: element("feedbackDialog"),
+      aboutDialog: element("aboutDialog"),
+      aboutClose: element("aboutClose"),
+      aboutVersion: element("aboutVersion"),
+      aboutEditor: element("aboutEditor"),
+      aboutSystem: element("aboutSystem"),
+      aboutWhatsNew: element("aboutWhatsNew"),
+      aboutSponsor: element("aboutSponsor"),
+      aboutAuthor: element("aboutAuthor"),
+      aboutGithub: element("aboutGithub"),
+      aboutIssue: element("aboutIssue"),
+      aboutCopy: element("aboutCopy"),
       feedbackForm: element("feedbackForm"),
       feedbackCancel: element("feedbackCancel"),
       feedbackSuggestTab: element("feedbackSuggestTab"),
@@ -7052,6 +7064,29 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
     };
   }
 
+  // src/webview/about-dialog.ts
+  function createAboutDialog(elements, api, scope) {
+    let info;
+    scope.listen(elements.close, "click", () => elements.dialog.close());
+    for (const [action, button] of Object.entries(elements.buttons))
+      scope.listen(button, "click", () => {
+        api.postMessage({ type: "aboutAction", action, ...action === "copy" && info ? { info } : {} });
+        if (action === "copy") {
+          button.textContent = "Copied";
+          setTimeout(() => button.textContent = "Copy", 1500);
+        }
+      });
+    return {
+      open(next) {
+        info = next;
+        elements.version.textContent = `v${next.version}`;
+        elements.editor.textContent = next.editor;
+        elements.system.textContent = next.system;
+        if (!elements.dialog.open) elements.dialog.showModal?.();
+      }
+    };
+  }
+
   // src/core/redaction.ts
   var DEFAULT_REPLACEMENT = "[REDACTED]";
   var SENSITIVE_KEY = /(?:password|passwd|passphrase|secret|token|api[-_ ]?key|authorization|cookie|private[-_ ]?key|access[-_ ]?key|credential|(?:^|[-_. ])pwd$)/i;
@@ -9299,6 +9334,8 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
       if (data.startTour) scope.frame(() => startTour());
       const openFeedback = data.openFeedback;
       if (openFeedback) scope.frame(() => feedback.open(openFeedback));
+      const openAbout = data.openAbout;
+      if (openAbout) scope.frame(() => about.open(openAbout));
       const reveal = data.reveal;
       if (reveal) scope.frame(() => revealControl(reveal.target, reveal.fallback));
       if (data.applySource && data.servers?.some((server) => server.id === data.applySource) && (data.applySource !== state.selectedServer || (data.applyRun ?? "") !== state.selectedSession)) {
@@ -9738,6 +9775,7 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
       elements.help,
       elements.takeTour,
       elements.suggestFeature,
+      elements.about,
       elements.clear
     ];
     const shownActions = () => actionItems.filter((item) => !item.hidden);
@@ -9810,6 +9848,25 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
         status: elements.feedbackStatus,
         send: elements.feedbackSend,
         github: elements.feedbackGithub
+      },
+      api,
+      scope
+    );
+    const about = createAboutDialog(
+      {
+        dialog: elements.aboutDialog,
+        close: elements.aboutClose,
+        version: elements.aboutVersion,
+        editor: elements.aboutEditor,
+        system: elements.aboutSystem,
+        buttons: {
+          whatsNew: elements.aboutWhatsNew,
+          sponsor: elements.aboutSponsor,
+          author: elements.aboutAuthor,
+          github: elements.aboutGithub,
+          issue: elements.aboutIssue,
+          copy: elements.aboutCopy
+        }
       },
       api,
       scope
@@ -10030,6 +10087,7 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
     scope.listen(elements.import, "click", () => api.postMessage({ type: "import" }));
     scope.listen(elements.openBrowser, "click", () => api.postMessage({ type: "openBrowser" }));
     scope.listen(elements.suggestFeature, "click", () => api.postMessage({ type: "suggestFeature" }));
+    scope.listen(elements.about, "click", () => api.postMessage({ type: "showAbout" }));
     const addContainer = elements.railAdd.closest(".popover-container");
     const addMenu = createPopover(addContainer, elements.railAdd, elements.railAddMenu);
     const addItems = [

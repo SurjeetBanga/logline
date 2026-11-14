@@ -288,6 +288,11 @@
         "category": "Logline"
       },
       {
+        "command": "logline.about",
+        "title": "About Logline",
+        "category": "Logline"
+      },
+      {
         "command": "logline.suggestFeature",
         "title": "Suggest a Feature",
         "category": "Logline"

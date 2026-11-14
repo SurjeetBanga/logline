@@ -29,7 +29,7 @@ import { ProcessRunner } from '../capture/process-runner';
 import { RuntimeState } from '../capture/runtime-state';
 import { SessionRegistry } from '../capture/session-registry';
 import { LogStore } from '../core/log-store';
-import type { HostMessage, ViewRequest } from '../protocol/messages';
+import type { AboutInfo, HostMessage, ViewRequest } from '../protocol/messages';
 import { LogPersistence } from '../storage/log-persistence';
 import { SavedSearches } from '../storage/saved-searches';
 import { Configuration } from './configuration';
@@ -195,6 +195,7 @@ export class LogsController {
   private pendingForm?: FormOpen;
   private pendingTour = false;
   private pendingFeedback?: FeedbackOpen;
+  private pendingAbout?: AboutInfo;
   readonly transfer = new LogTransfer(this.store, this.config, this.ingestion, this.state);
   readonly searches: SavedSearches;
   private readonly globalState: Pick<vscode.ExtensionContext, 'globalState'>['globalState'];
@@ -334,9 +335,10 @@ export class LogsController {
       pendingTour: startTour,
       pendingForm: openConnectionForm,
       pendingFeedback: openFeedback,
+      pendingAbout: openAbout,
     } = this;
     this.pendingTour = false;
-    this.pendingFeedback = undefined;
+    this.pendingFeedback = this.pendingAbout = undefined;
     this.pendingQuery = this.pendingTrace = this.pendingSource = this.pendingRun = this.pendingCompare = undefined;
     this.pendingReveal = this.pendingForm = undefined;
     // The guide's first steps tick off from what was done; a search is remembered once it happens.
@@ -367,6 +369,7 @@ export class LogsController {
       ...(startTour ? { startTour } : {}),
       ...(update ? { update } : {}),
       ...(openFeedback ? { openFeedback } : {}),
+      ...(openAbout ? { openAbout } : {}),
       ...snapshot,
       ...(applyQuery !== undefined ? { applyQuery } : {}),
       ...(openTrace ? { openTrace } : {}),
@@ -568,6 +571,12 @@ export class LogsController {
   /** Open Suggest a feature or Vote on what's next in the Logs panel, with the next snapshot like the tour. */
   async openFeedback(mode: FeedbackOpen['mode']): Promise<void> {
     this.pendingFeedback = { mode, sendable: feedbackSendable(this.usage) };
+    await vscode.commands.executeCommand('logline.logs.focus');
+    this.notifications.send({ type: 'update' });
+  }
+  /** Open the About dialog in the Logs panel, with the next snapshot like the feedback form. */
+  async openAbout(info: AboutInfo): Promise<void> {
+    this.pendingAbout = info;
     await vscode.commands.executeCommand('logline.logs.focus');
     this.notifications.send({ type: 'update' });
   }

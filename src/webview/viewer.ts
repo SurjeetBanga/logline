@@ -25,6 +25,7 @@ import { createConnectionTab } from './connection-tab';
 import { createInspectorResize, createRailResize } from './rail-resize';
 import { createTabRail } from './tab-rail';
 import { createTour } from './tour';
+import { createAboutDialog } from './about-dialog';
 import { createFeedbackForm } from './feedback-form';
 import { createCompare } from './inspection/compare';
 import { createMetricQuery } from './inspection/metric-query';
@@ -429,6 +430,8 @@ export function createViewer(api: WebviewApi) {
     if (data.startTour) scope.frame(() => startTour());
     const openFeedback = data.openFeedback;
     if (openFeedback) scope.frame(() => feedback.open(openFeedback));
+    const openAbout = data.openAbout;
+    if (openAbout) scope.frame(() => about.open(openAbout));
     // The guide's Show me: point at the control once this snapshot is on screen.
     const reveal = data.reveal;
     if (reveal) scope.frame(() => revealControl(reveal.target, reveal.fallback));
@@ -1010,6 +1013,7 @@ export function createViewer(api: WebviewApi) {
     elements.help,
     elements.takeTour,
     elements.suggestFeature,
+    elements.about,
     elements.clear,
   ];
   // Copy filtered results is hidden without a filter; keyboard navigation skips it.
@@ -1087,6 +1091,25 @@ export function createViewer(api: WebviewApi) {
       status: elements.feedbackStatus,
       send: elements.feedbackSend,
       github: elements.feedbackGithub,
+    },
+    api,
+    scope,
+  );
+  const about = createAboutDialog(
+    {
+      dialog: elements.aboutDialog,
+      close: elements.aboutClose,
+      version: elements.aboutVersion,
+      editor: elements.aboutEditor,
+      system: elements.aboutSystem,
+      buttons: {
+        whatsNew: elements.aboutWhatsNew,
+        sponsor: elements.aboutSponsor,
+        author: elements.aboutAuthor,
+        github: elements.aboutGithub,
+        issue: elements.aboutIssue,
+        copy: elements.aboutCopy,
+      },
     },
     api,
     scope,
@@ -1340,6 +1363,7 @@ export function createViewer(api: WebviewApi) {
   scope.listen(elements.import, 'click', () => api.postMessage({ type: 'import' }));
   scope.listen(elements.openBrowser, 'click', () => api.postMessage({ type: 'openBrowser' }));
   scope.listen(elements.suggestFeature, 'click', () => api.postMessage({ type: 'suggestFeature' }));
+  scope.listen(elements.about, 'click', () => api.postMessage({ type: 'showAbout' }));
   // Add logs, on the Sources rail: every way to bring logs in.
   const addContainer = elements.railAdd.closest<HTMLElement>('.popover-container')!;
   const addMenu = createPopover(addContainer, elements.railAdd, elements.railAddMenu);

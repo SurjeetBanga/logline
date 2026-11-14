@@ -297,3 +297,25 @@ test('the welcome choice and panel width are read only when they are valid', () 
   for (const width of [0, -1, Number.NaN, '640'])
     assert.equal(parseViewRequest({ type: 'panelSize', width }), undefined);
 });
+
+test('About dialog actions are a known button, and only Copy carries bounded details', () => {
+  assert.deepEqual(parseViewRequest({ type: 'aboutAction', action: 'sponsor' }), {
+    type: 'aboutAction',
+    action: 'sponsor',
+  });
+  assert.equal(parseViewRequest({ type: 'aboutAction', action: 'rm -rf' }), undefined);
+  const parsed = parseViewRequest({
+    type: 'aboutAction',
+    action: 'copy',
+    info: { version: '1.20.0', editor: 'x'.repeat(500), system: 'Linux' },
+  });
+  assert.deepEqual(parsed, {
+    type: 'aboutAction',
+    action: 'copy',
+    info: { version: '1.20.0', editor: 'x'.repeat(200), system: 'Linux' },
+  });
+  assert.deepEqual(parseViewRequest({ type: 'aboutAction', action: 'copy', info: { version: 1 } }), {
+    type: 'aboutAction',
+    action: 'copy',
+  });
+});

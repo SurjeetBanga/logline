@@ -19,6 +19,7 @@ import type { MetricSeriesView } from '../core/metrics';
 import type { TraceSummary, TraceView } from '../core/traces';
 import type { SavedSearches } from '../storage/saved-searches';
 import type { LogTransfer } from './log-transfer';
+import { runAboutAction } from './about';
 import { manageServers } from './servers';
 import { openSource } from './source-navigation';
 import type { AgentLogAccess } from './agent-access';
@@ -244,6 +245,12 @@ export async function handleMessage(
       return;
     case 'showStatus':
       await services.showStatus();
+      return;
+    case 'showAbout':
+      await vscode.commands.executeCommand('logline.about');
+      return;
+    case 'aboutAction':
+      await runAboutAction(msg.action, msg.info);
       return;
     case 'emptyAction':
       services.usage?.record('entry', { from: 'empty_state' });
