@@ -11,11 +11,14 @@ import {
   type GenAiContentOptions,
   type GenAiSummary,
 } from '../core/gen-ai';
+import { localUrls } from '../core/browser-events';
 import { MetricStore, type MetricSeriesView } from '../core/metrics';
 import { createRedactor } from '../core/redaction';
 import { telemetryFindings, type TelemetryFinding } from '../core/telemetry-findings';
 import { buildTrace, SpanStore, summarizeTraces, traceLogs, type TraceSummary, type TraceView } from '../core/traces';
 import { OtelIntegration } from './otel-integration';
+import { BrowserCapture } from '../capture/browser-capture';
+import type { BrowserLauncher } from './browser';
 import { FileFollower } from '../capture/file-follower';
 import { RemoteSource } from '../capture/remote-source';
 import { RemoteMetrics } from '../capture/remote-metrics';
@@ -125,6 +128,12 @@ export class LogsController {
   readonly tasks = new TaskLifecycle(this.registry, this.ingestion, this.state, () => this.runner.sessions.size > 0);
   readonly terminalCapture = new TerminalCapture(this.config, this.ingestion, this.registry, this.state);
   readonly files = new FileFollower(this.config, this.registry, this.ingestion, this.state);
+  /** The browser Logline opened, whose console and requests are captured. */
+  readonly browser = new BrowserCapture(this.config, this.registry, this.ingestion, this.state);
+  /** Opens that browser; set where the extension's storage folder is known. */
+  browserLauncher?: BrowserLauncher;
+  /** Hears each run as it starts, after usage has counted it. */
+  runStarted?: (record: SessionSummary) => void;
   /** Runs fetched from saved connections, and tails that keep reading them. */
   readonly remote = new RemoteSource(this.config, this.registry, this.ingestion, this.state);
   readonly connections: ConnectionManager;
@@ -235,7 +244,10 @@ export class LogsController {
       (open, focus) => this.showConnectionForm(open, focus),
     );
     this.compare = new ProductionCompare(this.store, this.registry, (view) => void this.comparisonFinished(view));
-    this.registry.records.onStart = (record) => this.usage?.capture(captureKind(record));
+    this.registry.records.onStart = (record) => {
+      this.usage?.capture(captureKind(record));
+      this.runStarted?.(record);
+    };
     // Agents fetch from connections the user allowed, and compare with production, through the sharing boundary.
     this.agentAccess.production = {
       connections: () => this.connections.agentConnections(),
@@ -456,6 +468,7 @@ export class LogsController {
         emptyAction: async (action) => {
           if (action === 'capture') await this.toggleTerminalCapture(true);
           else if (action === 'agent') await this.setUpForAgent();
+          else if (action === 'browser') await vscode.commands.executeCommand('logline.openBrowser');
           else await vscode.commands.executeCommand('logline.followFile');
         },
         showStatus: async () => {
@@ -851,9 +864,14 @@ export class LogsController {
     this.stop(serverId);
     const removed = this.store.removeSource(serverId);
     // A run that is still capturing, such as OpenTelemetry, a terminal, or a process that is
-    // shutting down, keeps adding logs under its record, so only finished runs are dropped.
+    // shutting down, keeps adding logs under its record, so only finished runs are dropped. A
+    // browser that is closing adds nothing more, so its run goes now, not at a second press.
     for (const [id, record] of this.registry.records)
-      if (belongsTo(record.serverId) && record.status !== 'running' && record.status !== 'stopping')
+      if (
+        belongsTo(record.serverId) &&
+        record.status !== 'running' &&
+        (record.status !== 'stopping' || record.sourceKind === 'browser')
+      )
         this.registry.records.delete(id);
     this.agentAccess.forgetSource(serverId);
     this.state.status = `Removed ${label}${removed ? ` and its ${removed.toLocaleString()} log${removed === 1 ? '' : 's'}` : ''}`;
@@ -894,7 +912,11 @@ export class LogsController {
   }
   private isRunning(): boolean {
     return (
-      this.runner.sessions.size > 0 || this.tasks.executions.size > 0 || this.files.active > 0 || this.remote.active > 0
+      this.runner.sessions.size > 0 ||
+      this.tasks.executions.size > 0 ||
+      this.files.active > 0 ||
+      this.remote.active > 0 ||
+      !!this.browser.active
     );
   }
   shareWithAgent(sourceIds?: string[], anchor?: number, sessionIds?: string[], chooseRuns = false): Promise<void> {
@@ -1180,6 +1202,7 @@ export class LogsController {
       this.runner.stopSessionById(sessionId);
       this.tasks.stopSessionById(sessionId);
       this.files.stopSessionById(sessionId);
+      this.browser.stopSessionById(sessionId);
       this.debug.stopSessionById(sessionId);
       this.remote.stopSessionById(sessionId);
       return;
@@ -1189,14 +1212,38 @@ export class LogsController {
     if (serverId) {
       this.runner.stopServer(serverId);
       this.files.stopServer(serverId);
+      this.browser.stopServer(serverId);
       this.debug.stopServer(serverId);
       this.remote.stopServer(serverId);
     } else {
       this.runner.stop();
       this.files.stop();
+      this.browser.stop();
       this.remote.stop();
     }
     this.tasks.stop(serverId);
+  }
+  /**
+   * The newest local address in what a run printed, such as `http://localhost:5173/` from a dev
+   * server; of any run but a browser's or a connection's when none is named.
+   */
+  recentLocalUrl(sessionId?: string): string | undefined {
+    // Newest first, stopping at the first address or after a bounded look: never the whole store.
+    let looked = 0;
+    let read = 0;
+    for (const event of this.store.newestFirst()) {
+      if (++looked > RECENT_URL_LOOKED) break;
+      if (sessionId ? event.sessionId !== sessionId : this.printsOtherAddresses(event.sessionId)) continue;
+      const url = localUrls(event.raw ?? event.message ?? '').at(-1);
+      if (url) return url;
+      if (++read >= RECENT_URL_EVENTS) break;
+    }
+    return undefined;
+  }
+  /** A browser's events hold the addresses it requested, and a connection's those of another machine. */
+  private printsOtherAddresses(sessionId?: string): boolean {
+    const kind = sessionId ? this.registry.records.get(sessionId)?.sourceKind : undefined;
+    return kind === 'browser' || kind === 'remote';
   }
   /** What a usage summary reads when it is sent: sizes and counts only. */
   usageSummary(): UsageSummarySource {
@@ -1240,6 +1287,7 @@ export class LogsController {
     this.debug.dispose();
     await this.otel.dispose();
     await this.files.dispose();
+    await this.browser.dispose();
     await this.remote.dispose();
     await this.remoteMetrics.dispose();
     this.connections.dispose();
@@ -1248,6 +1296,11 @@ export class LogsController {
     await this.persistence.dispose();
   }
 }
+
+/** How many of the newest events are read for an address a dev server printed. */
+const RECENT_URL_EVENTS = 500;
+/** How many events are passed over, at most, to find those. */
+const RECENT_URL_LOOKED = 5000;
 
 /** How long a search stays unchanged before it counts as one, so typing it is not many. */
 const SEARCH_SETTLE_MS = 1500;

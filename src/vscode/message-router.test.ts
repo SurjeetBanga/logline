@@ -154,6 +154,7 @@ test('message router dispatches every public action and preserves normalized inp
     { type: 'stop', serverId: 'api', sessionId: 'run' },
     { type: 'config' },
     { type: 'manageServers' },
+    { type: 'openBrowser' },
     { type: 'openLogSite', id: 1 },
     { type: 'openLogSite', id: -1 },
     { type: 'trace', traceId: 'ABC123' },

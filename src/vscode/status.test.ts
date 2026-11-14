@@ -27,6 +27,8 @@ function controller(settings: Record<string, unknown> = {}) {
     runner: { sessions: new Map([['a', {}]]) },
     tasks: { executions: new Map([['b', {}]]) },
     files: { active: 1 },
+    browser: { active: { events: 9 }, sites: ['localhost:5173'] },
+    browserLauncher: { executable: () => '/opt/chrome' },
     lens: { enabled: true },
     doctor: { total: 4 },
     gitChanges: { status: () => ({ files: 5 }) },
@@ -120,6 +122,7 @@ test('Show Status reads each part of the running window', () => {
     terminal: { state: 'capturing', detail: 'Capturing 1 terminal command' },
     debugSessions: true,
     running: 3,
+    browser: { site: 'localhost:5173', events: 9 },
   });
   assert.deepEqual(input.retention, {
     events: 1200,
@@ -139,8 +142,11 @@ test('Show Status works before the optional parts of the window exist', () => {
     lens: undefined,
     doctor: undefined,
     gitChanges: undefined,
+    browser: { active: undefined, sites: [] },
+    browserLauncher: { executable: () => undefined },
   } as unknown as LogsController;
   const input = withHome(() => statusInput(bare));
+  assert.deepEqual(input.capture.browser, { site: undefined, events: 0, unavailable: 'missing' });
   assert.equal(input.agents.bridgeRunning, false);
   assert.deepEqual(input.agents.clients, []);
   assert.deepEqual(input.editor, { lenses: false, doctor: 'all', findings: 0, changedFiles: undefined });

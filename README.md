@@ -21,6 +21,7 @@ Run your app the way you already do: in a terminal, with F5, as a task, in Docke
 ![The Logs panel with a failing request expanded: its JSON, a link to its trace, the log statement that wrote it, and Break here](media/readme/logs.webp)
 
 - **Capture anything**: terminals, F5 debug sessions in any language, tasks, log files, Docker Compose and Kubernetes services, and OpenTelemetry logs, traces, and metrics, with no collector.
+- **The browser too**: open your app from Logline, and its console, uncaught errors, and network requests land in the same timeline as the server's logs.
 - **Search like you think**: `level:error service:api`, `status:5xx`, `durationMs:>200`, `last:15m`, or `changed:true` for logs from code you changed since the last commit.
 - **Read any format**: JSON, logfmt, plain text, Pino, Winston, Log4j2, and ECS, with stack traces kept together.
 - **Back to the code**: every log statement shows live hit counts, errors, and p95 durations above it, and **Break here** stops the debugger the next time it logs.

@@ -105,7 +105,7 @@ interface MessageServices {
   connectAgent(agent?: 'claude' | 'codex'): Promise<void>;
   showStatus(): Promise<void>;
   /** A way in chosen from the empty Logs panel. */
-  emptyAction?(action: 'capture' | 'openFile' | 'agent'): Promise<void>;
+  emptyAction?(action: 'capture' | 'openFile' | 'browser' | 'agent'): Promise<void>;
   connections?: Pick<
     ConnectionManager,
     | 'fetch'
@@ -329,6 +329,9 @@ export async function handleMessage(
       return;
     case 'manageServers':
       await manageServers();
+      return;
+    case 'openBrowser':
+      await vscode.commands.executeCommand('logline.openBrowser');
       return;
     case 'feedbackSend': {
       const { type: _type, ...request } = msg;

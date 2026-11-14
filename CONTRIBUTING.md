@@ -35,9 +35,10 @@ The webview's source is `src/webview/`. `npm run compile` bundles it into `media
 | `npm run benchmark` | Measures the hot paths (ingestion, search, analysis, snapshots, and more) and the sizes of messages and retained memory. |
 | `npm run perf:compare -- --base <dir>` | Compares this build with the one in `<dir>` and fails when a case is more than 15% slower or a size grows by more than 5%. CI also compares with the baseline commit in `.github/performance-baseline`, so small slowdowns cannot add up past 15%. |
 | `npm run test:layout` | Opens the Logs panel in headless Chromium at a short size and two narrow ones, clicks through every tab, the rails, and the Connection form, and fails if the page itself scrolls or grows larger than the panel, or a control is out of reach. Run `npx playwright install chromium` once first. |
+| `npm run test:browser` | Runs browser capture against a real headless Chromium (Playwright's, or a browser installed on your machine) and checks the console, error, and request events it produces. Run it after changing `src/capture/browser-capture.ts` or `src/core/browser-events.ts`. |
 | `npm run smoke` | Starts a real VS Code with the extension and runs the smoke test. Set `VSCODE_VERSION=stable` to download VS Code instead of using your installed `code`. |
 
-CI runs the checks and the tests on Linux, Windows, and macOS, checks pull requests for new dependencies with known vulnerabilities, compares performance with the base branch, checks the panel's layout in headless Chromium, then runs the smoke test on the packaged extension in VS Code 1.99.0 and the latest stable. A pull request can be merged only when **CI passed** is green.
+CI runs the checks and the tests on Linux, Windows, and macOS, checks pull requests for new dependencies with known vulnerabilities, compares performance with the base branch, checks the panel's layout and browser capture in headless Chromium, then runs the smoke test on the packaged extension in VS Code 1.99.0 and the latest stable. A pull request can be merged only when **CI passed** is green.
 
 ## Tests
 

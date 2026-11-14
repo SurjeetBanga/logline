@@ -31,6 +31,8 @@ export interface StatusInput {
     debugSessions: boolean;
     /** Commands, tasks, and followed files running now. */
     running: number;
+    /** The browser Logline opens: the site being captured, or why none can be opened here. */
+    browser?: { site?: string; events: number; unavailable?: 'remote' | 'missing' };
   };
   retention: { events: number; bytes: number; maxBytes: number; discarded: number; persist: boolean };
   editor: { lenses: boolean; doctor: 'off' | 'security' | 'all'; findings: number; changedFiles?: number };
@@ -197,6 +199,41 @@ export function statusItems(input: StatusInput): StatusItem[] {
       summary: 'Not captured',
       detail: 'Debug Console output from F5 sessions does not reach the Logs panel.',
       action: setting('Capture debug sessions', 'logline.captureDebugSessions'),
+    });
+
+  const browser = capture.browser;
+  if (browser?.site)
+    items.push({
+      area: 'Browser',
+      state: 'ok',
+      summary: `Capturing ${browser.site} · ${plural(browser.events, 'event')}`,
+      detail:
+        'Console messages, uncaught errors, and requests of the browser Logline opened. Close its window to stop.',
+      action: { label: 'Open another address', command: 'logline.openBrowser' },
+    });
+  else if (browser?.unavailable === 'remote')
+    items.push({
+      area: 'Browser',
+      state: 'off',
+      summary: 'Not available in a remote window',
+      detail: 'Logline runs on the remote machine here, where it has no browser to open.',
+    });
+  else if (browser?.unavailable === 'missing')
+    items.push({
+      area: 'Browser',
+      state: 'off',
+      summary: 'No Chrome, Edge, Chromium, or Brave found',
+      detail: 'Set logline.browser.executable to the browser Logline should open.',
+      action: setting('Choose the browser', 'logline.browser.executable'),
+    });
+  else if (browser)
+    items.push({
+      area: 'Browser',
+      state: 'off',
+      summary: 'No browser open',
+      detail:
+        'Open your app in a browser Logline captures to see its console, errors, and requests beside the server logs.',
+      action: { label: 'Open browser with capture', command: 'logline.openBrowser' },
     });
 
   const full = retention.maxBytes > 0 && retention.bytes >= retention.maxBytes * 0.9;

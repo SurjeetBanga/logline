@@ -24,7 +24,7 @@ Events cover:
 - **Was it helpful**: a few minutes after **Ask Copilot** opens an investigation, Logline may ask whether it helped, at most once a week and three times in all, and sends Yes or No. Never the chat.
 - **Performance and errors**: how long activation, the first logs in the panel, searches, and imports took, and how many events an import brought, in ranges; and failures by area and a code Logline names, never their message.
 - **Captures**: whether a capture started by itself, and whether a terminal has the shell integration capture needs, with its kind of shell (POSIX, PowerShell, or cmd).
-- **Prompts**: how you answered the rating, feedback, and update questions, the notification about errors Logline caught, and the offer to capture a terminal. Never the command that led to the offer.
+- **Prompts**: how you answered the rating, feedback, and update questions, the notification about errors Logline caught, the offer to capture a terminal, and the offer to open a browser. Never the command or the address that led to an offer.
 - **A daily summary**: active minutes, how long the extension ran, searches and how many found nothing, events opened, panel actions used, events captured, dropped, and cut short, the share of recent events that were JSON, had no level, or had several lines, sources, memory used, connections by type, and agent use, all in ranges.
 
 ## What is never sent

@@ -60,6 +60,10 @@ export function registerCommands(
       for (const uri of files) await controller.files.follow(uri.fsPath);
       if (files.length) await vscode.commands.executeCommand('logline.logs.focus');
     }),
+    registerCommand('logline.openBrowser', async (url?: unknown) => {
+      // A URL is passed by the Logs panel and the offer; the command palette passes nothing and asks.
+      await controller.browserLauncher?.open(typeof url === 'string' ? url : undefined);
+    }),
     registerCommand('logline.openInLogline', async (clicked?: unknown, selected?: unknown) => {
       if (!vscode.workspace.isTrusted) {
         vscode.window.showWarningMessage('Trust this workspace before opening a log file in Logline.');
