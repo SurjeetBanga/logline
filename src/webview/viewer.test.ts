@@ -1805,6 +1805,22 @@ test('the inspector width is set by dragging its left edge or with the arrow key
   assert.equal(beside.dom.body.style['--inspector-width'], '444px');
 });
 
+test('a click anywhere in a row opens it, but not on another control or after selecting text', () => {
+  const { get, app, runtime } = viewer();
+  const row = eventRow(get, 42);
+  const click = (matches: Record<string, Element | undefined>) =>
+    get('logs').listeners.get('click')!({ target: { closest: (wanted: string) => matches[wanted] } });
+  click({ 'button, a, input, select, textarea': row });
+  assert.equal(app.state.selected, undefined, 'a control in the row keeps its own click');
+  const selection = { isCollapsed: false };
+  (runtime.window as { getSelection?: () => typeof selection }).getSelection = () => selection;
+  click({ 'tr.event-row': row });
+  assert.equal(app.state.selected, undefined, 'selecting text to copy does not open the row');
+  selection.isCollapsed = true;
+  click({ 'tr.event-row': row });
+  assert.equal(app.state.selected, 42, 'a click on its time, level, or a field opens it');
+});
+
 test('clicking a row opens the event in the inspector with its message, meta, details, and the one-time tip', () => {
   const { get, app, dom, messages, savedStates } = viewer();
   assert.equal(get('inspector').hidden, false, 'the fake page starts with it visible; opening keeps it shown');

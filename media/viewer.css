@@ -2720,6 +2720,9 @@ td.time {
   overflow: hidden;
   text-overflow: ellipsis;
 }
+.event-row {
+  cursor: pointer;
+}
 .event-row:hover {
   background: var(--vscode-list-hoverBackground, #292929);
 }

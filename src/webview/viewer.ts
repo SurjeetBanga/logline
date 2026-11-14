@@ -833,9 +833,16 @@ export function createViewer(api: WebviewApi) {
       traceView.show(trace.dataset.traceId);
       return;
     }
-    const button = (event.target as HTMLElement).closest<HTMLElement>('.message-button');
-    if (!button) return;
-    selectEvent(Number(button.closest('tr')!.dataset.id));
+    // A click anywhere in a row opens it, not just on its message. Other controls in the row keep
+    // their own clicks, and a drag that selects text to copy does not open the row.
+    const button = target.closest<HTMLElement>('.message-button');
+    let row = button?.closest<HTMLElement>('tr');
+    if (!row) {
+      if (target.closest('button, a, input, select, textarea')) return;
+      if (window.getSelection?.()?.isCollapsed === false) return;
+      row = target.closest<HTMLElement>('tr.event-row');
+    }
+    if (row) selectEvent(Number(row.dataset.id));
   });
   // With an event open, Escape anywhere in a row closes it, and the arrow keys on a message move to
   // the one above or below. On a cell they move between cells instead.

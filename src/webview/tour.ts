@@ -32,7 +32,7 @@ export const TOUR_STEPS: TourStep[] = [
     example: 'level:error service:checkout',
   },
   {
-    // The first row's message, which is what you click, not the whole table: the card then
+    // The first row's message, not the whole table: the card then
     // has room beside it rather than over it, even in a short panel.
     select: '#logs > tr.event-row .message-content',
     target: 'logsView',

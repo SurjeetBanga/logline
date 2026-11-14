@@ -6855,7 +6855,7 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
       example: "level:error service:checkout"
     },
     {
-      // The first row's message, which is what you click, not the whole table: the card then
+      // The first row's message, not the whole table: the card then
       // has room beside it rather than over it, even in a short panel.
       select: "#logs > tr.event-row .message-content",
       target: "logsView",
@@ -9621,9 +9621,14 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
         traceView.show(trace.dataset.traceId);
         return;
       }
-      const button = event.target.closest(".message-button");
-      if (!button) return;
-      selectEvent(Number(button.closest("tr").dataset.id));
+      const button = target.closest(".message-button");
+      let row = button?.closest("tr");
+      if (!row) {
+        if (target.closest("button, a, input, select, textarea")) return;
+        if (window.getSelection?.()?.isCollapsed === false) return;
+        row = target.closest("tr.event-row");
+      }
+      if (row) selectEvent(Number(row.dataset.id));
     });
     scope.listen(elements.logs, "keydown", (event) => {
       const target = event.target;
