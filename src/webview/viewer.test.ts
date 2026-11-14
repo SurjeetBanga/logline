@@ -4899,11 +4899,15 @@ test('an empty panel offers the ways to get logs in, until something is captured
   for (const [button, action] of [
     ['emptyCapture', 'capture'],
     ['emptyOpenFile', 'openFile'],
+    ['emptyBrowser', 'browser'],
     ['emptyAgent', 'agent'],
   ]) {
     get(button).listeners.get('click')!();
     assert.deepEqual(JSON.parse(JSON.stringify(messages.at(-1))), { type: 'emptyAction', action });
   }
+  // More actions opens the browser too, once there are logs and the empty panel is gone.
+  get('openBrowser').listeners.get('click')!();
+  assert.deepEqual(JSON.parse(JSON.stringify(messages.at(-1))), { type: 'openBrowser' });
   // With capture on, that button has nothing left to do.
   snapshot(0, true);
   assert.equal(get('emptyCapture').hidden, true);

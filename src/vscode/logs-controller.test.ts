@@ -444,6 +444,54 @@ test('Suggest a feature and Vote on what’s next open in the panel with the nex
   });
 });
 
+test('the newest local address a run printed is found for the browser, and each run start is heard', (t) => {
+  const controller = setup(t);
+  const started: string[] = [];
+  controller.runStarted = (record) => started.push(record.id);
+  const say = (line: string, serverId: string, sessionId: string) =>
+    controller.ingestion.accept(line, 'stdout', { serverId, server: serverId, sessionId });
+  assert.equal(controller.recentLocalUrl(), undefined);
+  const run = (id: string, serverId: string, sourceKind: 'browser' | 'remote') =>
+    controller.registry.records.set(id, {
+      id,
+      serverId,
+      server: serverId,
+      status: 'running',
+      startedAt: 1,
+      events: 0,
+      sourceKind,
+    });
+  run('browser-1', 'browser:localhost:9999', 'browser');
+  run('conn-1', 'conn:prod', 'remote');
+  say('  ➜  Local:   http://localhost:5173/', 'web', 'web-1');
+  say('listening on http://0.0.0.0:8000 and http://127.0.0.1:8001', 'api', 'api-1');
+  say('{"message":"GET http://localhost:9999/ 200","kind":"request"}', 'browser:localhost:9999', 'browser-1');
+  say('fetched http://localhost:7777', 'conn:prod', 'conn-1');
+  assert.equal(
+    controller.recentLocalUrl(),
+    'http://127.0.0.1:8001',
+    'the newest, and not a browser’s or a connection’s',
+  );
+  assert.equal(controller.recentLocalUrl('web-1'), 'http://localhost:5173/');
+  assert.equal(controller.recentLocalUrl('none'), undefined);
+  controller.registry.records.set('web-1', {
+    id: 'web-1',
+    serverId: 'web',
+    server: 'web',
+    status: 'running',
+    startedAt: 1,
+    events: 1,
+  });
+  assert.deepEqual(started, ['browser-1', 'conn-1', 'web-1']);
+  // The look is bounded: an address further back than it reaches is not found, and nothing reads the whole store.
+  for (let line = 0; line < 600; line++) say(`request ${line} handled`, 'api', 'api-1');
+  assert.equal(controller.recentLocalUrl(), undefined);
+  // Stopping reaches the browser too; with none open it does nothing.
+  controller.stop('browser:localhost:9999');
+  controller.stop();
+  assert.equal(controller.browser.active, undefined);
+});
+
 test('the empty panel’s buttons capture terminals, open a log file, and start the agent setup', async (t) => {
   const controller = setup(t);
   const entries: unknown[] = [];
@@ -460,11 +508,14 @@ test('the empty panel’s buttons capture terminals, open a log file, and start 
   assert.equal(controller.terminalCapture.isEnabled, true);
   await controller.handleMessage(() => {}, { type: 'emptyAction', action: 'openFile' });
   assert.ok(commands.includes('logline.followFile'));
+  await controller.handleMessage(() => {}, { type: 'emptyAction', action: 'browser' });
+  await controller.handleMessage(() => {}, { type: 'openBrowser' });
+  assert.equal(commands.filter((command) => command === 'logline.openBrowser').length, 2);
   // No agent is found here and the share warning is refused, so the setup stops after capture.
   warningAnswer = undefined;
   await controller.handleMessage(() => {}, { type: 'emptyAction', action: 'agent' });
   assert.equal(controller.agentAccess.status().active, false);
-  assert.equal(entries.filter(([event]: any) => event === 'entry').length, 3);
+  assert.equal(entries.filter(([event]: any) => event === 'entry').length, 4);
   assert.deepEqual(entries[0], ['entry', { from: 'empty_state' }]);
   // Capture Everywhere saves the setting for every workspace.
   settings.length = 0;

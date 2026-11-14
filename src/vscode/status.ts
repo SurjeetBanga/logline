@@ -33,6 +33,15 @@ export function statusInput(controller: LogsController): StatusInput {
       terminal: controller.terminalCapture.status(),
       debugSessions: config.get('captureDebugSessions', true),
       running: controller.runner.sessions.size + controller.tasks.executions.size + controller.files.active,
+      browser: {
+        site: controller.browser.sites.join(', ') || undefined,
+        events: controller.browser.active?.events ?? 0,
+        ...(vscode.env?.remoteName
+          ? { unavailable: 'remote' as const }
+          : controller.browserLauncher && !controller.browserLauncher.executable()
+            ? { unavailable: 'missing' as const }
+            : {}),
+      },
     },
     retention: {
       events: stats.retained,

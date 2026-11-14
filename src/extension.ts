@@ -1,3 +1,4 @@
+import { homedir } from 'node:os';
 import { join } from 'node:path';
 import * as vscode from 'vscode';
 import { agentClient } from './core/usage-events';
@@ -11,7 +12,9 @@ import { registerAgentTools, runAgentTool } from './vscode/agent-tools';
 import { AgentBridge, installMcpScript } from './vscode/agent-bridge';
 import { copilotAvailable, refreshCopilot, refreshInstalledSkills } from './vscode/agent-setup';
 import { AgentOnboarding } from './vscode/agent-onboarding';
+import { BROWSER_OFFER_DELAYS_MS, BrowserLauncher, BrowserOffer } from './vscode/browser';
 import { CaptureOffer } from './vscode/capture-offer';
+import { looksLikeDevServer } from './capture/dev-command';
 import { CaptureStatus } from './vscode/capture-status';
 import { registerDebugCapture } from './vscode/debug-capture';
 import { LogBreakpoints } from './vscode/log-breakpoints';
@@ -204,7 +207,48 @@ export function activate(context: vscode.ExtensionContext): { provider: LogsProv
   // Like the agent setup, capture is offered only where an answer lasts.
   if (context.extensionMode === (vscode.ExtensionMode?.Production ?? 1) && !vscode.env?.remoteName)
     agentController.terminalCapture.uncaptured = (commandLine) => void captureOffer.commandStarted(commandLine);
-  context.subscriptions.push(usage, onboarding, captured);
+  const browser = new BrowserLauncher({
+    capture: agentController.browser,
+    config: agentController.config,
+    // Beside Logline's other files when the editor names no storage folder.
+    storagePath: context.globalStorageUri?.fsPath ?? join(homedir(), '.logline'),
+    workspace: context.workspaceState,
+    recentUrl: () => agentController.recentLocalUrl(),
+    show: (serverId) => agentController.showSource(serverId),
+  });
+  agentController.browserLauncher = browser;
+  const browserOffer = new BrowserOffer({
+    workspace: context.workspaceState,
+    global: context.globalState,
+    enabled: () => agentController.config.get('browser.offer', true),
+    available: () => !browser.unavailable() && !agentController.browser.active && !!browser.executable(),
+    open: (url) => browser.open(url),
+    record: (step) => usage?.record('nudge', { kind: 'browser_offer', step }),
+  });
+  // A dev server prints its address a moment after it starts: read what the run has said then, off the
+  // ingestion path. Offered, like capture, only where an answer lasts.
+  const offerTimers = new Set<ReturnType<typeof setTimeout>>();
+  if (context.extensionMode === (vscode.ExtensionMode?.Production ?? 1) && !vscode.env?.remoteName)
+    agentController.runStarted = (record) => {
+      // Only a dev server's address is the app's: a test or a backend prints the addresses of other things.
+      // Whether it could be offered at all is checked before anything is scheduled or read.
+      if (!looksLikeDevServer(record.command ?? '') || !browserOffer.canAsk()) return;
+      for (const delay of BROWSER_OFFER_DELAYS_MS) {
+        const timer = setTimeout(() => {
+          offerTimers.delete(timer);
+          if (!browserOffer.canAsk()) return;
+          const url = agentController.recentLocalUrl(record.id);
+          if (url) void browserOffer.found(url);
+        }, delay);
+        timer.unref?.();
+        offerTimers.add(timer);
+      }
+    };
+  context.subscriptions.push(usage, onboarding, captured, {
+    dispose: () => {
+      for (const timer of offerTimers) clearTimeout(timer);
+    },
+  });
   if (opensPanelOnInstall(usage.newInstall, context.extensionMode, vscode.env?.remoteName))
     void vscode.commands.executeCommand('logline.logs.focus');
   usage.record('perf', { op: 'activate', ms: performance.now() - started });

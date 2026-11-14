@@ -468,6 +468,14 @@ export const GUIDE_CARDS: GuideCard[] = [
   },
   {
     section: 'capture',
+    title: 'Your app in the browser',
+    where: ['Command Palette', 'Logline: Open Browser with Capture'],
+    text: 'Open your app in a browser Logline watches. Its console, uncaught errors, and network requests appear beside the server logs, so one search finds a failed request and the error behind it.',
+    example: 'kind:request status:5xx',
+    command: 'logline.openBrowser',
+  },
+  {
+    section: 'capture',
     title: 'Receive OpenTelemetry',
     where: ['Status bar', 'OpenTelemetry'],
     text: 'Start a receiver on this machine. Instrumented apps you start from Logline, a debug session, or a new terminal send their logs, traces, and metrics to it.',

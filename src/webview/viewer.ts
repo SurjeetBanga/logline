@@ -881,6 +881,7 @@ export function createViewer(api: WebviewApi) {
     elements.copyResults,
     elements.export,
     elements.import,
+    elements.openBrowser,
     elements.clear,
     elements.breakOnLogs,
     elements.manage,
@@ -991,6 +992,7 @@ export function createViewer(api: WebviewApi) {
   for (const [button, action] of [
     [elements.emptyCapture, 'capture'],
     [elements.emptyOpenFile, 'openFile'],
+    [elements.emptyBrowser, 'browser'],
     [elements.emptyAgent, 'agent'],
   ] as const)
     scope.listen(button, 'click', () => api.postMessage({ type: 'emptyAction', action }));
@@ -1202,6 +1204,7 @@ export function createViewer(api: WebviewApi) {
   scope.listen(elements.export, 'click', () => exportRequest('export'));
 
   scope.listen(elements.import, 'click', () => api.postMessage({ type: 'import' }));
+  scope.listen(elements.openBrowser, 'click', () => api.postMessage({ type: 'openBrowser' }));
   scope.listen(elements.suggestFeature, 'click', () => api.postMessage({ type: 'suggestFeature' }));
   scope.listen(elements.voteOnNext, 'click', () => api.postMessage({ type: 'voteOnNext' }));
   scope.listen(elements.breakOnLogs, 'click', () =>

@@ -834,6 +834,7 @@
       emptyActions: element("emptyActions"),
       emptyCapture: element("emptyCapture"),
       emptyOpenFile: element("emptyOpenFile"),
+      emptyBrowser: element("emptyBrowser"),
       emptyAgent: element("emptyAgent"),
       logsTab: element("logsTab"),
       logsView: element("logsView"),
@@ -930,6 +931,7 @@
       manage: element("manage"),
       export: element("export"),
       import: element("import"),
+      openBrowser: element("openBrowser"),
       clear: element("clear"),
       captureToggle: element("captureToggle"),
       shareAgent: element("shareAgent"),
@@ -4180,6 +4182,7 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
     debug: "M5.5 6h5v4a2.5 2.5 0 0 1-5 0zM6.5 6V5a1.5 1.5 0 0 1 3 0v1M2.5 8.5h3M10.5 8.5h3M3 12.5l2.6-1.3M13 12.5l-2.6-1.3M3 4.5l2.6 1.5M13 4.5l-2.6 1.5",
     file: "M4 2.5h5l3 3v8H4zM9 2.5v3h3",
     otel: "M2 3.5h7M4 7.5h8M7 11.5h7",
+    browser: "M2.5 3.5h11v9h-11zM2.5 6h11M4.5 4.75h.01M6.5 4.75h.01",
     cloud: "M4.5 12.5h7a2.5 2.5 0 0 0 .4-5A3.6 3.6 0 0 0 5 6.7a2.9 2.9 0 0 0-.5 5.8z",
     database: "M3 4c0-1 2.2-1.8 5-1.8s5 .8 5 1.8-2.2 1.8-5 1.8S3 5 3 4zM3 4v8c0 1 2.2 1.8 5 1.8s5-.8 5-1.8V4M3 8c0 1 2.2 1.8 5 1.8s5-.8 5-1.8",
     run: "M5 3l7 5-7 5z",
@@ -4215,6 +4218,7 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
     if (server.kind === "debug") return "debug";
     if (server.kind === "import" || server.kind === "file") return "file";
     if (server.kind === "otel") return "otel";
+    if (server.kind === "browser") return "browser";
     return "terminal";
   }
   function sourceName(server) {
@@ -9321,6 +9325,7 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
       elements.copyResults,
       elements.export,
       elements.import,
+      elements.openBrowser,
       elements.clear,
       elements.breakOnLogs,
       elements.manage,
@@ -9416,6 +9421,7 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
     for (const [button, action] of [
       [elements.emptyCapture, "capture"],
       [elements.emptyOpenFile, "openFile"],
+      [elements.emptyBrowser, "browser"],
       [elements.emptyAgent, "agent"]
     ])
       scope.listen(button, "click", () => api.postMessage({ type: "emptyAction", action }));
@@ -9603,6 +9609,7 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
     }
     scope.listen(elements.export, "click", () => exportRequest("export"));
     scope.listen(elements.import, "click", () => api.postMessage({ type: "import" }));
+    scope.listen(elements.openBrowser, "click", () => api.postMessage({ type: "openBrowser" }));
     scope.listen(elements.suggestFeature, "click", () => api.postMessage({ type: "suggestFeature" }));
     scope.listen(elements.voteOnNext, "click", () => api.postMessage({ type: "voteOnNext" }));
     scope.listen(

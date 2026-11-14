@@ -104,3 +104,23 @@ test('the copied status is plain text with a mark per state', () => {
   assert.match(text, /^Logline 1\.14\.0 status\n✓ Capture: 1 running/);
   assert.match(text, /\n– GitHub Copilot: Not installed\n {4}Ask Copilot/);
 });
+
+test('the browser Logline opens is reported: captured, closed, or why it cannot open here', () => {
+  const browser = (state: NonNullable<StatusInput['capture']['browser']>) => {
+    const input = healthy();
+    input.capture.browser = state;
+    return byArea(input).get('Browser')!;
+  };
+  assert.equal(byArea(healthy()).get('Browser'), undefined);
+  const capturing = browser({ site: 'localhost:5173', events: 12 });
+  assert.equal(capturing.state, 'ok');
+  assert.equal(capturing.summary, 'Capturing localhost:5173 · 12 events');
+  const closed = browser({ events: 0 });
+  assert.equal(closed.state, 'off');
+  assert.deepEqual(closed.action, { label: 'Open browser with capture', command: 'logline.openBrowser' });
+  const remote = browser({ events: 0, unavailable: 'remote' });
+  assert.equal(remote.summary, 'Not available in a remote window');
+  assert.equal(remote.action, undefined);
+  const missing = browser({ events: 0, unavailable: 'missing' });
+  assert.deepEqual(missing.action!.args, ['logline.browser.executable']);
+});

@@ -947,6 +947,11 @@ export class LogStore {
     }
   }
 
+  /** Retained events newest first, for a reader that stops early instead of paging. */
+  newestFirst(): Generator<LogEvent> {
+    return this.iterateEventsReverse();
+  }
+
   private *iterateEventsReverse(serverId?: string): Generator<LogEvent> {
     if (serverId === undefined) {
       for (let i = this.size - 1; i >= 0; i--) yield this.slots[(this.head + i) % this.maxRows]!.event;

@@ -163,7 +163,8 @@ jobs:
           vsix=$(ls logline-*.vsix)
           if [ "$RUNNER_OS" = Linux ]; then xvfb-run -a node scripts/smoke.mjs --vsix "$vsix"; else node scripts/smoke.mjs --vsix "$vsix"; fi
 
-  # The Logs panel in headless Chromium at short and narrow sizes, checking that its layout never scrolls the page.
+  # The Logs panel in headless Chromium at short and narrow sizes, checking that its layout never scrolls the page,
+  # and browser capture against that Chromium.
   layout:
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -176,6 +177,7 @@ jobs:
       - run: npm ci
       - run: npx playwright install --with-deps chromium
       - run: npm run test:layout
+      - run: npm run test:browser
 
   # The one check branch protection requires, so the matrix above can change without editing repository settings.
   # Compares this build with the one it changes and with the baseline, on the same runner, and fails when a hot path is

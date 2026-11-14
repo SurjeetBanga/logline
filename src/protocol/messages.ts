@@ -67,7 +67,7 @@ export type ViewRequest =
   | { type: 'installUpdate' }
   | { type: 'panelSize'; width: number }
   | { type: 'showStatus' }
-  | { type: 'emptyAction'; action: 'capture' | 'openFile' | 'agent' }
+  | { type: 'emptyAction'; action: 'capture' | 'openFile' | 'browser' | 'agent' }
   | ({ type: 'breakOnQuery' } & Filter)
   | { type: 'trace'; traceId: string }
   | { type: 'traces' }
@@ -111,7 +111,7 @@ export type ViewRequest =
   | { type: 'connectionAgents'; connectionId: string; enabled: boolean }
   | ({ type: 'compare' } & CompareRequest)
   | { type: 'config'; setting?: string }
-  | { type: 'import' | 'clear' | 'manageServers' | 'addConnection' }
+  | { type: 'import' | 'clear' | 'manageServers' | 'addConnection' | 'openBrowser' }
   /** Suggest a feature or vote on what's next, from the More actions menu. */
   | { type: 'suggestFeature' | 'voteOnNext' }
   /** What the feedback form submitted. */
@@ -491,7 +491,7 @@ export function parseViewRequest(value: unknown): ViewRequest | undefined {
     case 'installUpdate':
       return { type: msg.type };
     case 'emptyAction':
-      return msg.action === 'capture' || msg.action === 'openFile' || msg.action === 'agent'
+      return msg.action === 'capture' || msg.action === 'openFile' || msg.action === 'browser' || msg.action === 'agent'
         ? { type: msg.type, action: msg.action }
         : undefined;
     case 'onboardingSeen': {
@@ -602,6 +602,7 @@ export function parseViewRequest(value: unknown): ViewRequest | undefined {
     case 'clear':
     case 'manageServers':
     case 'addConnection':
+    case 'openBrowser':
     case 'suggestFeature':
     case 'voteOnNext':
       return { type: msg.type };

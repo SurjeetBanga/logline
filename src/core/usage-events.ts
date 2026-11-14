@@ -69,6 +69,7 @@ export const CAPTURE_KINDS = [
   'otlp',
   'import',
   'connection',
+  'browser',
 ] as const;
 export const AGENT_TOOLS = [
   'logline_list_shared_sources',
@@ -138,7 +139,7 @@ export const AGENT_ONBOARDING_STEPS = [
 ] as const;
 export type AgentOnboardingStep = (typeof AGENT_ONBOARDING_STEPS)[number];
 /** A notification Logline raised on its own: errors caught while the panel was hidden, or an offer to capture a dev server. */
-export const NUDGE_KINDS = ['errors', 'capture_offer'] as const;
+export const NUDGE_KINDS = ['errors', 'capture_offer', 'browser_offer'] as const;
 export type NudgeKind = (typeof NUDGE_KINDS)[number];
 export const NUDGE_STEPS = ['shown', 'accepted', 'never', 'dismissed'] as const;
 export type NudgeStep = (typeof NUDGE_STEPS)[number];

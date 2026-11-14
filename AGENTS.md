@@ -9,6 +9,7 @@ A VS Code extension that captures logs from terminals, debug sessions, tasks, fi
 - `npm test`: unit tests only. `npm run coverage` also enforces the coverage minimums in `scripts/test.mjs`; add tests rather than lowering them.
 - `npm run perf:compare -- --base <dir>`: compares performance with another build; CI fails a pull request whose hot paths are more than 15% slower than its base or than the baseline in `.github/performance-baseline`, or whose payloads or retained memory grow by more than 5%. Add a case to `scripts/benchmark.mjs` for a new hot path.
 - `npm run test:layout`: the Logs panel in headless Chromium, failing when the page itself scrolls; run it after changing `media/viewer.css` or the panel's markup. Needs `npx playwright install chromium` once.
+- `npm run test:browser`: browser capture against a real headless Chromium; run it after changing `src/capture/browser-capture.ts` or `src/core/browser-events.ts`. Uses the same Chromium as `test:layout`, or an installed browser.
 - `npm run smoke`: the extension in a real VS Code; needs a desktop VS Code, or `VSCODE_VERSION=stable` to download one.
 
 ## Rules

@@ -217,6 +217,47 @@ timed('otlp', 'Read an OTLP/JSON request of 2,000 log records', async () => {
   };
   return () => readLogs(request, 0);
 });
+// Browser capture: what a busy page costs as its console calls and requests become log lines.
+timed('browser', 'Turn 1,000 console calls and 1,000 requests of a browser into log lines', async () => {
+  const { consoleRecord, RequestTracker } = await load('core/browser-events.js');
+  const calls = Array.from({ length: 1000 }, (_, i) => ({
+    type: i % 10 ? 'log' : 'error',
+    args: [
+      { type: 'string', value: 'order %s took %dms' },
+      { type: 'string', value: `ord_${i}` },
+      { type: 'number', value: i % 300 },
+      { type: 'object', preview: { properties: [{ name: 'items', type: 'number', value: '3' }] } },
+    ],
+    timestamp: 1_700_000_000_000 + i,
+    stackTrace: { callFrames: [{ url: 'http://localhost:5173/src/orders.ts', lineNumber: i % 200 }] },
+  }));
+  const requests = Array.from({ length: 1000 }, (_, i) => [
+    {
+      requestId: String(i),
+      request: { url: `http://localhost:4000/api/orders/${i}?page=2`, method: 'GET', headers: { Accept: '*/*' } },
+      timestamp: 100 + i,
+      wallTime: 1_700_000_000 + i,
+      type: 'Fetch',
+    },
+    {
+      requestId: String(i),
+      timestamp: 100.02 + i,
+      response: { status: i % 20 ? 200 : 500, mimeType: 'application/json' },
+    },
+    { requestId: String(i), timestamp: 100.03 + i, encodedDataLength: 512 },
+  ]);
+  return () => {
+    const tracker = new RequestTracker(() => 'api');
+    let bytes = 0;
+    for (const call of calls) bytes += JSON.stringify(consoleRecord(call, 0)).length;
+    for (const [sent, answered, finished] of requests) {
+      tracker.handle('Network.requestWillBeSent', sent, 'tab', 0);
+      tracker.handle('Network.responseReceived', answered, 'tab', 0);
+      bytes += JSON.stringify(tracker.handle('Network.loadingFinished', finished, 'tab', 0)).length;
+    }
+    return bytes;
+  };
+});
 // Connections: what a fetch from a log table costs once its rows arrive.
 const tableRows = (count) =>
   Array.from({ length: count }, (_, i) => ({
