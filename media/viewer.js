@@ -1932,7 +1932,7 @@
   }
   function summary(trace) {
     if (!trace.spans.length && !trace.logs.length) {
-      return "No spans or retained logs have this trace id. Turn on the OpenTelemetry receiver in More actions to collect spans from instrumented apps.";
+      return "No spans or retained logs have this trace id. Start the OpenTelemetry receiver from the status icon, or Add logs in the Sources rail, to collect spans from instrumented apps.";
     }
     if (!trace.spans.length) {
       return `${trace.logs.length} retained log${trace.logs.length === 1 ? "" : "s"} with this trace id over ${formatDuration(trace.durationMs)}. No spans were received for it.`;
@@ -6612,7 +6612,7 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
     {
       target: "sourceRail",
       title: "Your sources",
-      text: "Everything Logline captures, in one list: terminals, tasks, debug sessions, OpenTelemetry, and imports. Click one to see only its logs; point at it to stop or remove it. Drag the rail\u2019s right edge to widen it."
+      text: "Everything Logline captures, in one list: terminals, tasks, debug sessions, OpenTelemetry, and imports. Click one to see only its logs; point at it to stop or remove it. The + in its header adds logs: a command, a file, a browser, an import, a connection, or OpenTelemetry."
     },
     {
       target: "railAddConnection",
@@ -6632,7 +6632,7 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
       select: "#logs > tr.event-row .message-content",
       target: "logsView",
       title: "Every event, explained",
-      text: "Click a row for its fields, stack trace, the line of code that logged it, and the logs around it."
+      text: "Click a row to open it beside the list, with its fields, stack trace, the line of code that logged it, and the logs around it. The list keeps updating while it is open."
     },
     {
       target: "viewTabs",
@@ -6647,7 +6647,7 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
     {
       target: "statusBar",
       title: "What is running",
-      text: "Turn terminal capture and the OpenTelemetry receiver on or off here, see memory use, and check that everything is working."
+      text: "Capture turns terminal capture on and off here. The check mark opens a panel for capture, the OpenTelemetry receiver, agents, and memory, with a link to troubleshooting."
     }
   ];
   function shown(element2) {

@@ -18,7 +18,7 @@ Run your app the way you already do: in a terminal, with F5, as a task, in Docke
 
 ## See what your app is doing
 
-![The Logs panel with a failing request expanded: its JSON, a link to its trace, the log statement that wrote it, and Break here](media/readme/logs.webp)
+![The Logs panel with a failing request open in the inspector beside the list: its JSON, a link to its trace, the log statement that wrote it, and Break here](media/readme/logs.webp)
 
 - **Capture anything**: terminals, F5 debug sessions in any language, tasks, log files, Docker Compose and Kubernetes services, and OpenTelemetry logs, traces, and metrics, with no collector.
 - **The browser too**: open your app from Logline, and its console, uncaught errors, and network requests land in the same timeline as the server's logs.
@@ -53,7 +53,7 @@ Run your app the way you already do: in a terminal, with F5, as a task, in Docke
 
 1. Install Logline in **VS Code 1.99+** from the [Marketplace](https://marketplace.visualstudio.com/items?itemName=surjeetbanga.logline). In Cursor, Windsurf, or Kiro, install it from [Open VSX](https://open-vsx.org/extension/surjeetbanga/logline).
 2. Open the **Logs** panel. Click **Capture off** in its status bar so it reads **Capture on**, then run your app in a terminal as usual. Or press F5: debug output appears automatically.
-3. Type `level:error` in the search box and press **Enter**. Click an event to see everything about it.
+3. Type `level:error` in the search box and press **Enter**. Click an event to open it beside the list, with everything about it.
 
 New to it? Logline offers a one-minute tour the first time, which **More actions → Take the tour** replays, and **More actions → Help** opens the guide. To try it without your own app, import [samples/demo-logs.jsonl](samples/demo-logs.jsonl) with **Logline: Import Logs**, or run the [checkout sample](samples/README.md#checkout-demo).
 
@@ -66,8 +66,8 @@ New to it? Logline offers a one-minute tour the first time, which **More actions
 | **Export** | JSONL, JSON, CSV, or Markdown for AI tools, redacted by default. |
 | **Retention** | Keeps the newest logs within a memory budget you set, optionally written to disk. |
 | **Outside the panel** | A status bar item counts captured logs and errors, a notification says when a run logs errors while the panel is hidden, and **Open in Logline** shows a `.log` or `.jsonl` file. |
-| **Troubleshooting** | **Logline: Show Status** shows what is on, off, or broken, with the fix. |
-| **Feedback** | **More actions → Suggest a feature…** or **Vote on what's next…** tells us what to build. |
+| **Troubleshooting** | The check mark in the Logs panel's status bar opens a Status panel for capture, the OpenTelemetry receiver, agents, and memory, and **Logline: Show Status** shows what is on, off, or broken, with the fix. |
+| **Feedback** | **More actions → Send feedback…** suggests a feature or votes on what to build next. |
 
 
 ## Privacy

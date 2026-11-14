@@ -122,7 +122,7 @@ export function createTraceView(
 
 function summary(trace: TraceView): string {
   if (!trace.spans.length && !trace.logs.length) {
-    return 'No spans or retained logs have this trace id. Turn on the OpenTelemetry receiver in More actions to collect spans from instrumented apps.';
+    return 'No spans or retained logs have this trace id. Start the OpenTelemetry receiver from the status icon, or Add logs in the Sources rail, to collect spans from instrumented apps.';
   }
   if (!trace.spans.length) {
     return `${trace.logs.length} retained log${trace.logs.length === 1 ? '' : 's'} with this trace id over ${formatDuration(trace.durationMs)}. No spans were received for it.`;

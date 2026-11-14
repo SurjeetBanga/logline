@@ -3444,7 +3444,7 @@ test('a trace without spans explains how to collect them, and Filter logs by tra
     trace: { traceId: 'abc123', durationMs: 0, services: [], errors: 0, omitted: 0, hotspots: [], spans: [], logs: [] },
   });
   assert.equal(get('traceHotspots').hidden, true);
-  assert.match(get('traceStatus').textContent, /Turn on the OpenTelemetry receiver/);
+  assert.match(get('traceStatus').textContent, /Start the OpenTelemetry receiver/);
   get('traceFilter').listeners.get('click')!();
   assert.equal(get('inspector').hidden, true, 'leaving the Traces tab closes the waterfall');
   assert.equal(app.views.active(), 'logs');

@@ -926,7 +926,7 @@ export function createViewer(api: WebviewApi) {
   );
 
   const actionsContainer = elements.moreActions.closest<HTMLElement>('.popover-container')!;
-  // Findings shown in an expanded event inside Surrounding logs act the same way.
+  // Findings shown on an event inside Surrounding logs act the same way.
   scope.listen(elements.contextDetails, 'click', (event) => {
     doctor.handleAction(event);
   });

@@ -17,6 +17,22 @@ export interface GuideRelease {
 
 export const GUIDE_RELEASES: GuideRelease[] = [
   {
+    version: '1.21.0',
+    date: '2026-11-14',
+    highlights: [
+      {
+        title: 'A calmer Logs panel',
+        text: 'The tabs, search, filters, Share with agent, and More actions share one row, rows are denser, and error and warning rows carry a colored mark. Add logs from the + in the Sources rail, and the check mark in the status bar opens a Status panel for capture, OpenTelemetry, agents, and memory.',
+        section: 'capture',
+      },
+      {
+        title: 'Open an event beside the list',
+        text: 'Click an event to read it in an inspector beside the list while live logs keep arriving. Traces and AI calls open in the same inspector, and AI calls has a rail for models, kinds, and errors.',
+        section: 'inspect',
+      },
+    ],
+  },
+  {
     version: '1.20.0',
     date: '2026-11-05',
     highlights: [
@@ -142,7 +158,7 @@ export const GUIDE_RELEASES: GuideRelease[] = [
       },
       {
         title: 'Every view is a tab',
-        text: 'Analyze, Traces, AI calls, Metrics, and Issues are tabs next to Logs, the toolbar is two rows, and terminal capture moved to the status bar at the bottom of the panel.',
+        text: 'Analyze, Traces, AI calls, and Metrics are tabs next to Logs, and terminal capture moved to the status bar at the bottom of the panel.',
         section: 'capture',
       },
     ],
@@ -221,7 +237,7 @@ export const GUIDE_RELEASES: GuideRelease[] = [
       },
       {
         title: 'Log issues next to your logs',
-        text: 'Log issues in the toolbar lists what log doctor found, such as secrets, missing exceptions, and noisy statements, with Fix… to open the statement and its quick fixes and Show events to filter the table.',
+        text: 'Log issues lists what log doctor found, such as secrets, missing exceptions, and noisy statements, with Fix… to open the statement and its quick fixes and Show events to filter the table.',
         section: 'inspect',
       },
       {
@@ -469,24 +485,26 @@ export const GUIDE_CARDS: GuideCard[] = [
   {
     section: 'capture',
     title: 'Your app in the browser',
-    where: ['Command Palette', 'Logline: Open Browser with Capture'],
+    where: ['Sources rail', '+', 'Open a browser…'],
     text: 'Open your app in a browser Logline watches. Its console, uncaught errors, and network requests appear beside the server logs, so one search finds a failed request and the error behind it.',
     example: 'kind:request status:5xx',
+    target: 'openBrowser',
     command: 'logline.openBrowser',
   },
   {
     section: 'capture',
     title: 'Receive OpenTelemetry',
-    where: ['Status bar', 'OpenTelemetry'],
-    text: 'Start a receiver on this machine. Instrumented apps you start from Logline, a debug session, or a new terminal send their logs, traces, and metrics to it.',
+    where: ['Sources rail', '+', 'Receive OpenTelemetry'],
+    text: 'Start a receiver on this machine. Instrumented apps you start from Logline, a debug session, or a new terminal send their logs, traces, and metrics to it. Once it runs, the Status panel under the status bar’s check mark stops it.',
     example: 'http://127.0.0.1:4318',
-    target: 'otlpStatus',
+    target: 'railAddOtlp',
+    fallback: 'statusIcon',
     docs: 'opentelemetry-and-traces',
   },
   {
     section: 'connections',
     title: 'Add a connection',
-    where: ['Sources rail', '+'],
+    where: ['Sources rail', 'Connections', '+'],
     text: 'A Connection tab opens with a form: choose Datadog, CloudWatch, Loki, Elasticsearch, Cloud Logging, Postgres, MySQL, MongoDB, or SQLite, test it, and pick the log table with a preview of its rows, or none to only run queries. Passwords and keys stay in VS Code secret storage, never in settings; Aurora and RDS can sign in with AWS IAM instead.',
     target: 'railAddConnection',
     fallback: 'sourceRail',
@@ -621,7 +639,7 @@ export const GUIDE_CARDS: GuideCard[] = [
   {
     section: 'search',
     title: 'Filter by level',
-    where: ['Filter row', 'All levels'],
+    where: ['Top row', 'All levels'],
     text: 'Choose any combination of Trace, Debug, Info, Warn, Error, Fatal, and Unclassified.',
     target: 'levelButton',
   },
@@ -643,7 +661,7 @@ export const GUIDE_CARDS: GuideCard[] = [
   {
     section: 'search',
     title: 'Logs from your changes',
-    where: ['Filter row', 'My changes'],
+    where: ['Top row', 'My changes'],
     text: 'In a git repository, keep only logs from code you changed since the last commit.',
     example: 'level:error changed:true',
     target: 'changedOnly',
@@ -652,15 +670,15 @@ export const GUIDE_CARDS: GuideCard[] = [
   {
     section: 'inspect',
     title: 'Live and Browse',
-    where: ['Filter row', 'Live'],
+    where: ['Top row', 'Live'],
     text: 'Live keeps the newest rows on top. Scroll down to read and rows hold still; scroll back to the top to follow again.',
     target: 'follow',
   },
   {
     section: 'inspect',
-    title: 'Expand an event',
+    title: 'Open an event',
     where: ['Table', 'click a message'],
-    text: 'Read its formatted payload and exceptions, open the line that logged it, and see the logs around it from the same run.',
+    text: 'An inspector beside the list shows its message, fields, exceptions, and raw event, and opens the line that logged it and the logs around it from the same run. The list keeps updating. Up and Down move between events, and Escape closes it. Drag its left edge to resize it.',
     target: 'eventsTable',
   },
   {
@@ -673,7 +691,7 @@ export const GUIDE_CARDS: GuideCard[] = [
   {
     section: 'inspect',
     title: 'Choose columns',
-    where: ['Filter row', 'Columns'],
+    where: ['Top row', 'Columns'],
     text: 'Show detected or custom fields. Drag headers to reorder and dividers to resize; click a header to sort.',
     example: 'method · path · status',
     target: 'fieldsButton',
@@ -696,15 +714,17 @@ export const GUIDE_CARDS: GuideCard[] = [
   {
     section: 'inspect',
     title: 'Fix risky log statements',
-    where: ['Issues tab'],
-    text: 'Log doctor flags statements that logged secrets or personal data, dropped an exception, or flood the logs, with quick fixes.',
+    where: ['Status bar', 'N issues'],
+    text: 'Log doctor flags statements that logged secrets or personal data, dropped an exception, or flood the logs, with quick fixes. While it has findings, the chip opens them.',
+    target: 'issuesChip',
+    fallback: 'statusIcon',
     command: 'logline.showLogHealth',
   },
   {
     section: 'traces',
     title: 'Follow a request',
     where: ['Traces tab'],
-    text: 'Recent requests, then every span across services as a waterfall, with the logs that share its trace id. Where the time went ranks the slowest work.',
+    text: 'Recent requests, then every span across services as a waterfall in the inspector beside the list, with the logs that share its trace id. Where the time went ranks the slowest work.',
     target: 'traces',
     docs: 'opentelemetry-and-traces',
   },
@@ -712,7 +732,7 @@ export const GUIDE_CARDS: GuideCard[] = [
     section: 'traces',
     title: 'Read AI calls',
     where: ['AI calls tab'],
-    text: 'Every LLM call, tool execution, and agent run with its model, tokens, and latency, and each call’s conversation.',
+    text: 'Every LLM call, tool execution, and agent run with its model, tokens, and latency. A rail picks a model, a kind, or errors only, and each call’s conversation opens in the inspector.',
     example: 'gen_ai.*',
     target: 'aiCalls',
     fallback: 'traces',
@@ -723,7 +743,7 @@ export const GUIDE_CARDS: GuideCard[] = [
     where: ['Metrics tab'],
     text: 'OpenTelemetry metrics with each series’ latest value and trend, next to metric queries you watch on a connection.',
     target: 'metrics',
-    fallback: 'otlpStatus',
+    fallback: 'statusIcon',
   },
   {
     section: 'compare',
@@ -752,7 +772,7 @@ export const GUIDE_CARDS: GuideCard[] = [
     section: 'share',
     title: 'Choose what agents read',
     where: ['Share with agent', '▾'],
-    text: 'Share everything, or only the runs you pick. Expanding an event also shares its exact run.',
+    text: 'Share everything, or only the runs you pick. Share with agent in an open event also shares its exact run.',
     target: 'shareMenuButton',
   },
   {
@@ -781,22 +801,22 @@ export const GUIDE_CARDS: GuideCard[] = [
   {
     section: 'share',
     title: 'Import offline logs',
-    where: ['More actions', 'Import logs…'],
+    where: ['Sources rail', '+', 'Import logs…'],
     text: 'Load JSON, JSONL, CSV, or plain text into a source of its own for searching and analysis.',
     target: 'import',
   },
   {
     section: 'settings',
     title: 'Memory',
-    where: ['Status bar', 'memory meter'],
-    text: 'Logs stay within a memory budget, oldest first out. The meter’s panel shows what was received, kept, and discarded.',
+    where: ['Status bar', '✓', 'Memory'],
+    text: 'Logs stay within a memory budget, oldest first out. The Status panel shows how much is used and what was received, kept, and discarded, with a link to the limits. A meter also shows in the status bar once the logs use 80% of the budget.',
     example: '50,000 events · 100 MiB',
-    target: 'counts',
+    target: 'statusIcon',
   },
   {
     section: 'settings',
-    title: 'Suggest a feature',
-    where: ['More actions', 'Suggest a feature…'],
+    title: 'Send feedback',
+    where: ['More actions', 'Send feedback…'],
     text: 'Tell the Logline developers what to build, or vote on what comes next, in a short form in the panel. You see exactly what will be sent, with credentials and personal details such as email addresses replaced; with usage counts off, it offers a GitHub issue instead.',
     target: 'suggestFeature',
     command: 'logline.suggestFeature',
@@ -829,7 +849,7 @@ export const GUIDE_CARDS: GuideCard[] = [
     section: 'settings',
     title: 'Status and troubleshooting',
     where: ['Status bar', '✓'],
-    text: 'What Logline is doing in this window, with a fix for anything off or broken.',
+    text: 'A panel with capture, the OpenTelemetry receiver, agents, log issues, and memory, each with its switch. Its Troubleshooting link shows what Logline is doing in this window, with a fix for anything off or broken.',
     target: 'statusIcon',
   },
 ];
@@ -840,8 +860,9 @@ export const GUIDE_KEYS: [keys: string, action: string][] = [
   ['↑ ↓  Home  End', 'Move between sources and runs in the rail, or items in a menu'],
   ['Delete', 'Remove the focused source in the rail'],
   ['Enter', 'Apply the filter you typed'],
-  ['Escape', 'Close a menu, panel, or surrounding logs'],
+  ['Escape', 'Close a menu, panel, the inspector, or surrounding logs'],
   ['Arrow keys in the table', 'Move between cells; Enter opens a cell’s actions'],
+  ['↑ ↓ on a row', 'Open the previous or next event while one is open'],
 ];
 
 /** How far someone has got, for the guide's Get started steps. */

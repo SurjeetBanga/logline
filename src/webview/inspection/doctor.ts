@@ -222,7 +222,7 @@ export function createDoctor(
     return text;
   }
 
-  // Doctor actions also appear in expanded events, so any click on one is handled here.
+  // Doctor actions also appear on an open event, so any click on one is handled here.
   function handleAction(event: Event): boolean {
     if (handleFeedback(event)) return true;
     const target = (event.target as HTMLElement).closest<HTMLElement>('[data-doctor-action]');

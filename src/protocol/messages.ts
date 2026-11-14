@@ -287,7 +287,7 @@ export interface DoctorFindingView {
 }
 /** What the Logs panel can do with a finding; `report` opens the health report. */
 export type DoctorAction = 'open' | 'showEvents' | 'fix' | 'report';
-/** Links offered with an expanded event, resolved by the host. */
+/** Links offered with an open event, resolved by the host. */
 export interface DetailLinks {
   /** The log statement that produced the event, as `path:line`. */
   site?: string;

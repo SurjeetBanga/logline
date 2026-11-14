@@ -185,7 +185,7 @@ export class LogBreakpoints implements vscode.Disposable {
     const rules = this.rules.list();
     if (!rules.length) {
       void vscode.window.showInformationMessage(
-        'No log breakpoints are set. Use Break on matching logs in the Logs panel, or Break here on an expanded event.',
+        'No log breakpoints are set. Use Break on matching logs in the Logs panel, or Break here on an open event.',
       );
       return;
     }

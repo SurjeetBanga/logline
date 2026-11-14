@@ -82,7 +82,7 @@ function buildIcon(name: IconName): Element {
 }
 
 /**
- * One action on an expanded event. An action that does not apply to this
+ * One action on an open event. An action that does not apply to this
  * event stays visible but disabled, with the reason as its tooltip, so the
  * feature can be discovered from any event.
  */
