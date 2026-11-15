@@ -380,6 +380,16 @@ Supplying `args` selects literal argument mode by default, including `args: []`.
 
 Set `shell: true` when the command is a shell line containing pipes, redirects, or shell operators. Task variables such as `${env:NAME}`, `${config:logline.source}`, and `${input:name}` are resolved by VS Code immediately before the Logline task starts, including variables in `command`, `args`, `options.cwd`, and `options.env`. `jsonOnly: true` applies to this task only and drops non-JSON lines while retaining structured output.
 
+## AI usage in the status bar
+
+An item on the right of the VS Code status bar starts with the Logline icon, then shows a small pie and a percentage for how much of Codex's plan limit is used, taking its fullest limit window, such as `Codex 38%`. It takes the editor's warning background when a limit is at 80% or more, and its error background when a limit is reached. Before Codex usage is turned on, it shows the Logline icon alone, or with the LLM call count of the app you are debugging once there are some. The icon is always there, and clicking it opens the Logs panel. `logline.aiUsage.enabled` turns it off.
+
+`logline.aiUsage.detail` sets how much it says: `min` shows the pie and percentage, `medium` (the default) names Codex beside them, and `max` adds today's Codex tokens. The hover has **Min**, **Medium**, and **Max** links, and **Logline: Set AI Usage Detail in the Status Bar** asks.
+
+The hover shows each Codex limit window with a bar, its percentage, and when the fullest resets, and today's Codex tokens. A **This app** row has the LLM calls and tokens of the app you are debugging, from the OpenTelemetry GenAI spans Logline already receives, the same data as the **AI calls** tab.
+
+**Logline: Show Codex Usage** (`logline.aiUsage.codex`), off by default and offered in the hover, reads the session files Codex keeps under `~/.codex` (or `CODEX_HOME`), whether Codex runs in a terminal or in the editor. Codex records its plan limits there with every reply, so the pie is as fresh as your last Codex reply; a limit window that has reset is no longer shown. Tokens are counted since local midnight. Everything is read on your machine and nothing that is read is sent anywhere.
+
 ## Status and troubleshooting
 
 Click the check mark at the right of the Logs status bar to open the **Status** panel. It has a row for **Terminal capture** (**Turn on** or **Turn off**), the **OpenTelemetry receiver** (**Start** or **Stop**, with its address while it runs), **Agents** (**Manage** opens the Share panel), **Log issues** (**Open**, while log doctor is on), and **Memory** (how much is used, the counts received, kept, discarded, and cut short, and **Limits**, which opens the memory setting). Its **Troubleshooting…** link runs **Logline: Show Status**, as does the command and **Status and troubleshooting…** in the Share panel. It shows what Logline is doing in this window, with a fix for anything off or broken:
@@ -441,6 +451,9 @@ Settings are grouped the same way in the Settings editor (**More actions → Set
 | `logline.indentation` | `2` | Spaces used when formatting JSON in the inspector. |
 | `logline.refreshIntervalMs` | `500` | Minimum time between Logs panel updates. The panel refreshes as soon as new data arrives rather than on a fixed poll, so this only caps how often that happens during a heavy burst of log lines. |
 | `logline.statusBar.enabled` | `true` | Show how many logs and errors Logline has captured in the status bar at the bottom of the window, once there are some. |
+| `logline.aiUsage.enabled` | `true` | Show AI usage in the status bar. See [AI usage in the status bar](#ai-usage-in-the-status-bar). |
+| `logline.aiUsage.detail` | `medium` | How much the AI usage item says: `min` (Codex's fullest limit), `medium` (the same, named), or `max` (adds today's Codex tokens). |
+| `logline.aiUsage.codex` | `false` | Read the session files Codex keeps under `~/.codex` for the plan limits it records and today's tokens. |
 
 ### Memory and disk
 

@@ -27,6 +27,10 @@ Events cover:
 - **Prompts**: how you answered the rating, feedback, and update questions, the notification about errors Logline caught, the offer to capture a terminal, and the offer to open a browser. Never the command or the address that led to an offer.
 - **A daily summary**: active minutes, how long the extension ran, searches and how many found nothing, events opened, panel actions used, events captured, dropped, and cut short, the share of recent events that were JSON, had no level, or had several lines, sources, memory used, connections by type, and agent use, all in ranges.
 
+## AI usage in the status bar
+
+When you turn on **Show Codex Usage**, Logline reads the session files Codex keeps under `~/.codex` to show its plan limits and today's tokens in the status bar. This is read on your machine only. Nothing read is sent, and no token or limit figure is added to usage data.
+
 ## What is never sent
 
 Log content. Search text or queries, including SQL, Datadog, and other connection queries. File paths, workspace or folder names, and git details. Connection names, hosts, ports, databases, indexes, and user names. Tool inputs and results, and prompts. Your IP address is discarded, and no location is derived from it.

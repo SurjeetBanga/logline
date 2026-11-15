@@ -864,6 +864,34 @@ timed('panel-refresh', 'Place 50 new rows after the 950 the Logs panel holds, 20
   };
 });
 
+// AI usage: what the status bar reads from Codex's session files every few seconds.
+timed('codex-usage', 'Read 10,000 Codex session lines', async () => {
+  const { CodexUsageTally, readCodexLine } = await load('core/codex-usage.js');
+  const now = Date.now();
+  const timestamp = new Date(now).toISOString();
+  const lines = Array.from({ length: 10000 }, (_, i) =>
+    i % 2 === 0
+      ? JSON.stringify({
+          timestamp,
+          type: 'response_item',
+          payload: { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'y'.repeat(400) }] },
+        })
+      : JSON.stringify({
+          timestamp,
+          payload: {
+            type: 'token_count',
+            info: { last_token_usage: { input_tokens: 900, output_tokens: 40, total_tokens: 940 } },
+            rate_limits: { primary: { used_percent: 38, window_minutes: 300, resets_at: now / 1000 + 3600 } },
+          },
+        }),
+  );
+  return () => {
+    const tally = new CodexUsageTally();
+    for (const line of lines) for (const record of readCodexLine(line)) tally.add(record, 'codex', now);
+    assert.equal(tally.totals(now).tokens, 940 * 5000);
+  };
+});
+
 if (args.list) {
   const unknown = Object.keys(WEIGHTS).filter((name) => !cases.some((c) => c.name === name));
   assert.deepEqual(unknown, [], 'WEIGHTS names cases that do not exist');

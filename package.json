@@ -346,6 +346,16 @@
         "command": "logline.manageTerminalCapture",
         "title": "Manage Terminal Capture",
         "category": "Logline"
+      },
+      {
+        "command": "logline.setAiUsageDetail",
+        "title": "Set AI Usage Detail in the Status Bar",
+        "category": "Logline"
+      },
+      {
+        "command": "logline.enableCodexUsage",
+        "title": "Show Codex Usage",
+        "category": "Logline"
       }
     ],
     "menus": {
@@ -1473,8 +1483,199 @@
             "markdownDescription": "Report problems with log statements in the Problems panel, based on the events they actually logged. Requires #logline.logLenses#. Values are masked in every report. Add a `logline-ignore` comment on or above a statement to silence it."
           }
         }
+      },
+      {
+        "id": "logline.aiUsage",
+        "title": "AI Usage",
+        "order": 8,
+        "properties": {
+          "logline.aiUsage.enabled": {
+            "type": "boolean",
+            "default": true,
+            "order": 1,
+            "markdownDescription": "Show AI usage in the status bar: how much of Codex's plan limit is used, and how many LLM calls your app has made. Hover over it for each limit and today's tokens."
+          },
+          "logline.aiUsage.detail": {
+            "type": "string",
+            "enum": [
+              "min",
+              "medium",
+              "max"
+            ],
+            "enumDescriptions": [
+              "A pie and percentage for Codex's fullest limit.",
+              "The same, named Codex.",
+              "The same, and today's Codex tokens."
+            ],
+            "default": "medium",
+            "order": 2,
+            "markdownDescription": "How much the AI usage item in the status bar says. The hover has the same choice."
+          },
+          "logline.aiUsage.codex": {
+            "type": "boolean",
+            "default": false,
+            "order": 3,
+            "markdownDescription": "Read the session files Codex keeps under `~/.codex` (or `CODEX_HOME`), to show the plan limits it records and the tokens of today. Nothing that is read leaves this machine."
+          }
+        }
       }
-    ]
+    ],
+    "icons": {
+      "logline-mark": {
+        "description": "Logline",
+        "default": {
+          "fontPath": "media/logline-icons.woff",
+          "fontCharacter": "\\E900"
+        }
+      },
+      "logline-pie-0": {
+        "description": "0% used",
+        "default": {
+          "fontPath": "media/logline-icons.woff",
+          "fontCharacter": "\\E901"
+        }
+      },
+      "logline-pie-5": {
+        "description": "5% used",
+        "default": {
+          "fontPath": "media/logline-icons.woff",
+          "fontCharacter": "\\E902"
+        }
+      },
+      "logline-pie-10": {
+        "description": "10% used",
+        "default": {
+          "fontPath": "media/logline-icons.woff",
+          "fontCharacter": "\\E903"
+        }
+      },
+      "logline-pie-15": {
+        "description": "15% used",
+        "default": {
+          "fontPath": "media/logline-icons.woff",
+          "fontCharacter": "\\E904"
+        }
+      },
+      "logline-pie-20": {
+        "description": "20% used",
+        "default": {
+          "fontPath": "media/logline-icons.woff",
+          "fontCharacter": "\\E905"
+        }
+      },
+      "logline-pie-25": {
+        "description": "25% used",
+        "default": {
+          "fontPath": "media/logline-icons.woff",
+          "fontCharacter": "\\E906"
+        }
+      },
+      "logline-pie-30": {
+        "description": "30% used",
+        "default": {
+          "fontPath": "media/logline-icons.woff",
+          "fontCharacter": "\\E907"
+        }
+      },
+      "logline-pie-35": {
+        "description": "35% used",
+        "default": {
+          "fontPath": "media/logline-icons.woff",
+          "fontCharacter": "\\E908"
+        }
+      },
+      "logline-pie-40": {
+        "description": "40% used",
+        "default": {
+          "fontPath": "media/logline-icons.woff",
+          "fontCharacter": "\\E909"
+        }
+      },
+      "logline-pie-45": {
+        "description": "45% used",
+        "default": {
+          "fontPath": "media/logline-icons.woff",
+          "fontCharacter": "\\E90A"
+        }
+      },
+      "logline-pie-50": {
+        "description": "50% used",
+        "default": {
+          "fontPath": "media/logline-icons.woff",
+          "fontCharacter": "\\E90B"
+        }
+      },
+      "logline-pie-55": {
+        "description": "55% used",
+        "default": {
+          "fontPath": "media/logline-icons.woff",
+          "fontCharacter": "\\E90C"
+        }
+      },
+      "logline-pie-60": {
+        "description": "60% used",
+        "default": {
+          "fontPath": "media/logline-icons.woff",
+          "fontCharacter": "\\E90D"
+        }
+      },
+      "logline-pie-65": {
+        "description": "65% used",
+        "default": {
+          "fontPath": "media/logline-icons.woff",
+          "fontCharacter": "\\E90E"
+        }
+      },
+      "logline-pie-70": {
+        "description": "70% used",
+        "default": {
+          "fontPath": "media/logline-icons.woff",
+          "fontCharacter": "\\E90F"
+        }
+      },
+      "logline-pie-75": {
+        "description": "75% used",
+        "default": {
+          "fontPath": "media/logline-icons.woff",
+          "fontCharacter": "\\E910"
+        }
+      },
+      "logline-pie-80": {
+        "description": "80% used",
+        "default": {
+          "fontPath": "media/logline-icons.woff",
+          "fontCharacter": "\\E911"
+        }
+      },
+      "logline-pie-85": {
+        "description": "85% used",
+        "default": {
+          "fontPath": "media/logline-icons.woff",
+          "fontCharacter": "\\E912"
+        }
+      },
+      "logline-pie-90": {
+        "description": "90% used",
+        "default": {
+          "fontPath": "media/logline-icons.woff",
+          "fontCharacter": "\\E913"
+        }
+      },
+      "logline-pie-95": {
+        "description": "95% used",
+        "default": {
+          "fontPath": "media/logline-icons.woff",
+          "fontCharacter": "\\E914"
+        }
+      },
+      "logline-pie-100": {
+        "description": "100% used",
+        "default": {
+          "fontPath": "media/logline-icons.woff",
+          "fontCharacter": "\\E915"
+        }
+      }
+    }
   },
   "scripts": {
     "compile": "node scripts/build.mjs",
@@ -1493,7 +1694,8 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "coverage": "node scripts/test.mjs --coverage",
-    "perf:compare": "node scripts/perf-compare.mjs"
+    "perf:compare": "node scripts/perf-compare.mjs",
+    "build:icons": "node scripts/build-icons.mjs"
   },
   "devDependencies": {
     "@playwright/test": "1.65.0",
@@ -1510,6 +1712,8 @@
     "pg": "8.23.1",
     "playwright": "1.65.0",
     "prettier": "^3.10.0",
+    "svg2ttf": "^6.1.0",
+    "ttf2woff": "^3.0.0",
     "typescript": "^7.0.2"
   },
   "dependencies": {

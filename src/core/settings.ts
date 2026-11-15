@@ -34,6 +34,7 @@ const INTEGERS = new Set([
   'connectionTimeoutSeconds',
 ]);
 const CHOICES: Record<string, string[]> = {
+  'aiUsage.detail': ['min', 'medium', 'max'],
   'browser.requests': ['api', 'all', 'off'],
   containerPrefixes: ['auto', 'off'],
   logDoctor: ['off', 'security', 'all'],

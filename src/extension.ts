@@ -15,6 +15,8 @@ import { AgentOnboarding } from './vscode/agent-onboarding';
 import { BROWSER_OFFER_DELAYS_MS, BrowserLauncher, BrowserOffer } from './vscode/browser';
 import { CaptureOffer } from './vscode/capture-offer';
 import { looksLikeDevServer } from './capture/dev-command';
+import { CodexUsageReader } from './capture/codex-usage-reader';
+import { AiUsageStatus } from './vscode/ai-usage-status';
 import { CaptureStatus } from './vscode/capture-status';
 import { registerDebugCapture } from './vscode/debug-capture';
 import { LogBreakpoints } from './vscode/log-breakpoints';
@@ -158,6 +160,11 @@ export function activate(context: vscode.ExtensionContext): { provider: LogsProv
     },
     grant: () => agentController.agentAccess.grant,
   }));
+  const aiUsage = new AiUsageStatus({
+    config: agentController.config,
+    calls: () => agentController.aiCallRecords(),
+    reader: new CodexUsageReader({ codexDir: process.env.CODEX_HOME || join(homedir(), '.codex') }),
+  });
   const syncBridge = async () => {
     try {
       if (agentController.config.get('externalAgents', true)) {
@@ -244,7 +251,7 @@ export function activate(context: vscode.ExtensionContext): { provider: LogsProv
         offerTimers.add(timer);
       }
     };
-  context.subscriptions.push(usage, onboarding, captured, {
+  context.subscriptions.push(usage, onboarding, captured, aiUsage, {
     dispose: () => {
       for (const timer of offerTimers) clearTimeout(timer);
     },

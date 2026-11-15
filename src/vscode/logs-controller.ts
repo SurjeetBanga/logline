@@ -1094,6 +1094,10 @@ export class LogsController {
   aiCallList(): GenAiSummary {
     return this.aiCalls().summary;
   }
+  /** Every retained GenAI call, newest first: the same array until one arrives or leaves. */
+  aiCallRecords(): readonly GenAiCall[] {
+    return this.aiCalls().calls;
+  }
   private aiCalls(): { calls: GenAiCall[]; summary: GenAiSummary } {
     if (this.aiCallCache?.revision !== this.spans.genAiRevision) {
       const calls = readGenAiCalls(this.spans.entries());
