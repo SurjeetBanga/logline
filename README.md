@@ -66,7 +66,7 @@ New to it? Logline offers a one-minute tour the first time, which **More actions
 | **Export** | JSONL, JSON, CSV, or Markdown for AI tools, redacted by default. |
 | **Retention** | Keeps the newest logs within a memory budget you set, optionally written to disk. |
 | **Outside the panel** | A status bar item counts captured logs and errors, a notification says when a run logs errors while the panel is hidden, and **Open in Logline** shows a `.log` or `.jsonl` file. |
-| **Troubleshooting** | The check mark in the Logs panel's status bar opens a Status panel for capture, the OpenTelemetry receiver, agents, and memory, and **Logline: Show Status** shows what is on, off, or broken, with the fix. |
+| **Troubleshooting** | The check mark in the Logs panel's status bar opens a Status panel for capture, the OpenTelemetry receiver, agents, log issues, and memory, and **Logline: Show Status** shows what is on, off, or broken, with the fix. |
 | **Feedback** | **More actions → Send feedback…** suggests a feature or votes on what to build next. |
 
 

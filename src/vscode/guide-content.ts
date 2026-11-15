@@ -661,7 +661,7 @@ export const GUIDE_CARDS: GuideCard[] = [
   {
     section: 'inspect',
     title: 'Open an event',
-    where: ['Table', 'click a message'],
+    where: ['Table', 'click an event'],
     text: 'An inspector beside the list shows its message, fields, exceptions, and raw event, and opens the line that logged it and the logs around it from the same run. The list keeps updating. Up and Down on a message move between events, and Escape closes it. Drag its left edge to resize it.',
     target: 'eventsTable',
   },
@@ -845,7 +845,7 @@ export const GUIDE_KEYS: [keys: string, action: string][] = [
   ['Delete', 'Remove the focused source in the rail'],
   ['Enter', 'Apply the filter you typed'],
   ['Escape', 'Close a menu, panel, the inspector, or surrounding logs'],
-  ['Arrow keys in the table', 'Move between cells; Enter opens a cell’s actions'],
+  ['Arrow keys in the table', 'Move between cells; Shift+F10 opens a cell’s actions'],
   ['↑ ↓ on a message', 'Open the previous or next event while one is open'],
 ];
 
