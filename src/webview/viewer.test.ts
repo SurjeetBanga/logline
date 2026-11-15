@@ -1805,6 +1805,18 @@ test('the inspector width is set by dragging its left edge or with the arrow key
   assert.equal(beside.dom.body.style['--inspector-width'], '444px');
 });
 
+test('a narrower panel narrows a chosen width once a frame, however many resize events arrive', () => {
+  const { dom, runtime, flushFrames } = viewer({ inspectorWidth: 600, railWidth: 500 });
+  flushFrames();
+  assert.equal(dom.body.style['--inspector-width'], '600px');
+  runtime.window.innerWidth = 700;
+  for (let i = 0; i < 5; i++) runtime.window.listeners.get('resize')!();
+  assert.equal(dom.body.style['--inspector-width'], '600px', 'nothing is measured until the frame');
+  flushFrames();
+  assert.equal(dom.body.style['--inspector-width'], '380px', 'the list keeps 320px of the 700px panel');
+  assert.equal(dom.body.style['--rail-width'], '460px', 'the table keeps 240px beside the rail');
+});
+
 test('a click anywhere in a row opens it, but not on another control or after selecting text', () => {
   const { get, app, runtime } = viewer();
   const row = eventRow(get, 42);
@@ -1865,10 +1877,15 @@ test('the selected row is marked, and choosing it again clears the mark', () => 
   assert.equal(button.attributes['aria-controls'], 'inspector');
   assert.equal(eventRow(get, 1).classList.contains('selected'), false);
   assert.equal(rowButton(get, 1).attributes['aria-pressed'], 'false');
-  // Another row takes the mark.
+  // Another row takes the mark, and the rows are kept rather than rebuilt.
+  const rows = [eventRow(get, 1), eventRow(get, 2)];
   get('logs').listeners.get('click')!(clickOn('.message-button', rowButton(get, 1)));
   assert.equal(eventRow(get, 1).classList.contains('selected'), true);
   assert.equal(eventRow(get, 2).classList.contains('selected'), false);
+  assert.equal(rowButton(get, 1).attributes['aria-pressed'], 'true');
+  assert.equal(rowButton(get, 2).attributes['aria-pressed'], 'false');
+  assert.equal(eventRow(get, 1), rows[0], 'selecting moves the mark without rebuilding the rows');
+  assert.equal(eventRow(get, 2), rows[1]);
   assert.equal(get('inspectorTitle').textContent, 'one');
   // The same row again closes it.
   get('logs').listeners.get('click')!(clickOn('.message-button', rowButton(get, 1)));
@@ -4963,7 +4980,7 @@ test('a Datadog connection lists its services to choose one, and can send a quer
 });
 
 test('About Logline is a dialog in the panel with the version, links, and a copy of the details', () => {
-  const { get, receive, messages, flushFrames } = viewer();
+  const { get, receive, messages, timers, flushFrames } = viewer();
   const info = { version: '1.20.0', editor: 'Visual Studio Code 1.99.0', system: 'Darwin arm64 25.0.0' };
   receive({
     type: 'snapshot',
@@ -4997,10 +5014,50 @@ test('About Logline is a dialog in the panel with the version, links, and a copy
     get(id).listeners.get('click')!();
     assert.deepEqual(JSON.parse(JSON.stringify(messages.at(-1))), { type: 'aboutAction', action });
   }
+  const pending = new Set(timers.keys());
+  const copyTimers = () => [...timers.keys()].filter((id) => !pending.has(id));
   get('aboutCopy').listeners.get('click')!();
   assert.deepEqual(JSON.parse(JSON.stringify(messages.at(-1))), { type: 'aboutAction', action: 'copy', info });
+  assert.equal(get('aboutCopy').textContent, 'Copied');
+  // Copying again restarts the moment Copied shows, instead of a second timer cutting it short.
+  const first = copyTimers();
+  get('aboutCopy').listeners.get('click')!();
+  assert.equal(copyTimers().length, 1);
+  assert.notDeepEqual(copyTimers(), first);
+  timers.get(copyTimers()[0])!();
+  assert.equal(get('aboutCopy').textContent, 'Copy');
   get('aboutClose').listeners.get('click')!();
   assert.equal(get('aboutDialog').open, false);
+});
+
+test('a pending Copied reset is cancelled when the panel is disposed', () => {
+  const { get, receive, app, timers, flushFrames } = viewer();
+  receive({
+    type: 'snapshot',
+    generation: 1,
+    newest: 0,
+    total: 0,
+    retained: 0,
+    discarded: 0,
+    bytes: 0,
+    maxBytes: 1,
+    truncated: 0,
+    events: [],
+    columns: [],
+    page: 0,
+    pages: 1,
+    matched: 0,
+    openAbout: { version: '1.20.0', editor: 'Visual Studio Code 1.99.0', system: 'Darwin' },
+  });
+  flushFrames();
+  const pending = new Set(timers.keys());
+  get('aboutCopy').listeners.get('click')!();
+  assert.equal([...timers.keys()].filter((id) => !pending.has(id)).length, 1);
+  app.dispose();
+  assert.deepEqual(
+    [...timers.keys()].filter((id) => !pending.has(id)),
+    [],
+  );
 });
 
 test('Suggest a feature and Vote on what’s next are a dialog in the panel that shows what it will send', () => {

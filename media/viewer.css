@@ -5251,7 +5251,6 @@ body:not([data-view='logs']) .match-count {
 }
 .about-dialog::backdrop {
   background: rgba(0, 0, 0, 0.55);
-  backdrop-filter: blur(2px);
 }
 .about-hero {
   display: flex;
@@ -5516,6 +5515,9 @@ body:not([data-view='logs']) .match-count {
   }
   .about-name {
     flex-direction: row;
+    /* In the narrowest side bar the version goes under the name rather than past the dialog's edge. */
+    flex-wrap: wrap;
+    min-width: 0;
   }
   .about-tagline,
   .about-legal,

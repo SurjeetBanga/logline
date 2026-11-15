@@ -25,12 +25,17 @@ const mockVscode = {
     showQuickPick: async () => undefined,
   },
   env: {
+    openExternal: async (uri: { toString(): string }) => {
+      calls.push({ name: 'open', value: uri.toString() });
+      return true;
+    },
     clipboard: {
       writeText: async (text: string) => {
         calls.push({ name: 'clipboard', value: text });
       },
     },
   },
+  Uri: { parse: (value: string) => ({ toString: () => value }) },
   commands: {
     executeCommand: async (name: string, ...args: unknown[]) => {
       calls.push({ name: 'command', value: name });
@@ -368,6 +373,23 @@ test('About Logline in More actions runs the same command as the Command Palette
   assert.deepEqual(
     calls.filter((call) => call.name === 'command').map((call) => call.value),
     ['logline.about'],
+  );
+});
+
+test('a button in the About dialog opens its page, the release notes, or copies the details', async () => {
+  const info = { version: '1.20.0', editor: 'Visual Studio Code 1.99.0', system: 'Darwin arm64 25.0.0' };
+  calls.length = 0;
+  await handleMessage(services() as any, () => undefined, { type: 'aboutAction', action: 'sponsor' });
+  await handleMessage(services() as any, () => undefined, { type: 'aboutAction', action: 'whatsNew' });
+  await handleMessage(services() as any, () => undefined, { type: 'aboutAction', action: 'copy', info });
+  assert.deepEqual(
+    calls.map(({ name, value }) => [name, value]),
+    [
+      ['open', 'https://github.com/sponsors/SurjeetBanga'],
+      ['command', 'logline.showWhatsNew'],
+      ['clipboard', 'Logline 1.20.0\nVisual Studio Code 1.99.0\nDarwin arm64 25.0.0'],
+      ['info', 'Copied Logline version details.'],
+    ],
   );
 });
 

@@ -577,21 +577,56 @@ export class LogStore {
     return this.removeWhere((event) => event.sessionId !== undefined && sessionIds.has(event.sessionId));
   }
 
+  /**
+   * Compact the ring in place, releasing only what the removed events held: the other sources keep their
+   * indexes and shapes, so removing a small source costs one pass rather than re-adding every event.
+   */
   private removeWhere(removes: (event: LogEvent) => boolean): number {
-    const kept: Slot[] = [];
-    for (let i = 0; i < this.size; i++) {
-      const slot = this.slots[(this.head + i) % this.maxRows]!;
-      if (!removes(slot.event)) kept.push(slot);
+    const max = this.maxRows;
+    let kept = 0;
+    // The removed slots of each source, so only those sources' indexes change.
+    let removed: Map<string, Set<Slot>> | undefined;
+    for (let read = 0; read < this.size; read++) {
+      const slot = this.slots[(this.head + read) % max]!;
+      if (!removes(slot.event)) {
+        if (kept !== read) this.slots[(this.head + kept) % max] = slot;
+        kept++;
+        continue;
+      }
+      this.bytes -= slot.bytes;
+      const shape = slot.shape;
+      if (shape && --shape.count === 0) this.releaseShape(shape);
+      if (slot.event.attachedTo !== undefined) this.attached.delete(slot.event.attachedTo);
+      const serverId = slot.event.serverId;
+      const index = serverId === undefined ? undefined : this.serverIndex.get(serverId);
+      if (index) {
+        removed ??= new Map();
+        let slots = removed.get(serverId!);
+        if (!slots) removed.set(serverId!, (slots = new Set()));
+        slots.add(slot);
+        const sessionKey = slot.event.sessionId ?? '*';
+        const count = index.sessions.get(sessionKey) ?? 0;
+        if (count > 1) index.sessions.set(sessionKey, count - 1);
+        else index.sessions.delete(sessionKey);
+      }
     }
-    const removed = this.size - kept.length;
-    if (!removed) return 0;
-    const { total, discarded, truncated } = this;
-    this.clear();
-    this.total = total;
-    this.discarded = discarded;
-    this.truncated = truncated;
-    for (const slot of kept) this.insertSlot(slot);
-    return removed;
+    const count = this.size - kept;
+    if (!count) return 0;
+    for (let i = kept; i < this.size; i++) this.slots[(this.head + i) % max] = undefined;
+    this.size = kept;
+    for (const [serverId, slots] of removed ?? []) {
+      const index = this.serverIndex.get(serverId)!;
+      if (slots.size === index.length) {
+        this.serverIndex.delete(serverId);
+        continue;
+      }
+      index.items = index.items.slice(index.start).filter((slot) => !slots.has(slot!));
+      index.start = 0;
+    }
+    this.pageCache = undefined;
+    this.sortedCache = undefined;
+    this.valueTally = undefined;
+    return count;
   }
 
   page({

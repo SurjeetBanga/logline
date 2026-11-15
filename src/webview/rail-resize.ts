@@ -95,19 +95,31 @@ interface EdgeResize {
 
 function createEdgeResize(edge: EdgeResize, scope: EventScope) {
   const { handles, bounds } = edge;
-  const clamp = (width: number) => Math.round(Math.max(bounds.min, Math.min(edge.widest(), width)));
+  const clamp = (width: number, widest = edge.widest()) => Math.round(Math.max(bounds.min, Math.min(widest, width)));
   /** The width on screen: the chosen one, or else what the stylesheet drew. */
-  const current = () => clamp(edge.get() ?? edge.drawn?.() ?? bounds.default);
+  const current = (widest = edge.widest()) => clamp(edge.get() ?? edge.drawn?.() ?? bounds.default, widest);
   function apply(): void {
+    // Every size is read before the width is written, so applying lays the panel out at most once.
+    const widest = edge.widest();
     const chosen = edge.get();
-    const width = current();
+    const width = current(widest);
     if (chosen === undefined) document.body.style.removeProperty(edge.variable);
     else document.body.style.setProperty(edge.variable, `${width}px`);
     for (const handle of handles) {
       handle.setAttribute('aria-valuenow', String(width));
       handle.setAttribute('aria-valuemin', String(bounds.min));
-      handle.setAttribute('aria-valuemax', String(edge.widest()));
+      handle.setAttribute('aria-valuemax', String(widest));
     }
+  }
+  // Resizing the panel fires many events; the width is applied once a frame rather than for each one.
+  let applyQueued = false;
+  function applySoon(): void {
+    if (applyQueued) return;
+    applyQueued = true;
+    scope.frame(() => {
+      applyQueued = false;
+      apply();
+    });
   }
 
   function set(width: number | undefined): void {
@@ -150,7 +162,7 @@ function createEdgeResize(edge: EdgeResize, scope: EventScope) {
   // The drawn width may have changed since the last apply, as when the pane was hidden then.
   for (const handle of handles) scope.listen(handle, 'focus', apply);
   // A width that fit a wide panel is narrowed with it, without forgetting the choice.
-  scope.listen(window, 'resize', apply);
+  scope.listen(window, 'resize', applySoon);
   apply();
   return { apply };
 }

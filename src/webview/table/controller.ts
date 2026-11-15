@@ -594,20 +594,33 @@ export function createTable(
    * event again clears the selection. Returns whether an event is now selected.
    */
   function select(id: number): boolean {
+    const previous = state.selected;
     const opening = state.inspect(id);
     selectedEvent = opening ? sourceEvents.find((event) => event.id === id) : undefined;
-    // Rows show which one is selected, so they are rebuilt.
-    renderRevision++;
+    markSelected(previous);
     if (opening) api.postMessage({ type: 'details', id });
-    renderWindow();
     return opening;
   }
   function clearSelection() {
     if (state.selected === undefined) return;
+    const previous = state.selected;
     state.resetSelection();
     selectedEvent = undefined;
-    renderRevision++;
-    renderWindow();
+    markSelected(previous);
+  }
+  /**
+   * Move the selected mark from the previous row to the selected one. Only those two rows change, so the
+   * rendered rows are kept rather than rebuilt; rows built later read the selection themselves.
+   */
+  function markSelected(previous: number | undefined) {
+    for (const id of new Set([previous, state.selected])) {
+      if (id === undefined) continue;
+      const row = rowCache.get(id)?.row;
+      if (!row) continue;
+      const selected = id === state.selected;
+      row.classList.toggle('selected', selected);
+      row.querySelector('.message-button')?.setAttribute('aria-pressed', String(selected));
+    }
   }
   /** The event shown above or below the selected one, for the arrow keys. */
   function neighbor(offset: number): LogEvent | undefined {

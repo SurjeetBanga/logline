@@ -451,6 +451,87 @@ for (const size of SIZES) {
     }
   });
 
+  test(`an event in an inspector widened by its edge fits a ${name} panel`, async () => {
+    // A width saved in a wide panel, then the same state in this one.
+    const page = await open(size, { inspectorWidth: 900 });
+    try {
+      await page.locator('#logs tr.event-row .message-button').first().click();
+      await post(page, { type: 'details', id: 20, target: 'main', text: '{"level":"error"}', exceptions: [] });
+      await assertPageFits(page, 'an inspector with a saved width');
+      const handle = page.locator('#inspectorResizer');
+      if (await handle.isVisible()) {
+        const box = (await handle.boundingBox())!;
+        await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+        await page.mouse.down();
+        await page.mouse.move(-size.width, box.y + box.height / 2, { steps: 4 });
+        await page.mouse.up();
+        await assertPageFits(page, 'the inspector dragged as wide as it goes');
+      }
+      await page.setViewportSize({ width: Math.max(220, Math.round(size.width * 0.6)), height: size.height });
+      await post(page, { type: 'noop' });
+      await assertPageFits(page, 'the panel narrowed under a wide inspector');
+    } finally {
+      await page.close();
+    }
+  });
+
+  test(`the status panel fits a ${name} panel`, async () => {
+    const page = await open(size, undefined, { ...snapshot, doctor: { revision: 1, total: 2, findings: [] } });
+    try {
+      await page.locator('#statusIcon').click();
+      assert.equal(await page.locator('#statusPanel').isVisible(), true, 'the status panel opens');
+      await assertPageFits(page, 'the status panel');
+      await page.keyboard.press('Escape');
+      assert.equal(await page.locator('#statusPanel').isVisible(), false);
+    } finally {
+      await page.close();
+    }
+  });
+
+  test(`the Add logs menu fits a ${name} panel`, async () => {
+    const page = await open(size);
+    try {
+      if (!(await page.locator('#railAdd').isVisible())) await page.locator('#railToggle').click();
+      await page.locator('#railAdd').click();
+      assert.equal(await page.locator('#railAddMenu').isVisible(), true, 'the Add logs menu opens');
+      await assertPageFits(page, 'the Add logs menu');
+    } finally {
+      await page.close();
+    }
+  });
+
+  test(`the Issues view fits a ${name} panel`, async () => {
+    const findings = [
+      { siteId: 's1', code: 'secret', severity: 'error', message: 'Logged a bearer token', file: 'src/a.ts', line: 3 },
+      { code: 'unattributed', severity: 'warning', message: 'Output no statement accounts for', source: 'api' },
+    ];
+    const page = await open(size, undefined, { ...snapshot, doctor: { revision: 1, total: 2, findings } });
+    try {
+      await page.locator('#statusIcon').click();
+      await page.locator('#statusIssues').click();
+      assert.equal(await page.locator('#doctorView').isVisible(), true, 'the Issues view opens');
+      await assertPageFits(page, 'the Issues view');
+    } finally {
+      await page.close();
+    }
+  });
+
+  test(`the About dialog fits a ${name} panel`, async () => {
+    const page = await open(size);
+    try {
+      const info = { version: '1.20.0', editor: 'Visual Studio Code 1.99.0', system: 'Darwin arm64 25.0.0' };
+      await post(page, { ...snapshot, openAbout: info });
+      assert.equal(await page.locator('#aboutDialog').isVisible(), true, 'the About dialog opens');
+      await assertPageFits(page, 'the About dialog');
+      const box = (await page.locator('#aboutDialog').boundingBox())!;
+      assert.ok(box.x >= 0 && box.x + box.width <= size.width, `the dialog fits across: ${JSON.stringify(box)}`);
+      const clipped = await page.locator('#aboutDialog').evaluate((dialog) => dialog.scrollWidth > dialog.clientWidth);
+      assert.equal(clipped, false, 'nothing in the dialog is wider than the dialog');
+    } finally {
+      await page.close();
+    }
+  });
+
   test(`a trace open in the inspector fits a ${name} panel`, async () => {
     const page = await open(size);
     try {

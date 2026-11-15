@@ -11,16 +11,25 @@ export interface AboutElements {
   buttons: Record<AboutAction, HTMLButtonElement>;
 }
 
+const COPIED_MS = 1500;
+
 /** About Logline, as a dialog in the Logs panel: the version, who made it, and where to go next. */
 export function createAboutDialog(elements: AboutElements, api: WebviewApi, scope: EventScope) {
   let info: AboutInfo | undefined;
+  // Copy reads Copied for a moment; copying again restarts the moment rather than cutting it short.
+  let copied: ReturnType<typeof setTimeout> | undefined;
+  scope.track(() => clearTimeout(copied));
   scope.listen(elements.close, 'click', () => elements.dialog.close());
   for (const [action, button] of Object.entries(elements.buttons) as [AboutAction, HTMLButtonElement][])
     scope.listen(button, 'click', () => {
       api.postMessage({ type: 'aboutAction', action, ...(action === 'copy' && info ? { info } : {}) });
       if (action === 'copy') {
         button.textContent = 'Copied';
-        setTimeout(() => (button.textContent = 'Copy'), 1500);
+        clearTimeout(copied);
+        copied = setTimeout(() => {
+          copied = undefined;
+          button.textContent = 'Copy';
+        }, COPIED_MS);
       }
     });
   return {

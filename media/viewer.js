@@ -6614,18 +6614,28 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
   }
   function createEdgeResize(edge, scope) {
     const { handles, bounds } = edge;
-    const clamp = (width) => Math.round(Math.max(bounds.min, Math.min(edge.widest(), width)));
-    const current = () => clamp(edge.get() ?? edge.drawn?.() ?? bounds.default);
+    const clamp = (width, widest2 = edge.widest()) => Math.round(Math.max(bounds.min, Math.min(widest2, width)));
+    const current = (widest2 = edge.widest()) => clamp(edge.get() ?? edge.drawn?.() ?? bounds.default, widest2);
     function apply() {
+      const widest2 = edge.widest();
       const chosen = edge.get();
-      const width = current();
+      const width = current(widest2);
       if (chosen === void 0) document.body.style.removeProperty(edge.variable);
       else document.body.style.setProperty(edge.variable, `${width}px`);
       for (const handle of handles) {
         handle.setAttribute("aria-valuenow", String(width));
         handle.setAttribute("aria-valuemin", String(bounds.min));
-        handle.setAttribute("aria-valuemax", String(edge.widest()));
+        handle.setAttribute("aria-valuemax", String(widest2));
       }
+    }
+    let applyQueued = false;
+    function applySoon() {
+      if (applyQueued) return;
+      applyQueued = true;
+      scope.frame(() => {
+        applyQueued = false;
+        apply();
+      });
     }
     function set(width) {
       edge.set(width === void 0 ? void 0 : clamp(width));
@@ -6664,7 +6674,7 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
       });
     }
     for (const handle of handles) scope.listen(handle, "focus", apply);
-    scope.listen(window, "resize", apply);
+    scope.listen(window, "resize", applySoon);
     apply();
     return { apply };
   }
@@ -7065,15 +7075,22 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
   }
 
   // src/webview/about-dialog.ts
+  var COPIED_MS = 1500;
   function createAboutDialog(elements, api, scope) {
     let info;
+    let copied;
+    scope.track(() => clearTimeout(copied));
     scope.listen(elements.close, "click", () => elements.dialog.close());
     for (const [action, button] of Object.entries(elements.buttons))
       scope.listen(button, "click", () => {
         api.postMessage({ type: "aboutAction", action, ...action === "copy" && info ? { info } : {} });
         if (action === "copy") {
           button.textContent = "Copied";
-          setTimeout(() => button.textContent = "Copy", 1500);
+          clearTimeout(copied);
+          copied = setTimeout(() => {
+            copied = void 0;
+            button.textContent = "Copy";
+          }, COPIED_MS);
         }
       });
     return {
@@ -7167,13 +7184,29 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
   function normalizedKey(key) {
     return key.toLowerCase().replace(/[^a-z0-9]/g, "");
   }
+  var KNOWN_KEYS_LIMIT = 4096;
+  var knownKeys = /* @__PURE__ */ new Map();
+  function hasSensitiveName(key) {
+    let sensitive = knownKeys.get(key);
+    if (sensitive !== void 0) return sensitive;
+    sensitive = SENSITIVE_KEY.test(key) && !NOT_SENSITIVE_KEY.test(key);
+    if (key.length <= 64) {
+      if (knownKeys.size >= KNOWN_KEYS_LIMIT) knownKeys.clear();
+      knownKeys.set(key, sensitive);
+    }
+    return sensitive;
+  }
   function isSensitiveKey(key, fields = []) {
-    const normalized = normalizedKey(key);
-    if (fields.some((field) => normalizedKey(field) === normalized)) return true;
-    return SENSITIVE_KEY.test(key) && !NOT_SENSITIVE_KEY.test(key);
+    if (fields.length) {
+      const normalized = normalizedKey(key);
+      if (fields.some((field) => normalizedKey(field) === normalized)) return true;
+    }
+    return hasSensitiveName(key);
   }
   function isKeyCharacter(value) {
-    return value !== void 0 && /[A-Za-z0-9_.-]/.test(value);
+    if (value === void 0) return false;
+    const code = value.charCodeAt(0);
+    return code >= 97 && code <= 122 || code >= 65 && code <= 90 || code >= 48 && code <= 57 || code === 95 || code === 46 || code === 45;
   }
   function redactAssignments(text2, replacement, sensitive, depth = 0) {
     let output = "";
@@ -8723,19 +8756,29 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
     }
     let selectedEvent;
     function select(id) {
+      const previous = state.selected;
       const opening = state.inspect(id);
       selectedEvent = opening ? sourceEvents.find((event) => event.id === id) : void 0;
-      renderRevision++;
+      markSelected(previous);
       if (opening) api.postMessage({ type: "details", id });
-      renderWindow();
       return opening;
     }
     function clearSelection() {
       if (state.selected === void 0) return;
+      const previous = state.selected;
       state.resetSelection();
       selectedEvent = void 0;
-      renderRevision++;
-      renderWindow();
+      markSelected(previous);
+    }
+    function markSelected(previous) {
+      for (const id of /* @__PURE__ */ new Set([previous, state.selected])) {
+        if (id === void 0) continue;
+        const row = rowCache.get(id)?.row;
+        if (!row) continue;
+        const selected = id === state.selected;
+        row.classList.toggle("selected", selected);
+        row.querySelector(".message-button")?.setAttribute("aria-pressed", String(selected));
+      }
     }
     function neighbor(offset) {
       const index = virtualEvents.findIndex((event) => event.id === state.selected);

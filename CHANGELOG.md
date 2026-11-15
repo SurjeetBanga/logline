@@ -28,6 +28,8 @@ All notable changes to Logline are documented in this file.
 
 ### Fixes
 
+- In the narrowest side bar, the About dialog puts the version under the name instead of past the dialog's edge.
+- Faster with many logs retained: removing a source or a run no longer rebuilds what Logline knows about every other source, and copying or sharing redacted logs, and finding the log statement behind each event, take less time. Moving the selection with **Up** and **Down** in the inspector no longer rebuilds every visible row, and resizing the panel narrows the rails and the inspector once a frame.
 - The Logs panel runs edge to edge: the 20 pixels VS Code leaves at each side of a webview no longer frame the tabs, the Sources rail, and the table.
 - **Clear logs** keeps any window that shares everything sharing, as the same share: an agent's share id stays valid and a wait for new logs goes on. A share of chosen runs still ends with a clear.
 - A filter typed in the search box but not yet entered is no longer left out: **Run** and **Tail** on a connection apply it first, and choosing a whole term from the suggestions, such as `appname:"prod"`, applies it as Enter does. A highlighted suggestion no longer turns the search box white.

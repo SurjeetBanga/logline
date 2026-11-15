@@ -1048,6 +1048,47 @@ test('removing a source drops its events and container sources, keeps the rest i
   assert.equal(store.all().at(-1)?.id, 21);
 });
 
+test('removing from a ring that has wrapped leaves the store as if the removed events were never added', () => {
+  const make = (id: number) => {
+    const serverId = ['api', 'worker', 'web'][id % 3];
+    return {
+      id,
+      raw: `e${id}`,
+      message: `e${id}`,
+      level: id % 5 ? 'info' : 'error',
+      serverId,
+      server: serverId,
+      sessionId: `${serverId}-${id % 2}`,
+      fields: id % 4 ? { [`${serverId}Field`]: id, shared: 'x' } : { shared: 'y' },
+    } as LogEvent;
+  };
+  const store = new LogStore(40, 1024 * 1024);
+  for (let id = 1; id <= 95; id++) store.add(make(id));
+  assert.ok(store.head > 0, 'the ring has wrapped');
+  const kept = store.all().map((event) => event.id);
+  assert.equal(store.removeSessions(new Set(['worker-1'])), kept.filter((id) => id % 3 === 1 && id % 2).length);
+  assert.ok(store.removeSource('web') > 0);
+  const expected = new LogStore(40, 1024 * 1024);
+  for (const id of kept) if (id % 3 === 0 || (id % 3 === 1 && id % 2 === 0)) expected.add(make(id));
+  const view = (target: LogStore) => ({
+    all: target.all().map((event) => event.id),
+    sources: target.serverIds().sort(),
+    bytes: target.stats().bytes,
+    fields: target.fieldNames(),
+    columns: ['api', 'worker', 'web'].map((serverId) => target.columnFields(serverId)),
+    pages: ['api', 'worker', 'web'].map((serverId) => target.page({ serverId }).events.map((event) => event.id)),
+    errors: target.page({ levels: ['error'] }).events.map((event) => event.id),
+    context: target.context(kept.find((id) => id % 3 === 1 && id % 2 === 0)!).events.map((event) => event.id),
+  });
+  assert.deepEqual(view(store), view(expected));
+  // Adding more evicts in the right order from the compacted ring.
+  for (let id = 96; id <= 140; id++) {
+    store.add(make(id));
+    expected.add(make(id));
+  }
+  assert.deepEqual(view(store), view(expected));
+});
+
 test('field names stay known while any retained event of a source has them, however its shapes vary', () => {
   const store = new LogStore(8);
   let id = 0;
