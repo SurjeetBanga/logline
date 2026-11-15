@@ -264,6 +264,8 @@ test('a line ending a sqlite3 statement is found outside quotes and comments onl
     'SELECT 1\r\n/ -- c\r\n.print x',
     "SELECT 'a' -- it's\ngo",
     'SELECT 1 /* a */\n go',
+    // Read in one pass: comment closers and openers in a row do not make it backtrack.
+    `SELECT 1\n/ /*${'*//*'.repeat(100_000)}`,
   ])
     assert.equal(endsStatementEarly(sql), true, sql);
   for (const sql of [
