@@ -6,7 +6,7 @@
 // text field or a whole keyword value. Fetched logs are filtered again with
 // the whole search, so what a query cannot express still applies.
 import type { ColumnInfo, LogTableMapping, MappedField } from './connections';
-import { pushDown, termGroups, typedValue } from './pushdown';
+import { LEVEL_CODES, pushDown, termGroups, typedValue } from './pushdown';
 import { canonicalField, type Token } from './query';
 
 type Clause = Record<string, unknown>;
@@ -46,8 +46,6 @@ const NAMES: Record<string, string[]> = {
   traceId: ['traceId', 'trace_id', 'trace.id'],
   durationMs: ['durationMs', 'duration', 'duration_ms', 'event.duration'],
 };
-// pino and bunyan write levels as numbers.
-const LEVEL_CODES: Record<string, number> = { trace: 10, debug: 20, info: 30, warn: 40, error: 50, fatal: 60 };
 
 const one = (clauses: Clause[]): Clause =>
   clauses.length === 1 ? clauses[0] : { bool: { should: clauses, minimum_should_match: 1 } };

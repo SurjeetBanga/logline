@@ -9,10 +9,6 @@ function widest(): number {
   return Math.max(RAIL_WIDTH.min, Math.min(RAIL_WIDTH.max, (window.innerWidth || 0) - 240));
 }
 
-export function clampRailWidth(width: number): number {
-  return Math.round(Math.max(RAIL_WIDTH.min, Math.min(widest(), width)));
-}
-
 /**
  * The inspector's width: wide enough for a stack trace, and never so wide the
  * list beside it is lost. Until one is chosen the stylesheet sizes it, so its

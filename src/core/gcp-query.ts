@@ -4,7 +4,7 @@
 // them; `level:` is the entry's severity; words are searched as Cloud Logging
 // searches them. In this language OR binds tighter than AND, so every group
 // is in parentheses. Fetched logs are filtered again with the whole search.
-import { pushDown, termGroups, typedValue } from './pushdown';
+import { pushDown, re2Literal, termGroups, typedValue } from './pushdown';
 import { canonicalField, type Token } from './query';
 
 export interface GcpQuery {
@@ -49,9 +49,9 @@ const SEVERITIES: Record<string, string> = {
 };
 
 const quote = (value: string) => JSON.stringify(value);
-const regexOf = (value: string) => value.replace(/[.+?^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*');
 /** Any part of a value without case, unless it has `*`: then the whole value. */
-const contains = (value: string) => quote(value.includes('*') ? `(?i)^${regexOf(value)}$` : `(?i)${regexOf(value)}`);
+const contains = (value: string) =>
+  quote(value.includes('*') ? `(?i)^${re2Literal(value)}$` : `(?i)${re2Literal(value)}`);
 const any = (terms: string[]) => (terms.length === 1 ? terms[0] : `(${terms.join(' OR ')})`);
 
 /** A path in the query language, each name quoted that is not a plain identifier. */

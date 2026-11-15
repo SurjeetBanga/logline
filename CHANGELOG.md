@@ -28,6 +28,7 @@ All notable changes to Logline are documented in this file.
 
 ### Fixes
 
+- A CloudWatch search stopped, or replaced by a new **Run**, while it waits to retry a request over the account's rate ends at once, instead of after the wait.
 - Browser capture: removing a Browser source while its window closes no longer brings its logs back, and a request made by a frame embedded in your page, such as a payment form or a video, no longer moves the tab to that frame's site. When the browser is slow to report its first tab, Logline no longer closes the tab it opened for your app instead of the blank one. Opening the browser again while the last one closes keeps the workspace's profile and its sign-ins, and a profile left locked by a browser that was killed is used again instead of being replaced by an empty one. A browser that closes before Logline connects to it shows as a failed run, and the old browser exiting no longer marks a new one closed.
 - Removing a source or a run no longer closes an event open in the inspector that is still kept.
 - On a SQLite connection in an editor without built-in SQLite, a query that divides across lines with a comment after the `/`, such as `/ /* ratio */ b`, runs instead of being refused.
