@@ -59,7 +59,7 @@ test('activation registers the provider, command/task surfaces, autostart, and i
     } as any;
     const result = activate(context);
     assert.ok(result.provider);
-    assert.equal(registeredCommands.length, 45);
+    assert.equal(registeredCommands.length, 48);
     assert.ok(context.subscriptions.length >= 20);
     await new Promise((resolve) => setTimeout(resolve, 50));
     assert.ok(existsSync(join(home, '.logline', 'mcp.js')), 'the MCP server script is installed at a stable path');
@@ -93,8 +93,9 @@ test('activation adds editor features where the host supports them, and follows 
       dispose() {}
     },
     OverviewRulerLane: { Right: 4 },
-    StatusBarAlignment: { Left: 1 },
+    StatusBarAlignment: { Left: 1, Right: 2 },
     ThemeColor: class {},
+    MarkdownString: class {},
     CodeActionKind: { QuickFix: 'quickfix' },
     languages: {
       registerCodeLensProvider: disposable,
