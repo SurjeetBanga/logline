@@ -11,7 +11,7 @@ export function layoutColumnWidths(
   const defaults: Record<string, number> = { 'base:time': 140, 'base:level': 110, 'base:source': 110 };
   const messageFloor = 300;
   // In a narrow panel the message gives way first, down to this, so times and levels stay whole.
-  const messageMin = 140;
+  let messageMin = 140;
   const minWidth = 72;
   // The width a time (12 characters of the editor font) and a level need, with the cell padding.
   const floors: Record<string, number> = { 'base:time': 124, 'base:level': 80 };
@@ -30,9 +30,10 @@ export function layoutColumnWidths(
   const collapseSource = Boolean(sourceElement) && available > 0 && fullOtherWidth + messageFloor > available;
   const collapsed = new Set(collapseSource ? ['base:source'] : []);
   // Then field columns, from the right, until the time, level, and a readable message fit.
+  let needed = () => 0;
   if (available > 0) {
     const fields = displayedColumns.filter((column) => !column.key.startsWith('base:')).reverse();
-    const needed = () =>
+    needed = () =>
       displayedColumns
         .filter((column) => column.key !== 'base:message' && !collapsed.has(column.key))
         .reduce((sum, column) => sum + (isExplicit(column.key) ? widthFor(column.key) : floorFor(column.key)), 0) +
@@ -42,8 +43,18 @@ export function layoutColumnWidths(
       collapsed.add(field.key);
     }
   }
+  // Narrower still, such as a side bar: the level gives way to the message, since the row's edge already
+  // marks errors and warnings, and the time keeps only its seconds.
+  const compact =
+    available > 0 && columnElements.has('base:level') && !isExplicit('base:level') && needed() > available;
+  if (compact) {
+    collapsed.add('base:level');
+    floors['base:time'] = 72;
+    messageMin = 120;
+  }
+  table.dataset.compact = String(compact);
   for (const [key, element] of columnElements)
-    if (key === 'base:source' || !key.startsWith('base:'))
+    if (key === 'base:source' || key === 'base:level' || !key.startsWith('base:'))
       element.style.visibility = collapsed.has(key) ? 'collapse' : '';
   const columns = displayedColumns.filter((column) => !collapsed.has(column.key));
   const explicitWidth = columns

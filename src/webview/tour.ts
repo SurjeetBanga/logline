@@ -17,7 +17,7 @@ export const TOUR_STEPS: TourStep[] = [
   {
     target: 'sourceRail',
     title: 'Your sources',
-    text: 'Everything Logline captures, in one list: terminals, tasks, debug sessions, OpenTelemetry, and imports. Click one to see only its logs; point at it to stop or remove it. Drag the rail’s right edge to widen it.',
+    text: 'Everything Logline captures, in one list: terminals, tasks, debug sessions, OpenTelemetry, and imports. Click one to see only its logs; point at it to stop or remove it. The + in its header adds logs: a command, a file, a browser, an import, a connection, or OpenTelemetry.',
   },
   {
     target: 'railAddConnection',
@@ -32,12 +32,12 @@ export const TOUR_STEPS: TourStep[] = [
     example: 'level:error service:checkout',
   },
   {
-    // The first row's message, which is what you click, not the whole table: the card then
+    // The first row's message, not the whole table: the card then
     // has room beside it rather than over it, even in a short panel.
     select: '#logs > tr.event-row .message-content',
     target: 'logsView',
     title: 'Every event, explained',
-    text: 'Click a row for its fields, stack trace, the line of code that logged it, and the logs around it.',
+    text: 'Click a row to open it beside the list, with its fields, stack trace, the line of code that logged it, and the logs around it. The list keeps updating while it is open.',
   },
   {
     target: 'viewTabs',
@@ -52,7 +52,7 @@ export const TOUR_STEPS: TourStep[] = [
   {
     target: 'statusBar',
     title: 'What is running',
-    text: 'Turn terminal capture and the OpenTelemetry receiver on or off here, see memory use, and check that everything is working.',
+    text: 'Capture turns terminal capture on and off here. The check mark opens a panel for capture, the OpenTelemetry receiver, agents, and memory, with a link to troubleshooting.',
   },
 ];
 

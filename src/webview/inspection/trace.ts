@@ -11,7 +11,7 @@ export function formatDuration(ms: number): string {
   return `${(ms / 1000).toFixed(2)} s`;
 }
 
-/** The trace waterfall in the Traces tab: spans across services with their logs interleaved. */
+/** One trace's waterfall, in the inspector beside the list of traces: spans across services with their logs interleaved. */
 export function createTraceView(
   elements: Elements,
   api: WebviewApi,
@@ -19,27 +19,25 @@ export function createTraceView(
   actions: {
     showContext(id: number): void;
     applyQuery(query: string): void;
-    showList(): void;
     openAiCall(traceId: string, spanId: string): void;
-    /** Shows the waterfall in place of the table. */
-    reveal(): void;
-    visible(): boolean;
+    /** Shows the waterfall of a trace in the inspector, under a title. */
+    inspect(title: string, traceId: string): void;
+    /** Whether the inspector shows a trace. */
+    inspecting(): boolean;
   },
 ) {
   let current: string | undefined;
 
   function show(traceId: string) {
     current = traceId.toLowerCase();
-    elements.traceTitle.textContent = `Trace ${current.length > 12 ? `${current.slice(0, 8)}…${current.slice(-4)}` : current}`;
-    elements.traceTitle.title = current;
     elements.traceStatus.textContent = 'Loading…';
     elements.traceRows.replaceChildren();
     elements.traceHotspots.hidden = true;
-    actions.reveal();
+    actions.inspect(`Trace ${current.length > 12 ? `${current.slice(0, 8)}…${current.slice(-4)}` : current}`, current);
     api.postMessage({ type: 'trace', traceId: current });
   }
 
-  /** Forgets the trace when another view is shown, so a late reply for it is ignored. */
+  /** Forgets the trace when the inspector closes, so a late reply for it is ignored. */
   function hide() {
     current = undefined;
     elements.traceRows.replaceChildren();
@@ -47,7 +45,6 @@ export function createTraceView(
     elements.traceHotspots.hidden = true;
   }
 
-  scope.listen(elements.traceBack, 'click', () => actions.showList());
   // A hotspot leads to the first span of its operation in the waterfall.
   scope.listen(elements.traceHotspotList, 'click', (event) => {
     const button = (event.target as HTMLElement).closest<HTMLElement>('.trace-hotspot');
@@ -78,7 +75,7 @@ export function createTraceView(
   });
 
   function receive(trace: TraceView) {
-    if (!actions.visible() || trace.traceId !== current) return;
+    if (!actions.inspecting() || trace.traceId !== current) return;
     elements.traceStatus.textContent = summary(trace);
     // With one span, self time says nothing the waterfall does not.
     const shownHotspots = trace.spans.length + trace.omitted > 1 ? trace.hotspots : [];
@@ -118,14 +115,14 @@ export function createTraceView(
     hide,
     receive,
     get open() {
-      return actions.visible();
+      return actions.inspecting();
     },
   };
 }
 
 function summary(trace: TraceView): string {
   if (!trace.spans.length && !trace.logs.length) {
-    return 'No spans or retained logs have this trace id. Turn on the OpenTelemetry receiver in More actions to collect spans from instrumented apps.';
+    return 'No spans or retained logs have this trace id. Start the OpenTelemetry receiver from the status icon, or Add logs in the Sources rail, to collect spans from instrumented apps.';
   }
   if (!trace.spans.length) {
     return `${trace.logs.length} retained log${trace.logs.length === 1 ? '' : 's'} with this trace id over ${formatDuration(trace.durationMs)}. No spans were received for it.`;
@@ -272,7 +269,10 @@ function logRow(log: TraceLog, total: number, depth: number): HTMLTableRowElemen
   const button = document.createElement('button');
   button.className = 'trace-log-button';
   button.dataset.id = String(log.id);
-  button.style.marginInlineStart = `${Math.min(depth, 24) * 14}px`;
+  const indent = Math.min(depth, 24) * 14;
+  button.style.marginInlineStart = `${indent}px`;
+  // The message is cut to what is left of the cell after its indent, so the button never runs past it.
+  button.style.maxWidth = `calc(100% - ${indent}px)`;
   button.title = 'Show surrounding logs';
   const level = document.createElement('span');
   level.className = `level ${log.level}`;

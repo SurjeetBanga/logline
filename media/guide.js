@@ -110,7 +110,7 @@
       {
         done: progress.searched,
         title: 'Search it',
-        text: 'Type level:error in the search box and press Enter. Click a row to see its details.',
+        text: 'Type level:error in the search box and press Enter. Click a row to open its details beside the list.',
         target: 'search',
       },
       {

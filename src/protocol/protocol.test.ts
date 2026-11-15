@@ -89,7 +89,6 @@ test('message boundary preserves an empty level selection and normalizes paginat
     levels: [],
     page: -3,
     before: Infinity,
-    statsOnly: 'yes',
     columns: ['service', null],
     sortDirection: 'other',
     query: 42,
@@ -99,7 +98,6 @@ test('message boundary preserves an empty level selection and normalizes paginat
   assert.deepEqual(request.columns, ['service']);
   assert.equal(request.page, undefined);
   assert.equal(request.before, undefined);
-  assert.equal(request.statsOnly, false);
   assert.equal(request.query, undefined);
   assert.equal(request.sortDirection, 'asc');
   const requestWithId = parseViewRequest({ type: 'snapshot', requestId: 9 });
@@ -260,6 +258,7 @@ test('Connect names only a known agent, and Settings opens only a Logline settin
     assert.deepEqual(parseViewRequest({ type: 'emptyAction', action }), { type: 'emptyAction', action });
   assert.equal(parseViewRequest({ type: 'emptyAction', action: 'rm' }), undefined);
   assert.deepEqual(parseViewRequest({ type: 'openBrowser', url: 'ignored' }), { type: 'openBrowser' });
+  assert.deepEqual(parseViewRequest({ type: 'followFile', path: 'ignored' }), { type: 'followFile' });
 });
 
 test('removing a source names it, and removing a connection names the connection', () => {
@@ -297,4 +296,26 @@ test('the welcome choice and panel width are read only when they are valid', () 
   assert.deepEqual(parseViewRequest({ type: 'panelSize', width: 640 }), { type: 'panelSize', width: 640 });
   for (const width of [0, -1, Number.NaN, '640'])
     assert.equal(parseViewRequest({ type: 'panelSize', width }), undefined);
+});
+
+test('About dialog actions are a known button, and only Copy carries bounded details', () => {
+  assert.deepEqual(parseViewRequest({ type: 'aboutAction', action: 'sponsor' }), {
+    type: 'aboutAction',
+    action: 'sponsor',
+  });
+  assert.equal(parseViewRequest({ type: 'aboutAction', action: 'rm -rf' }), undefined);
+  const parsed = parseViewRequest({
+    type: 'aboutAction',
+    action: 'copy',
+    info: { version: '1.20.0', editor: 'x'.repeat(500), system: 'Linux' },
+  });
+  assert.deepEqual(parsed, {
+    type: 'aboutAction',
+    action: 'copy',
+    info: { version: '1.20.0', editor: 'x'.repeat(200), system: 'Linux' },
+  });
+  assert.deepEqual(parseViewRequest({ type: 'aboutAction', action: 'copy', info: { version: 1 } }), {
+    type: 'aboutAction',
+    action: 'copy',
+  });
 });

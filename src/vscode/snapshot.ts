@@ -135,8 +135,7 @@ export function buildSnapshot(
     ? msg.columns.filter((field): field is string => typeof field === 'string' && columnFields.includes(field))
     : [];
   const projectedColumns = [...new Set([...columns, ...requestedColumns])];
-  const pageResult = msg.statsOnly ? undefined : store.page(options);
-  const result = pageResult ?? store.stats();
+  const result = store.page(options);
   // A row only ever reads the displayed field columns, but a structured
   // payload can carry dozens of keys per event. Trimming here keeps the
   // refresh payload proportional to what is on screen rather than to how
@@ -147,8 +146,8 @@ export function buildSnapshot(
     ? (store.changeScope?.version ?? null)
     : null;
   const rowsVersion = JSON.stringify([state.generation, projectedColumns, rowLinksVersion ?? null, changeVersion]);
-  const keep = pageResult && keptRows(msg, pageResult.events, rowsVersion);
-  const events = pageResult?.events.slice(keep ?? 0).map((event) => {
+  const keep = keptRows(msg, result.events, rowsVersion);
+  const events = result.events.slice(keep ?? 0).map((event) => {
     const traceId = getField(event, 'traceId');
     return {
       ...event,
@@ -181,8 +180,9 @@ export function buildSnapshot(
   return {
     type: 'snapshot',
     ...result,
-    ...(events ? { events, rowsVersion } : {}),
-    ...(keep !== undefined ? { keep, keepFirst: pageResult!.events[0].id } : {}),
+    events,
+    rowsVersion,
+    ...(keep !== undefined ? { keep, keepFirst: result.events[0].id } : {}),
     columns,
     columnFields,
     fields: store.fieldNames(),

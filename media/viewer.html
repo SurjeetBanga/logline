@@ -106,7 +106,7 @@
                 stroke-width="1.6"
                 stroke-linecap="round"
               /></svg
-            ><span class="button-label">Traces</span><span id="traceCount" class="count-badge" hidden></span>
+            ><span class="button-label">Traces</span>
           </button>
           <button
             id="aiCalls"
@@ -132,7 +132,7 @@
             >
               <path d="M2.5 3.5h11v7h-6l-3 2.5v-2.5h-2z" />
               <path d="M5.5 7h.01M8 7h.01M10.5 7h.01" stroke-width="1.8" /></svg
-            ><span class="button-label">AI calls</span><span id="aiCallCount" class="count-badge"></span>
+            ><span class="button-label">AI calls</span>
           </button>
           <button
             id="metrics"
@@ -153,7 +153,7 @@
                 stroke-linecap="round"
                 stroke-linejoin="round"
               /></svg
-            ><span class="button-label">Metrics</span><span id="metricCount" class="count-badge"></span>
+            ><span class="button-label">Metrics</span>
           </button>
           <button
             id="doctor"
@@ -179,7 +179,7 @@
             >
               <path d="M8 2.5 14.5 13.5h-13zM8 6.5v3" />
               <circle cx="8" cy="11.6" r=".4" fill="currentColor" /></svg
-            ><span class="button-label">Issues</span><span id="doctorCount" class="count-badge"></span>
+            ><span class="button-label">Issues</span>
           </button>
           <button
             id="connectionTab"
@@ -210,291 +210,6 @@
             ><span id="connectionTabLabel" class="button-label">Add connection</span>
           </button>
         </div>
-        <div class="view-bar-actions">
-          <button id="updateButton" class="update-button" type="button" hidden>Update</button>
-          <div id="shareSplit" class="share-split popover-container">
-            <button
-              id="shareAgent"
-              type="button"
-              aria-pressed="false"
-              title="Share existing and new captured logs in this window until stopped"
-            >
-              <svg
-                class="tb-icon"
-                aria-hidden="true"
-                viewBox="0 0 16 16"
-                width="14"
-                height="14"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="1.4"
-                stroke-linecap="round"
-                stroke-linejoin="round"
-              >
-                <path d="M8 2l1.4 4.6L14 8l-4.6 1.4L8 14l-1.4-4.6L2 8l4.6-1.4z" /></svg
-              ><span class="button-label">Share with agent</span>
-            </button>
-            <button
-              id="shareMenuButton"
-              class="share-chevron"
-              type="button"
-              aria-haspopup="dialog"
-              aria-expanded="false"
-              aria-controls="sharePanel"
-              aria-label="Sharing scope, agents, and production access"
-              title="What agents can read, which agents are connected, and production access"
-            >
-              <svg
-                aria-hidden="true"
-                viewBox="0 0 16 16"
-                width="12"
-                height="12"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="1.5"
-                stroke-linecap="round"
-                stroke-linejoin="round"
-              >
-                <path d="M4 6l4 4 4-4" />
-              </svg>
-            </button>
-            <div id="sharePanel" class="popover share-panel" role="dialog" aria-labelledby="sharePanelTitle" hidden>
-              <div class="share-panel-header">
-                <h3 id="sharePanelTitle">Share with agents</h3>
-                <span id="shareState" class="share-state">Off</span>
-              </div>
-              <section class="share-section" aria-labelledby="shareScopeTitle">
-                <h4 id="shareScopeTitle">What agents can read</h4>
-                <label class="share-choice"
-                  ><input id="shareScopeAll" type="radio" name="shareScope" value="all" checked /><span
-                    ><span>Everything captured in this window</span
-                    ><span class="share-hint">Existing and new logs, until you stop sharing</span></span
-                  ></label
-                >
-                <label class="share-choice"
-                  ><input id="shareScopeRuns" type="radio" name="shareScope" value="runs" /><span
-                    ><span>Specific runs</span
-                    ><span id="shareRunsHint" class="share-hint">Choose runs; later commands stay private</span></span
-                  ></label
-                >
-                <button id="shareSpecificRuns" class="share-choose" type="button" hidden>Choose runs…</button>
-                <p class="share-note">Read-only and always redacted. Agents cannot run or stop commands.</p>
-              </section>
-              <section class="share-section" aria-labelledby="shareAgentsTitle">
-                <h4 id="shareAgentsTitle">Agents</h4>
-                <div id="shareAgentList" class="share-agent-list"></div>
-              </section>
-              <section id="shareProduction" class="share-section" aria-labelledby="shareProductionTitle" hidden>
-                <h4 id="shareProductionTitle">Production access</h4>
-                <div id="shareConnectionList" class="share-connection-list"></div>
-                <p class="share-note">Allowed agents fetch up to 24 hours at a time, at most 10 times a minute.</p>
-              </section>
-              <div class="share-footer">
-                <button id="statusAction" class="link-button" type="button">Status and troubleshooting…</button>
-                <button id="shareToggle" class="share-toggle" type="button">Start sharing</button>
-              </div>
-            </div>
-          </div>
-          <div class="popover-container">
-            <button
-              id="moreActions"
-              class="more-actions"
-              type="button"
-              aria-label="More actions"
-              title="More actions"
-              aria-haspopup="menu"
-              aria-expanded="false"
-              aria-controls="actionsMenu"
-            >
-              <span aria-hidden="true">⋯</span>
-            </button>
-            <div id="actionsMenu" class="popover actions-menu" role="menu" aria-labelledby="moreActions" hidden>
-              <button
-                id="copyResults"
-                type="button"
-                role="menuitem"
-                tabindex="-1"
-                hidden
-                title="Copy up to 1,000 filtered log rows as JSON Lines"
-              >
-                Copy filtered results
-              </button>
-              <button
-                id="export"
-                type="button"
-                role="menuitem"
-                tabindex="-1"
-                title="Export filtered logs as JSON Lines, JSON, CSV, or AI context (Markdown)"
-              >
-                Export logs…
-              </button>
-              <button id="import" type="button" role="menuitem" tabindex="-1">Import logs…</button>
-              <button
-                id="openBrowser"
-                type="button"
-                role="menuitem"
-                tabindex="-1"
-                title="Open your app in a browser whose console, errors, and requests appear here"
-              >
-                Open browser…
-              </button>
-              <button
-                id="clear"
-                type="button"
-                role="menuitem"
-                tabindex="-1"
-                title="Remove every retained log and span. Capture keeps running."
-              >
-                Clear logs
-              </button>
-              <div class="menu-separator" role="separator"></div>
-              <button
-                id="breakOnLogs"
-                type="button"
-                role="menuitem"
-                tabindex="-1"
-                title="Pause debug sessions when they log an event matching the current filter"
-              >
-                Break on matching logs
-              </button>
-              <button id="manage" type="button" role="menuitem" tabindex="-1">Manage servers…</button>
-              <div class="menu-separator" role="separator"></div>
-              <button id="config" type="button" role="menuitem" tabindex="-1">Settings</button>
-              <button
-                id="help"
-                type="button"
-                role="menuitem"
-                tabindex="-1"
-                aria-label="Open the Logline Guide"
-                title="Open the Logline Guide"
-              >
-                <span id="helpLabel">Help</span><span id="helpBadge" class="new-badge" hidden>New</span>
-              </button>
-              <button id="takeTour" type="button" role="menuitem" tabindex="-1">Take the tour</button>
-              <div class="menu-separator" role="separator"></div>
-              <button
-                id="suggestFeature"
-                type="button"
-                role="menuitem"
-                tabindex="-1"
-                title="Tell the Logline developers what to build"
-              >
-                Suggest a feature…
-              </button>
-              <button
-                id="voteOnNext"
-                type="button"
-                role="menuitem"
-                tabindex="-1"
-                title="Pick what Logline should do next"
-              >
-                Vote on what's next…
-              </button>
-            </div>
-          </div>
-        </div>
-      </div>
-    </header>
-    <div class="workspace">
-      <nav id="sourceRail" class="source-rail" aria-label="Sources">
-        <div class="rail-header">
-          <span class="rail-title">Sources</span>
-          <button
-            id="railStopAll"
-            class="icon-button rail-icon"
-            type="button"
-            hidden
-            title="Stop every command Logline started, and every tail"
-            aria-label="Stop all"
-          >
-            <svg
-              aria-hidden="true"
-              viewBox="0 0 16 16"
-              width="14"
-              height="14"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="1.4"
-              stroke-linecap="round"
-            >
-              <rect x="2.5" y="4.5" width="7" height="7" rx="1" />
-              <path d="M11.5 6.5v5.5a1.5 1.5 0 0 1-1.5 1.5H5" />
-            </svg>
-          </button>
-          <button
-            id="railToggle"
-            class="icon-button rail-icon rail-toggle"
-            type="button"
-            aria-expanded="true"
-            aria-controls="railList"
-            title="Collapse sources"
-            aria-label="Collapse sources"
-          >
-            <svg
-              aria-hidden="true"
-              viewBox="0 0 16 16"
-              width="14"
-              height="14"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="1.4"
-              stroke-linecap="round"
-              stroke-linejoin="round"
-            >
-              <path d="M8 4 4 8l4 4M12.5 4l-4 4 4 4" />
-            </svg>
-          </button>
-        </div>
-        <div id="railList" class="rail-list"></div>
-        <div
-          id="railResizer"
-          class="rail-resizer"
-          role="separator"
-          aria-orientation="vertical"
-          aria-label="Resize sources"
-          title="Drag to resize · double-click to reset"
-          tabindex="0"
-        ></div>
-      </nav>
-      <nav id="tabRail" class="source-rail tab-rail" aria-labelledby="tabRailTitle" hidden>
-        <div class="rail-header">
-          <span id="tabRailTitle" class="rail-title"></span>
-          <button
-            id="tabRailToggle"
-            class="icon-button rail-icon rail-toggle"
-            type="button"
-            aria-expanded="true"
-            aria-controls="tabRailList"
-            title="Collapse filters"
-            aria-label="Collapse filters"
-          >
-            <svg
-              aria-hidden="true"
-              viewBox="0 0 16 16"
-              width="14"
-              height="14"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="1.4"
-              stroke-linecap="round"
-              stroke-linejoin="round"
-            >
-              <path d="M8 4 4 8l4 4M12.5 4l-4 4 4 4" />
-            </svg>
-          </button>
-        </div>
-        <div id="tabRailList" class="rail-list"></div>
-        <div
-          id="tabRailResizer"
-          class="rail-resizer"
-          role="separator"
-          aria-orientation="vertical"
-          aria-label="Resize sources"
-          title="Drag to resize · double-click to reset"
-          tabindex="0"
-        ></div>
-      </nav>
-      <div class="workspace-main">
         <div class="search-toolbar" role="group" aria-label="Search and filter logs">
           <div class="popover-container search-group">
             <div id="searchEditor" class="search-editor">
@@ -754,6 +469,351 @@
             </div>
           </div>
         </div>
+        <div class="view-bar-actions">
+          <button id="updateButton" class="update-button" type="button" hidden>Update</button>
+          <div id="shareSplit" class="share-split popover-container">
+            <button
+              id="shareAgent"
+              type="button"
+              aria-pressed="false"
+              title="Share existing and new captured logs in this window until stopped"
+            >
+              <svg
+                class="tb-icon"
+                aria-hidden="true"
+                viewBox="0 0 16 16"
+                width="14"
+                height="14"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.4"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              >
+                <path d="M8 2l1.4 4.6L14 8l-4.6 1.4L8 14l-1.4-4.6L2 8l4.6-1.4z" /></svg
+              ><span class="button-label">Share with agent</span>
+            </button>
+            <button
+              id="shareMenuButton"
+              class="share-chevron"
+              type="button"
+              aria-haspopup="dialog"
+              aria-expanded="false"
+              aria-controls="sharePanel"
+              aria-label="Sharing scope, agents, and production access"
+              title="What agents can read, which agents are connected, and production access"
+            >
+              <svg
+                aria-hidden="true"
+                viewBox="0 0 16 16"
+                width="12"
+                height="12"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.5"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              >
+                <path d="M4 6l4 4 4-4" />
+              </svg>
+            </button>
+            <div id="sharePanel" class="popover share-panel" role="dialog" aria-labelledby="sharePanelTitle" hidden>
+              <div class="share-panel-header">
+                <h3 id="sharePanelTitle">Share with agents</h3>
+                <span id="shareState" class="share-state">Off</span>
+              </div>
+              <section class="share-section" aria-labelledby="shareScopeTitle">
+                <h4 id="shareScopeTitle">What agents can read</h4>
+                <label class="share-choice"
+                  ><input id="shareScopeAll" type="radio" name="shareScope" value="all" checked /><span
+                    ><span>Everything captured in this window</span
+                    ><span class="share-hint">Existing and new logs, until you stop sharing</span></span
+                  ></label
+                >
+                <label class="share-choice"
+                  ><input id="shareScopeRuns" type="radio" name="shareScope" value="runs" /><span
+                    ><span>Specific runs</span
+                    ><span id="shareRunsHint" class="share-hint">Choose runs; later commands stay private</span></span
+                  ></label
+                >
+                <button id="shareSpecificRuns" class="share-choose" type="button" hidden>Choose runs…</button>
+                <p class="share-note">Read-only and always redacted. Agents cannot run or stop commands.</p>
+              </section>
+              <section class="share-section" aria-labelledby="shareAgentsTitle">
+                <h4 id="shareAgentsTitle">Agents</h4>
+                <div id="shareAgentList" class="share-agent-list"></div>
+              </section>
+              <section id="shareProduction" class="share-section" aria-labelledby="shareProductionTitle" hidden>
+                <h4 id="shareProductionTitle">Production access</h4>
+                <div id="shareConnectionList" class="share-connection-list"></div>
+                <p class="share-note">Allowed agents fetch up to 24 hours at a time, at most 10 times a minute.</p>
+              </section>
+              <div class="share-footer">
+                <button id="statusAction" class="link-button" type="button">Status and troubleshooting…</button>
+                <button id="shareToggle" class="share-toggle" type="button">Start sharing</button>
+              </div>
+            </div>
+          </div>
+          <div class="popover-container">
+            <button
+              id="moreActions"
+              class="more-actions"
+              type="button"
+              aria-label="More actions"
+              title="More actions"
+              aria-haspopup="menu"
+              aria-expanded="false"
+              aria-controls="actionsMenu"
+            >
+              <span aria-hidden="true">⋯</span>
+            </button>
+            <div id="actionsMenu" class="popover actions-menu" role="menu" aria-labelledby="moreActions" hidden>
+              <button
+                id="copyResults"
+                type="button"
+                role="menuitem"
+                tabindex="-1"
+                hidden
+                title="Copy up to 1,000 filtered log rows as JSON Lines"
+              >
+                Copy filtered results
+              </button>
+              <button
+                id="export"
+                type="button"
+                role="menuitem"
+                tabindex="-1"
+                title="Export filtered logs as JSON Lines, JSON, CSV, or AI context (Markdown)"
+              >
+                Export logs…
+              </button>
+              <div class="menu-separator" role="separator"></div>
+              <button
+                id="breakOnLogs"
+                type="button"
+                role="menuitem"
+                tabindex="-1"
+                title="Pause debug sessions when they log an event matching the current filter"
+              >
+                Break on matching logs
+              </button>
+              <button id="manage" type="button" role="menuitem" tabindex="-1">Manage servers…</button>
+              <div class="menu-separator" role="separator"></div>
+              <button id="config" type="button" role="menuitem" tabindex="-1">Settings</button>
+              <button
+                id="help"
+                type="button"
+                role="menuitem"
+                tabindex="-1"
+                aria-label="Open the Logline Guide"
+                title="Open the Logline Guide"
+              >
+                <span id="helpLabel">Help</span><span id="helpBadge" class="new-badge" hidden>New</span>
+              </button>
+              <button id="takeTour" type="button" role="menuitem" tabindex="-1">Take the tour</button>
+              <button
+                id="suggestFeature"
+                type="button"
+                role="menuitem"
+                tabindex="-1"
+                title="Suggest a feature, or vote on what Logline should do next"
+              >
+                Send feedback…
+              </button>
+              <button id="about" type="button" role="menuitem" tabindex="-1">About Logline</button>
+              <div class="menu-separator" role="separator"></div>
+              <button
+                id="clear"
+                class="menu-danger"
+                type="button"
+                role="menuitem"
+                tabindex="-1"
+                title="Remove every retained log and span. Capture keeps running."
+              >
+                Clear logs
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </header>
+    <div class="workspace">
+      <nav id="sourceRail" class="source-rail" aria-label="Sources">
+        <div class="rail-header">
+          <span class="rail-title">Sources</span>
+          <div class="popover-container rail-add">
+            <button
+              id="railAdd"
+              class="icon-button rail-icon"
+              type="button"
+              aria-haspopup="menu"
+              aria-expanded="false"
+              aria-controls="railAddMenu"
+              title="Add logs: run a command, follow a file, open a browser, import, or connect"
+              aria-label="Add logs"
+            >
+              <svg
+                aria-hidden="true"
+                viewBox="0 0 16 16"
+                width="14"
+                height="14"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.4"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              >
+                <path d="M8 3v10M3 8h10" />
+              </svg>
+            </button>
+            <div id="railAddMenu" class="popover actions-menu" role="menu" aria-labelledby="railAdd" hidden>
+              <button
+                id="railAddRun"
+                type="button"
+                role="menuitem"
+                tabindex="-1"
+                title="Run a command and capture its output"
+              >
+                Run a command…
+              </button>
+              <button
+                id="railAddFile"
+                type="button"
+                role="menuitem"
+                tabindex="-1"
+                title="Follow a log file as it grows"
+              >
+                Follow a log file…
+              </button>
+              <button
+                id="openBrowser"
+                type="button"
+                role="menuitem"
+                tabindex="-1"
+                title="Open your app in a browser whose console, errors, and requests appear here"
+              >
+                Open a browser…
+              </button>
+              <button id="import" type="button" role="menuitem" tabindex="-1" title="Import a file of logs">
+                Import logs…
+              </button>
+              <div class="menu-separator" role="separator"></div>
+              <button
+                id="railAddConnectionItem"
+                type="button"
+                role="menuitem"
+                tabindex="-1"
+                title="Search Datadog, CloudWatch, Loki, Elasticsearch, Cloud Logging, or a database"
+              >
+                Add a connection…
+              </button>
+              <button
+                id="railAddOtlp"
+                type="button"
+                role="menuitem"
+                tabindex="-1"
+                title="Receive OpenTelemetry logs, traces, and metrics from instrumented apps on this machine"
+              >
+                Receive OpenTelemetry
+              </button>
+            </div>
+          </div>
+          <button
+            id="railStopAll"
+            class="icon-button rail-icon"
+            type="button"
+            hidden
+            title="Stop every command Logline started, and every tail"
+            aria-label="Stop all"
+          >
+            <svg
+              aria-hidden="true"
+              viewBox="0 0 16 16"
+              width="14"
+              height="14"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.4"
+              stroke-linecap="round"
+            >
+              <rect x="2.5" y="4.5" width="7" height="7" rx="1" />
+              <path d="M11.5 6.5v5.5a1.5 1.5 0 0 1-1.5 1.5H5" />
+            </svg>
+          </button>
+          <button
+            id="railToggle"
+            class="icon-button rail-icon rail-toggle"
+            type="button"
+            aria-expanded="true"
+            aria-controls="railList"
+            title="Collapse sources"
+            aria-label="Collapse sources"
+          >
+            <svg
+              aria-hidden="true"
+              viewBox="0 0 16 16"
+              width="14"
+              height="14"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.4"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            >
+              <path d="M8 4 4 8l4 4M12.5 4l-4 4 4 4" />
+            </svg>
+          </button>
+        </div>
+        <div id="railList" class="rail-list"></div>
+        <div
+          id="railResizer"
+          class="rail-resizer"
+          role="separator"
+          aria-orientation="vertical"
+          aria-label="Resize sources"
+          title="Drag to resize · double-click to reset"
+          tabindex="0"
+        ></div>
+      </nav>
+      <nav id="tabRail" class="source-rail tab-rail" aria-labelledby="tabRailTitle" hidden>
+        <div class="rail-header">
+          <span id="tabRailTitle" class="rail-title"></span>
+          <button
+            id="tabRailToggle"
+            class="icon-button rail-icon rail-toggle"
+            type="button"
+            aria-expanded="true"
+            aria-controls="tabRailList"
+            title="Collapse filters"
+            aria-label="Collapse filters"
+          >
+            <svg
+              aria-hidden="true"
+              viewBox="0 0 16 16"
+              width="14"
+              height="14"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.4"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            >
+              <path d="M8 4 4 8l4 4M12.5 4l-4 4 4 4" />
+            </svg>
+          </button>
+        </div>
+        <div id="tabRailList" class="rail-list"></div>
+        <div
+          id="tabRailResizer"
+          class="rail-resizer"
+          role="separator"
+          aria-orientation="vertical"
+          aria-label="Resize sources"
+          title="Drag to resize · double-click to reset"
+          tabindex="0"
+        ></div>
+      </nav>
+      <div class="workspace-main">
         <div id="connectionBar" class="connection-bar" role="group" aria-label="Search connection" hidden>
           <div class="connection-controls">
             <label class="connection-range"
@@ -823,311 +883,326 @@
           <code id="connectionPreview" class="connection-note connection-preview"></code>
         </div>
         <p id="rowHint" class="detail-hint table-hint" hidden>
-          Click an event to see its details and actions. Hover a row for quick actions, and hover any icon to see what
-          it does.<button id="rowHintDismiss" class="dismiss-hint" type="button">Got it</button>
+          Click an event to see its details and actions beside the list.<button
+            id="rowHintDismiss"
+            class="dismiss-hint"
+            type="button"
+          >
+            Got it
+          </button>
         </p>
-        <main class="views">
-          <section id="logsView" class="view-panel logs-view" role="tabpanel" aria-labelledby="logsTab">
-            <section class="table-scroll" aria-label="Log events">
-              <table id="eventsTable">
-                <colgroup id="eventColumns"></colgroup>
-                <thead>
-                  <tr id="head-row">
-                    <th>Time</th>
-                    <th>Level</th>
-                    <th title="Click a message to expand it">Message</th>
-                    <th>Source</th>
-                  </tr>
-                </thead>
-                <tbody id="logs"></tbody>
-              </table>
-              <p id="empty">
-                Make your terminal output searchable. Turn on Capture in the status bar, then run commands normally in a
-                supported VS Code terminal.
-              </p>
-              <div id="emptyActions" class="empty-actions" hidden>
-                <button id="emptyCapture" type="button">Capture my terminals</button>
-                <button id="emptyOpenFile" type="button">Open a log file…</button>
-                <button id="emptyBrowser" type="button">Open a browser…</button>
-                <button id="emptyAgent" type="button">Set up for my agent</button>
+        <div class="content-split">
+          <main class="views">
+            <section id="logsView" class="view-panel logs-view" role="tabpanel" aria-labelledby="logsTab">
+              <section class="table-scroll" aria-label="Log events">
+                <table id="eventsTable">
+                  <colgroup id="eventColumns"></colgroup>
+                  <thead>
+                    <tr id="head-row">
+                      <th>Time</th>
+                      <th>Level</th>
+                      <th title="Click a message to expand it">Message</th>
+                      <th>Source</th>
+                    </tr>
+                  </thead>
+                  <tbody id="logs"></tbody>
+                </table>
+                <p id="empty">
+                  Make your terminal output searchable. Turn on Capture in the status bar, then run commands normally in
+                  a supported VS Code terminal.
+                </p>
+                <div id="emptyActions" class="empty-actions" hidden>
+                  <button id="emptyCapture" type="button">Capture my terminals</button>
+                  <button id="emptyOpenFile" type="button">Open a log file…</button>
+                  <button id="emptyBrowser" type="button">Open a browser…</button>
+                  <button id="emptyAgent" type="button">Set up for my agent</button>
+                </div>
+              </section>
+            </section>
+            <section id="analysisView" class="view-panel" role="tabpanel" aria-labelledby="analyze" hidden>
+              <p id="analysisStatus" class="view-status" role="status">Loading…</p>
+              <div id="analysisContent" class="analysis-content"></div>
+            </section>
+            <section id="compareView" class="view-panel" role="tabpanel" aria-labelledby="compare" hidden>
+              <div class="view-header compare-header">
+                <label class="compare-choice"
+                  >Production
+                  <select id="compareBaseline" aria-label="Production run to compare"></select
+                ></label>
+                <label class="compare-choice"
+                  >Local
+                  <select id="compareLocal" aria-label="Local source whose newest runs are compared"></select
+                ></label>
+              </div>
+              <p id="compareStatus" class="view-status" role="status">Loading…</p>
+              <div class="compare-body">
+                <div class="trace-scroll">
+                  <table class="compare-table" aria-label="Errors in production and local runs">
+                    <thead>
+                      <tr id="compareHead"></tr>
+                    </thead>
+                    <tbody id="compareRows"></tbody>
+                  </table>
+                </div>
+                <aside
+                  id="compareDetail"
+                  class="compare-detail"
+                  aria-label="The selected error in production and locally"
+                  hidden
+                ></aside>
               </div>
             </section>
-          </section>
-          <section id="analysisView" class="view-panel" role="tabpanel" aria-labelledby="analyze" hidden>
-            <p id="analysisStatus" class="view-status" role="status">Loading…</p>
-            <div id="analysisContent" class="analysis-content"></div>
-          </section>
-          <section id="compareView" class="view-panel" role="tabpanel" aria-labelledby="compare" hidden>
-            <div class="view-header compare-header">
-              <label class="compare-choice"
-                >Production
-                <select id="compareBaseline" aria-label="Production run to compare"></select
-              ></label>
-              <label class="compare-choice"
-                >Local
-                <select id="compareLocal" aria-label="Local source whose newest runs are compared"></select
-              ></label>
-            </div>
-            <p id="compareStatus" class="view-status" role="status">Loading…</p>
-            <div class="compare-body">
+            <section id="tracesView" class="view-panel" role="tabpanel" aria-labelledby="traces" hidden>
+              <div class="view-header">
+                <p id="tracesStatus" class="view-status" role="status">Loading…</p>
+                <span class="view-header-actions"
+                  ><button id="tracesStartReceiver" hidden title="Receive spans from instrumented apps on this machine">
+                    Start OpenTelemetry receiver
+                  </button></span
+                >
+              </div>
               <div class="trace-scroll">
-                <table class="compare-table" aria-label="Errors in production and local runs">
+                <table class="trace-table traces-table" aria-label="Recent traces">
                   <thead>
-                    <tr id="compareHead"></tr>
+                    <tr>
+                      <th>Started</th>
+                      <th>Operation</th>
+                      <th>Services</th>
+                      <th>Duration</th>
+                      <th>Spans and logs</th>
+                    </tr>
                   </thead>
-                  <tbody id="compareRows"></tbody>
+                  <tbody id="tracesRows"></tbody>
                 </table>
               </div>
-              <aside
-                id="compareDetail"
-                class="compare-detail"
-                aria-label="The selected error in production and locally"
-                hidden
-              ></aside>
-            </div>
-          </section>
-          <section id="tracesView" class="view-panel" role="tabpanel" aria-labelledby="traces" hidden>
-            <div class="view-header">
-              <p id="tracesStatus" class="view-status" role="status">Loading…</p>
-              <span class="view-header-actions"
-                ><button id="tracesStartReceiver" hidden title="Receive spans from instrumented apps on this machine">
-                  Start OpenTelemetry receiver
-                </button></span
-              >
-            </div>
-            <div class="trace-scroll">
-              <table class="trace-table traces-table" aria-label="Recent traces">
-                <thead>
-                  <tr>
-                    <th>Started</th>
-                    <th>Operation</th>
-                    <th>Services</th>
-                    <th>Duration</th>
-                    <th>Spans and logs</th>
-                  </tr>
-                </thead>
-                <tbody id="tracesRows"></tbody>
-              </table>
-            </div>
-          </section>
-          <section id="traceView" class="view-panel" role="tabpanel" aria-labelledby="traces" hidden>
-            <div class="view-header">
-              <span class="view-header-title"
-                ><button id="traceBack" class="back-button" type="button" title="Close the waterfall">Close</button
-                ><strong id="traceTitle">Trace</strong></span
-              >
-              <span class="view-header-actions"
-                ><button id="traceFilter" type="button" title="Show every retained event with this trace id">
-                  Filter logs by trace
-                </button></span
-              >
-            </div>
-            <p id="traceStatus" class="view-status" role="status">Loading…</p>
-            <section id="traceHotspots" class="trace-hotspots" aria-labelledby="traceHotspotsTitle" hidden>
-              <h3 id="traceHotspotsTitle">Where the time went</h3>
-              <ol id="traceHotspotList"></ol>
             </section>
-            <div class="trace-scroll">
-              <table class="trace-table" aria-label="Spans and logs in this trace">
-                <thead>
-                  <tr>
-                    <th>Operation</th>
-                    <th>Service</th>
-                    <th>Timeline</th>
-                    <th>Duration</th>
-                    <th title="Time not spent in child spans">Self</th>
-                  </tr>
-                </thead>
-                <tbody id="traceRows"></tbody>
-              </table>
-            </div>
-          </section>
-          <section id="metricsView" class="view-panel" role="tabpanel" aria-labelledby="metrics" hidden>
-            <div id="metricQuery" class="metric-query" role="group" aria-label="Metric query" hidden>
-              <div class="metric-query-controls">
-                <select id="metricConnection" aria-label="Connection to query"></select>
-                <input
-                  id="metricInput"
-                  type="text"
-                  list="metricSuggestions"
-                  autocomplete="off"
-                  maxlength="2048"
-                  aria-label="Metric query"
-                />
-                <datalist id="metricSuggestions"></datalist>
-                <select id="metricRange" aria-label="Time range">
-                  <option value="15m">Last 15 minutes</option>
-                  <option value="1h">Last hour</option>
-                  <option value="4h">Last 4 hours</option>
-                  <option value="24h">Last 24 hours</option>
-                  <option value="7d">Last 7 days</option>
-                </select>
-                <button id="metricRun" type="button">Run</button>
-                <button
-                  id="metricWatch"
-                  type="button"
-                  aria-pressed="false"
-                  title="Keep reading this query into the Metrics list below, every 15 seconds"
-                >
-                  Watch
-                </button>
-              </div>
-              <p id="metricQueryStatus" class="view-status" role="status"></p>
-              <div id="metricChart" class="metric-chart" hidden></div>
-              <div id="metricSelection" class="metric-selection" role="group" aria-label="Selected time" hidden>
-                <span id="metricSelectionText"></span>
-                <button id="metricShowLogs" type="button">Show logs</button>
-                <button id="metricShowLocal" type="button" title="Show your local logs from this window">
-                  Local logs
-                </button>
-              </div>
-            </div>
-            <div class="view-header">
-              <p id="metricsStatus" class="view-status" role="status">Loading…</p>
-              <span class="view-header-actions"
-                ><input
-                  id="metricsFilter"
-                  type="search"
-                  placeholder="Filter by name, service, or attribute"
-                  aria-label="Filter metrics"
-              /></span>
-            </div>
-            <div class="metrics-scroll">
-              <section id="metricDetail" class="metric-detail" aria-live="polite" hidden></section>
-              <div id="metricsCards" class="metric-cards" role="list" aria-label="OpenTelemetry metrics"></div>
-            </div>
-          </section>
-          <section id="aiCallsView" class="view-panel" role="tabpanel" aria-labelledby="aiCalls" hidden>
-            <div class="view-header">
-              <p id="aiCallsStatus" class="view-status" role="status">Loading…</p>
-              <span id="aiCallsControls" class="view-header-actions"
-                ><select id="aiCallsKind" aria-label="Show">
-                  <option value="">All calls</option>
-                  <option value="model">Model calls</option>
-                  <option value="tool">Tool calls</option>
-                  <option value="agent">Agent runs</option></select
-                ><label class="traces-filter"><input id="aiCallsErrorsOnly" type="checkbox" /> Errors only</label
-                ><input
-                  id="aiCallsFilter"
-                  type="search"
-                  placeholder="Filter by model, tool, or agent"
-                  aria-label="Filter AI calls"
-              /></span>
-            </div>
-            <div class="ai-scroll">
-              <div id="aiCallsTiles" class="analysis-tiles ai-tiles"></div>
-              <table id="aiModelsTable" class="trace-table ai-models-table" aria-label="Totals per model">
-                <thead>
-                  <tr>
-                    <th>Model</th>
-                    <th>Calls</th>
-                    <th>Input</th>
-                    <th>Output</th>
-                    <th>p95</th>
-                    <th>Errors</th>
-                  </tr>
-                </thead>
-                <tbody id="aiModelRows"></tbody>
-              </table>
-              <table id="aiCallsTable" class="trace-table ai-calls-table" aria-label="AI calls">
-                <thead>
-                  <tr>
-                    <th>Started</th>
-                    <th>Operation</th>
-                    <th>Agent</th>
-                    <th title="Input tokens → output tokens">Tokens</th>
-                    <th>Duration</th>
-                    <th title="Why the model stopped">Finish</th>
-                  </tr>
-                </thead>
-                <tbody id="aiCallRows"></tbody>
-              </table>
-            </div>
-          </section>
-          <section id="aiCallView" class="view-panel" role="tabpanel" aria-labelledby="aiCalls" hidden>
-            <div class="view-header">
-              <span class="view-header-title"
-                ><button id="aiCallBack" class="back-button" type="button" title="Back to the list of AI calls">
-                  ← All AI calls</button
-                ><strong id="aiCallTitle">AI call</strong></span
-              >
-              <span class="view-header-actions"
-                ><span id="aiCallNavigation" class="ai-navigation" hidden
-                  ><button
-                    id="aiCallPrevious"
-                    class="icon-button"
+            <section id="metricsView" class="view-panel" role="tabpanel" aria-labelledby="metrics" hidden>
+              <div id="metricQuery" class="metric-query" role="group" aria-label="Metric query" hidden>
+                <div class="metric-query-controls">
+                  <select id="metricConnection" aria-label="Connection to query"></select>
+                  <input
+                    id="metricInput"
+                    type="text"
+                    list="metricSuggestions"
+                    autocomplete="off"
+                    maxlength="2048"
+                    aria-label="Metric query"
+                  />
+                  <datalist id="metricSuggestions"></datalist>
+                  <select id="metricRange" aria-label="Time range">
+                    <option value="15m">Last 15 minutes</option>
+                    <option value="1h">Last hour</option>
+                    <option value="4h">Last 4 hours</option>
+                    <option value="24h">Last 24 hours</option>
+                    <option value="7d">Last 7 days</option>
+                  </select>
+                  <button id="metricRun" type="button">Run</button>
+                  <button
+                    id="metricWatch"
                     type="button"
-                    title="The previous call in this conversation"
-                    aria-label="Previous call"
+                    aria-pressed="false"
+                    title="Keep reading this query into the Metrics list below, every 15 seconds"
                   >
-                    <svg
-                      aria-hidden="true"
-                      viewBox="0 0 16 16"
-                      width="14"
-                      height="14"
-                      fill="none"
-                      stroke="currentColor"
-                      stroke-width="1.4"
-                      stroke-linecap="round"
-                      stroke-linejoin="round"
-                    >
-                      <path d="M10 3.5L5.5 8l4.5 4.5" />
-                    </svg></button
-                  ><span id="aiCallPosition"></span
-                  ><button
-                    id="aiCallNext"
-                    class="icon-button"
-                    type="button"
-                    title="The next call in this conversation"
-                    aria-label="Next call"
-                  >
-                    <svg
-                      aria-hidden="true"
-                      viewBox="0 0 16 16"
-                      width="14"
-                      height="14"
-                      fill="none"
-                      stroke="currentColor"
-                      stroke-width="1.4"
-                      stroke-linecap="round"
-                      stroke-linejoin="round"
-                    >
-                      <path d="M6 3.5l4.5 4.5L6 12.5" />
-                    </svg></button></span
-                ><button id="aiCallTrace" type="button" title="Open the trace this call belongs to">Trace</button
-                ><button
-                  id="aiCallCopy"
-                  type="button"
-                  title="Copy the conversation as Markdown, redacted like exports when logline.redactExports is on"
+                    Watch
+                  </button>
+                </div>
+                <p id="metricQueryStatus" class="view-status" role="status"></p>
+                <div id="metricChart" class="metric-chart" hidden></div>
+                <div id="metricSelection" class="metric-selection" role="group" aria-label="Selected time" hidden>
+                  <span id="metricSelectionText"></span>
+                  <button id="metricShowLogs" type="button">Show logs</button>
+                  <button id="metricShowLocal" type="button" title="Show your local logs from this window">
+                    Local logs
+                  </button>
+                </div>
+              </div>
+              <div class="view-header">
+                <p id="metricsStatus" class="view-status" role="status">Loading…</p>
+                <span class="view-header-actions"
+                  ><input
+                    id="metricsFilter"
+                    type="search"
+                    placeholder="Filter by name, service, or attribute"
+                    aria-label="Filter metrics"
+                /></span>
+              </div>
+              <div class="metrics-scroll">
+                <section id="metricDetail" class="metric-detail" aria-live="polite" hidden></section>
+                <div id="metricsCards" class="metric-cards" role="list" aria-label="OpenTelemetry metrics"></div>
+              </div>
+            </section>
+            <section id="aiCallsView" class="view-panel" role="tabpanel" aria-labelledby="aiCalls" hidden>
+              <div class="view-header">
+                <p id="aiCallsStatus" class="view-status" role="status">Loading…</p>
+                <span id="aiCallsControls" class="view-header-actions"
+                  ><input
+                    id="aiCallsFilter"
+                    type="search"
+                    placeholder="Filter by model, tool, or agent"
+                    aria-label="Filter AI calls"
+                /></span>
+              </div>
+              <div class="ai-scroll">
+                <div id="aiCallsTiles" class="analysis-tiles ai-tiles"></div>
+                <table id="aiCallsTable" class="trace-table ai-calls-table" aria-label="AI calls">
+                  <thead>
+                    <tr>
+                      <th>Started</th>
+                      <th>Operation</th>
+                      <th>Agent</th>
+                      <th title="Input tokens → output tokens">Tokens</th>
+                      <th>Duration</th>
+                      <th title="Why the model stopped">Finish</th>
+                    </tr>
+                  </thead>
+                  <tbody id="aiCallRows"></tbody>
+                </table>
+              </div>
+            </section>
+            <section id="doctorView" class="view-panel doctor-view" role="tabpanel" aria-labelledby="doctor" hidden>
+              <div class="view-header">
+                <p class="view-status">
+                  Problems with log statements, found in what they actually logged. Also shown in the Problems panel.
+                </p>
+                <span class="view-header-actions"
+                  ><button type="button" data-doctor-action="report" title="Open a Markdown report of every finding">
+                    Full report
+                  </button></span
                 >
-                  Copy
-                </button></span
+              </div>
+              <div id="doctorList" class="doctor-list"></div>
+            </section>
+            <section
+              id="connectionView"
+              class="view-panel connection-view"
+              role="tabpanel"
+              aria-labelledby="connectionTab"
+              hidden
+            ></section>
+          </main>
+          <aside id="inspector" class="inspector" aria-labelledby="inspectorTitle" hidden>
+            <div
+              id="inspectorResizer"
+              class="rail-resizer inspector-resizer"
+              role="separator"
+              aria-orientation="vertical"
+              aria-label="Resize details"
+              title="Drag to resize · double-click to reset"
+              tabindex="0"
+            ></div>
+            <div class="inspector-header">
+              <strong id="inspectorTitle" class="inspector-title"></strong>
+              <span id="inspectorNav" class="inspector-nav"></span>
+              <button
+                id="inspectorClose"
+                class="icon-button"
+                type="button"
+                title="Close (Esc)"
+                aria-label="Close details"
               >
+                <svg
+                  aria-hidden="true"
+                  viewBox="0 0 16 16"
+                  width="12"
+                  height="12"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.6"
+                  stroke-linecap="round"
+                >
+                  <path d="M4 4l8 8M12 4l-8 8" />
+                </svg>
+              </button>
             </div>
-            <p id="aiCallStatus" class="view-status" role="status">Loading…</p>
-            <div id="aiCallTranscript" class="ai-transcript"></div>
-          </section>
-          <section id="doctorView" class="view-panel doctor-view" role="tabpanel" aria-labelledby="doctor" hidden>
-            <div class="view-header">
-              <p class="view-status">
-                Problems with log statements, found in what they actually logged. Also shown in the Problems panel.
-              </p>
-              <span class="view-header-actions"
-                ><button type="button" data-doctor-action="report" title="Open a Markdown report of every finding">
-                  Full report
-                </button></span
-              >
-            </div>
-            <div id="doctorList" class="doctor-list"></div>
-          </section>
-          <section
-            id="connectionView"
-            class="view-panel connection-view"
-            role="tabpanel"
-            aria-labelledby="connectionTab"
-            hidden
-          ></section>
-        </main>
+            <p id="inspectorMeta" class="inspector-meta" hidden></p>
+            <div id="inspectorBody" class="inspector-body"></div>
+          </aside>
+        </div>
+      </div>
+    </div>
+    <div id="inspectorParts" hidden>
+      <span id="aiCallNavigation" class="ai-navigation" hidden
+        ><button
+          id="aiCallPrevious"
+          class="icon-button"
+          type="button"
+          title="The previous call in this conversation"
+          aria-label="Previous call"
+        >
+          <svg
+            aria-hidden="true"
+            viewBox="0 0 16 16"
+            width="14"
+            height="14"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.4"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          >
+            <path d="M10 3.5L5.5 8l4.5 4.5" />
+          </svg></button
+        ><span id="aiCallPosition"></span
+        ><button
+          id="aiCallNext"
+          class="icon-button"
+          type="button"
+          title="The next call in this conversation"
+          aria-label="Next call"
+        >
+          <svg
+            aria-hidden="true"
+            viewBox="0 0 16 16"
+            width="14"
+            height="14"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.4"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          >
+            <path d="M6 3.5l4.5 4.5L6 12.5" />
+          </svg></button
+      ></span>
+      <div id="traceView" class="inspector-part">
+        <div class="inspector-actions">
+          <button id="traceFilter" type="button" title="Show every retained event with this trace id">
+            Show this trace's logs
+          </button>
+        </div>
+        <p id="traceStatus" class="view-status" role="status">Loading…</p>
+        <section id="traceHotspots" class="trace-hotspots" aria-labelledby="traceHotspotsTitle" hidden>
+          <h3 id="traceHotspotsTitle">Where the time went</h3>
+          <ol id="traceHotspotList"></ol>
+        </section>
+        <div class="trace-scroll">
+          <table class="trace-table" aria-label="Spans and logs in this trace">
+            <thead>
+              <tr>
+                <th>Operation</th>
+                <th>Service</th>
+                <th>Timeline</th>
+                <th>Duration</th>
+                <th title="Time not spent in child spans">Self</th>
+              </tr>
+            </thead>
+            <tbody id="traceRows"></tbody>
+          </table>
+        </div>
+      </div>
+      <div id="aiCallView" class="inspector-part">
+        <div class="inspector-actions">
+          <button id="aiCallTrace" type="button" title="Open the trace this call belongs to">Trace</button>
+          <button
+            id="aiCallCopy"
+            type="button"
+            title="Copy the conversation as Markdown, redacted like exports when logline.redactExports is on"
+          >
+            Copy as Markdown
+          </button>
+        </div>
+        <p id="aiCallStatus" class="view-status" role="status">Loading…</p>
+        <div id="aiCallTranscript" class="ai-transcript"></div>
       </div>
     </div>
     <div
@@ -1183,6 +1258,23 @@
         <span id="status" class="status-notice" role="status" aria-live="polite" hidden>Ready</span>
       </div>
       <div class="status-right">
+        <button id="issuesChip" class="status-chip issues-chip" type="button" hidden>
+          <svg
+            class="tb-icon"
+            aria-hidden="true"
+            viewBox="0 0 16 16"
+            width="13"
+            height="13"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.3"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          >
+            <path d="M8 2.5 14.5 13.5h-13zM8 6.5v3" />
+            <circle cx="8" cy="11.6" r=".4" fill="currentColor" /></svg
+          ><span id="doctorCount" class="button-label"></span>
+        </button>
         <button id="shareScope" class="status-chip share-chip" type="button" hidden></button>
         <button
           id="captureToggle"
@@ -1209,47 +1301,66 @@
         <button id="otlpStatus" class="status-chip otlp-chip" type="button" aria-pressed="false">
           OpenTelemetry off
         </button>
-        <div class="popover-container memory-control">
+        <button id="counts" class="status-chip memory-chip" type="button" hidden>
+          <span class="memory-meter" aria-hidden="true"><span id="memoryFill" class="memory-fill"></span></span
+          ><span id="memoryText"></span>
+        </button>
+        <div class="popover-container status-control">
           <button
-            id="counts"
-            class="status-chip memory-chip"
+            id="statusIcon"
+            class="status-chip status-icon"
             type="button"
+            aria-label="Status"
             aria-haspopup="dialog"
             aria-expanded="false"
-            aria-controls="memoryPanel"
+            aria-controls="statusPanel"
+            title="Status: terminal capture, the OpenTelemetry receiver, agents, and memory"
           >
-            <span class="memory-meter" aria-hidden="true"><span id="memoryFill" class="memory-fill"></span></span
-            ><span id="memoryText"></span>
+            <svg
+              aria-hidden="true"
+              viewBox="0 0 16 16"
+              width="13"
+              height="13"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.4"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            >
+              <circle cx="8" cy="8" r="5.5" />
+              <path d="M5.8 8.2l1.6 1.6 3-3.2" />
+            </svg>
           </button>
-          <div id="memoryPanel" class="popover memory-panel" role="dialog" aria-labelledby="memoryTitle" hidden>
-            <h3 id="memoryTitle">Kept in memory</h3>
-            <p id="memorySummary" class="memory-summary"></p>
-            <dl id="memoryDetails" class="memory-details"></dl>
-            <button id="memorySettings" class="link-button" type="button">Change limits in Settings</button>
+          <div id="statusPanel" class="popover status-panel" role="dialog" aria-labelledby="statusTitle" hidden>
+            <h3 id="statusTitle">Status</h3>
+            <div class="status-row">
+              <div><strong>Terminal capture</strong><span id="statusCaptureText" class="status-row-detail"></span></div>
+              <button id="statusCapture" type="button"></button>
+            </div>
+            <div class="status-row">
+              <div>
+                <strong>OpenTelemetry receiver</strong><span id="statusOtlpText" class="status-row-detail"></span>
+              </div>
+              <button id="statusOtlp" type="button"></button>
+            </div>
+            <div class="status-row">
+              <div><strong>Agents</strong><span id="statusAgentsText" class="status-row-detail"></span></div>
+              <button id="statusAgents" type="button">Manage</button>
+            </div>
+            <div id="statusIssuesRow" class="status-row" hidden>
+              <div><strong>Log issues</strong><span id="statusIssuesText" class="status-row-detail"></span></div>
+              <button id="statusIssues" type="button">Open</button>
+            </div>
+            <div class="status-row status-memory">
+              <div>
+                <strong>Memory</strong><span id="memorySummary" class="status-row-detail"></span>
+                <dl id="memoryDetails" class="memory-details"></dl>
+              </div>
+              <button id="memorySettings" type="button">Limits</button>
+            </div>
+            <button id="statusTroubleshoot" class="link-button" type="button">Troubleshooting…</button>
           </div>
         </div>
-        <button
-          id="statusIcon"
-          class="status-chip status-icon"
-          type="button"
-          aria-label="Status and troubleshooting"
-          title="Status and troubleshooting: the receiver, agent connections, sharing, and capture"
-        >
-          <svg
-            aria-hidden="true"
-            viewBox="0 0 16 16"
-            width="13"
-            height="13"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="1.4"
-            stroke-linecap="round"
-            stroke-linejoin="round"
-          >
-            <circle cx="8" cy="8" r="5.5" />
-            <path d="M5.8 8.2l1.6 1.6 3-3.2" />
-          </svg>
-        </button>
       </div>
     </footer>
     <dialog id="contextDialog" aria-labelledby="contextTitle">
@@ -1331,6 +1442,84 @@
       <p class="welcome-note">
         This shows once. Logline keeps everything on this machine; nothing is sent anywhere unless you share it.
       </p>
+    </dialog>
+    <dialog id="aboutDialog" class="about-dialog" aria-labelledby="aboutTitle" aria-describedby="aboutTagline">
+      <button id="aboutClose" class="about-close" type="button" aria-label="Close" title="Close">×</button>
+      <div class="about-hero">
+        <span class="about-mark" aria-hidden="true"
+          ><svg width="100%" height="100%" viewBox="0 0 128 128" xmlns="http://www.w3.org/2000/svg">
+            <defs>
+              <linearGradient id="about-c" x1="0" y1="0" x2="1" y2="1">
+                <stop offset="0" stop-color="#0f172a" />
+                <stop offset="1" stop-color="#020617" />
+              </linearGradient>
+              <linearGradient id="about-cg" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0" stop-color="#22d3ee" />
+                <stop offset="1" stop-color="#a78bfa" />
+              </linearGradient>
+            </defs>
+            <rect width="128" height="128" rx="30" fill="url(#about-c)" />
+            <g fill="none" stroke="url(#about-cg)" stroke-width="10" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M44 30c-9 0-11 5-11 12v10c0 7-3 12-11 12 8 0 11 5 11 12v10c0 7 2 12 11 12" />
+              <path d="M84 30c9 0 11 5 11 12v10c0 7 3 12 11 12-8 0-11 5-11 12v10c0 7-2 12-11 12" />
+            </g>
+            <circle cx="48" cy="64" r="6.5" fill="#e0f2fe" />
+            <circle cx="64" cy="64" r="6.5" fill="#e0f2fe" />
+            <circle cx="80" cy="64" r="6.5" fill="#f472b6" /></svg
+        ></span>
+        <div class="about-name">
+          <h2 id="aboutTitle">Logline</h2>
+          <span id="aboutVersion" class="about-version"></span>
+        </div>
+        <p id="aboutTagline" class="about-tagline">All your logs in one searchable view, ready for your AI agent.</p>
+        <p class="about-legal">MIT License · Your logs stay on this machine</p>
+      </div>
+      <div class="about-body">
+        <div class="about-links">
+          <button id="aboutWhatsNew" type="button">
+            <svg class="about-icon" aria-hidden="true" viewBox="0 0 16 16" width="16" height="16">
+              <path d="M8 1.5l1.6 4.2 4.4.3-3.4 2.8 1.1 4.3L8 10.7l-3.7 2.4 1.1-4.3L2 6l4.4-.3z" /></svg
+            ><span>What's new</span>
+          </button>
+          <button id="aboutGithub" type="button">
+            <svg class="about-icon" aria-hidden="true" viewBox="0 0 16 16" width="16" height="16">
+              <path
+                d="M8 1.2a6.8 6.8 0 0 0-2.15 13.25c.34.06.46-.15.46-.33v-1.2c-1.9.41-2.3-.8-2.3-.8-.31-.79-.76-1-.76-1-.62-.42.05-.41.05-.41.69.05 1.05.7 1.05.7.61 1.05 1.6.75 1.99.57.06-.44.24-.75.43-.92-1.51-.17-3.1-.76-3.1-3.36 0-.74.27-1.35.7-1.83-.07-.17-.3-.86.07-1.8 0 0 .57-.18 1.87.7a6.5 6.5 0 0 1 3.4 0c1.3-.88 1.87-.7 1.87-.7.37.94.14 1.63.07 1.8.44.48.7 1.09.7 1.83 0 2.61-1.6 3.19-3.11 3.36.24.21.46.62.46 1.25v1.85c0 .18.12.4.47.33A6.8 6.8 0 0 0 8 1.2z"
+              /></svg
+            ><span>GitHub</span>
+          </button>
+          <button id="aboutIssue" type="button">
+            <svg class="about-icon" aria-hidden="true" viewBox="0 0 16 16" width="16" height="16">
+              <path
+                d="M8 2.5a2.5 2.5 0 0 1 2.45 2H5.55A2.5 2.5 0 0 1 8 2.5zM4.5 6h7v4a3.5 3.5 0 0 1-7 0zM2 8h2.5M11.5 8H14M2.5 12l2-1M13.5 12l-2-1M2.5 4.5l2 1.5M13.5 4.5l-2 1.5"
+              /></svg
+            ><span>Report an issue</span>
+          </button>
+        </div>
+        <div class="about-author">
+          <span class="about-avatar" aria-hidden="true">SB</span>
+          <div class="about-author-text">
+            <strong>Made by Surjeet Banga</strong><span>Logline is free and open source.</span>
+          </div>
+          <button id="aboutAuthor" type="button">About me</button>
+        </div>
+        <button id="aboutSponsor" class="about-sponsor" type="button">
+          <svg class="about-icon" aria-hidden="true" viewBox="0 0 16 16" width="16" height="16">
+            <path d="M8 13.8S1.8 10.2 1.8 5.9A3.3 3.3 0 0 1 8 4.3a3.3 3.3 0 0 1 6.2 1.6c0 4.3-6.2 7.9-6.2 7.9z" /></svg
+          ><span><strong>Sponsor Logline</strong><small>If it saves you time, help keep it going.</small></span>
+        </button>
+        <div class="about-details">
+          <dl>
+            <dt>Editor</dt>
+            <dd id="aboutEditor"></dd>
+            <dt>System</dt>
+            <dd id="aboutSystem"></dd>
+          </dl>
+          <button id="aboutCopy" type="button" title="Copy the version, editor, and system for a bug report">
+            Copy
+          </button>
+        </div>
+      </div>
     </dialog>
     <div id="tourHint" class="tour-hint" role="status" hidden>
       <span>Take the tour any time from <strong>More actions → Take the tour</strong>.</span>

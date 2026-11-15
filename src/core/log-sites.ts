@@ -366,9 +366,12 @@ function skipExpression(text: string, start: number): number {
 const PLACEHOLDER =
   /\0|\$\{[^}]*\}|#\{[^}]*\}|\{\{|\}\}|\{[^{}]*\}|%%|%(?:\([^)]*\))?[-+ #0]*(?:\d+|\*)?(?:\.\d+)?[sdifoOjJvqxXeEgGtTpcbuUw]/g;
 
+// Languages that interpolate `$name` as well as `${…}`.
+const DOLLAR_PLACEHOLDER = new RegExp(`${PLACEHOLDER.source}|\\$[A-Za-z_]\\w*`, 'g');
+
 function splitTemplate(value: string, interpolated: boolean, dollar: boolean): string[] {
   const parts: string[] = [''];
-  const pattern = dollar ? new RegExp(`${PLACEHOLDER.source}|\\$[A-Za-z_]\\w*`, 'g') : PLACEHOLDER;
+  const pattern = dollar ? DOLLAR_PLACEHOLDER : PLACEHOLDER;
   let last = 0;
   for (const match of value.matchAll(pattern)) {
     parts[parts.length - 1] += value.slice(last, match.index);
@@ -444,8 +447,15 @@ const KEY_TOKEN = /(?<![\w…])[A-Za-z0-9][A-Za-z0-9_]*(?![\w…])/g;
 
 interface Compiled {
   site: LogSite;
-  parts: RegExp[];
+  /** The literals as patterns, built the first time a message is tested against the site. */
+  parts?: RegExp[];
   score: number;
+}
+
+function partsOf(compiled: Compiled): RegExp[] {
+  return (compiled.parts ??= compiled.site.literals.map(
+    (part) => new RegExp(escapeRegex(part).replace(/\s+/g, '\\s+?'), 'g'),
+  ));
 }
 
 /**
@@ -564,11 +574,12 @@ export class LogSiteIndex {
     let best: Compiled | undefined;
     let tied = false;
     const seen = new Set<Compiled>();
+    const index = this.wordIndex();
     for (const word of words) {
-      for (const candidate of this.wordIndex().get(word.toLowerCase()) ?? []) {
+      for (const candidate of index.get(word.toLowerCase()) ?? []) {
         if (seen.has(candidate)) continue;
         seen.add(candidate);
-        if (!inOrder(candidate.parts, message)) continue;
+        if (!inOrder(partsOf(candidate), message)) continue;
         if (!best || candidate.score > best.score) {
           best = candidate;
           tied = false;
@@ -615,9 +626,8 @@ export class LogSiteIndex {
         const difference = frequency.get(word)! - frequency.get(best)!;
         return difference < 0 || (difference === 0 && word.length > best.length) ? word : best;
       });
-      const parts = site.literals.map((part) => new RegExp(escapeRegex(part).replace(/\s+/g, '\\s+?'), 'g'));
       const list = index.get(key) ?? [];
-      list.push({ site, parts, score: site.literals.join('').replace(/\s+/g, '').length });
+      list.push({ site, score: site.literals.join('').replace(/\s+/g, '').length });
       index.set(key, list);
     }
     return (this.byWord = index);

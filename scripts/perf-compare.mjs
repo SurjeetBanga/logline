@@ -13,7 +13,7 @@
 //
 // A timed case over a limit (and slower by more than --floor ms) is measured again with twice the rounds, and fails
 // only if it is still over. A size case (bytes sent, memory retained) is deterministic and fails when it grows by
-// more than --size-threshold.
+// more than --size-threshold. A case the benchmark marks `baselineOnly` is held to the baseline alone.
 //
 // --shard i/n measures one nth of the cases, balanced by the weights benchmark.mjs gives them, so CI can split the
 // cases across machines; each comparison still runs on one machine. --merge combines the shards' results into one report and one verdict.
@@ -75,10 +75,10 @@ function compareBuilds() {
       { stdio: ['ignore', 'inherit', 'inherit'] },
     );
     if (result.status !== 0) throw new Error(`The benchmark failed for ${side} (${sides[side]}).`);
-    for (const [name, { label, unit, value, error }] of Object.entries(
+    for (const [name, { label, unit, value, error, baselineOnly }] of Object.entries(
       JSON.parse(readFileSync(output, 'utf8')).results,
     )) {
-      meta[name] = { label, unit };
+      meta[name] = { label, unit, baselineOnly };
       if (error) errors[side][name] = error;
       else (samples[side][name] ??= []).push(value);
     }
@@ -111,13 +111,15 @@ function compareBuilds() {
   }
 
   function verdicts() {
-    return Object.entries(meta).map(([name, { label, unit }]) => {
+    return Object.entries(meta).map(([name, { label, unit, baselineOnly }]) => {
       const base = median(samples.base[name]);
       const baseline = baselineSide && median(samples[baselineSide][name]);
       const head = median(samples.head[name]);
       if (head === undefined) return { name, label, unit, base, baseline, status: 'broken', note: errors.head[name] };
       const change = compare(head, base, unit);
       const drift = compare(head, baseline, unit);
+      // Held to the baseline alone: the change from the base is shown, never a failure.
+      if (baselineOnly && change) change.over = false;
       const timed = unit === 'ms';
       const status = change?.over
         ? timed

@@ -7,6 +7,7 @@ import { afterEach, test } from 'node:test';
 import { createContext, runInContext } from 'node:vm';
 import type { buildEventDetails } from './inspection/details';
 import type { createViewer } from './viewer';
+import { isTabName, tabOf } from './views';
 
 // A minimal DOM adapter checks the real webview's message/state transitions.
 // It does not simulate layout; visual verification still needs a browser.
@@ -111,6 +112,12 @@ class Element {
   removeAttribute(name: string) {
     delete this.attributes[name];
   }
+  getAttribute(name: string) {
+    return this.attributes[name] ?? null;
+  }
+  get parentElement() {
+    return this.parent;
+  }
   setAttribute(name: string, value: string) {
     this.attributes[name] = value;
     if (name === 'class') this.className = value;
@@ -130,7 +137,13 @@ class Element {
   }
   querySelectorAll(selector: string): Element[] {
     return this.children.flatMap((child) => [
-      ...(selector.startsWith('.') && child.classList.contains(selector.slice(1)) ? [child] : []),
+      ...(selector.startsWith('.') &&
+      selector
+        .slice(1)
+        .split('.')
+        .every((name) => child.classList.contains(name))
+        ? [child]
+        : []),
       ...(selector === 'td[data-column]' && child.dataset.column ? [child] : []),
       ...child.querySelectorAll(selector),
     ]);
@@ -173,6 +186,16 @@ class Element {
     this.listeners.get('close')?.();
   }
 }
+
+/** A click whose target answers only the one selector that `closest` is asked for. */
+const clickOn = (selector: string, target: Element | undefined) => ({
+  target: { closest: (wanted: string) => (wanted === selector ? target : undefined) },
+});
+const eventRow = (get: (id: string) => Element, id: number) =>
+  get('logs')
+    .querySelectorAll('.event-row')
+    .find((row) => String(row.dataset.id) === String(id))!;
+const rowButton = (get: (id: string) => Element, id: number) => eventRow(get, id).querySelector('.message-button')!;
 
 const disposables: { dispose(): void }[] = [];
 afterEach(() => {
@@ -300,17 +323,16 @@ function viewer(
   return { get, messages, savedStates, timers, app, runtime, dom: document, renderDetails, receive, flushFrames };
 }
 
-test('context preserves search, levels, server, paging, pause state and scroll position', () => {
+test('context preserves search, levels, server, paging, selected event and scroll position', () => {
   const { get, app, receive, messages } = viewer();
   get('older').listeners.get('click')!();
-  app.table.toggleExpand(42);
+  app.table.select(42);
   get('viewport').scrollTop = 450;
   const state = () =>
     JSON.stringify({
       page: app.state.page,
       before: app.state.before,
       following: app.state.following,
-      paused: app.state.paused,
       selected: app.state.selected,
       selectedServer: app.state.selectedServer,
       levels: [...app.state.checkedLevels],
@@ -347,7 +369,7 @@ test('context preserves search, levels, server, paging, pause state and scroll p
 test('context handles evicted anchors and source links send only frame coordinates', () => {
   const { get, app, renderDetails, receive, messages } = viewer();
   (() => {
-    app.table.toggleExpand(42);
+    app.table.select(42);
     app.inspection.showContext(42);
   })();
   receive({ type: 'context', id: 42, missing: true, events: [] });
@@ -491,11 +513,11 @@ test('More actions supports keyboard navigation and restores focus on dismissal'
   assert.equal(dom.activeElement, get('copyResults'));
   const key = (value: string) => get('actionsMenu').listeners.get('keydown')!({ key: value, preventDefault() {} });
   key('ArrowUp');
-  assert.equal(dom.activeElement, get('voteOnNext'));
+  assert.equal(dom.activeElement, get('clear'));
   key('ArrowDown');
   assert.equal(dom.activeElement, get('copyResults'));
   key('End');
-  assert.equal(dom.activeElement, get('voteOnNext'));
+  assert.equal(dom.activeElement, get('clear'));
   key('Home');
   assert.equal(dom.activeElement, get('copyResults'));
   key('ArrowDown');
@@ -504,7 +526,7 @@ test('More actions supports keyboard navigation and restores focus on dismissal'
   assert.equal(get('actionsMenu').hidden, true);
   assert.equal(dom.activeElement, get('moreActions'));
   get('moreActions').listeners.get('keydown')!({ key: 'ArrowUp', preventDefault() {} });
-  assert.equal(dom.activeElement, get('voteOnNext'));
+  assert.equal(dom.activeElement, get('clear'));
   dom.listeners.get('keydown')!({ key: 'Escape' });
   assert.equal(get('actionsMenu').hidden, true);
   assert.equal(dom.activeElement, get('moreActions'));
@@ -514,17 +536,18 @@ test('More actions preserves commands and closes after selection or an outside c
   const { get, dom, messages } = viewer();
   for (const [id, type] of [
     ['export', 'export'],
-    ['import', 'import'],
     ['manage', 'manageServers'],
     ['config', 'config'],
     ['help', 'showGuide'],
     ['suggestFeature', 'suggestFeature'],
-    ['voteOnNext', 'voteOnNext'],
+    ['about', 'showAbout'],
+    ['clear', 'clear'],
   ]) {
     get('actionsMenu').hidden = true;
+    const before = messages.length;
     get('moreActions').listeners.get('click')!({ stopPropagation() {} });
     get(id).listeners.get('click')!();
-    assert.equal(messages.at(-1)?.type, type);
+    assert.equal(messages.find((message, index) => index >= before && message.type === type)?.type, type);
     assert.equal(get('actionsMenu').hidden, true);
     assert.equal(get('moreActions').attributes['aria-expanded'], 'false');
     assert.equal(dom.activeElement, get('moreActions'));
@@ -875,12 +898,12 @@ test('right-clicking a table value offers an additional field-value filter', () 
   assert.equal(messages.at(-1)?.query, 'timeout level:"error"');
 });
 
-test('Exclude saves the narrowed query and preserves scope while leaving inspection', () => {
+test('Exclude saves the narrowed query and preserves scope while the event stays selected', () => {
   const { get, app, messages, savedStates, timers, receive } = viewer();
   get('search').value = 'service:api OR service:worker';
   get('search').listeners.get('input')!();
   assert.equal(timers.size, 2);
-  app.table.toggleExpand(42);
+  app.table.select(42);
   app.state.page = 1;
   const row = get('logs').querySelectorAll('.event-row')[0];
   const cell = row.children.find((cell) => cell.dataset.column === 'base:level')!;
@@ -893,9 +916,7 @@ test('Exclude saves the narrowed query and preserves scope while leaving inspect
   assert.equal(messages.at(-1)?.serverId, 'api');
   assert.deepEqual([...messages.at(-1)?.levels], ['error']);
   assert.equal(app.state.page, 0);
-  assert.equal(app.state.following, false);
-  assert.equal(app.state.paused, false);
-  assert.equal(app.state.selected, undefined);
+  assert.equal(app.state.selected, 42, 'filtering does not close the event');
   assert.equal(get('cellFilterMenu').hidden, true);
   assert.equal(timers.size, 0);
   assert.equal(get('fieldSuggestions').children.length, 0);
@@ -1094,7 +1115,6 @@ test('in terminal order, Live settles at the new bottom after layout and resumes
   flushFrames();
   assert.equal(get('viewport').scrollTop, 32000);
   (() => {
-    app.state.paused = true;
     app.state.following = false;
     app.state.before = 50;
     app.state.page = 3;
@@ -1106,20 +1126,16 @@ test('in terminal order, Live settles at the new bottom after layout and resumes
   flushFrames();
   assert.equal(get('viewport').scrollTop, 32000);
   assert.equal(
-    app.state.following &&
-      !app.state.paused &&
-      app.state.page === 0 &&
-      app.state.before === undefined &&
-      app.state.selectedSort === '' &&
-      app.state.selected === undefined,
+    app.state.following && app.state.page === 0 && app.state.before === undefined && app.state.selectedSort === '',
     true,
   );
+  assert.equal(app.state.selected, 42, 'resuming Live leaves the open event alone');
   assert.equal(app.state.lastRows, undefined, 'the same result IDs must still be rendered after resuming');
 });
 
-test('opening a live row freezes its result set while a snapshot is in flight', () => {
-  const { app, receive } = viewer();
-  app.table.toggleExpand(42);
+test('live rows keep arriving and rendering while an event is selected', () => {
+  const { app, receive, get } = viewer();
+  app.table.select(42);
   receive({
     type: 'snapshot',
     generation: 1,
@@ -1130,17 +1146,25 @@ test('opening a live row freezes its result set while a snapshot is in flight', 
     bytes: 1000,
     maxBytes: 10000,
     columns: [],
-    events: [{ id: 101, level: 'info', message: 'new line' }],
+    events: [
+      { id: 101, level: 'info', message: 'new line' },
+      { id: 42, level: 'error', message: 'timeout' },
+    ],
     page: 0,
     pages: 1,
     matched: 101,
   });
   assert.equal(app.state.selected, 42);
-  assert.equal(app.table.events[0].id, 42, 'the selected row remains available until Live is resumed');
+  assert.equal(app.state.following, true, 'selecting does not stop Live');
+  assert.equal(app.table.events[0].id, 101, 'the new row is shown');
+  const rows = get('logs').querySelectorAll('.event-row');
+  assert.ok(rows.some((row) => String(row.dataset.id) === '101'));
+  const selected = rows.find((row) => String(row.dataset.id) === '42')!;
+  assert.equal(selected.classList.contains('selected'), true, 'the selection stays marked as rows change');
 });
 
-test('a history reset during inspection is applied once inspection ends', () => {
-  const { app, receive } = viewer();
+test('clearing the logs while an event is selected applies at once and closes the inspector', () => {
+  const { app, receive, get } = viewer();
   const snapshot = (generation: number, id: number) =>
     receive({
       type: 'snapshot',
@@ -1158,15 +1182,16 @@ test('a history reset during inspection is applied once inspection ends', () => 
       matched: 1,
     });
   snapshot(1, 42);
-  app.table.toggleExpand(42);
-  snapshot(2, 7);
-  assert.equal(app.state.selected, 42, 'inspection stays open across the reset');
-  assert.equal(app.state.generation, 1, 'the reset is deferred rather than forgotten');
-  app.state.resume();
+  get('logs').listeners.get('click')!(clickOn('.message-button', rowButton(get, 42)));
+  assert.equal(app.state.selected, 42);
+  assert.equal(get('inspector').hidden, false);
   app.state.page = 3;
   snapshot(2, 7);
-  assert.equal(app.state.generation, 2);
-  assert.equal(app.state.page, 0, 'the deferred reset clears paging once inspection ends');
+  assert.equal(app.state.generation, 2, 'the reset is applied immediately');
+  assert.equal(app.state.page, 0);
+  assert.equal(app.state.selected, undefined);
+  assert.equal(get('inspector').hidden, true);
+  assert.equal(app.table.events.length, 0, 'the old rows are dropped until the next snapshot');
 });
 
 test('snapshot errors release the bridge and keep the next refresh possible', () => {
@@ -1181,21 +1206,18 @@ test('snapshot errors release the bridge and keep the next refresh possible', ()
   assert.equal(messages.at(-1)?.type, 'snapshot');
 });
 
-test('explicit paging, filtering, sorting and column selection leave inspection in Browse', () => {
+test('explicit paging, filtering, sorting and column selection keep the selected event open', () => {
   for (const action of ['page', 'filter', 'sort', 'columns']) {
     const { app, get, receive, messages } = viewer();
-    app.table.toggleExpand(42);
+    app.table.select(42);
     if (action === 'page') get('older').listeners.get('click')!();
     if (action === 'filter') get('levelMenu').children[0].children[0].listeners.get('click')!({ stopPropagation() {} });
     if (action === 'sort') get('head-row').children[0].querySelector('.column-sort')!.listeners.get('click')!();
     if (action === 'columns') get('fieldsAll').listeners.get('click')!();
     const request = messages.at(-1)!;
     assert.equal(request.type, 'snapshot', action);
-    assert.equal(request.statsOnly, false, action);
-    assert.equal(request.before, 100, action);
-    assert.equal(app.state.paused, false, action);
-    assert.equal(app.state.following, false, action);
-    assert.equal(app.state.selected, undefined, action);
+    assert.equal(app.state.selected, 42, action);
+    if (action === 'page' || action === 'sort') assert.equal(app.state.following, false, action);
     receive({
       type: 'snapshot',
       generation: 1,
@@ -1215,6 +1237,7 @@ test('explicit paging, filtering, sorting and column selection leave inspection 
       matched: 1,
     });
     assert.equal(app.table.events[0].id, 43, action);
+    assert.equal(app.state.selected, 42, action);
   }
 });
 
@@ -1241,33 +1264,38 @@ test('autocomplete ignores changed input or server and inserts a complete query'
   assert.equal(get('fieldSuggestions').children.length, 0);
 });
 
-test('scrolling past expanded details keeps their DOM state and does not repeatedly replace rows', () => {
+test('scrolling past the selected row keeps rows in place and adds no detail row or spacer height', () => {
   const { get, app, flushFrames, receive } = viewer();
   app.state.newestFirst = false; // terminal order: these rows are laid out oldest first
   get('viewport').scrollTop = 0;
   (() => {
     app.state.following = false;
     app.table.renderRows(Array.from({ length: 100 }, (_, i) => ({ id: i + 1, level: 'info', message: 'line ' + i })));
-    app.table.toggleExpand(10);
+    app.table.select(10);
   })();
   receive({ type: 'details', id: 10, text: 'large payload', exceptions: [] });
-  const detail = get('logs').querySelector('.detail-row')!;
-  detail.height = 350;
-  detail.querySelector('.event-details')!.scrollTop = 200;
   flushFrames();
+  assert.equal(get('logs').querySelector('.detail-row'), undefined, 'nothing expands inside the table');
+  assert.equal(get('logs').querySelector('.detail-cell'), undefined);
+  const row = get('logs').querySelector('tr.event-row[data-id="10"] .message-button')!.closest('tr')!;
   const children = get('logs').children;
   get('viewport').scrollTop = 1;
   app.table.renderWindow();
   assert.equal(get('logs').children, children, 'a scroll within the same virtual window preserves the DOM');
-  assert.equal(detail.scrollIntoViewCalls.length, 0, 'detail responses must not yank the viewport');
+  assert.equal(row.scrollIntoViewCalls.length, 0, 'detail responses must not yank the viewport');
   get('viewport').scrollTop = 2300;
   app.table.renderWindow();
   assert.equal(get('viewport').scrollTop, 2300);
   get('viewport').scrollTop = 0;
   app.table.renderWindow();
-  assert.equal(get('logs').querySelector('.detail-row'), detail);
-  assert.equal(detail.querySelector('.event-details')!.scrollTop, 200);
-  assert.equal(app.table.expandedHeight, 350);
+  assert.equal(
+    get('logs')
+      .querySelector('tr.event-row[data-id="10"] .message-button')!
+      .closest('tr')!
+      .classList.contains('selected'),
+    true,
+    'the selected row is still marked after scrolling back',
+  );
 });
 
 test('restoring row focus during scrolling uses preventScroll', () => {
@@ -1727,6 +1755,338 @@ test('the rail is resized by dragging its edge or with the arrow keys, and the w
   assert.equal(restored.dom.body.style['--rail-width'], '560px', 'a saved width is fitted to the panel');
 });
 
+test('the inspector width is set by dragging its left edge or with the arrow keys, and is kept', () => {
+  const { get, dom, savedStates } = viewer({}, { hidden: ['inspector'] });
+  const handle = get('inspectorResizer');
+  assert.equal(handle.attributes['aria-valuenow'], '440', 'a hidden inspector reports the default');
+  assert.equal(handle.attributes['aria-valuemin'], '280');
+  assert.equal(handle.attributes['aria-valuemax'], '680', 'the list beside it keeps 320px of the 1000px panel');
+  // Until a width is chosen, the stylesheet's width is where a drag starts.
+  get('inspector').hidden = false;
+  get('inspector').width = 532;
+  handle.listeners.get('focus')!();
+  assert.equal(handle.attributes['aria-valuenow'], '532');
+  handle.listeners.get('pointerdown')!({ clientX: 600, button: 0 });
+  dom.listeners.get('pointermove')!({ clientX: 592 });
+  assert.equal(dom.body.style['--inspector-width'], '540px', 'dragging left widens it from its drawn width');
+  dom.listeners.get('pointerup')!();
+  assert.equal(savedStates.at(-1)?.inspectorWidth, 540);
+  assert.equal(savedStates.at(-1)?.railWidth, undefined, 'the rails keep their own width');
+  // Never narrower than 280, nor wider than the panel less 320.
+  handle.listeners.get('pointerdown')!({ clientX: 500, button: 0 });
+  dom.listeners.get('pointermove')!({ clientX: 5000 });
+  dom.listeners.get('pointerup')!();
+  assert.equal(savedStates.at(-1)?.inspectorWidth, 280);
+  handle.listeners.get('pointerdown')!({ clientX: 500, button: 0 });
+  dom.listeners.get('pointermove')!({ clientX: -5000 });
+  dom.listeners.get('pointerup')!();
+  assert.equal(savedStates.at(-1)?.inspectorWidth, 680);
+  // ArrowLeft widens, ArrowRight narrows, and Shift takes bigger steps.
+  handle.listeners.get('keydown')!({ key: 'ArrowRight', preventDefault() {} });
+  assert.equal(savedStates.at(-1)?.inspectorWidth, 664);
+  handle.listeners.get('keydown')!({ key: 'ArrowLeft', preventDefault() {} });
+  assert.equal(savedStates.at(-1)?.inspectorWidth, 680);
+  handle.listeners.get('keydown')!({ key: 'ArrowRight', shiftKey: true, preventDefault() {} });
+  assert.equal(savedStates.at(-1)?.inspectorWidth, 632);
+  handle.listeners.get('dblclick')!();
+  assert.equal(savedStates.at(-1)?.inspectorWidth, undefined);
+  assert.equal(dom.body.style['--inspector-width'], undefined);
+
+  const restored = viewer({ inspectorWidth: 2000 });
+  assert.equal(restored.dom.body.style['--inspector-width'], '680px', 'a saved width is fitted to the panel');
+  assert.equal(viewer({ inspectorWidth: 500 }).dom.body.style['--inspector-width'], '500px');
+
+  // Beside an open Sources rail, the list keeps its room in what is left.
+  const beside = viewer({ inspectorWidth: 2000 });
+  const split = beside.get('contentSplit');
+  split.width = 764;
+  beside.get('inspector').parent = split;
+  beside.get('inspectorResizer').listeners.get('focus')!();
+  assert.equal(beside.dom.body.style['--inspector-width'], '444px');
+});
+
+test('a narrower panel narrows a chosen width once a frame, however many resize events arrive', () => {
+  const { dom, runtime, flushFrames } = viewer({ inspectorWidth: 600, railWidth: 500 });
+  flushFrames();
+  assert.equal(dom.body.style['--inspector-width'], '600px');
+  runtime.window.innerWidth = 700;
+  for (let i = 0; i < 5; i++) runtime.window.listeners.get('resize')!();
+  assert.equal(dom.body.style['--inspector-width'], '600px', 'nothing is measured until the frame');
+  flushFrames();
+  assert.equal(dom.body.style['--inspector-width'], '380px', 'the list keeps 320px of the 700px panel');
+  assert.equal(dom.body.style['--rail-width'], '460px', 'the table keeps 240px beside the rail');
+});
+
+test('a click anywhere in a row opens it, but not on another control or after selecting text', () => {
+  const { get, app, runtime } = viewer();
+  const row = eventRow(get, 42);
+  const click = (matches: Record<string, Element | undefined>) =>
+    get('logs').listeners.get('click')!({ target: { closest: (wanted: string) => matches[wanted] } });
+  click({ 'button, a, input, select, textarea': row });
+  assert.equal(app.state.selected, undefined, 'a control in the row keeps its own click');
+  const selection = { isCollapsed: false };
+  (runtime.window as { getSelection?: () => typeof selection }).getSelection = () => selection;
+  click({ 'tr.event-row': row });
+  assert.equal(app.state.selected, undefined, 'selecting text to copy does not open the row');
+  selection.isCollapsed = true;
+  click({ 'tr.event-row': row });
+  assert.equal(app.state.selected, 42, 'a click on its time, level, or a field opens it');
+});
+
+test('clicking a row opens the event in the inspector with its message, meta, details, and the one-time tip', () => {
+  const { get, app, dom, messages, savedStates } = viewer();
+  assert.equal(get('inspector').hidden, false, 'the fake page starts with it visible; opening keeps it shown');
+  get('inspector').hidden = true;
+  get('logs').listeners.get('click')!(clickOn('.message-button', rowButton(get, 42)));
+  assert.equal(app.state.selected, 42);
+  assert.deepEqual(JSON.parse(JSON.stringify(messages.at(-1))), { type: 'details', id: 42 });
+  assert.equal(get('inspector').hidden, false);
+  assert.equal(dom.body.dataset.inspector, 'event');
+  assert.equal(get('inspectorTitle').textContent, 'timeout');
+  assert.match(get('inspectorMeta').textContent, /^ERROR · .+ · stderr$/);
+  assert.equal(get('inspectorMeta').hidden, false);
+  const [details, hint] = get('inspectorBody').children;
+  assert.equal(details.classList.contains('event-details'), true);
+  assert.equal(details.querySelector('.context-button')?.dataset.id, '42', 'Surrounding logs leads the actions');
+  assert.equal(get('logs').querySelector('.detail-row'), undefined, 'nothing opens inside the table');
+  assert.equal(hint.classList.contains('detail-hint'), true);
+  assert.equal(hint.children.length, 2, 'the tip text and its Got it button');
+  const dismiss = hint.querySelector('.dismiss-hint')!;
+  assert.equal(dismiss.textContent, 'Got it');
+  get('inspectorBody').listeners.get('click')!(clickOn('.dismiss-hint', dismiss));
+  assert.equal(app.state.cellHintDismissed, true);
+  assert.equal(savedStates.at(-1)?.cellHintDismissed, true);
+  // Once dismissed the tip is not offered again.
+  get('inspectorClose').listeners.get('click')!();
+  get('logs').listeners.get('click')!(clickOn('.message-button', rowButton(get, 42)));
+  assert.equal(get('inspectorBody').querySelector('.detail-hint'), undefined);
+  assert.equal(viewer({ cellHintDismissed: true }).get('inspectorBody').querySelector('.detail-hint'), undefined);
+});
+
+test('the selected row is marked, and choosing it again clears the mark', () => {
+  const { get, app } = viewer();
+  app.table.renderRows([
+    { id: 1, level: 'info', message: 'one' },
+    { id: 2, level: 'info', message: 'two' },
+  ]);
+  get('logs').listeners.get('click')!(clickOn('.message-button', rowButton(get, 2)));
+  const marked = eventRow(get, 2);
+  assert.equal(marked.classList.contains('selected'), true);
+  const button = rowButton(get, 2);
+  assert.equal(button.attributes['aria-pressed'], 'true', 'the message is a toggle for the inspector');
+  assert.equal(button.attributes['aria-controls'], 'inspector');
+  assert.equal(eventRow(get, 1).classList.contains('selected'), false);
+  assert.equal(rowButton(get, 1).attributes['aria-pressed'], 'false');
+  // Another row takes the mark, and the rows are kept rather than rebuilt.
+  const rows = [eventRow(get, 1), eventRow(get, 2)];
+  get('logs').listeners.get('click')!(clickOn('.message-button', rowButton(get, 1)));
+  assert.equal(eventRow(get, 1).classList.contains('selected'), true);
+  assert.equal(eventRow(get, 2).classList.contains('selected'), false);
+  assert.equal(rowButton(get, 1).attributes['aria-pressed'], 'true');
+  assert.equal(rowButton(get, 2).attributes['aria-pressed'], 'false');
+  assert.equal(eventRow(get, 1), rows[0], 'selecting moves the mark without rebuilding the rows');
+  assert.equal(eventRow(get, 2), rows[1]);
+  assert.equal(get('inspectorTitle').textContent, 'one');
+  // The same row again closes it.
+  get('logs').listeners.get('click')!(clickOn('.message-button', rowButton(get, 1)));
+  assert.equal(eventRow(get, 1).classList.contains('selected'), false);
+  assert.equal(rowButton(get, 1).attributes['aria-pressed'], 'false');
+  assert.equal(app.state.selected, undefined);
+});
+
+test('the inspector closes by the same row, its close button, Escape, Clear logs, or another tab', () => {
+  const routes: [string, (t: ReturnType<typeof viewer>) => void][] = [
+    ['the same row', ({ get }) => get('logs').listeners.get('click')!(clickOn('.message-button', rowButton(get, 42)))],
+    ['the close button', ({ get }) => get('inspectorClose').listeners.get('click')!()],
+    [
+      'Escape in the inspector',
+      ({ get }) => get('inspector').listeners.get('keydown')!({ key: 'Escape', stopPropagation() {} }),
+    ],
+    [
+      'Escape on the row',
+      ({ get }) =>
+        get('logs').listeners.get('keydown')!({ key: 'Escape', target: rowButton(get, 42), preventDefault() {} }),
+    ],
+    [
+      'Escape on a cell of a row',
+      ({ get }) =>
+        get('logs').listeners.get('keydown')!({
+          key: 'Escape',
+          target: eventRow(get, 42).children[0],
+          preventDefault() {},
+        }),
+    ],
+    ['Clear logs', ({ get }) => get('clear').listeners.get('click')!()],
+    ['another tab', ({ get }) => get('analyze').listeners.get('click')!()],
+  ];
+  for (const [name, close] of routes) {
+    const t = viewer();
+    const { get, app, dom } = t;
+    get('logs').listeners.get('click')!(clickOn('.message-button', rowButton(get, 42)));
+    assert.equal(get('inspector').hidden, false, name);
+    assert.equal(dom.body.dataset.inspector, 'event', name);
+    close(t);
+    assert.equal(get('inspector').hidden, true, name);
+    assert.equal(dom.body.dataset.inspector, undefined, name);
+    assert.equal(app.state.selected, undefined, name);
+    if (name !== 'Clear logs' && name !== 'another tab')
+      assert.equal(eventRow(get, 42).classList.contains('selected'), false, name);
+  }
+});
+
+test('closing the inspector with focus inside it returns focus to the event’s row', () => {
+  const { get, dom } = viewer();
+  get('logs').listeners.get('click')!(clickOn('.message-button', rowButton(get, 42)));
+  get('inspector').append(get('inspectorClose'));
+  get('inspectorClose').focus();
+  get('inspector').listeners.get('keydown')!({ key: 'Escape', stopPropagation() {} });
+  assert.equal(get('inspector').hidden, true);
+  assert.equal(dom.activeElement, rowButton(get, 42));
+});
+
+test('Escape elsewhere in the table leaves the inspector open', () => {
+  const { get, app } = viewer();
+  get('logs').listeners.get('click')!(clickOn('.message-button', rowButton(get, 42)));
+  let prevented = false;
+  get('logs').listeners.get('keydown')!({
+    key: 'Escape',
+    target: { closest: () => undefined },
+    preventDefault() {
+      prevented = true;
+    },
+  });
+  assert.equal(prevented, false);
+  assert.equal(app.state.selected, 42);
+  assert.equal(get('inspector').hidden, false);
+});
+
+test('the details reply rebuilds the inspector body for the selected event and ignores other ids', () => {
+  const { get, receive } = viewer();
+  const raw = () => get('inspectorBody').children[0].children.at(-1)?.textContent;
+  get('logs').listeners.get('click')!(clickOn('.message-button', rowButton(get, 42)));
+  assert.equal(raw(), 'Loading…');
+  receive({ type: 'details', id: 7, text: 'someone else', exceptions: [] });
+  assert.equal(raw(), 'Loading…', 'another id is ignored');
+  receive({ type: 'details', id: 42, text: 'the full text', exceptions: [] });
+  assert.equal(raw(), 'the full text');
+  assert.equal(get('inspectorBody').querySelector('.detail-hint')?.classList.contains('detail-hint'), true);
+  get('inspectorClose').listeners.get('click')!();
+  receive({ type: 'details', id: 42, text: 'late', exceptions: [] });
+  assert.equal(get('inspectorBody').children.length, 0, 'a reply after closing does not reopen or fill it');
+  assert.equal(get('inspector').hidden, true);
+});
+
+test('a JSON event lists its fields, and each field adds or excludes its value in the search', () => {
+  const { get, receive, messages } = viewer();
+  get('logs').listeners.get('click')!(clickOn('.message-button', rowButton(get, 42)));
+  assert.equal(get('inspectorBody').querySelector('.event-fields'), undefined, 'no list while the text loads');
+  receive({
+    type: 'details',
+    id: 42,
+    text: JSON.stringify({ user: 'ana', count: 3, nested: { a: 1 }, empty: '' }),
+    exceptions: [],
+  });
+  const rows = get('inspectorBody').querySelectorAll('.event-field');
+  assert.deepEqual(
+    rows.map((row) => row.querySelector('.event-field-name')!.textContent),
+    ['user', 'count', 'nested', 'empty'],
+  );
+  const buttons = get('inspectorBody').querySelectorAll('.field-filter');
+  assert.equal(buttons.length, 4, 'a nested or empty value has no filter buttons');
+  const [include, exclude] = buttons;
+  const click = (button: Element) => get('inspectorBody').listeners.get('click')!(clickOn('.field-filter', button));
+  click(include);
+  assert.equal(get('search').value, 'timeout user:"ana"');
+  assert.equal(messages.at(-1)?.type, 'snapshot');
+  assert.equal(messages.at(-1)?.query, 'timeout user:"ana"');
+  click(exclude);
+  assert.equal(get('search').value, 'timeout user:"ana" -user:"ana"');
+  // A field name the search cannot express explains itself instead.
+  const odd = buttons[0].cloneNode();
+  odd.dataset.field = 'bad-key';
+  odd.dataset.value = 'x';
+  click(odd);
+  assert.equal(get('search').value, 'timeout user:"ana" -user:"ana"');
+  assert.match(odd.title, /cannot be used/);
+});
+
+test('with an event open, ArrowDown and ArrowUp on a row select the next and previous row in display order', () => {
+  const { get, app, dom } = viewer();
+  app.table.renderRows(Array.from({ length: 4 }, (_, i) => ({ id: i + 1, level: 'info', message: `line ${i + 1}` })));
+  const order = () =>
+    get('logs')
+      .querySelectorAll('.event-row')
+      .map((row) => Number(row.dataset.id));
+  const [first, second, third] = order();
+  const key = (name: string, id: number) => {
+    let prevented = false;
+    get('logs').listeners.get('keydown')!({
+      key: name,
+      target: rowButton(get, id),
+      preventDefault() {
+        prevented = true;
+      },
+    });
+    return prevented;
+  };
+  assert.equal(key('ArrowDown', first), false, 'nothing happens while no event is open');
+  assert.equal(app.state.selected, undefined);
+  get('logs').listeners.get('click')!(clickOn('.message-button', rowButton(get, second)));
+  assert.equal(key('ArrowDown', second), true);
+  assert.equal(app.state.selected, third);
+  assert.equal(get('inspectorTitle').textContent, `line ${third}`);
+  assert.equal(dom.activeElement, rowButton(get, third), 'focus follows the selection');
+  assert.equal(key('ArrowUp', third), true);
+  assert.equal(app.state.selected, second);
+  key('ArrowUp', second);
+  assert.equal(app.state.selected, first);
+  assert.equal(key('ArrowUp', first), false, 'the first row has no row above it');
+  assert.equal(app.state.selected, first);
+  const last = order().at(-1)!;
+  get('logs').listeners.get('click')!(clickOn('.message-button', rowButton(get, last)));
+  assert.equal(key('ArrowDown', last), false);
+  assert.equal(app.state.selected, last);
+});
+
+test('the Live button is only Live or Browse, and selecting an event never says paused', () => {
+  const { get, app } = viewer();
+  assert.equal(get('follow').dataset.mode, 'live');
+  get('logs').listeners.get('click')!(clickOn('.message-button', rowButton(get, 42)));
+  assert.equal(get('follow').dataset.mode, 'live', 'an open event does not stop Live');
+  assert.doesNotMatch(get('mode').textContent, /Paused/);
+  get('older').listeners.get('click')!();
+  assert.equal(get('follow').dataset.mode, 'browse');
+  assert.doesNotMatch(get('mode').textContent, /Paused/);
+  assert.equal(app.state.selected, 42);
+  get('follow').listeners.get('click')!();
+  assert.equal(get('follow').dataset.mode, 'live');
+  assert.equal(app.state.selected, 42, 'returning to Live keeps the open event');
+});
+
+test('the table controller selects an event, reports its details, and finds neighbours', () => {
+  const { app, messages } = viewer();
+  app.table.renderRows([
+    { id: 1, level: 'info', message: 'one' },
+    { id: 2, level: 'warn', message: 'two' },
+  ]);
+  assert.equal(app.table.selectedEvent(), undefined);
+  assert.equal(app.table.neighbor(1), undefined, 'no neighbour without a selection');
+  assert.equal(app.table.select(1), true);
+  assert.deepEqual(JSON.parse(JSON.stringify(messages.at(-1))), { type: 'details', id: 1 });
+  assert.equal(app.table.selectedEvent()?.message, 'one');
+  const sent = messages.length;
+  assert.equal(app.table.select(1), false, 'choosing it again clears it');
+  assert.equal(messages.length, sent, 'closing asks the host for nothing');
+  assert.equal(app.table.selectedEvent(), undefined);
+  app.table.select(2);
+  assert.equal(app.table.receiveDetails({ type: 'details', id: 2, text: 'x', exceptions: [] } as never), true);
+  assert.equal(app.table.receiveDetails({ type: 'details', id: 1, text: 'x', exceptions: [] } as never), false);
+  app.table.clearSelection();
+  assert.equal(app.state.selected, undefined);
+  assert.equal(app.table.selectedEvent(), undefined);
+  assert.equal(app.table.receiveDetails({ type: 'details', id: 2, text: 'x', exceptions: [] } as never), false);
+});
+
 test('a connection source without its settings stays under Connections, offering to remove it', () => {
   const { get, messages, receive } = viewer({ server: 'conn:prod' });
   receive({
@@ -1836,6 +2196,16 @@ test('the rail lists connections with what they are doing, and offers to add one
   const { get, messages, receive } = viewer({ server: '' });
   const plain = (value: unknown) => JSON.parse(JSON.stringify(value));
   receive({ ...railSnapshot, connections: [] });
+  const about = get('railList').querySelectorAll('.rail-info')[0];
+  assert.equal(about.attributes['aria-label'], 'About connections');
+  assert.match(about.title, /^Search Datadog/, 'what a connection is shows on hover, not in the card');
+  assert.deepEqual(
+    get('railList')
+      .querySelectorAll('.rail-empty')[0]
+      .children.map((child) => child.className),
+    ['rail-empty-add', 'rail-info'],
+    'the card is its button and the i',
+  );
   const empty = get('railList').querySelectorAll('.rail-empty-add')[0];
   empty.listeners.get('click')!();
   assert.deepEqual(plain(messages.at(-1)), { type: 'addConnection' });
@@ -2180,7 +2550,11 @@ test('the status bar counts matches, pages compactly, and shows memory with its 
   assert.ok(details.includes('Lines cut short') && details.includes('3'));
   get('memorySettings').listeners.get('click')!();
   assert.deepEqual(JSON.parse(JSON.stringify(messages.at(-1))), { type: 'config', setting: 'logline.maxMemoryMb' });
-  get('statusIcon').listeners.get('click')!();
+  assert.equal(get('counts').hidden, true, 'memory stays out of the status bar below 80% of the limit');
+  get('statusPanel').hidden = true;
+  get('statusIcon').listeners.get('click')!({ stopPropagation() {} });
+  assert.equal(get('statusPanel').hidden, false, 'the status icon opens the status panel');
+  get('statusTroubleshoot').listeners.get('click')!();
   assert.equal(messages.at(-1)?.type, 'showStatus');
   assert.equal(get('mode').hidden, true, 'plain Live is what the Live button says');
 });
@@ -2424,7 +2798,10 @@ test('More actions holds the data actions, and its keys skip Copy filtered resul
 });
 
 test('views are tabs: one shows at a time, arrow keys move between visible tabs, and the panel remembers its tab', () => {
-  const { get, app, messages, savedStates } = viewer();
+  const { get, app, messages, savedStates } = viewer(
+    {},
+    { snapshot: { doctor: { revision: 1, total: 1, findings: [] } } },
+  );
   assert.equal(app.views.active(), 'logs');
   assert.equal(get('logsTab').attributes['aria-selected'], 'true');
   assert.equal(get('logsTab').tabIndex, 0);
@@ -2455,6 +2832,8 @@ test('views are tabs: one shows at a time, arrow keys move between visible tabs,
   assert.equal(app.views.active(), 'doctor', 'Metrics is skipped');
   key('doctor', 'ArrowRight');
   assert.equal(app.views.active(), 'logs', 'the last tab wraps to the first');
+  assert.equal(get('doctor').hidden, true, 'the Issues tab hides again once its view is left');
+  get('doctor').hidden = false;
   key('logsTab', 'End');
   assert.equal(app.views.active(), 'doctor');
   key('doctor', 'Home');
@@ -2482,7 +2861,7 @@ test('views are tabs: one shows at a time, arrow keys move between visible tabs,
 });
 
 test('rows show their code link and log doctor finding, with actions, and the Issues tab lists findings', () => {
-  const { get, receive, messages, app } = viewer();
+  const { get, receive, messages, app, flushFrames } = viewer();
   const finding = {
     siteId: 'src/pay.ts\u00004',
     code: 'secret',
@@ -2551,7 +2930,7 @@ test('rows show their code link and log doctor finding, with actions, and the Is
   assert.equal(slot.children.length, 2, 'hovering again does not add more');
   click(slot.children[1], '.row-icon, .row-action');
   assert.deepEqual(JSON.parse(JSON.stringify(messages.at(-1))), { type: 'breakOnEvent', id: 43 });
-  app.table.resetDetails();
+  app.table.invalidateRows();
   app.table.renderWindow();
   const rebuilt = get('logs')
     .querySelectorAll('.event-row')
@@ -2566,9 +2945,10 @@ test('rows show their code link and log doctor finding, with actions, and the Is
   assert.deepEqual(
     JSON.parse(JSON.stringify(messages.at(-1))),
     { type: 'details', id: 43 },
-    'the badge opens the event, where the finding is explained',
+    'the badge opens the event in the inspector, where the finding is explained',
   );
-  assert.equal(get('rowHint').hidden, false, 'the tip stays until it is dismissed');
+  assert.equal(get('rowHint').hidden, true, 'opening an event dismisses the tip');
+  assert.equal(get('inspector').hidden, false);
   receive({
     type: 'details',
     id: 43,
@@ -2579,21 +2959,23 @@ test('rows show their code link and log doctor finding, with actions, and the Is
     findings: [finding],
   });
   assert.match(
-    get('logs').querySelector('.event-finding')!.className,
+    get('inspectorBody').querySelector('.event-finding')!.className,
     /severity-warning/,
-    'the expanded event explains the finding',
+    'the open event explains the finding',
   );
 
-  assert.equal(get('doctor').hidden, false);
-  assert.equal(get('doctorCount').textContent, '1');
-  assert.match(get('doctor').className, /has-warnings/);
+  assert.equal(get('doctor').hidden, true, 'the Issues tab shows only while its view is open');
+  assert.equal(get('issuesChip').hidden, false);
+  assert.equal(get('doctorCount').textContent, '1 issue');
+  assert.match(get('issuesChip').className, /has-warnings/);
   const item = get('doctorList').querySelectorAll('.doctor-item')[0];
   assert.equal(item.querySelector('.doctor-location')!.textContent, 'pay.ts:4');
   const fix = item.querySelectorAll('.doctor-action').find((button) => button.textContent === 'Fix…')!;
   // As in the page, the list sits inside the Issues view.
   get('doctorView').append(get('doctorList'));
-  get('doctor').listeners.get('click')!();
+  get('issuesChip').listeners.get('click')!();
   assert.equal(app.views.active(), 'doctor');
+  assert.equal(get('doctor').hidden, false);
   assert.equal(get('doctorView').hidden, false);
   get('doctorView').listeners.get('click')!({
     target: { closest: (wanted: string) => (wanted === '[data-doctor-action]' ? fix : undefined) },
@@ -2620,6 +3002,9 @@ test('rows show their code link and log doctor finding, with actions, and the Is
   app.bridge.pending = false;
   app.bridge.request(true);
   assert.equal(messages.at(-1)!.doctorRevision, 3, 'the host can skip a list the view already has');
+  // The guide can point into the Issues view though its tab is hidden until then.
+  Object.assign(get('doctorView'), { id: 'doctorView' }).classList.add('view-panel');
+  assert.equal(get('doctor').hidden, true);
   receive({
     type: 'snapshot',
     generation: 1,
@@ -2639,7 +3024,11 @@ test('rows show their code link and log doctor finding, with actions, and the Is
     pages: 1,
     matched: 0,
     doctor: { revision: 3, total: 1 },
+    reveal: { target: 'doctorView' },
   });
+  flushFrames();
+  assert.equal(app.views.active(), 'doctor');
+  assert.ok(get('doctorView').classList.contains('reveal-pulse'));
   assert.equal(
     get('doctorList').querySelectorAll('.doctor-item').length,
     1,
@@ -2665,8 +3054,8 @@ test('rows show their code link and log doctor finding, with actions, and the Is
     matched: 0,
     doctor: { revision: 4, total: 0, findings: [] },
   });
-  assert.equal(get('doctor').hidden, false, 'with nothing found the tab stays visible');
-  assert.match(get('doctor').className, /is-clear/);
+  assert.equal(get('issuesChip').hidden, true, 'with nothing found the chip is hidden');
+  assert.match(get('issuesChip').className, /is-clear/);
   assert.equal(get('doctorCount').hidden, true);
   assert.match(get('doctorList').querySelector('.popover-empty')!.textContent, /No problems found so far/);
   get('doctorView').listeners.get('click')!({
@@ -2730,7 +3119,7 @@ test('a leak in output no statement accounts for names its source and opens an e
 });
 
 test('an OpenTelemetry convention finding names its service and opens a trace that shows it', () => {
-  const { get, receive, messages } = viewer();
+  const { get, app, dom, receive, messages } = viewer();
   const finding = {
     code: 'span-name-ids',
     severity: 'warning',
@@ -2769,7 +3158,9 @@ test('an OpenTelemetry convention finding names its service and opens a trace th
   get('doctorView').listeners.get('click')!({
     target: { closest: (wanted: string) => (wanted === '[data-doctor-action]' ? trace : undefined) },
   });
-  assert.equal(get('traceView').hidden, false, 'the trace opens in the Traces tab');
+  assert.equal(app.views.active(), 'traces', 'the trace opens in the Traces tab');
+  assert.equal(dom.body.dataset.inspector, 'trace');
+  assert.equal(get('inspectorTitle').textContent, 'Trace abc123');
   assert.deepEqual(JSON.parse(JSON.stringify(messages.at(-1))), { type: 'trace', traceId: 'abc123' });
 });
 
@@ -2891,7 +3282,7 @@ test('a pointer resting on the table stops holding live rows after two seconds',
   assert.deepEqual(ids(), [44, 43, 42], 'a resting pointer no longer holds new rows');
 });
 
-test('an expanded event explains log doctor findings on its statement', () => {
+test('an open event explains log doctor findings on its statement', () => {
   const { renderDetails } = viewer();
   const details = renderDetails(42, 'raw', [], {
     site: 'src/pay.ts:4',
@@ -2920,22 +3311,24 @@ test('an expanded event explains log doctor findings on its statement', () => {
   assert.equal(renderDetails(42, 'raw', []).querySelector('.event-finding'), undefined);
 });
 
-test('event details link to the log statement and the trace', () => {
-  const { get, renderDetails, messages } = viewer();
-  const details = renderDetails(42, 'raw', [], { site: 'src/auth.ts:18', traceId: 'abc123' });
+test('the inspector links the event to its log statement and the trace', () => {
+  const { get, app, dom, renderDetails, messages, receive } = viewer();
+  get('logs').listeners.get('click')!(clickOn('.message-button', rowButton(get, 42)));
+  receive({ type: 'details', id: 42, text: 'raw', exceptions: [], site: 'src/auth.ts:18', traceId: 'abc123' });
+  const details = get('inspectorBody').querySelector('.event-details')!;
   const site = details.querySelector('.log-site-button')!;
   const trace = details.querySelector('.trace-button')!;
   assert.equal(site.querySelector('.event-action-label')!.textContent, 'Open code · auth.ts:18');
   assert.match(site.title, /src\/auth\.ts:18/);
   assert.equal(trace.dataset.traceId, 'abc123');
   const click = (target: Element, selector: string) =>
-    get('contextDetails').listeners.get('click')!({
-      target: { closest: (wanted: string) => (wanted === selector ? target : undefined) },
-    });
+    get('inspectorBody').listeners.get('click')!(clickOn(selector, target));
   click(site, '.log-site-button');
   assert.deepEqual(JSON.parse(JSON.stringify(messages.at(-1))), { type: 'openLogSite', id: 42 });
   click(trace, '.trace-button');
-  assert.equal(get('traceView').hidden, false, 'the trace opens in the Traces tab');
+  assert.equal(app.views.active(), 'traces', 'the trace opens in the Traces tab');
+  assert.equal(dom.body.dataset.inspector, 'trace', 'the trace replaces the event in the inspector');
+  assert.equal(app.state.selected, undefined, 'the event is no longer selected');
   assert.deepEqual(JSON.parse(JSON.stringify(messages.at(-1))), { type: 'trace', traceId: 'abc123' });
   // Actions that do not apply stay visible, explain why, and do nothing when clicked.
   const plain = renderDetails(43, 'raw', []);
@@ -2944,13 +3337,9 @@ test('event details link to the log statement and the trace', () => {
   assert.equal(unavailable.attributes['aria-disabled'], 'true');
   assert.match(String(plain.querySelector('.log-site-button')!.dataset.unavailable), /No code location/);
   const sent = messages.length;
-  get('contextDetails').listeners.get('click')!({
-    target: {
-      closest: (wanted: string) => (wanted === '.event-action' ? plain.querySelector('.log-site-button') : undefined),
-    },
-  });
+  get('inspectorBody').listeners.get('click')!(clickOn('.event-action', plain.querySelector('.log-site-button')));
   assert.equal(messages.length, sent);
-  assert.equal(get('traceView').hidden, false, 'unchanged');
+  assert.equal(dom.body.dataset.inspector, 'trace', 'unchanged');
   assert.match(
     String(renderDetails(44, undefined, []).querySelector('.trace-button')!.dataset.unavailable),
     /Checking/,
@@ -2982,7 +3371,7 @@ test('a JSON error shows the crash that followed it, and the crash links back', 
   assert.equal(back.querySelector('.context-button')!.dataset.id, '42');
 });
 
-test('an expanded JSON error in the table shows its crash, and the crash row links back', () => {
+test('an open JSON error shows its crash in the inspector, and the crash row links back', () => {
   const { get, receive, messages } = viewer();
   receive({
     type: 'snapshot',
@@ -3038,14 +3427,18 @@ test('an expanded JSON error in the table shows its crash, and the crash row lin
     exceptions: [],
     crash: { id: 2, message: 'TypeError: x', exceptions },
   });
-  assert.equal(get('logs').querySelector('.event-attachment')?.querySelector('.context-button')?.dataset.id, '2');
-  assert.equal(get('logs').querySelector('.source-link')?.dataset.id, '2');
+  assert.equal(
+    get('inspectorBody').querySelector('.event-attachment')?.querySelector('.context-button')?.dataset.id,
+    '2',
+  );
+  assert.equal(get('inspectorBody').querySelector('.source-link')?.dataset.id, '2');
 });
 
-test('the trace dialog renders a waterfall with logs and opens their context', () => {
+test('the trace waterfall renders in the inspector with logs, and opens their context', () => {
   const { get, app, receive, messages } = viewer();
   app.traceView.show('ABC123');
   assert.equal(get('traceStatus').textContent, 'Loading…');
+  assert.equal(get('inspectorBody').children[0], get('traceView'), 'the waterfall is the inspector body');
   const span = (spanId: string, depth: number, extra: Record<string, unknown> = {}) => ({
     spanId,
     name: `op ${spanId}`,
@@ -3118,7 +3511,6 @@ test('the trace dialog renders a waterfall with logs and opens their context', (
   get('traceRows').listeners.get('click')!({
     target: { closest: (selector: string) => (selector === '.trace-log-button' ? log : undefined) },
   });
-  assert.equal(get('traceDialog').open, false);
   assert.equal(get('contextDialog').open, true);
   assert.deepEqual(JSON.parse(JSON.stringify(messages.at(-1))), { type: 'context', id: 7 });
 });
@@ -3131,15 +3523,16 @@ test('a trace without spans explains how to collect them, and Filter logs by tra
     trace: { traceId: 'abc123', durationMs: 0, services: [], errors: 0, omitted: 0, hotspots: [], spans: [], logs: [] },
   });
   assert.equal(get('traceHotspots').hidden, true);
-  assert.match(get('traceStatus').textContent, /Turn on the OpenTelemetry receiver/);
+  assert.match(get('traceStatus').textContent, /Start the OpenTelemetry receiver/);
   get('traceFilter').listeners.get('click')!();
-  assert.equal(get('traceDialog').open, false);
+  assert.equal(get('inspector').hidden, true, 'leaving the Traces tab closes the waterfall');
+  assert.equal(app.views.active(), 'logs');
   assert.equal(app.search.query(), 'traceId:abc123');
   assert.equal(messages.at(-1)?.type, 'snapshot');
 });
 
-test('the Traces list shows recent requests and opens a waterfall that can return to the list', () => {
-  const { get, app, receive, messages } = viewer();
+test('the Traces list shows recent requests and opens a waterfall in the inspector beside it', () => {
+  const { get, app, dom, receive, messages } = viewer();
   get('traces').listeners.get('click')!();
   assert.equal(app.views.active(), 'traces');
   assert.equal(get('tracesView').hidden, false);
@@ -3211,17 +3604,18 @@ test('the Traces list shows recent requests and opens a waterfall that can retur
   );
   const row = get('tracesRows').children[0];
   get('tracesRows').listeners.get('click')!({ target: { closest: () => row } });
-  assert.equal(get('tracesView').hidden, false, 'the list stays above the waterfall');
-  assert.equal(get('traceView').hidden, false);
+  assert.equal(get('tracesView').hidden, false, 'the list stays beside the waterfall');
+  assert.equal(dom.body.dataset.inspector, 'trace');
+  assert.equal(get('inspector').hidden, false);
   assert.equal(get('traces').attributes['aria-selected'], 'true', 'a trace belongs to the Traces tab');
   assert.deepEqual(JSON.parse(JSON.stringify(messages.at(-1))), { type: 'trace', traceId: 'f1' });
-  get('traceBack').listeners.get('click')!();
+  get('inspectorClose').listeners.get('click')!();
   assert.equal(get('tracesView').hidden, false);
-  assert.equal(get('traceView').hidden, true);
+  assert.equal(get('inspector').hidden, true);
   railButton('errors').listeners.get('click')!();
   app.traceView.show('abc');
-  assert.equal(get('traceView').hidden, false, 'a trace opened from a row also opens in the Traces tab');
-  get('traceBack').listeners.get('click')!();
+  assert.equal(get('inspector').hidden, false, 'a trace opened from elsewhere also opens in the Traces tab');
+  get('inspectorClose').listeners.get('click')!();
   receive({ type: 'traces', traces: [] });
   assert.match(get('tracesStatus').textContent, /No traces yet. Start the OpenTelemetry receiver/);
   assert.equal(get('tracesStartReceiver').hidden, false);
@@ -3279,24 +3673,27 @@ test('snapshots apply editor requests once and reflect the OpenTelemetry receive
     status: 'OpenTelemetry receiver on http://127.0.0.1:4318',
   });
   assert.equal(app.search.query(), 'message:/user.*logged\\s+in/');
+  assert.equal(get('otlpStatus').hidden, false, 'the chip shows while the receiver runs');
   assert.equal(get('otlpStatus').textContent, 'OpenTelemetry 127.0.0.1:4318');
   assert.equal(get('otlpStatus').attributes['aria-pressed'], 'true');
   assert.equal(get('status').textContent, 'Ready', 'the chip replaces the receiver status text');
   assert.equal(get('status').hidden, true, 'a steady state is not news');
-  assert.equal(get('traceCount').textContent, '12');
+  assert.match(get('traces').title, /12 traces/);
   get('otlpStatus').listeners.get('click')!();
   assert.deepEqual(JSON.parse(JSON.stringify(messages.at(-1))), { type: 'toggleOtlp', enabled: false });
   snapshot({ openTrace: 'abc123', otlp: { running: false } });
-  assert.equal(get('traceView').hidden, false);
+  assert.equal(app.views.active(), 'traces');
+  assert.equal(get('inspectorTitle').textContent, 'Trace abc123');
+  assert.equal(get('inspector').hidden, false);
   assert.equal(get('otlpStatus').textContent, 'OpenTelemetry off');
   assert.equal(get('otlpStatus').attributes['aria-pressed'], 'false');
-  assert.equal(get('traceCount').hidden, true);
+  assert.equal(get('otlpStatus').hidden, true, 'the chip hides once the receiver stops without an error');
   get('otlpStatus').listeners.get('click')!();
   assert.deepEqual(JSON.parse(JSON.stringify(messages.at(-1))), { type: 'toggleOtlp', enabled: true });
 });
 
 test('the AI calls tab lists calls with totals and opens a conversation with its tool results', () => {
-  const { get, app, receive, messages } = viewer();
+  const { get, app, dom, receive, messages } = viewer();
   const snapshot = (extra: Record<string, unknown>) =>
     receive({
       type: 'snapshot',
@@ -3332,6 +3729,7 @@ test('the AI calls tab lists calls with totals and opens a conversation with its
       total: 0,
       modelCalls: 0,
       toolCalls: 0,
+      agentRuns: 0,
       errors: 0,
       inputTokens: 0,
       outputTokens: 0,
@@ -3347,7 +3745,7 @@ test('the AI calls tab lists calls with totals and opens a conversation with its
   assert.equal(app.views.active(), 'logs', 'stopping the receiver with no calls leaves the tab');
   snapshot({ aiCalls: { calls: 3, revision: 1 } });
   assert.equal(get('aiCalls').hidden, false);
-  assert.equal(get('aiCallCount').textContent, '3');
+  assert.match(get('aiCalls').title, /3/);
   get('aiCalls').listeners.get('click')!();
   assert.equal(app.views.active(), 'aiCalls');
   assert.deepEqual(JSON.parse(JSON.stringify(messages.at(-1))), { type: 'aiCalls' });
@@ -3374,6 +3772,7 @@ test('the AI calls tab lists calls with totals and opens a conversation with its
       total: 3,
       modelCalls: 2,
       toolCalls: 1,
+      agentRuns: 0,
       errors: 1,
       inputTokens: 1244,
       outputTokens: 4182,
@@ -3414,31 +3813,34 @@ test('the AI calls tab lists calls with totals and opens a conversation with its
   assert.equal(rows()[0].children[3].textContent, '40 → 4,096');
   assert.match(rows()[0].children[5].className, /ai-cut-short/, 'a response cut off by its limit stands out');
   assert.match(rows()[2].className, /trace-error/);
-  get('aiCallsKind').value = 'tool';
-  get('aiCallsKind').listeners.get('change')!();
+  const railButton = (key: string) =>
+    get('tabRailList')
+      .children.map((child) => child.children[0])
+      .find((button) => button?.dataset.railKey === key)!;
+  railButton('kind:tool').listeners.get('click')!();
   assert.equal(rows().length, 1);
-  get('aiCallsKind').value = '';
-  get('aiCallsErrorsOnly').checked = true;
-  get('aiCallsErrorsOnly').listeners.get('change')!();
+  railButton('kind:tool').listeners.get('click')!();
+  railButton('errors').listeners.get('click')!();
   assert.deepEqual(
     rows().map((row) => row.dataset.spanId),
     ['s1'],
   );
-  get('aiCallsErrorsOnly').checked = false;
-  const chooseModel = () => get('aiModelRows').listeners.get('click')!({ target: get('aiModelRows').children[0] });
-  chooseModel();
+  railButton('errors').listeners.get('click')!();
+  railButton('model:gpt-4o').listeners.get('click')!();
   assert.deepEqual(
     rows().map((row) => row.dataset.spanId),
     ['s3', 's1'],
     'a model narrows the list to exactly its calls',
   );
-  assert.equal(get('aiModelRows').children[0].attributes['aria-pressed'], 'true');
+  assert.equal(railButton('model:gpt-4o').attributes['aria-current'], 'true');
   assert.match(get('aiCallsStatus').textContent, /gpt-4o only/);
-  chooseModel();
+  railButton('model:gpt-4o').listeners.get('click')!();
   assert.equal(rows().length, 3, 'choosing the model again shows every call');
 
   get('aiCallRows').listeners.get('click')!({ target: rows()[0] });
-  assert.equal(app.views.active(), 'aiCall');
+  assert.equal(app.views.active(), 'aiCalls', 'the list stays beside the conversation');
+  assert.equal(dom.body.dataset.inspector, 'aiCall');
+  assert.equal(get('inspectorTitle').textContent, 'AI call', 'until the reply names the call');
   assert.equal(get('aiCalls').attributes['aria-selected'], 'true', 'a call belongs to the AI calls tab');
   assert.deepEqual(JSON.parse(JSON.stringify(messages.at(-1))), { type: 'aiCall', traceId: 't1', spanId: 's3' });
   receive({ type: 'aiCall', traceId: 't1', spanId: 'other', detail: undefined });
@@ -3466,7 +3868,10 @@ test('the AI calls tab lists calls with totals and opens a conversation with its
       position: 1,
     },
   });
-  assert.equal(get('aiCallTitle').textContent, '◆ chat gpt-4o');
+  assert.equal(get('inspectorTitle').textContent, '◆ chat gpt-4o');
+  assert.equal(get('inspectorTitle').title, 'chat gpt-4o\nTrace t1\nSpan s3');
+  assert.equal(get('inspectorNav').children[0], get('aiCallNavigation'));
+  assert.equal(get('inspectorBody').children[0], get('aiCallView'));
   assert.equal(get('aiCallStatus').textContent, 'openai · 1.20 s · 40 in → 4,096 out');
   assert.equal(get('aiCallNavigation').hidden, false);
   assert.equal(get('aiCallPosition').textContent, '2 of 2');
@@ -3504,7 +3909,8 @@ test('the AI calls tab lists calls with totals and opens a conversation with its
   assert.match(get('aiCallTranscript').children[0].textContent, /no message content.*content capture/);
   assert.equal(get('aiCallNavigation').hidden, true, 'a lone call has nothing to step through');
   get('aiCallTrace').listeners.get('click')!();
-  assert.equal(app.views.active(), 'trace');
+  assert.equal(app.views.active(), 'traces');
+  assert.equal(dom.body.dataset.inspector, 'trace', 'the trace replaces the call in the inspector');
   assert.deepEqual(JSON.parse(JSON.stringify(messages.at(-1))), { type: 'trace', traceId: 't1' });
   // The waterfall's chip on a GenAI span opens that call.
   receive({
@@ -3573,10 +3979,11 @@ test('the AI calls tab lists calls with totals and opens a conversation with its
   assert.equal(chipOf(1).attributes['aria-label'], 'Open tool · get_weather in AI calls');
   assert.equal(chipOf(2).children[1].textContent, '2 calls · 1.2K → 98 tok', 'an agent run totals its calls');
   get('traceRows').listeners.get('click')!({ target: chip });
-  assert.equal(app.views.active(), 'aiCall');
-  assert.deepEqual(JSON.parse(JSON.stringify(messages.at(-1))), { type: 'aiCall', traceId: 't1', spanId: 's3' });
-  get('aiCallBack').listeners.get('click')!();
   assert.equal(app.views.active(), 'aiCalls');
+  assert.equal(dom.body.dataset.inspector, 'aiCall', 'the call replaces the trace in the inspector');
+  assert.deepEqual(JSON.parse(JSON.stringify(messages.at(-1))), { type: 'aiCall', traceId: 't1', spanId: 's3' });
+  get('inspectorClose').listeners.get('click')!();
+  assert.equal(app.views.active(), 'aiCalls', 'closing the conversation leaves the list');
   snapshot({});
   assert.equal(app.views.active(), 'logs', 'the tab leaves once its calls are gone');
 });
@@ -3608,7 +4015,7 @@ test('the Metrics tab appears once metrics arrive and lists series with their la
   assert.equal(get('metrics').hidden, true, 'no tab before any metric arrives');
   snapshot({ metrics: { series: 2, revision: 5 } });
   assert.equal(get('metrics').hidden, false);
-  assert.equal(get('metricCount').textContent, '2');
+  assert.match(get('metrics').title, /2/);
   get('metrics').listeners.get('click')!();
   assert.equal(get('metricsView').hidden, false);
   assert.deepEqual(JSON.parse(JSON.stringify(messages.at(-1))), { type: 'metrics' });
@@ -4572,6 +4979,87 @@ test('a Datadog connection lists its services to choose one, and can send a quer
   assert.equal(get('connectionTail').textContent, 'Stop tail');
 });
 
+test('About Logline is a dialog in the panel with the version, links, and a copy of the details', () => {
+  const { get, receive, messages, timers, flushFrames } = viewer();
+  const info = { version: '1.20.0', editor: 'Visual Studio Code 1.99.0', system: 'Darwin arm64 25.0.0' };
+  receive({
+    type: 'snapshot',
+    generation: 1,
+    newest: 0,
+    total: 0,
+    retained: 0,
+    discarded: 0,
+    bytes: 0,
+    maxBytes: 1,
+    truncated: 0,
+    events: [],
+    columns: [],
+    page: 0,
+    pages: 1,
+    matched: 0,
+    openAbout: info,
+  });
+  flushFrames();
+  assert.equal(get('aboutDialog').open, true, 'the Command Palette or More actions opens it');
+  assert.equal(get('aboutVersion').textContent, 'v1.20.0');
+  assert.equal(get('aboutEditor').textContent, 'Visual Studio Code 1.99.0');
+  assert.equal(get('aboutSystem').textContent, 'Darwin arm64 25.0.0');
+  for (const [id, action] of [
+    ['aboutWhatsNew', 'whatsNew'],
+    ['aboutSponsor', 'sponsor'],
+    ['aboutAuthor', 'author'],
+    ['aboutGithub', 'github'],
+    ['aboutIssue', 'issue'],
+  ]) {
+    get(id).listeners.get('click')!();
+    assert.deepEqual(JSON.parse(JSON.stringify(messages.at(-1))), { type: 'aboutAction', action });
+  }
+  const pending = new Set(timers.keys());
+  const copyTimers = () => [...timers.keys()].filter((id) => !pending.has(id));
+  get('aboutCopy').listeners.get('click')!();
+  assert.deepEqual(JSON.parse(JSON.stringify(messages.at(-1))), { type: 'aboutAction', action: 'copy', info });
+  assert.equal(get('aboutCopy').textContent, 'Copied');
+  // Copying again restarts the moment Copied shows, instead of a second timer cutting it short.
+  const first = copyTimers();
+  get('aboutCopy').listeners.get('click')!();
+  assert.equal(copyTimers().length, 1);
+  assert.notDeepEqual(copyTimers(), first);
+  timers.get(copyTimers()[0])!();
+  assert.equal(get('aboutCopy').textContent, 'Copy');
+  get('aboutClose').listeners.get('click')!();
+  assert.equal(get('aboutDialog').open, false);
+});
+
+test('a pending Copied reset is cancelled when the panel is disposed', () => {
+  const { get, receive, app, timers, flushFrames } = viewer();
+  receive({
+    type: 'snapshot',
+    generation: 1,
+    newest: 0,
+    total: 0,
+    retained: 0,
+    discarded: 0,
+    bytes: 0,
+    maxBytes: 1,
+    truncated: 0,
+    events: [],
+    columns: [],
+    page: 0,
+    pages: 1,
+    matched: 0,
+    openAbout: { version: '1.20.0', editor: 'Visual Studio Code 1.99.0', system: 'Darwin' },
+  });
+  flushFrames();
+  const pending = new Set(timers.keys());
+  get('aboutCopy').listeners.get('click')!();
+  assert.equal([...timers.keys()].filter((id) => !pending.has(id)).length, 1);
+  app.dispose();
+  assert.deepEqual(
+    [...timers.keys()].filter((id) => !pending.has(id)),
+    [],
+  );
+});
+
 test('Suggest a feature and Vote on what’s next are a dialog in the panel that shows what it will send', () => {
   const { get, receive, messages, flushFrames } = viewer();
   const snapshot = (openFeedback: unknown) => ({
@@ -4916,4 +5404,711 @@ test('an empty panel offers the ways to get logs in, until something is captured
   snapshot(100, true);
   assert.equal(get('emptyActions').hidden, true);
   assert.equal(get('empty').textContent, 'No matching events in retained history.');
+});
+
+const quietSnapshot = {
+  type: 'snapshot',
+  generation: 1,
+  newest: 100,
+  status: 'Ready',
+  command: '',
+  running: false,
+  total: 0,
+  retained: 0,
+  discarded: 0,
+  bytes: 0,
+  maxBytes: 10000,
+  truncated: 0,
+  events: [],
+  columns: [],
+  page: 0,
+  pages: 1,
+  matched: 0,
+};
+
+test('the status icon opens a status panel showing capture, receiver and agents, with a switch for each', () => {
+  const { get, receive, messages } = viewer();
+  receive({
+    ...quietSnapshot,
+    captureTerminals: true,
+    otlp: { running: true, endpoint: 'http://127.0.0.1:4318' },
+    agentSharing: { active: true, scope: 'all', revision: 1, sources: [] },
+  });
+  get('statusPanel').hidden = true;
+  get('statusIcon').listeners.get('click')!({ stopPropagation() {} });
+  assert.equal(get('statusPanel').hidden, false);
+  assert.equal(get('statusIcon').attributes['aria-expanded'], 'true');
+  assert.equal(get('statusCaptureText').textContent, 'On');
+  assert.equal(get('statusCapture').textContent, 'Turn off');
+  assert.equal(get('statusOtlpText').textContent, 'On · 127.0.0.1:4318');
+  assert.equal(get('statusOtlp').textContent, 'Stop');
+  assert.equal(get('statusAgentsText').textContent, get('shareScope').textContent);
+  assert.notEqual(get('statusAgentsText').textContent, 'Not sharing');
+  get('statusCapture').listeners.get('click')!();
+  assert.deepEqual(JSON.parse(JSON.stringify(messages.at(-1))), { type: 'toggleTerminalCapture', enabled: false });
+  get('statusOtlp').listeners.get('click')!();
+  assert.deepEqual(JSON.parse(JSON.stringify(messages.at(-1))), { type: 'toggleOtlp', enabled: false });
+
+  receive({ ...quietSnapshot, captureTerminals: false, otlp: { running: false } });
+  assert.equal(get('statusCaptureText').textContent, 'Off');
+  assert.equal(get('statusCapture').textContent, 'Turn on');
+  assert.equal(get('statusOtlpText').textContent, 'Off');
+  assert.equal(get('statusOtlp').textContent, 'Start');
+  assert.equal(get('statusAgentsText').textContent, 'Not sharing');
+  get('statusCapture').listeners.get('click')!();
+  assert.deepEqual(JSON.parse(JSON.stringify(messages.at(-1))), { type: 'toggleTerminalCapture', enabled: true });
+  get('statusOtlp').listeners.get('click')!();
+  assert.deepEqual(JSON.parse(JSON.stringify(messages.at(-1))), { type: 'toggleOtlp', enabled: true });
+
+  get('statusTroubleshoot').listeners.get('click')!();
+  assert.deepEqual(JSON.parse(JSON.stringify(messages.at(-1))), { type: 'showStatus' });
+  assert.equal(get('statusPanel').hidden, true, 'troubleshooting closes the panel');
+});
+
+test('the Issues chip shows a count, opens the Issues view with its tab, and the tab goes when the view is left', () => {
+  const { get, receive, app } = viewer();
+  const finding = { siteId: 'a\u00001', code: 'secret', severity: 'warning', message: 'm', file: 'a.ts', line: 1 };
+  assert.equal(get('issuesChip').hidden, true, 'hidden while log doctor is off');
+  receive({ ...quietSnapshot, doctor: { revision: 1, total: 0, findings: [] } });
+  assert.equal(get('issuesChip').hidden, true, 'hidden with nothing found');
+  assert.equal(get('statusIssuesRow').hidden, false);
+  assert.equal(get('statusIssuesText').textContent, 'No problems found so far');
+  receive({ ...quietSnapshot, doctor: { revision: 2, total: 4, findings: [finding] } });
+  assert.equal(get('issuesChip').hidden, false);
+  assert.equal(get('doctorCount').textContent, '4 issues');
+  assert.equal(get('statusIssuesText').textContent, '4 problems with log statements');
+  assert.equal(get('doctor').hidden, true);
+  get('issuesChip').listeners.get('click')!();
+  assert.equal(app.views.active(), 'doctor');
+  assert.equal(get('doctor').hidden, false);
+  assert.equal(get('doctorView').hidden, false);
+  get('logsTab').listeners.get('click')!();
+  assert.equal(app.views.active(), 'logs');
+  assert.equal(get('doctor').hidden, true);
+  get('statusIssues').listeners.get('click')!();
+  assert.equal(app.views.active(), 'doctor', 'the status panel opens the view too');
+  receive({ ...quietSnapshot, doctor: { revision: 3, total: 1, findings: [finding] } });
+  assert.equal(get('doctorCount').textContent, '1 issue');
+  receive(quietSnapshot);
+  assert.equal(get('issuesChip').hidden, true);
+  assert.equal(get('statusIssuesRow').hidden, true, 'no row when log doctor is off');
+  assert.equal(get('doctor').hidden, true);
+});
+
+test('the Add logs menu offers each way to bring logs in, and hides the receiver item while it runs', () => {
+  const { get, receive, messages } = viewer();
+  get('railAddMenu').hidden = true;
+  const expected: [string, Record<string, unknown>][] = [
+    ['railAddRun', { type: 'run' }],
+    ['railAddFile', { type: 'followFile' }],
+    ['openBrowser', { type: 'openBrowser' }],
+    ['import', { type: 'import' }],
+    ['railAddConnectionItem', { type: 'addConnection' }],
+    ['railAddOtlp', { type: 'toggleOtlp', enabled: true }],
+  ];
+  for (const [id, message] of expected) {
+    get('railAdd').listeners.get('click')!({ stopPropagation() {} });
+    assert.equal(get('railAddMenu').hidden, false);
+    get(id).listeners.get('click')!();
+    assert.deepEqual(JSON.parse(JSON.stringify(messages.at(-1))), message, id);
+    assert.equal(get('railAddMenu').hidden, true, `${id} closes the menu`);
+  }
+  assert.equal(get('railAddOtlp').hidden, false);
+  receive({ ...quietSnapshot, otlp: { running: true, endpoint: 'http://127.0.0.1:4318' } });
+  assert.equal(get('railAddOtlp').hidden, true);
+  receive({ ...quietSnapshot, otlp: { running: false } });
+  assert.equal(get('railAddOtlp').hidden, false);
+});
+
+test('the Add logs menu moves between its shown items with the arrow, Home, and End keys', () => {
+  const { get, dom, receive } = viewer();
+  receive({ ...quietSnapshot, otlp: { running: true, endpoint: 'http://127.0.0.1:4318' } });
+  get('railAddMenu').hidden = true;
+  get('railAdd').listeners.get('click')!({ stopPropagation() {} });
+  assert.equal(dom.activeElement, get('railAddRun'));
+  const key = (value: string) => get('railAddMenu').listeners.get('keydown')!({ key: value, preventDefault() {} });
+  key('End');
+  assert.equal(dom.activeElement, get('railAddConnectionItem'), 'the hidden receiver item is skipped');
+  key('ArrowDown');
+  assert.equal(dom.activeElement, get('railAddRun'));
+  key('ArrowUp');
+  assert.equal(dom.activeElement, get('railAddConnectionItem'));
+  key('Home');
+  assert.equal(dom.activeElement, get('railAddRun'));
+  key('Tab');
+  assert.equal(get('railAddMenu').hidden, true);
+});
+
+test('the receiver chip shows only while it runs or has failed, and the memory chip only near the limit', () => {
+  const { get, receive } = viewer();
+  receive({ ...quietSnapshot, otlp: { running: false } });
+  assert.equal(get('otlpStatus').hidden, true);
+  receive({ ...quietSnapshot, otlp: { running: false, error: 'port in use' } });
+  assert.equal(get('otlpStatus').hidden, false);
+  receive({ ...quietSnapshot, otlp: { running: true, endpoint: 'http://127.0.0.1:4318' } });
+  assert.equal(get('otlpStatus').hidden, false);
+
+  receive({ ...quietSnapshot, total: 5, retained: 5, bytes: 79, maxBytes: 100 * 1048576 });
+  assert.equal(get('counts').hidden, true);
+  receive({ ...quietSnapshot, total: 5, retained: 5, bytes: 85 * 1048576, maxBytes: 100 * 1048576 });
+  assert.equal(get('counts').hidden, false);
+  assert.equal(get('memoryText').textContent, '85 / 100 MiB');
+  get('statusPanel').hidden = true;
+  get('counts').listeners.get('click')!({ stopPropagation() {} });
+  assert.equal(get('statusPanel').hidden, false, 'the memory chip opens the status panel');
+});
+
+test('the pager hides with one page, and an empty panel says there are no logs yet', () => {
+  const { get, receive } = viewer();
+  const pager = new Element();
+  get('pageNumber').parent = pager;
+  receive({ ...quietSnapshot, total: 10, retained: 10, matched: 10, pages: 3 });
+  assert.equal(pager.hidden, false);
+  assert.equal(get('page').textContent, '10 matches');
+  receive({ ...quietSnapshot, total: 10, retained: 10, matched: 10, pages: 1 });
+  assert.equal(pager.hidden, true);
+  receive({ ...quietSnapshot, total: 10, retained: 10, matched: 0 });
+  assert.equal(get('page').textContent, 'No matches');
+  assert.equal(get('page').textContent === 'No logs yet', false);
+  receive(quietSnapshot);
+  assert.equal(get('page').textContent, 'No logs yet');
+});
+
+const LONG_TRACE = 'abcdef0123456789';
+const tracesReply = (...ids: string[]) => ({
+  type: 'traces',
+  traces: ids.map((traceId, index) => ({
+    traceId,
+    name: `GET /${traceId}`,
+    service: 'api',
+    services: ['api'],
+    startMs: 1000 - index,
+    durationMs: 20,
+    spans: 2,
+    logs: 1,
+    errors: 0,
+  })),
+});
+const traceReply = (traceId: string) => ({
+  type: 'trace',
+  trace: {
+    traceId,
+    durationMs: 20,
+    services: ['api'],
+    errors: 0,
+    omitted: 0,
+    hotspots: [],
+    logs: [],
+    spans: [
+      {
+        spanId: 'a',
+        name: 'GET /x',
+        service: 'api',
+        kind: 'server',
+        offsetMs: 0,
+        durationMs: 20,
+        selfMs: 20,
+        depth: 0,
+        error: false,
+        critical: true,
+        attributes: {},
+        events: [],
+      },
+    ],
+  },
+});
+const aiCallSummary = (spanId: string, extra: Record<string, unknown> = {}) => ({
+  traceId: 't1',
+  spanId,
+  kind: 'model',
+  operation: 'chat',
+  name: 'chat gpt-4o',
+  service: 'agent',
+  startMs: 0,
+  durationMs: 1200,
+  error: false,
+  hasContent: true,
+  model: 'gpt-4o',
+  inputTokens: 100,
+  outputTokens: 20,
+  ...extra,
+});
+const aiCallsReply = () => ({
+  type: 'aiCalls',
+  aiCalls: {
+    calls: [
+      aiCallSummary('s3'),
+      aiCallSummary('s2', { kind: 'tool', operation: 'execute_tool', tool: 'get_weather', model: undefined }),
+      aiCallSummary('s1', { error: true, errorMessage: '429', model: 'claude-sonnet' }),
+    ],
+    total: 3,
+    modelCalls: 2,
+    toolCalls: 1,
+    agentRuns: 0,
+    errors: 1,
+    inputTokens: 200,
+    outputTokens: 40,
+    cachedTokens: 50,
+    p50Ms: 1200,
+    p95Ms: 1200,
+    models: [
+      {
+        model: 'gpt-4o',
+        provider: 'openai',
+        calls: 1,
+        errors: 0,
+        inputTokens: 100,
+        outputTokens: 20,
+        cachedTokens: 50,
+        p50Ms: 900,
+        p95Ms: 1100,
+      },
+      {
+        model: 'claude-sonnet',
+        provider: 'anthropic',
+        calls: 1,
+        errors: 1,
+        inputTokens: 100,
+        outputTokens: 20,
+        cachedTokens: 0,
+        p50Ms: 1300,
+        p95Ms: 1500,
+      },
+    ],
+    tools: [{ tool: 'get_weather', calls: 1, errors: 0, p95Ms: 180 }],
+  },
+});
+const aiCallReply = (spanId: string, conversation: string[], extra: Record<string, unknown> = {}) => ({
+  type: 'aiCall',
+  traceId: 't1',
+  spanId,
+  detail: {
+    call: aiCallSummary(spanId, { provider: 'openai', ...extra }),
+    messages: [],
+    toolRuns: {},
+    conversation: conversation.map((id) => ({ traceId: 't1', spanId: id })),
+    position: conversation.indexOf(spanId),
+  },
+});
+/** A viewer whose AI calls tab shows, already on that tab with its list loaded. */
+function aiCallsViewer() {
+  const t = viewer({}, { snapshot: { aiCalls: { calls: 3, revision: 1 } } });
+  t.get('aiCalls').listeners.get('click')!();
+  t.receive(aiCallsReply());
+  return t;
+}
+const railButtonOf = (get: (id: string) => Element, key: string) =>
+  get('tabRailList')
+    .children.map((child) => child.children[0])
+    .find((button) => button?.dataset.railKey === key)!;
+const sent = (messages: Record<string, any>[]) => messages.map((message) => JSON.parse(JSON.stringify(message)));
+
+test('the views are one per tab: a trace or a conversation is not a view of its own', () => {
+  const { app, dom, get } = viewer({}, { snapshot: { aiCalls: { calls: 3, revision: 1 } } });
+  for (const name of ['trace', 'aiCall']) assert.equal(isTabName(name), false, `${name} is not a view`);
+  assert.equal(tabOf('aiCalls'), 'aiCalls', 'a view is its own tab');
+  assert.equal(app.views.active(), 'logs');
+  get('traces').listeners.get('click')!();
+  app.traceView.show('abc');
+  assert.equal(app.views.active(), 'traces', 'a waterfall belongs to the Traces tab');
+  assert.equal(dom.body.dataset.view, 'traces');
+  assert.equal(dom.body.dataset.subview, undefined);
+  get('aiCalls').listeners.get('click')!();
+  assert.equal(app.views.active(), 'aiCalls');
+  assert.equal(dom.body.dataset.subview, undefined);
+});
+
+test('a trace opens beside the Traces list from every place that names one', () => {
+  const entries: [string, (t: ReturnType<typeof viewer>) => void][] = [
+    [
+      'a trace row',
+      ({ get }) => {
+        get('traces').listeners.get('click')!();
+      },
+    ],
+    [
+      'a log row',
+      ({ get }) =>
+        get('logs').listeners.get('click')!(
+          clickOn('.row-trace-button', { dataset: { traceId: LONG_TRACE } } as unknown as Element),
+        ),
+    ],
+    [
+      'the Trace action of an event',
+      ({ get, receive }) => {
+        get('logs').listeners.get('click')!(clickOn('.message-button', rowButton(get, 42)));
+        receive({ type: 'details', id: 42, text: 'raw', exceptions: [], traceId: LONG_TRACE });
+        const trace = get('inspectorBody').querySelector('.trace-button')!;
+        get('inspectorBody').listeners.get('click')!(clickOn('.trace-button', trace));
+      },
+    ],
+    [
+      'the surrounding logs',
+      ({ get, app, receive }) => {
+        app.inspection.showContext(42);
+        receive({
+          type: 'context',
+          id: 42,
+          missing: false,
+          events: [{ id: 42, message: 'timeout', level: 'error', timestamp: '12:00', stream: 'stderr' }],
+        });
+        receive({ type: 'details', target: 'context', id: 42, text: 'raw', exceptions: [], traceId: LONG_TRACE });
+        const trace = get('contextDetails').querySelector('.trace-button')!;
+        get('contextDetails').listeners.get('click')!(clickOn('.trace-button', trace));
+      },
+    ],
+    [
+      'a snapshot that opens one',
+      ({ receive }) =>
+        receive({
+          type: 'snapshot',
+          generation: 1,
+          newest: 100,
+          status: 'Running',
+          command: '',
+          running: true,
+          total: 0,
+          retained: 0,
+          discarded: 0,
+          bytes: 0,
+          maxBytes: 1,
+          truncated: 0,
+          events: [],
+          columns: [],
+          page: 0,
+          pages: 1,
+          matched: 0,
+          openTrace: LONG_TRACE.toUpperCase(),
+        }),
+    ],
+  ];
+  for (const [name, choose] of entries) {
+    const t = viewer();
+    const { get, app, dom, receive, messages } = t;
+    choose(t);
+    if (name === 'a trace row') {
+      receive(tracesReply(LONG_TRACE, 'other'));
+      const row = get('tracesRows').children[0];
+      get('tracesRows').listeners.get('click')!({ target: { closest: () => row } });
+      assert.equal(row.classList.contains('selected'), true, 'the chosen row is marked');
+      assert.equal(get('tracesRows').children[1].classList.contains('selected'), false, name);
+    }
+    assert.equal(app.views.active(), 'traces', name);
+    assert.equal(get('tracesView').hidden, false, `${name}: the list stays shown`);
+    assert.equal(get('logsView').hidden, true, name);
+    assert.equal(dom.body.dataset.inspector, 'trace', name);
+    assert.equal(get('inspector').hidden, false, name);
+    assert.equal(get('inspectorTitle').textContent, 'Trace abcdef01…6789', name);
+    assert.equal(get('inspectorTitle').title, LONG_TRACE, `${name}: the tooltip has the whole id`);
+    assert.equal(get('inspectorBody').children[0], get('traceView'), name);
+    assert.deepEqual(
+      sent(messages)
+        .filter((message) => message.type === 'traces' || message.type === 'trace')
+        .map((message) => message.type),
+      ['traces', 'trace'],
+      `${name}: the list loads, then the waterfall`,
+    );
+    assert.deepEqual(sent(messages).at(-1), { type: 'trace', traceId: LONG_TRACE }, name);
+    receive(traceReply(LONG_TRACE));
+    assert.equal(get('traceRows').children.length, 1, name);
+  }
+});
+
+test('a short trace id shows whole in the inspector title, and Enter on a list row opens it', () => {
+  const { get, app, receive, messages } = viewer();
+  get('traces').listeners.get('click')!();
+  receive(tracesReply('f1', 'f2'));
+  const row = get('tracesRows').children[1];
+  let prevented = false;
+  get('tracesRows').listeners.get('keydown')!({
+    key: 'Enter',
+    target: { closest: () => row },
+    preventDefault: () => (prevented = true),
+  });
+  assert.equal(prevented, true);
+  assert.equal(get('inspectorTitle').textContent, 'Trace f2');
+  assert.equal(row.classList.contains('selected'), true);
+  assert.deepEqual(sent(messages).at(-1), { type: 'trace', traceId: 'f2' });
+  // Choosing another trace replaces it.
+  const first = get('tracesRows').children[0];
+  get('tracesRows').listeners.get('click')!({ target: { closest: () => first } });
+  assert.equal(get('inspectorTitle').textContent, 'Trace f1');
+  assert.equal(first.classList.contains('selected'), true);
+  assert.equal(row.classList.contains('selected'), false);
+  assert.equal(app.views.active(), 'traces');
+  receive(traceReply('f2'));
+  assert.equal(get('traceRows').children.length, 0, 'the reply for the replaced trace is ignored');
+  receive(traceReply('f1'));
+  assert.equal(get('traceRows').children.length, 1);
+});
+
+test('a trace closes with the inspector, Escape, or leaving the tab, and a late reply is ignored', () => {
+  const routes: [string, (t: ReturnType<typeof viewer>) => void][] = [
+    ['the close button', ({ get }) => get('inspectorClose').listeners.get('click')!()],
+    [
+      'Escape in the inspector',
+      ({ get }) => get('inspector').listeners.get('keydown')!({ key: 'Escape', stopPropagation() {} }),
+    ],
+    ['the Logs tab', ({ get }) => get('logsTab').listeners.get('click')!()],
+    ['another tab', ({ get }) => get('analyze').listeners.get('click')!()],
+    ['Show this trace’s logs', ({ get }) => get('traceFilter').listeners.get('click')!()],
+  ];
+  for (const [name, close] of routes) {
+    const t = viewer();
+    const { get, app, dom, receive } = t;
+    get('traces').listeners.get('click')!();
+    receive(tracesReply('f1', 'f2'));
+    const row = get('tracesRows').children[0];
+    get('tracesRows').listeners.get('click')!({ target: { closest: () => row } });
+    receive(traceReply('f1'));
+    assert.equal(get('traceRows').children.length, 1, name);
+    close(t);
+    assert.equal(get('inspector').hidden, true, name);
+    assert.equal(dom.body.dataset.inspector, undefined, name);
+    assert.equal(get('traceRows').children.length, 0, `${name}: the waterfall is cleared`);
+    assert.equal(row.classList.contains('selected'), false, `${name}: the row is unmarked`);
+    receive(traceReply('f1'));
+    assert.equal(get('traceRows').children.length, 0, `${name}: a late reply is ignored`);
+    if (name === 'the close button' || name.startsWith('Escape'))
+      assert.equal(app.views.active(), 'traces', `${name}: the list stays`);
+  }
+});
+
+test('Show this trace’s logs applies the trace to the search and leaves the Traces tab', () => {
+  const { get, app, dom, receive } = viewer();
+  app.traceView.show('abc123');
+  receive(traceReply('abc123'));
+  get('traceFilter').listeners.get('click')!();
+  assert.equal(app.search.query(), 'traceId:abc123');
+  assert.equal(app.views.active(), 'logs');
+  assert.equal(dom.body.dataset.inspector, undefined);
+});
+
+test('an AI call opens beside the list, steps with previous and next, and closes with the inspector', () => {
+  const { get, app, dom, receive, messages } = aiCallsViewer();
+  const rows = () => get('aiCallRows').children;
+  get('aiCallRows').listeners.get('click')!({ target: rows()[1] });
+  assert.equal(app.views.active(), 'aiCalls');
+  assert.equal(get('aiCallsView').hidden, false, 'the list stays shown');
+  assert.equal(dom.body.dataset.inspector, 'aiCall');
+  assert.equal(get('inspectorTitle').textContent, 'AI call');
+  assert.equal(get('inspectorBody').children[0], get('aiCallView'));
+  assert.deepEqual(sent(messages).at(-1), { type: 'aiCall', traceId: 't1', spanId: 's2' });
+  receive(aiCallReply('s2', ['s1', 's2', 's3'], { kind: 'tool', operation: 'execute_tool', tool: 'get_weather' }));
+  assert.equal(get('inspectorTitle').textContent, '⚙ tool get_weather');
+  assert.equal(get('inspectorNav').children[0], get('aiCallNavigation'));
+  assert.equal(get('aiCallPosition').textContent, '2 of 3');
+  get('aiCallNext').listeners.get('click')!();
+  assert.deepEqual(sent(messages).at(-1), { type: 'aiCall', traceId: 't1', spanId: 's3' });
+  assert.equal(get('inspectorTitle').textContent, 'AI call', 'the call is replaced in place');
+  assert.equal(dom.body.dataset.inspector, 'aiCall');
+  receive(aiCallReply('s2', ['s1', 's2', 's3']));
+  assert.equal(get('inspectorTitle').textContent, 'AI call', 'the reply for the call it replaced is ignored');
+  receive(aiCallReply('s3', ['s1', 's2', 's3']));
+  assert.equal(get('inspectorTitle').textContent, '◆ chat gpt-4o');
+  get('aiCallPrevious').listeners.get('click')!();
+  assert.deepEqual(sent(messages).at(-1), { type: 'aiCall', traceId: 't1', spanId: 's2' });
+  // Enter on a row opens it too.
+  let prevented = false;
+  get('aiCallRows').listeners.get('keydown')!({
+    key: 'Enter',
+    target: rows()[2],
+    preventDefault: () => (prevented = true),
+  });
+  assert.equal(prevented, true);
+  assert.deepEqual(sent(messages).at(-1), { type: 'aiCall', traceId: 't1', spanId: 's1' });
+  get('inspectorClose').listeners.get('click')!();
+  assert.equal(get('inspector').hidden, true);
+  assert.equal(dom.body.dataset.inspector, undefined);
+  assert.equal(app.views.active(), 'aiCalls', 'closing leaves the list');
+  receive(aiCallReply('s1', ['s1']));
+  assert.equal(get('aiCallTranscript').children.length, 0, 'a late reply is ignored');
+  assert.equal(get('inspector').hidden, true);
+});
+
+test('an AI call closes with Escape or when its tab is left', () => {
+  for (const close of [
+    ({ get }: ReturnType<typeof viewer>) =>
+      get('inspector').listeners.get('keydown')!({ key: 'Escape', stopPropagation() {} }),
+    ({ get }: ReturnType<typeof viewer>) => get('logsTab').listeners.get('click')!(),
+  ]) {
+    const t = aiCallsViewer();
+    t.get('aiCallRows').listeners.get('click')!({ target: t.get('aiCallRows').children[0] });
+    assert.equal(t.dom.body.dataset.inspector, 'aiCall');
+    close(t);
+    assert.equal(t.get('inspector').hidden, true);
+    t.receive(aiCallReply('s3', ['s3']));
+    assert.equal(t.get('aiCallTranscript').children.length, 0);
+  }
+});
+
+test('the AI calls rail narrows the list by model and kind, shows only errors, and All calls resets it', () => {
+  const { get, receive } = aiCallsViewer();
+  const rows = () => get('aiCallRows').children.map((row) => row.dataset.spanId);
+  assert.equal(get('tabRailTitle').textContent, 'AI calls');
+  const items = get('tabRailList').children.map(
+    (child) => child.children[0]?.dataset.railKey ?? child.children[0]?.textContent,
+  );
+  assert.deepEqual(
+    items.filter((key) => key !== undefined && !String(key).includes(':')),
+    ['all', 'Models', 'Kind', 'Show', 'errors'],
+    'the items and their headings, with kinds that have no calls left out',
+  );
+  assert.deepEqual(
+    items.filter((key) => String(key).includes(':')),
+    ['model:gpt-4o', 'model:claude-sonnet', 'kind:model', 'kind:tool'],
+  );
+  const parts = (key: string) =>
+    ['.rail-name', '.rail-status', '.rail-meta'].map((name) => railButtonOf(get, key).querySelector(name)?.textContent);
+  assert.deepEqual(parts('model:claude-sonnet'), ['claude-sonnet', 'anthropic', '1 failed · 1']);
+  assert.deepEqual(parts('model:gpt-4o'), ['gpt-4o', 'openai', '1']);
+  assert.equal(railButtonOf(get, 'all').attributes['aria-current'], 'true');
+  assert.deepEqual(rows(), ['s3', 's2', 's1']);
+  // A model.
+  railButtonOf(get, 'model:gpt-4o').listeners.get('click')!();
+  assert.deepEqual(rows(), ['s3']);
+  assert.equal(railButtonOf(get, 'all').attributes['aria-current'], 'false');
+  assert.match(get('aiCallsStatus').textContent, / · gpt-4o only/);
+  railButtonOf(get, 'model:gpt-4o').listeners.get('click')!();
+  assert.deepEqual(rows(), ['s3', 's2', 's1'], 'choosing it again clears it');
+  // A kind.
+  railButtonOf(get, 'kind:tool').listeners.get('click')!();
+  assert.deepEqual(rows(), ['s2']);
+  assert.equal(railButtonOf(get, 'kind:tool').attributes['aria-current'], 'true');
+  railButtonOf(get, 'kind:tool').listeners.get('click')!();
+  assert.deepEqual(rows(), ['s3', 's2', 's1']);
+  railButtonOf(get, 'kind:model').listeners.get('click')!();
+  assert.deepEqual(rows(), ['s3', 's1']);
+  railButtonOf(get, 'kind:model').listeners.get('click')!();
+  // Errors only is a check that turns on and off.
+  railButtonOf(get, 'errors').listeners.get('click')!();
+  assert.deepEqual(rows(), ['s1']);
+  assert.equal(railButtonOf(get, 'errors').attributes['aria-pressed'], 'true');
+  railButtonOf(get, 'errors').listeners.get('click')!();
+  assert.deepEqual(rows(), ['s3', 's2', 's1']);
+  assert.equal(railButtonOf(get, 'errors').attributes['aria-pressed'], 'false');
+  // All calls clears the model and the kind.
+  railButtonOf(get, 'model:claude-sonnet').listeners.get('click')!();
+  railButtonOf(get, 'all').listeners.get('click')!();
+  assert.deepEqual(rows(), ['s3', 's2', 's1']);
+  railButtonOf(get, 'kind:tool').listeners.get('click')!();
+  railButtonOf(get, 'all').listeners.get('click')!();
+  assert.deepEqual(rows(), ['s3', 's2', 's1']);
+  assert.equal(railButtonOf(get, 'all').attributes['aria-current'], 'true');
+  // A model and a kind replace each other, since a model's calls are never tool calls.
+  railButtonOf(get, 'model:gpt-4o').listeners.get('click')!();
+  railButtonOf(get, 'kind:tool').listeners.get('click')!();
+  assert.deepEqual(rows(), ['s2']);
+  assert.equal(railButtonOf(get, 'model:gpt-4o').attributes['aria-current'], 'false');
+  assert.doesNotMatch(get('aiCallsStatus').textContent, /gpt-4o only/);
+  railButtonOf(get, 'model:gpt-4o').listeners.get('click')!();
+  assert.deepEqual(rows(), ['s3']);
+  assert.equal(railButtonOf(get, 'kind:tool').attributes['aria-current'], 'false');
+  railButtonOf(get, 'all').listeners.get('click')!();
+  // A kind whose calls are no longer retained leaves the rail and stops narrowing the list.
+  railButtonOf(get, 'kind:tool').listeners.get('click')!();
+  const reply = aiCallsReply();
+  reply.aiCalls.calls = reply.aiCalls.calls.filter((call) => call.kind !== 'tool');
+  reply.aiCalls.total = 2;
+  reply.aiCalls.toolCalls = 0;
+  receive(reply);
+  assert.deepEqual(rows(), ['s3', 's1']);
+  assert.equal(railButtonOf(get, 'all').attributes['aria-current'], 'true');
+  receive(aiCallsReply());
+  // The text filter still works beside the rail.
+  get('aiCallsFilter').value = 'get_weather';
+  get('aiCallsFilter').listeners.get('input')!();
+  assert.deepEqual(rows(), ['s2']);
+  get('aiCallsFilter').value = '';
+  get('aiCallsFilter').listeners.get('input')!();
+  // With no calls there is nothing in the rail.
+  receive({
+    type: 'aiCalls',
+    aiCalls: {
+      calls: [],
+      total: 0,
+      modelCalls: 0,
+      toolCalls: 0,
+      agentRuns: 0,
+      errors: 0,
+      inputTokens: 0,
+      outputTokens: 0,
+      cachedTokens: 0,
+      models: [],
+      tools: [],
+    },
+  });
+  assert.equal(get('tabRailList').children.length, 0);
+});
+
+test('choosing a model in the AI calls rail replaces the totals with that model’s', () => {
+  const { get } = aiCallsViewer();
+  const tiles = () => get('aiCallsTiles').children.map((tile) => tile.children.map((part) => part.textContent));
+  assert.deepEqual(
+    tiles().map((tile) => tile[0]),
+    ['Model calls', 'Tokens', 'Latency', 'Tool calls'],
+  );
+  railButtonOf(get, 'model:gpt-4o').listeners.get('click')!();
+  assert.deepEqual(tiles(), [
+    ['gpt-4o', '1', 'calls'],
+    ['Tokens', '100 → 20', '50% of input cached'],
+    ['Latency', 'p50 900 ms', 'p95 1.10 s'],
+  ]);
+  railButtonOf(get, 'model:claude-sonnet').listeners.get('click')!();
+  assert.deepEqual(tiles()[0], ['claude-sonnet', '1', '1 failed']);
+  assert.deepEqual(tiles()[1], ['Tokens', '100 → 20', 'input → output']);
+  railButtonOf(get, 'model:claude-sonnet').listeners.get('click')!();
+  assert.equal(tiles().length, 4, 'clearing the model brings the totals back');
+});
+
+test('the inspector shows one thing: leaving a tab closes its selection, and another kind replaces it', () => {
+  const t = viewer({}, { snapshot: { aiCalls: { calls: 3, revision: 1 } } });
+  const { get, app, dom, receive, messages } = t;
+  const kind = () => dom.body.dataset.inspector;
+  // Leaving Logs closes an open event.
+  get('logs').listeners.get('click')!(clickOn('.message-button', rowButton(get, 42)));
+  assert.equal(kind(), 'event');
+  get('traces').listeners.get('click')!();
+  assert.equal(kind(), undefined);
+  assert.equal(app.state.selected, undefined);
+  // Leaving Traces closes an open trace.
+  app.traceView.show('abc');
+  assert.equal(kind(), 'trace');
+  get('aiCalls').listeners.get('click')!();
+  assert.equal(kind(), undefined);
+  receive(aiCallsReply());
+  // Leaving AI calls closes an open call.
+  get('aiCallRows').listeners.get('click')!({ target: get('aiCallRows').children[0] });
+  assert.equal(kind(), 'aiCall');
+  get('logsTab').listeners.get('click')!();
+  assert.equal(kind(), undefined);
+  // A trace opened from an open call replaces it, and the reverse.
+  get('aiCalls').listeners.get('click')!();
+  get('aiCallRows').listeners.get('click')!({ target: get('aiCallRows').children[0] });
+  receive(aiCallReply('s3', ['s3']));
+  get('aiCallTrace').listeners.get('click')!();
+  assert.equal(kind(), 'trace');
+  assert.equal(app.views.active(), 'traces');
+  assert.equal(get('inspectorBody').children[0], get('traceView'));
+  assert.equal(get('aiCallTranscript').children.length, 0, 'the call is forgotten');
+  receive({
+    type: 'trace',
+    trace: {
+      ...traceReply('t1').trace,
+      spans: [
+        {
+          ...traceReply('t1').trace.spans[0],
+          spanId: 's3',
+          genAi: { kind: 'model', label: 'gpt-4o', inputTokens: 1, outputTokens: 1 },
+        },
+      ],
+    },
+  });
+  const chip = get('traceRows').children[0].children[0].children[0].children[1];
+  get('traceRows').listeners.get('click')!({ target: chip });
+  assert.equal(kind(), 'aiCall');
+  assert.equal(app.views.active(), 'aiCalls');
+  assert.equal(get('inspectorBody').children[0], get('aiCallView'));
+  assert.equal(get('traceRows').children.length, 0, 'the trace is forgotten');
+  assert.deepEqual(sent(messages).at(-1), { type: 'aiCall', traceId: 't1', spanId: 's3' });
 });

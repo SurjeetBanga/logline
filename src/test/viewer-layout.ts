@@ -15,16 +15,20 @@ const media = join(__dirname, '..', '..', 'media');
 const origin = 'https://logline.test';
 const nonce = 'layout';
 // Filled as src/vscode/webview-html.ts fills it, Content Security Policy included.
-const html = readFileSync(join(media, 'viewer.html'), 'utf8').replace(
-  /\{\{([A-Z_]+)\}\}/g,
-  (_, key: string) =>
-    ({
-      CSP_SOURCE: origin,
-      NONCE: nonce,
-      STYLE_URI: `${origin}/viewer.css`,
-      SCRIPT_URI: `${origin}/viewer.js`,
-    })[key] ?? '',
-);
+// VS Code puts its own default styles ahead of the page's, the body's side padding among them.
+const VSCODE_DEFAULTS = 'body { margin: 0; padding: 0 20px; }';
+const html = readFileSync(join(media, 'viewer.html'), 'utf8')
+  .replace('<head>', `<head><link rel="stylesheet" href="${origin}/vscode-defaults.css" />`)
+  .replace(
+    /\{\{([A-Z_]+)\}\}/g,
+    (_, key: string) =>
+      ({
+        CSP_SOURCE: origin,
+        NONCE: nonce,
+        STYLE_URI: `${origin}/viewer.css`,
+        SCRIPT_URI: `${origin}/viewer.js`,
+      })[key] ?? '',
+  );
 
 // A short panel docked under the editor, a narrow one in the side bar, and the narrowest side bar.
 const SIZES = [
@@ -82,6 +86,118 @@ const traces = {
   ],
 };
 
+const traceDetail = {
+  type: 'trace',
+  trace: {
+    traceId: 'f1',
+    durationMs: 120,
+    services: ['api', 'payments'],
+    errors: 1,
+    omitted: 0,
+    hotspots: [{ service: 'api', name: 'POST /checkout', count: 1, selfMs: 80, share: 0.66, errors: 0 }],
+    spans: [
+      {
+        spanId: 'a',
+        name: 'POST /checkout',
+        service: 'api',
+        kind: 'server',
+        offsetMs: 0,
+        durationMs: 120,
+        selfMs: 80,
+        depth: 0,
+        error: false,
+        critical: true,
+        attributes: { 'http.route': '/checkout' },
+        events: [],
+      },
+      {
+        spanId: 'b',
+        name: 'charge card',
+        service: 'payments',
+        kind: 'client',
+        offsetMs: 20,
+        durationMs: 40,
+        selfMs: 40,
+        depth: 1,
+        error: true,
+        critical: false,
+        attributes: {},
+        events: [],
+        statusMessage: 'declined',
+      },
+    ],
+    logs: [{ id: 7, level: 'warn', message: 'slow query', offsetMs: 12, spanId: 'b', server: 'OTel · payments' }],
+  },
+};
+
+const aiCall = {
+  traceId: 't1',
+  spanId: 's1',
+  kind: 'model',
+  operation: 'chat',
+  name: 'chat gpt-4o',
+  service: 'agent',
+  startMs: 0,
+  durationMs: 1200,
+  error: false,
+  hasContent: true,
+  model: 'gpt-4o',
+  inputTokens: 100,
+  outputTokens: 20,
+};
+const aiCalls = {
+  type: 'aiCalls',
+  aiCalls: {
+    calls: [aiCall, { ...aiCall, spanId: 's2', kind: 'tool', tool: 'get_weather', model: undefined }],
+    total: 2,
+    modelCalls: 1,
+    toolCalls: 1,
+    agentRuns: 0,
+    errors: 0,
+    inputTokens: 100,
+    outputTokens: 20,
+    cachedTokens: 0,
+    p50Ms: 1200,
+    p95Ms: 1200,
+    models: [
+      {
+        model: 'gpt-4o',
+        provider: 'openai',
+        calls: 1,
+        errors: 0,
+        inputTokens: 100,
+        outputTokens: 20,
+        cachedTokens: 0,
+        p50Ms: 1200,
+        p95Ms: 1200,
+      },
+    ],
+    tools: [{ tool: 'get_weather', calls: 1, errors: 0, p95Ms: 180 }],
+  },
+};
+const aiCallDetail = {
+  type: 'aiCall',
+  traceId: 't1',
+  spanId: 's1',
+  detail: {
+    call: { ...aiCall, provider: 'openai' },
+    messages: [
+      { role: 'user', parts: [{ kind: 'text', text: 'Weather in Paris?' }] },
+      {
+        role: 'assistant',
+        output: true,
+        parts: [{ kind: 'tool_call', name: 'get_weather', id: 'c1', value: '{ "city": "Paris" }' }],
+      },
+    ],
+    toolRuns: { c1: { spanId: 's2', tool: 'get_weather', durationMs: 180, error: false, result: '{ "high": 14 }' } },
+    conversation: [
+      { traceId: 't1', spanId: 's1' },
+      { traceId: 't1', spanId: 's2' },
+    ],
+    position: 0,
+  },
+};
+
 let browser: Browser;
 before(async () => {
   browser = await chromium.launch();
@@ -105,6 +221,7 @@ async function open(
   await page.route(`${origin}/**`, (route) => {
     const name = new URL(route.request().url()).pathname.slice(1);
     if (name === '') return route.fulfill({ contentType: 'text/html', body: html });
+    if (name === 'vscode-defaults.css') return route.fulfill({ contentType: 'text/css', body: VSCODE_DEFAULTS });
     return route.fulfill({ path: join(media, name) });
   });
   await page.addInitScript((state) => {
@@ -193,6 +310,21 @@ for (const size of SIZES) {
     }
   });
 
+  test(`the ${name} panel runs edge to edge, without VS Code's padding at its sides`, async () => {
+    const page = await open(size);
+    try {
+      const edges = await page.evaluate(() => {
+        const bar = document.querySelector('.view-bar')!.getBoundingClientRect();
+        const rail = document.getElementById('sourceRail')!.getBoundingClientRect();
+        return { bar: [bar.left, bar.right], rail: rail.left, width: window.innerWidth };
+      });
+      assert.deepEqual(edges.bar, [0, edges.width], 'the top row spans the panel');
+      assert.equal(edges.rail, 0, 'the Sources rail starts at the left edge');
+    } finally {
+      await page.close();
+    }
+  });
+
   test(`the Update button fits a ${name} panel beside the actions`, async () => {
     const page = await open(size);
     try {
@@ -247,10 +379,14 @@ for (const size of SIZES) {
       await post(page, { type: 'connectionForm', session: 1, update: { type: 'close' } });
       await openForm(page, 2, 'add');
       await assertPageFits(page, 'a second Add connection');
+      await page.locator('#connectionView footer button', { hasText: 'Next' }).click();
+      await assertPageFits(page, 'the Connect step');
       await page.locator('#connectionView .segment', { hasText: 'Fields' }).click();
       await assertPageFits(page, 'Fields');
-      await page.locator('#connectionView button', { hasText: 'Test connection' }).click();
+      await page.locator('#connectionView footer button', { hasText: 'Test connection' }).click();
       await assertPageFits(page, 'Test connection with fields missing');
+      await page.locator('#connectionView .wizard-step', { hasText: 'Type' }).click();
+      await assertPageFits(page, 'back at the Type step');
       await post(page, { type: 'connectionForm', session: 2, update: { type: 'close' } });
       await openForm(page, 3, 'edit');
       await assertPageFits(page, 'Edit connection');
@@ -294,4 +430,155 @@ for (const size of SIZES) {
       await page.close();
     }
   });
+
+  test(`a log event open in the inspector fits a ${name} panel`, async () => {
+    const page = await open(size);
+    try {
+      await page.locator('#logs tr.event-row .message-button').first().click();
+      await post(page, {
+        type: 'details',
+        id: 20,
+        target: 'main',
+        text: '{"level":"error","msg":"x","service":"api"}',
+        exceptions: [],
+      });
+      assert.equal(await page.locator('#inspector').isVisible(), true, 'the inspector opens for an event');
+      await assertPageFits(page, 'an event open in the inspector');
+      await page.locator('#inspectorClose').click();
+      await assertPageFits(page, 'the event closed again');
+    } finally {
+      await page.close();
+    }
+  });
+
+  test(`an event in an inspector widened by its edge fits a ${name} panel`, async () => {
+    // A width saved in a wide panel, then the same state in this one.
+    const page = await open(size, { inspectorWidth: 900 });
+    try {
+      await page.locator('#logs tr.event-row .message-button').first().click();
+      await post(page, { type: 'details', id: 20, target: 'main', text: '{"level":"error"}', exceptions: [] });
+      await assertPageFits(page, 'an inspector with a saved width');
+      const handle = page.locator('#inspectorResizer');
+      if (await handle.isVisible()) {
+        const box = (await handle.boundingBox())!;
+        await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+        await page.mouse.down();
+        await page.mouse.move(-size.width, box.y + box.height / 2, { steps: 4 });
+        await page.mouse.up();
+        await assertPageFits(page, 'the inspector dragged as wide as it goes');
+      }
+      await page.setViewportSize({ width: Math.max(220, Math.round(size.width * 0.6)), height: size.height });
+      await post(page, { type: 'noop' });
+      await assertPageFits(page, 'the panel narrowed under a wide inspector');
+    } finally {
+      await page.close();
+    }
+  });
+
+  test(`the status panel fits a ${name} panel`, async () => {
+    const page = await open(size, undefined, { ...snapshot, doctor: { revision: 1, total: 2, findings: [] } });
+    try {
+      await page.locator('#statusIcon').click();
+      assert.equal(await page.locator('#statusPanel').isVisible(), true, 'the status panel opens');
+      await assertPageFits(page, 'the status panel');
+      await page.keyboard.press('Escape');
+      assert.equal(await page.locator('#statusPanel').isVisible(), false);
+    } finally {
+      await page.close();
+    }
+  });
+
+  test(`the Add logs menu fits a ${name} panel`, async () => {
+    const page = await open(size);
+    try {
+      if (!(await page.locator('#railAdd').isVisible())) await page.locator('#railToggle').click();
+      await page.locator('#railAdd').click();
+      assert.equal(await page.locator('#railAddMenu').isVisible(), true, 'the Add logs menu opens');
+      await assertPageFits(page, 'the Add logs menu');
+    } finally {
+      await page.close();
+    }
+  });
+
+  test(`the Issues view fits a ${name} panel`, async () => {
+    const findings = [
+      { siteId: 's1', code: 'secret', severity: 'error', message: 'Logged a bearer token', file: 'src/a.ts', line: 3 },
+      { code: 'unattributed', severity: 'warning', message: 'Output no statement accounts for', source: 'api' },
+    ];
+    const page = await open(size, undefined, { ...snapshot, doctor: { revision: 1, total: 2, findings } });
+    try {
+      await page.locator('#statusIcon').click();
+      await page.locator('#statusIssues').click();
+      assert.equal(await page.locator('#doctorView').isVisible(), true, 'the Issues view opens');
+      await assertPageFits(page, 'the Issues view');
+    } finally {
+      await page.close();
+    }
+  });
+
+  test(`the About dialog fits a ${name} panel`, async () => {
+    const page = await open(size);
+    try {
+      const info = { version: '1.20.0', editor: 'Visual Studio Code 1.99.0', system: 'Darwin arm64 25.0.0' };
+      await post(page, { ...snapshot, openAbout: info });
+      assert.equal(await page.locator('#aboutDialog').isVisible(), true, 'the About dialog opens');
+      await assertPageFits(page, 'the About dialog');
+      const box = (await page.locator('#aboutDialog').boundingBox())!;
+      assert.ok(box.x >= 0 && box.x + box.width <= size.width, `the dialog fits across: ${JSON.stringify(box)}`);
+      const clipped = await page.locator('#aboutDialog').evaluate((dialog) => dialog.scrollWidth > dialog.clientWidth);
+      assert.equal(clipped, false, 'nothing in the dialog is wider than the dialog');
+    } finally {
+      await page.close();
+    }
+  });
+
+  test(`a trace open in the inspector fits a ${name} panel`, async () => {
+    const page = await open(size);
+    try {
+      await page.locator('#viewTabs [role=tab]', { hasText: 'Traces' }).click();
+      await post(page, traces);
+      await page.locator('#tracesRows tr').first().click();
+      await post(page, traceDetail);
+      assert.equal(await page.locator('#inspector').isVisible(), true, 'the inspector opens for a trace');
+      assert.equal(await page.locator('#traceView').isVisible(), true);
+      await assertPageFits(page, 'a trace open in the inspector');
+      await page.locator('#inspectorClose').click();
+      await assertPageFits(page, 'the trace closed again');
+    } finally {
+      await page.close();
+    }
+  });
+
+  test(`an AI call open in the inspector fits a ${name} panel`, async () => {
+    const page = await open(size, undefined, { ...snapshot, aiCalls: { calls: 2, revision: 1 } });
+    try {
+      await page.locator('#viewTabs [role=tab]', { hasText: 'AI calls' }).click();
+      await post(page, aiCalls);
+      await assertPageFits(page, 'the AI calls list with its rail');
+      await page.locator('#aiCallRows tr').first().click();
+      await post(page, aiCallDetail);
+      assert.equal(await page.locator('#inspector').isVisible(), true, 'the inspector opens for a call');
+      assert.equal(await page.locator('#aiCallView').isVisible(), true);
+      await assertPageFits(page, 'an AI call open in the inspector');
+      await page.locator('#inspectorClose').click();
+      await assertPageFits(page, 'the call closed again');
+    } finally {
+      await page.close();
+    }
+  });
 }
+
+test('at the narrowest width the Logs table keeps at least half its width for the Message column', async () => {
+  const page = await open({ width: 220, height: 600 });
+  try {
+    const { message, table } = await page.evaluate(() => {
+      const cell = document.querySelector<HTMLElement>('#logs td[data-column="base:message"]');
+      const table = document.getElementById('eventsTable')!;
+      return { message: cell?.getBoundingClientRect().width ?? 0, table: table.getBoundingClientRect().width };
+    });
+    assert.ok(message > 0, 'the table has a Message cell');
+    assert.ok(message >= table / 2, `the Message column is ${message}px of a ${table}px table`);
+  } finally {
+    await page.close();
+  }
+});

@@ -117,14 +117,42 @@ function normalizedKey(key: string): string {
   return key.toLowerCase().replace(/[^a-z0-9]/g, '');
 }
 
-export function isSensitiveKey(key: string, fields: string[] = []): boolean {
-  const normalized = normalizedKey(key);
-  if (fields.some((field) => normalizedKey(field) === normalized)) return true;
-  return SENSITIVE_KEY.test(key) && !NOT_SENSITIVE_KEY.test(key);
+// Logs repeat the same few keys, so each short key is tested against the patterns once. The cache is
+// emptied when full, since keys read from free text are unbounded.
+const KNOWN_KEYS_LIMIT = 4096;
+const knownKeys = new Map<string, boolean>();
+
+function hasSensitiveName(key: string): boolean {
+  let sensitive = knownKeys.get(key);
+  if (sensitive !== undefined) return sensitive;
+  sensitive = SENSITIVE_KEY.test(key) && !NOT_SENSITIVE_KEY.test(key);
+  if (key.length <= 64) {
+    if (knownKeys.size >= KNOWN_KEYS_LIMIT) knownKeys.clear();
+    knownKeys.set(key, sensitive);
+  }
+  return sensitive;
 }
 
+export function isSensitiveKey(key: string, fields: string[] = []): boolean {
+  if (fields.length) {
+    const normalized = normalizedKey(key);
+    if (fields.some((field) => normalizedKey(field) === normalized)) return true;
+  }
+  return hasSensitiveName(key);
+}
+
+/** A letter, digit, `_`, `.` or `-`. */
 function isKeyCharacter(value: string | undefined): boolean {
-  return value !== undefined && /[A-Za-z0-9_.-]/.test(value);
+  if (value === undefined) return false;
+  const code = value.charCodeAt(0);
+  return (
+    (code >= 97 && code <= 122) ||
+    (code >= 65 && code <= 90) ||
+    (code >= 48 && code <= 57) ||
+    code === 95 ||
+    code === 46 ||
+    code === 45
+  );
 }
 
 /**

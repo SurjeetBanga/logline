@@ -39,6 +39,15 @@ type TestState =
   /** The fields changed since a good test. */
   | { state: 'stale' };
 
+/** The test's state in a few words, for the Connect step's summary and the line beside the test. */
+const TEST_SUMMARY: Record<TestState['state'], string> = {
+  idle: 'Not checked yet',
+  running: 'Connecting…',
+  ok: 'Connected',
+  failed: 'Could not connect',
+  stale: 'Changed since the last test',
+};
+
 type Child = Node | string | false | undefined | null;
 
 /** An element with attributes, properties starting `on` as listeners, and children. */
@@ -64,13 +73,16 @@ function h<K extends keyof HTMLElementTagNameMap>(
 }
 
 const SERVER_TYPES: ConnectionType[] = ['postgres', 'mysql'];
+/** How many of the tables a test found are listed beside the form. */
+const FOUND_TABLES = 12;
 
 /**
- * The Connection form: one page that shows what to connect, a log service or
- * a database, how to sign in, a test, which table holds logs if a database has
- * one, with a preview of its rows, and a name.
- * Later steps open once the earlier ones are done, and nothing typed is lost
- * when a test fails.
+ * The Connection form: four steps shown one at a time. What to connect, a log
+ * service or a database; how to sign in; which table holds logs if a database
+ * has one, with a preview of its rows; and a name. A list of the steps says
+ * where each stands, and a pane beside them shows what the test found.
+ * A later step opens once the earlier ones are done, and nothing typed is lost
+ * when a test fails or a step is left.
  */
 export function createConnectionForm(api: FormApi, root: HTMLElement) {
   let mode: 'add' | 'edit' = 'add';
@@ -102,16 +114,43 @@ export function createConnectionForm(api: FormApi, root: HTMLElement) {
   let savedMapping: LogTableMapping | undefined;
   let saving = false;
   let saveError = '';
+  /** The step shown, by its place in `sections`; -1 before the extension fills the form in. */
+  let current = -1;
+  /** The furthest step shown so far: an earlier one that needs nothing more is marked done. */
+  let visited = 0;
   /** The draft a running test was sent, to tell whether it changed before the answer came. */
   let testing = '';
   /** What a test covers: everything but the name. */
   const tested = () => JSON.stringify({ ...draft, label: '' });
 
   const title = h('h1', {}, 'Add connection');
+  // What a connection is shows from the i beside the title, on hover or focus, like the type cards' i.
+  const heading = h(
+    'div',
+    { className: 'form-title' },
+    title,
+    h(
+      'button',
+      {
+        type: 'button',
+        className: 'type-info',
+        'aria-label': 'About connections',
+        'aria-describedby': 'connection-about',
+      },
+      'i',
+    ),
+    h(
+      'span',
+      { className: 'type-description', id: 'connection-about', role: 'tooltip' },
+      `A connection searches the logs in ${new Intl.ListFormat('en', { type: 'disjunction' }).format(
+        CONNECTION_TYPES.map((entry) => entry.label),
+      )} beside your local runs. It only reads, and nothing is saved until you add it.`,
+    ),
+  );
   const lead = h(
     'p',
     { className: 'lead' },
-    'Search a log service next to your local runs, or query a database. Every connection is read-only, and passwords and keys stay in VS Code secret storage.',
+    'Every connection is read-only, and passwords and keys stay in VS Code secret storage.',
   );
   const types = h('div', { className: 'type-groups', role: 'radiogroup', 'aria-label': 'What to connect' });
   const details = h('div', { className: 'details' });
@@ -121,6 +160,8 @@ export function createConnectionForm(api: FormApi, root: HTMLElement) {
     'Test connection',
   );
   const testStatus = h('div', { className: 'test-status', role: 'status', 'aria-live': 'polite' });
+  /** What a good test found, such as the tables it can read. */
+  const found = h('div', { className: 'found' });
   const logs = h('div', { className: 'logs' });
   const labelInput = h('input', {
     id: 'field-label',
@@ -132,6 +173,9 @@ export function createConnectionForm(api: FormApi, root: HTMLElement) {
       labelEdited = true;
       updateFooter();
     },
+    onkeydown: (event: KeyboardEvent) => {
+      if (event.key === 'Enter') save();
+    },
   });
   const saveButton = h('button', { type: 'button', onclick: () => save() }, 'Add connection');
   const cancelButton = h(
@@ -139,37 +183,168 @@ export function createConnectionForm(api: FormApi, root: HTMLElement) {
     { type: 'button', className: 'secondary', onclick: () => api.postMessage({ type: 'cancel' }) },
     'Cancel',
   );
+  const backButton = h('button', { type: 'button', className: 'secondary', onclick: () => go(current - 1) }, 'Back');
+  const nextButton = h('button', { type: 'button', onclick: () => next() }, 'Next');
   const footerNote = h('span', { className: 'footer-note', role: 'status', 'aria-live': 'polite' });
 
-  const step = (number: number, heading: Child, ...children: Child[]) =>
+  const step = (name: string, heading: Child, ...children: Child[]) =>
     h(
       'section',
-      { className: 'step' },
-      h('h2', {}, h('span', { className: 'step-number', 'aria-hidden': 'true' }, String(number)), heading),
+      { className: 'step', 'aria-labelledby': `step-${name}`, hidden: true },
+      h('h2', { id: `step-${name}`, tabindex: '-1' }, heading),
       ...children,
     );
+  const connectHeading = h('span', {}, 'Connect');
   /** Step 3 is Logs for a log service, and an optional log table for a database. */
   const logsHeading = h('span', {}, 'Logs');
-  const typeStep = step(1, 'What are you connecting?', types);
-  const connectStep = step(2, 'Connect', details, h('div', { className: 'test-row' }, testButton, testStatus));
-  const logsStep = step(3, logsHeading, logs);
+  const typeStep = step('type', 'What are you connecting?', lead, types);
+  const connectStep = step('connect', connectHeading, details);
+  const logsStep = step('logs', logsHeading, logs);
   const nameStep = step(
-    4,
+    'name',
     'Name',
     h('div', { className: 'field' }, h('label', { for: 'field-label' }, 'Shown in the Sources list'), labelInput),
   );
+  const sections = [typeStep, connectStep, logsStep, nameStep];
+  /** The shown step, which scrolls by itself in a wide panel. */
+  const body = h('div', { className: 'wizard-body' }, ...sections);
+  /** The list of steps: each a button that shows it, with where it stands under its name. */
+  const stepButtons = sections.map((_, index) => {
+    const marker = h('span', { className: 'wizard-marker', 'aria-hidden': 'true' }, String(index + 1));
+    const name = h('span', { className: 'wizard-name' });
+    const summary = h('span', { className: 'wizard-summary' });
+    const button = h(
+      'button',
+      { type: 'button', className: 'wizard-step', onclick: () => go(index) },
+      marker,
+      h('span', { className: 'wizard-text' }, name, summary),
+    );
+    return { button, marker, name, summary };
+  });
   root.replaceChildren(
     h(
       'main',
       { className: 'form' },
-      h('header', {}, title, lead),
-      typeStep,
-      connectStep,
-      logsStep,
-      nameStep,
-      h('footer', {}, footerNote, h('div', { className: 'buttons' }, cancelButton, saveButton)),
+      h(
+        'nav',
+        { className: 'wizard-nav', 'aria-label': 'Steps' },
+        heading,
+        h('div', { className: 'wizard-steps' }, ...stepButtons.map((entry) => entry.button)),
+      ),
+      h(
+        'div',
+        { className: 'wizard-main' },
+        body,
+        h(
+          'footer',
+          {},
+          cancelButton,
+          footerNote,
+          h('div', { className: 'buttons' }, backButton, nextButton, saveButton),
+        ),
+      ),
+      h(
+        'aside',
+        { className: 'wizard-result', 'aria-label': 'Test result' },
+        h('div', { className: 'result-header' }, h('strong', {}, 'Test result'), testButton),
+        testStatus,
+        found,
+      ),
     ),
   );
+
+  // ---- The steps.
+
+  /** What stops a step from being left for the next, or undefined when nothing does. */
+  function blockedAt(index: number): string | undefined {
+    if (index === 1) {
+      if (test.state === 'running') return 'Testing the connection…';
+      if (test.state !== 'ok') return 'Test the connection to continue.';
+    }
+    if (index === 2) {
+      const kind = connectionKind(draft.type);
+      if (!kind.service) {
+        const word = kind.container ?? 'table';
+        if (table === undefined || (table === null && kind.mappingRequired))
+          return `Choose the log ${word}${kind.mappingRequired ? '' : ', or None'}.`;
+        if (table && columnsState !== 'ready') return `Reading ${table}…`;
+        if (table && !mapping.timestamp) return 'Choose the time column.';
+      }
+    }
+    if (index === 3 && !draft.label.trim()) return 'Give the connection a name.';
+    return undefined;
+  }
+
+  /** Whether a step can be shown: every step before it needs nothing more. */
+  function reachable(index: number): boolean {
+    for (let before = 0; before < index; before++) if (blockedAt(before)) return false;
+    return true;
+  }
+
+  function go(index: number): void {
+    if (index < 0 || index >= sections.length || !reachable(index)) return;
+    current = index;
+    updateFooter();
+    focusStep();
+  }
+
+  /** On Connect, the way on is the test: Next runs it until it has passed. */
+  function next(): void {
+    if (current === 1 && test.state !== 'ok') runTest();
+    else go(current + 1);
+  }
+
+  /** Focus goes to the shown step's first control, or its heading when it has none to use. */
+  function focusStep(): void {
+    const section = sections[current];
+    if (!section) return;
+    const controls = [...section.querySelectorAll<HTMLInputElement>('input, select, textarea')];
+    const first = controls.find((control) => !control.disabled && (control.type !== 'radio' || control.checked));
+    // The step starts at its top: the chosen type's card, say, may sit below the fold of a short panel.
+    (first ?? section.querySelector<HTMLElement>('h2'))?.focus({ preventScroll: true });
+    body.scrollTop = 0;
+  }
+
+  /** A step whose way in closed, such as after a test that failed, gives way to the one that needs attention. */
+  function settle(): void {
+    while (current > 0 && !reachable(current)) current--;
+  }
+
+  function stepSummary(index: number): string {
+    const kind = connectionKind(draft.type);
+    if (index === 0) return kind.label;
+    if (index === 1) return TEST_SUMMARY[test.state];
+    if (index === 2) {
+      if (kind.service) return 'No table needed';
+      return table ?? (table === null ? 'None' : kind.mappingRequired ? 'Required' : 'Optional');
+    }
+    return draft.label.trim() || 'Not named yet';
+  }
+
+  function renderSteps(): void {
+    if (current < 0) return;
+    settle();
+    visited = Math.max(visited, current);
+    const last = sections.length - 1;
+    const names = ['Type', 'Connect', logsHeading.textContent ?? 'Logs', 'Name'];
+    sections.forEach((section, index) => (section.hidden = index !== current));
+    stepButtons.forEach((entry, index) => {
+      const open = reachable(index);
+      const done = open && index !== current && index <= visited && !blockedAt(index);
+      entry.button.className = `wizard-step${index === current ? ' current' : ''}${done ? ' done' : ''}`;
+      entry.button.disabled = !open;
+      entry.button.setAttribute('aria-current', index === current ? 'step' : 'false');
+      entry.marker.textContent = done ? '✓' : String(index + 1);
+      entry.name.textContent = names[index];
+      entry.summary.textContent = stepSummary(index);
+    });
+    backButton.hidden = current === 0;
+    nextButton.hidden = current === last;
+    saveButton.hidden = current !== last;
+    const testFirst = current === 1 && test.state !== 'ok';
+    nextButton.disabled = test.state === 'running' ? current === 1 : !testFirst && !!blockedAt(current);
+    nextButton.textContent = !testFirst ? 'Next' : test.state === 'running' ? 'Testing…' : 'Test connection';
+  }
 
   // ---- What the draft says, and what is wrong with it.
 
@@ -518,7 +693,24 @@ export function createConnectionForm(api: FormApi, root: HTMLElement) {
           onchange: () => chooseType(entryType.type),
         }),
         h('span', { className: 'type-name' }, entryType.label),
-        h('span', { className: 'type-description' }, entryType.description),
+        // What the store is shows from its i, on hover or focus, so the cards stay one line each.
+        h(
+          'button',
+          {
+            type: 'button',
+            className: 'type-info',
+            'aria-label': `About ${entryType.label}`,
+            'aria-describedby': `type-about-${entryType.type}`,
+            // Inside the card's label, a click would otherwise choose the type.
+            onclick: (event: Event) => event.preventDefault(),
+          },
+          'i',
+        ),
+        h(
+          'span',
+          { className: 'type-description', id: `type-about-${entryType.type}`, role: 'tooltip' },
+          entryType.description,
+        ),
       );
     });
   }
@@ -580,6 +772,7 @@ export function createConnectionForm(api: FormApi, root: HTMLElement) {
         break;
     }
     details.replaceChildren(...children.filter((child): child is Node | string => !!child));
+    connectHeading.textContent = `Connect to ${connectionKind(draft.type).label}`;
     updateErrors();
   }
 
@@ -867,6 +1060,7 @@ export function createConnectionForm(api: FormApi, root: HTMLElement) {
       details.querySelector<HTMLElement>('#field-url-entry')?.focus();
       test = { state: 'failed', error: 'Enter a URL Logline can read, or use Fields.' };
       updateTest();
+      updateFooter();
       return;
     }
     const { connection, errors } = result();
@@ -875,6 +1069,7 @@ export function createConnectionForm(api: FormApi, root: HTMLElement) {
       details.querySelector<HTMLElement>(`#field-${first}`)?.focus();
       test = { state: 'failed', error: Object.values(errors)[0] ?? 'Fill in the connection first.' };
       updateTest();
+      updateFooter();
       return;
     }
     test = { state: 'running' };
@@ -890,15 +1085,45 @@ export function createConnectionForm(api: FormApi, root: HTMLElement) {
       test.state === 'running' ? 'Testing…' : test.state === 'ok' ? 'Test again' : 'Test connection';
     testStatus.className = `test-status ${test.state}`;
     testStatus.textContent =
-      test.state === 'running'
-        ? 'Connecting…'
-        : test.state === 'ok'
-          ? `✓ Connected · ${test.detail}`
-          : test.state === 'failed'
-            ? test.error
-            : test.state === 'stale'
-              ? 'Changed since the last test. Test again to continue.'
+      test.state === 'ok'
+        ? `✓ ${TEST_SUMMARY.ok} · ${test.detail}`
+        : test.state === 'failed'
+          ? test.error
+          : test.state === 'stale'
+            ? `${TEST_SUMMARY.stale}. Test again to continue.`
+            : test.state === 'running'
+              ? TEST_SUMMARY.running
               : '';
+    renderFound();
+    // The steps follow with the footer, which every caller updates next.
+  }
+
+  /** Under the test's answer: the tables it can read, or what a test is for before one has run. */
+  function renderFound(): void {
+    if (test.state === 'idle') {
+      found.replaceChildren(
+        h('p', { className: 'hint' }, 'Test the connection to see what Logline can reach. Nothing is saved yet.'),
+      );
+      return;
+    }
+    const tables = test.state === 'ok' ? (test.tables ?? []) : [];
+    if (!tables.length) {
+      found.replaceChildren();
+      return;
+    }
+    const word = connectionKind(draft.type).container ?? 'table';
+    const shown = tables.slice(0, FOUND_TABLES);
+    found.replaceChildren(
+      h('div', { className: 'found-caption' }, `${tables.length} ${word}${tables.length === 1 ? '' : 's'}`),
+      h(
+        'ul',
+        { className: 'found-list' },
+        ...shown.map((name) => h('li', { title: name }, name)),
+        tables.length > shown.length
+          ? h('li', { className: 'more' }, `and ${tables.length - shown.length} more`)
+          : undefined,
+      ),
+    );
   }
 
   // ---- Step 3: the log table and its columns.
@@ -1110,26 +1335,19 @@ export function createConnectionForm(api: FormApi, root: HTMLElement) {
 
   /** What still stands between the form and Save, or undefined when it can be saved. */
   function missing(): string | undefined {
-    if (test.state === 'running') return 'Testing the connection…';
-    if (test.state !== 'ok') return 'Test the connection to continue.';
-    const kind = connectionKind(draft.type);
-    if (!kind.service) {
-      const word = kind.container ?? 'table';
-      if (table === undefined || (table === null && kind.mappingRequired))
-        return `Choose the log ${word}${kind.mappingRequired ? '' : ', or None'}.`;
-      if (table && columnsState !== 'ready') return `Reading ${table}…`;
-      if (table && !mapping.timestamp) return 'Choose the time column.';
-    }
-    if (!draft.label.trim()) return 'Give the connection a name.';
-    return undefined;
+    return blockedAt(1) ?? blockedAt(2) ?? blockedAt(3);
   }
 
   function updateFooter(): void {
+    settle();
     const blocked = missing();
+    // The footer says what the shown step still needs; the last one, what is left before Save.
+    const needed = current === sections.length - 1 ? blocked : blockedAt(current);
     saveButton.disabled = saving || !!blocked;
     saveButton.textContent = saving ? 'Saving…' : mode === 'edit' ? 'Save changes' : 'Add connection';
     footerNote.className = `footer-note${saveError ? ' error' : ''}`;
-    footerNote.textContent = saveError || blocked || '';
+    footerNote.textContent = saveError || needed || '';
+    renderSteps();
   }
 
   function save(): void {
@@ -1160,7 +1378,9 @@ export function createConnectionForm(api: FormApi, root: HTMLElement) {
         if (!labelEdited) draft.label = suggestedLabel(draft);
         labelInput.value = draft.label;
         title.textContent = mode === 'edit' ? `Edit ${draft.label}` : 'Add connection';
-        typeStep.hidden = false;
+        // The type of a saved connection cannot change, so editing starts at how it connects.
+        current = mode === 'edit' ? 1 : 0;
+        visited = current;
         renderTypes();
         renderDetails();
         updateTest();
@@ -1168,7 +1388,7 @@ export function createConnectionForm(api: FormApi, root: HTMLElement) {
         updateFooter();
         // A saved connection is tested straight away, so its tables are there to change.
         if (mode === 'edit' && result().connection) runTest();
-        else (details.querySelector('input') as HTMLInputElement | null)?.focus();
+        else focusStep();
         return;
       case 'tested':
         // A field changed while the test ran: its answer is about a connection the form no longer shows.
@@ -1236,7 +1456,6 @@ export function createConnectionForm(api: FormApi, root: HTMLElement) {
     }
   }
 
-  typeStep.hidden = true;
   updateFooter();
   return { receive };
 }

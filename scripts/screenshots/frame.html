@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Window</title>
+    <link rel="stylesheet" href="/frame.css" />
+  </head>
+  <body>
+    <div class="window">
+      <header class="titlebar">
+        <span class="lights"><i class="red"></i><i class="yellow"></i><i class="green"></i></span>
+        <span id="title" class="title">pay.ts — checkout</span>
+      </header>
+      <div class="body">
+        <nav class="activity" aria-hidden="true">
+          <svg viewBox="0 0 24 24" class="on">
+            <path
+              d="M14 3H7a1.5 1.5 0 0 0-1.5 1.5v15A1.5 1.5 0 0 0 7 21h10a1.5 1.5 0 0 0 1.5-1.5V7.5L14 3zM14 3v4.5h4.5"
+            />
+          </svg>
+          <svg viewBox="0 0 24 24">
+            <circle cx="10.5" cy="10.5" r="5.5" />
+            <path d="M14.6 14.6L20 20" />
+          </svg>
+          <svg viewBox="0 0 24 24">
+            <circle cx="7" cy="5.5" r="2" />
+            <circle cx="7" cy="18.5" r="2" />
+            <circle cx="17" cy="9" r="2" />
+            <path d="M7 7.5v9M17 11c0 3.5-4 3-9 5.5" />
+          </svg>
+          <svg viewBox="0 0 24 24">
+            <path d="M12 3l7.5 4.2v8.6L12 20l-7.5-4.2V7.2L12 3zM4.8 7.4L12 11.5l7.2-4.1M12 11.5V20" />
+          </svg>
+        </nav>
+        <main class="main">
+          <div class="tabs"><span class="tab">pay.ts</span></div>
+          <div id="editor" class="editor">
+            <pre
+              id="code"
+              class="code"
+            ><span class="ln">41</span><span class="k">export</span> <span class="k">async</span> <span class="k">function</span> <span class="f">charge</span>(<span class="v">order</span>: <span class="t">Order</span>) {
+<span class="ln">42</span>  <span class="k">const</span> <span class="v">started</span> = <span class="t">Date</span>.<span class="f">now</span>();
+<span class="ln">43</span>  <span class="c">try</span> {
+<span class="ln">44</span>    <span class="c">await</span> <span class="v">provider</span>.<span class="f">charge</span>(<span class="v">order</span>.<span class="v">total</span>, { <span class="v">timeout</span>: <span class="n">3000</span> });
+<span class="ln">45</span>  } <span class="c">catch</span> (<span class="v">error</span>) {
+<span class="lens">Logline · 312 hits · 41 errors · p95 3,004 ms · last 2s ago</span><span class="ln cur">46</span>    <span class="v">logger</span>.<span class="f">error</span>({ <span class="v">orderId</span>: <span class="v">order</span>.<span class="v">id</span>, <span class="v">attempt</span> }, <span class="s">'Payment provider timeout after 3000ms'</span>);
+<span class="ln">47</span>    <span class="c">throw</span> <span class="k">new</span> <span class="t">ChargeFailed</span>(<span class="v">order</span>.<span class="v">id</span>, <span class="v">error</span>);
+<span class="ln">48</span>  }</pre>
+          </div>
+          <div class="panel-tabs">
+            <span>PROBLEMS</span><span>OUTPUT</span><span>TERMINAL</span><span class="on">LOGS</span>
+          </div>
+          <iframe id="panel" class="panel" src="/panel.html" title="Logs"></iframe>
+        </main>
+      </div>
+      <footer class="status">
+        <span
+          ><svg viewBox="0 0 16 16" width="12" height="12">
+            <path d="M5 2v8M5 10a2 2 0 1 0 0 4 2 2 0 0 0 0-4zM5 2a1.4 1.4 0 1 0 0 .01M11 4.5c0 3-6 2-6 5.5" />
+          </svg>
+          main</span
+        >
+        <span>⊗ 0 ⚠ 0</span>
+      </footer>
+    </div>
+    <script>
+      // The scene sets what varies: the title, and how much of the editor shows above the panel.
+      const query = new URLSearchParams(location.search);
+      if (query.has('title')) document.getElementById('title').textContent = query.get('title');
+      if (query.has('editor')) document.documentElement.style.setProperty('--editor', query.get('editor') + 'px');
+      if (query.has('scroll')) document.documentElement.style.setProperty('--scroll', query.get('scroll') + 'px');
+    </script>
+  </body>
+</html>

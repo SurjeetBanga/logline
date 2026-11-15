@@ -108,6 +108,9 @@ Object.assign(globalThis, {
 // Loaded after the adapter, since the module reads `document` only when the form is made.
 const { createConnectionForm } = require('./form') as typeof import('./form');
 
+/** That many table names, as a test's answer lists them. */
+const tables = (count: number) => Array.from({ length: count }, (_, index) => `table_${index + 1}`);
+
 function setup() {
   const sent: FormRequest[] = [];
   root.replaceChildren();
@@ -139,7 +142,28 @@ function setup() {
   /** The radio button of a choice, such as the Fields of Enter the server as. */
   const radio = (name: string, value: string) =>
     root.querySelectorAll('input').find((input) => input.attributes.name === name && input.value === value)!;
-  return { sent, $, steps, button, type, choose, receive, init, note, save, radio, root: () => root };
+  /** The footer's Next, which reads Test connection on Connect until the test has passed. */
+  const next = () => $('footer').querySelectorAll('button').at(-2)!;
+  /** The list of steps: each one's button, and which step shows. */
+  const list = () => root.querySelectorAll('.wizard-step');
+  const shown = () => steps().findIndex((step) => !step.hidden);
+  return {
+    sent,
+    $,
+    steps,
+    button,
+    type,
+    choose,
+    receive,
+    init,
+    note,
+    save,
+    radio,
+    next,
+    list,
+    shown,
+    root: () => root,
+  };
 }
 
 test('a Postgres URL fills the form, a test unlocks the tables, and Save waits for the time column', () => {
@@ -149,7 +173,19 @@ test('a Postgres URL fills the form, a test unlocks the tables, and Save waits f
   assert.equal(form.steps()[0].hidden, false);
   assert.equal(form.root().querySelectorAll('.type-card').length, CONNECTION_TYPES.length);
   assert.ok(form.$('.type-card.selected').textContent.startsWith('Postgres'));
+  // What each store is waits behind the i on its card, which describes it without choosing it.
+  const about = form.$('.type-card.selected').querySelector('.type-info')!;
+  assert.equal(about.attributes['aria-label'], 'About Postgres');
+  assert.equal(form.$(`#${about.attributes['aria-describedby']}`).attributes.role, 'tooltip');
+  // The title's i says what a connection is, naming every type the form offers.
+  const aboutConnections = form.$('.form-title').querySelector('.type-info')!;
+  assert.equal(aboutConnections.attributes['aria-label'], 'About connections');
+  const explained = form.$(`#${aboutConnections.attributes['aria-describedby']}`).textContent;
+  for (const entry of CONNECTION_TYPES) assert.ok(explained.includes(entry.label), entry.label);
   assert.equal(form.save().disabled, true);
+  assert.equal(form.note(), '', 'choosing the type needs nothing more');
+  form.next().fire('click');
+  assert.equal(form.shown(), 1);
   assert.equal(form.note(), 'Test the connection to continue.');
   assert.ok(form.steps()[2].classList.contains('locked'));
 
@@ -187,6 +223,8 @@ test('a Postgres URL fills the form, a test unlocks the tables, and Save waits f
   );
   assert.equal(form.note(), '');
   assert.equal(form.save().disabled, false);
+  form.next().fire('click');
+  assert.equal(form.shown(), 2);
   form.choose('#field-table', 'events');
   assert.deepEqual(form.sent.at(-1), { type: 'table', table: 'events' });
   assert.equal(form.note(), 'Reading events…');
@@ -231,6 +269,82 @@ test('a Postgres URL fills the form, a test unlocks the tables, and Save waits f
   form.receive({ type: 'saveFailed', error: 'Settings could not be written.' });
   assert.equal(form.note(), 'Settings could not be written.');
   assert.equal(form.save().disabled, false);
+});
+
+test('one step shows at a time: a later one waits for the test, and the list says where each stands', () => {
+  const form = setup();
+  form.init();
+  const names = () => form.list().map((step) => step.querySelector('.wizard-name')!.textContent);
+  const summaries = () => form.list().map((step) => step.querySelector('.wizard-summary')!.textContent);
+  assert.equal(form.shown(), 0);
+  assert.deepEqual(names(), ['Type', 'Connect', 'Log table', 'Name']);
+  assert.deepEqual(summaries(), ['Postgres', 'Not checked yet', 'Optional', 'Not named yet']);
+  assert.deepEqual(
+    form.list().map((step) => step.disabled),
+    [false, false, true, true],
+    'the table and the name wait for the test',
+  );
+  assert.equal(form.list()[0].attributes['aria-current'], 'step');
+  // A step that cannot open yet stays closed when its button is used anyway.
+  form.list()[3].fire('click');
+  assert.equal(form.shown(), 0);
+
+  form.next().fire('click');
+  assert.equal(form.shown(), 1);
+  assert.equal(form.list()[0].querySelector('.wizard-marker')!.textContent, '✓');
+  assert.equal(form.next().textContent, 'Test connection', 'on Connect, the way on is the test');
+  form.type('#field-url-entry', 'postgres://dev@db.local/orders');
+  form.next().fire('click');
+  assert.equal(form.sent.at(-1)?.type, 'test');
+  assert.equal(form.next().disabled, true);
+  assert.equal(form.shown(), 1, 'the answer shows before the next step does');
+  form.receive({ type: 'tested', ok: true, detail: 'Postgres 16.2 · 14 tables', tables: tables(14) });
+  assert.equal(form.next().textContent, 'Next');
+  assert.deepEqual(summaries(), ['Postgres', 'Connected', 'None', 'orders']);
+  // Beside the steps: the tables the test found, the first of them by name.
+  assert.equal(form.$('.found-caption').textContent, '14 tables');
+  assert.deepEqual(
+    form
+      .$('.found-list')
+      .querySelectorAll('li')
+      .map((item) => item.textContent)
+      .slice(-2),
+    ['table_12', 'and 2 more'],
+  );
+
+  // Next, Back, and the list all move between the steps that are open; Save shows on the last.
+  form.next().fire('click');
+  assert.equal(form.shown(), 2);
+  form.next().fire('click');
+  assert.equal(form.shown(), 3);
+  assert.equal(form.next().hidden, true);
+  assert.equal(form.save().hidden, false);
+  form.button(/Back/).fire('click');
+  assert.equal(form.shown(), 2);
+  form.list()[3].fire('click');
+  assert.equal(form.shown(), 3);
+
+  // A test that fails from a later step returns to Connect, where its error is.
+  form.button(/Test again/).fire('click');
+  form.receive({ type: 'tested', ok: false, error: 'password authentication failed' });
+  assert.equal(form.shown(), 1);
+  assert.equal(summaries()[1], 'Could not connect');
+  assert.equal(form.list()[2].disabled, true);
+  assert.equal(form.$('#field-url-entry').value, 'postgres://dev@db.local/orders', 'nothing typed is lost');
+});
+
+test('a log service names its third step Logs, and editing opens at Connect', () => {
+  const form = setup();
+  form.init();
+  form.radio('type', 'datadog').fire('change');
+  assert.equal(form.list()[2].querySelector('.wizard-name')!.textContent, 'Logs');
+  assert.equal(form.list()[2].querySelector('.wizard-summary')!.textContent, 'No table needed');
+  assert.equal(form.shown(), 0, 'choosing a type stays on its step');
+
+  const editing = setup();
+  editing.init({ mode: 'edit', draft: { ...emptyDraft('sqlite'), label: 'App DB', path: 'data/app.db' } });
+  assert.equal(editing.shown(), 1);
+  assert.equal(editing.button(/Back/).hidden, false);
 });
 
 test('a failed test keeps what was typed, and a change after a good test asks for another', () => {
@@ -457,7 +571,10 @@ test('Elasticsearch needs its index pattern chosen, with no None, and can sign i
     .querySelectorAll('option')
     .map((option) => option.textContent);
   assert.deepEqual(options, ['Choose an index pattern…', 'logs-app-*', 'logs-app-2026.10.30']);
+  form.list()[2].fire('click');
+  assert.equal(form.shown(), 2);
   assert.equal(form.note(), 'Choose the log index pattern.');
+  assert.equal(form.next().disabled, true, 'Name waits for the index pattern');
   assert.equal(form.save().disabled, true);
 });
 

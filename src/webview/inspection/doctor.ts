@@ -67,7 +67,7 @@ export const DOCTOR_ACTION_TITLES = {
 };
 
 /**
- * The Issues tab and its list of findings, so what log doctor reports in the
+ * The Issues chip in the status bar and the list of findings it opens, so what log doctor reports in the
  * Problems panel is also visible next to the logs.
  *
  * @param hostActionTaken Runs after a finding in the tab asks the host to act, such as showing its events.
@@ -82,6 +82,8 @@ export function createDoctor(
   hostActionTaken: (action: DoctorAction) => void,
   showExample: (id: number) => void = () => undefined,
   showTrace: (traceId: string) => void = () => undefined,
+  /** Runs when log doctor turns on or off, or its count changes. */
+  stateChanged: (enabled: boolean, total: number) => void = () => undefined,
 ) {
   // The host sends the list only when it changes; this is the revision on screen.
   let revision: number | undefined;
@@ -90,8 +92,9 @@ export function createDoctor(
   const voted = new Set<string>();
 
   function receive(doctor: Snapshot['doctor']) {
-    // Hidden only while log doctor is off; with nothing found it stays visible so it can be discovered.
-    button.hidden = !doctor;
+    // The chip shows only while there is something to review; the status panel opens the list either way.
+    button.hidden = !doctor?.total;
+    stateChanged(Boolean(doctor), doctor?.total ?? 0);
     if (!doctor) {
       revision = undefined;
       return;
@@ -103,7 +106,7 @@ export function createDoctor(
       findings = doctor.findings!;
     }
     count.hidden = !total;
-    count.textContent = total.toLocaleString();
+    count.textContent = `${total.toLocaleString()} issue${total === 1 ? '' : 's'}`;
     const warnings = findings.filter((finding) => finding.severity === 'warning').length;
     // Classes, not className: the tab keeps its own classes.
     if (total) button.classList.remove('is-clear');
@@ -219,7 +222,7 @@ export function createDoctor(
     return text;
   }
 
-  // Doctor actions also appear in expanded events, so any click on one is handled here.
+  // Doctor actions also appear on an open event, so any click on one is handled here.
   function handleAction(event: Event): boolean {
     if (handleFeedback(event)) return true;
     const target = (event.target as HTMLElement).closest<HTMLElement>('[data-doctor-action]');

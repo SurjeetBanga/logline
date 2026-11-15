@@ -288,6 +288,11 @@
         "category": "Logline"
       },
       {
+        "command": "logline.about",
+        "title": "About Logline",
+        "category": "Logline"
+      },
+      {
         "command": "logline.suggestFeature",
         "title": "Suggest a Feature",
         "category": "Logline"
@@ -824,7 +829,7 @@
           {
             "id": "search",
             "title": "Search your logs",
-            "description": "Type a filter such as level:error in the Logs panel's search box and press Enter. Click a row to see its details, stack trace, and the code that logged it.\n[Open the Logs Panel](command:logline.showLogs)",
+            "description": "Type a filter such as level:error in the Logs panel's search box and press Enter. Click a row to open its details, stack trace, and the code that logged it beside the list.\n[Open the Logs Panel](command:logline.showLogs)",
             "media": {
               "markdown": "media/walkthrough/search.md"
             },
@@ -1481,6 +1486,7 @@
     "test": "node scripts/test.mjs",
     "benchmark": "npm run compile && node --expose-gc scripts/benchmark.mjs",
     "smoke": "npm run compile && tsc -p tsconfig.test.json && node scripts/smoke.mjs",
+    "screenshots": "node scripts/screenshots.mjs",
     "test:layout": "npm run compile && tsc -p tsconfig.test.json && node --test out-tests/test/viewer-layout.js",
     "test:browser": "npm run compile && tsc -p tsconfig.test.json && node --test out-tests/test/browser-real.js",
     "lint": "oxlint --type-aware --tsconfig tsconfig.test.json src",

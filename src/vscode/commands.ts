@@ -4,6 +4,7 @@ import { resolveAutoStartServers, resolveCwd } from '../core/server-config';
 import type { ServerConfig } from '../core/types';
 import type { LogsController } from './logs-controller';
 import { convertTask } from './tasks/conversion';
+import { currentAbout } from './about';
 import { showStatus } from './status';
 import { counted, type Usage } from './usage';
 
@@ -199,6 +200,7 @@ export function registerCommands(
     registerCommand('logline.connectAgent', () => controller.connectAgent()),
     registerCommand('logline.setUpForAgent', () => controller.setUpForAgent()),
     registerCommand('logline.showStatus', () => showStatus(controller, version)),
+    registerCommand('logline.about', () => controller.openAbout(currentAbout(version))),
     registerCommand('logline.startOtlpReceiver', () => controller.toggleOtlp(true)),
     registerCommand('logline.stopOtlpReceiver', () => controller.toggleOtlp(false)),
     registerCommand('logline.showTrace', async (value?: unknown) => {

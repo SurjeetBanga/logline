@@ -9,7 +9,7 @@
 // scripts/perf-compare.mjs runs this against two builds on the same machine and fails on regressions.
 // Each case is independent: one that cannot load in an older build is reported as unavailable.
 import assert from 'node:assert/strict';
-import { writeFileSync } from 'node:fs';
+import { statSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { performance } from 'node:perf_hooks';
 import { pathToFileURL } from 'node:url';
@@ -103,8 +103,8 @@ const cases = [];
 /** A timed case: `prepare` loads modules and builds fixtures, and returns the operation to time. */
 const timed = (name, label, prepare) => cases.push({ name, label, unit: 'ms', prepare, measure: time });
 /** A size case: `measure` returns a deterministic quantity, such as bytes sent or memory retained. */
-const sized = (name, label, unit, measure) =>
-  cases.push({ name, label, unit, prepare: async () => measure, measure: (value) => value() });
+const sized = (name, label, unit, measure, options = {}) =>
+  cases.push({ name, label, unit, prepare: async () => measure, measure: (value) => value(), ...options });
 
 /** The shared fixture: 50,000 parsed events retained in a store. */
 let fixture;
@@ -748,19 +748,136 @@ timed('removeSource', 'Remove a 100-event source from 50,000 retained events', a
   };
 });
 
+// The Logs panel: what it downloads, and the work it does in its own JavaScript on each live refresh. The browser's
+// layout is checked by `npm run test:layout`; these measure the panel's code, run here against a minimal DOM.
+// The panel's files grow with its features, so they are held to the baseline alone: a change may grow them while
+// they stay within 5% of it, and growing past that is accepted by moving the baseline, in review.
+const mediaSize = (file) => async () => statSync(path.join(root, 'media', file)).size / 1024;
+const againstBaseline = { baselineOnly: true };
+sized('viewer-js', 'Logs panel script', 'KiB', mediaSize('viewer.js'), againstBaseline);
+sized('viewer-css', 'Logs panel stylesheet', 'KiB', mediaSize('viewer.css'), againstBaseline);
+sized('viewer-html', 'Logs panel markup', 'KiB', mediaSize('viewer.html'), againstBaseline);
+
+/** Elements with only what row building and the snapshot bridge touch. */
+class FakeElement {
+  constructor(tag) {
+    this.tagName = tag;
+    this.children = [];
+    this.attributes = {};
+    this.dataset = {};
+    this.style = {};
+    this.className = '';
+    this.textContent = '';
+  }
+  get firstChild() {
+    return this.children[0];
+  }
+  get classList() {
+    const names = () => this.className.split(' ').filter(Boolean);
+    return {
+      add: (name) => names().includes(name) || (this.className = [...names(), name].join(' ')),
+      contains: (name) => names().includes(name),
+      toggle: (name, on) =>
+        (this.className = [...names().filter((item) => item !== name), ...(on ? [name] : [])].join(' ')),
+    };
+  }
+  append(...children) {
+    this.children.push(...children);
+  }
+  setAttribute(name, value) {
+    this.attributes[name] = String(value);
+  }
+  cloneNode() {
+    const copy = new FakeElement(this.tagName);
+    Object.assign(copy, { className: this.className, attributes: { ...this.attributes } });
+    copy.children = this.children.map((child) => child.cloneNode());
+    return copy;
+  }
+}
+/** The panel's modules, bundled from this build's sources as the panel bundles them, with a minimal DOM. */
+async function webview(contents) {
+  const { buildSync } = await import('esbuild');
+  const code = buildSync({
+    stdin: { contents, resolveDir: root },
+    bundle: true,
+    format: 'cjs',
+    platform: 'browser',
+    write: false,
+  }).outputFiles[0].text;
+  const module = { exports: {} };
+  const document = {
+    hidden: false,
+    createElement: (tag) => new FakeElement(tag),
+    createElementNS: (_namespace, tag) => new FakeElement(tag),
+  };
+  new Function('module', 'exports', 'document', code)(module, module.exports, document);
+  return module.exports;
+}
+const panelRow = (id) => ({
+  id,
+  level: id % 50 ? 'info' : 'error',
+  message: `GET /api/orders/${id} 200 in ${id % 900} ms`,
+  timestamp: '2026-09-14T12:00:00.000Z',
+  stream: 'stdout',
+  serverId: 'api',
+  fields: { service: 'api', status: 200, durationMs: id % 900, requestId: `req-${id}` },
+  ...(id % 3 ? {} : { traceId: (id % 100).toString(16).padStart(32, '0') }),
+  ...(id % 7 ? {} : { site: true }),
+});
+timed('panel-rows', 'Build the 60 rows the Logs panel shows, with three field columns', async () => {
+  const { createRows } = await webview("export { createRows } from './src/webview/table/rows';");
+  const columns = [
+    { key: 'base:time', label: 'Time' },
+    { key: 'base:level', label: 'Level' },
+    { key: 'base:message', label: 'Message' },
+    { key: 'field:service', label: 'service' },
+    { key: 'field:status', label: 'status' },
+    { key: 'field:durationMs', label: 'durationMs' },
+  ];
+  const { buildRow } = createRows(
+    { selected: 30 },
+    () => columns,
+    (event) => event.timestamp.slice(11, 19),
+  );
+  const rows = Array.from({ length: 60 }, (_, i) => panelRow(i + 1));
+  return () => rows.map(buildRow);
+});
+timed('panel-refresh', 'Place 50 new rows after the 950 the Logs panel holds, 20 refreshes', async () => {
+  const { SnapshotBridge } = await webview("export { SnapshotBridge } from './src/webview/bridge';");
+  let requestId = 0;
+  const api = { postMessage: (message) => (requestId = message.requestId) };
+  const state = { extraColumns: [], currentLevels: () => undefined, page: 0, selectedSortDirection: 'desc' };
+  const bridge = new SnapshotBridge(api, state, () => '');
+  let next = 0;
+  const page = (count) => Array.from({ length: count }, () => panelRow(++next));
+  const answer = (data) => {
+    bridge.request();
+    bridge.received(requestId);
+    return bridge.rows({ type: 'snapshot', requestId, rowsVersion: 'v', ...data });
+  };
+  let held = answer({ events: page(1000) });
+  return () => {
+    for (let refresh = 0; refresh < 20; refresh++) {
+      held = answer({ events: page(50), keep: 950, keepFirst: held[50].id });
+      assert.equal(held.length, 1000);
+    }
+  };
+});
+
 if (args.list) {
   const unknown = Object.keys(WEIGHTS).filter((name) => !cases.some((c) => c.name === name));
   assert.deepEqual(unknown, [], 'WEIGHTS names cases that do not exist');
   console.log(JSON.stringify(cases.map(({ name }) => ({ name, weight: WEIGHTS[name] ?? 1 }))));
   process.exit(0);
 }
-for (const { name, label, unit, prepare, measure } of cases) {
+for (const { name, label, unit, prepare, measure, baselineOnly } of cases) {
   if (only && !only.has(name)) continue;
+  const meta = { label, unit, ...(baselineOnly ? { baselineOnly } : {}) };
   try {
     const value = await measure(await prepare());
-    results[name] = { label, unit, value };
+    results[name] = { ...meta, value };
   } catch (error) {
-    results[name] = { label, unit, error: String(error instanceof Error ? error.message : error).split('\n')[0] };
+    results[name] = { ...meta, error: String(error instanceof Error ? error.message : error).split('\n')[0] };
   }
 }
 

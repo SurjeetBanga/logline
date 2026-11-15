@@ -760,7 +760,6 @@
         type: "snapshot",
         requestId,
         ...params,
-        statsOnly: state.paused && !force,
         doctorRevision: this.doctorRevision(),
         ...this.pendingHave ? { have: this.pendingHave } : {}
       });
@@ -915,7 +914,7 @@
       updateButton: element("updateButton"),
       takeTour: element("takeTour"),
       suggestFeature: element("suggestFeature"),
-      voteOnNext: element("voteOnNext"),
+      about: element("about"),
       welcomeDialog: element("welcomeDialog"),
       welcomeTour: element("welcomeTour"),
       welcomeExplore: element("welcomeExplore"),
@@ -955,7 +954,31 @@
       pageNumber: element("pageNumber"),
       memoryFill: element("memoryFill"),
       memoryText: element("memoryText"),
-      memoryPanel: element("memoryPanel"),
+      statusPanel: element("statusPanel"),
+      statusCapture: element("statusCapture"),
+      statusCaptureText: element("statusCaptureText"),
+      statusOtlp: element("statusOtlp"),
+      statusOtlpText: element("statusOtlpText"),
+      statusAgents: element("statusAgents"),
+      statusAgentsText: element("statusAgentsText"),
+      statusIssuesRow: element("statusIssuesRow"),
+      statusIssues: element("statusIssues"),
+      statusIssuesText: element("statusIssuesText"),
+      statusTroubleshoot: element("statusTroubleshoot"),
+      issuesChip: element("issuesChip"),
+      inspector: element("inspector"),
+      inspectorTitle: element("inspectorTitle"),
+      inspectorMeta: element("inspectorMeta"),
+      inspectorNav: element("inspectorNav"),
+      inspectorBody: element("inspectorBody"),
+      inspectorClose: element("inspectorClose"),
+      inspectorResizer: element("inspectorResizer"),
+      railAdd: element("railAdd"),
+      railAddMenu: element("railAddMenu"),
+      railAddRun: element("railAddRun"),
+      railAddFile: element("railAddFile"),
+      railAddConnectionItem: element("railAddConnectionItem"),
+      railAddOtlp: element("railAddOtlp"),
       memorySummary: element("memorySummary"),
       memoryDetails: element("memoryDetails"),
       memorySettings: element("memorySettings"),
@@ -969,36 +992,26 @@
       contextLogs: element("contextLogs"),
       contextDetails: element("contextDetails"),
       traceView: element("traceView"),
-      traceBack: element("traceBack"),
       traces: element("traces"),
-      traceCount: element("traceCount"),
       tracesView: element("tracesView"),
       tracesStatus: element("tracesStatus"),
       tracesRows: element("tracesRows"),
       tracesStartReceiver: element("tracesStartReceiver"),
       metrics: element("metrics"),
-      metricCount: element("metricCount"),
       metricsView: element("metricsView"),
       metricsFilter: element("metricsFilter"),
       metricsStatus: element("metricsStatus"),
       metricsCards: element("metricsCards"),
       metricDetail: element("metricDetail"),
       aiCalls: element("aiCalls"),
-      aiCallCount: element("aiCallCount"),
       aiCallsView: element("aiCallsView"),
       aiCallsStatus: element("aiCallsStatus"),
-      aiCallsKind: element("aiCallsKind"),
-      aiCallsErrorsOnly: element("aiCallsErrorsOnly"),
       aiCallsFilter: element("aiCallsFilter"),
       aiCallsTiles: element("aiCallsTiles"),
-      aiModelsTable: element("aiModelsTable"),
       aiCallsTable: element("aiCallsTable"),
       aiCallsControls: element("aiCallsControls"),
-      aiModelRows: element("aiModelRows"),
       aiCallRows: element("aiCallRows"),
       aiCallView: element("aiCallView"),
-      aiCallBack: element("aiCallBack"),
-      aiCallTitle: element("aiCallTitle"),
       aiCallNavigation: element("aiCallNavigation"),
       aiCallPrevious: element("aiCallPrevious"),
       aiCallPosition: element("aiCallPosition"),
@@ -1008,7 +1021,6 @@
       aiCallStatus: element("aiCallStatus"),
       aiCallTranscript: element("aiCallTranscript"),
       otlpStatus: element("otlpStatus"),
-      traceTitle: element("traceTitle"),
       traceStatus: element("traceStatus"),
       traceRows: element("traceRows"),
       traceHotspots: element("traceHotspots"),
@@ -1017,6 +1029,17 @@
       breakOnLogs: element("breakOnLogs"),
       saveSearchDialog: element("saveSearchDialog"),
       feedbackDialog: element("feedbackDialog"),
+      aboutDialog: element("aboutDialog"),
+      aboutClose: element("aboutClose"),
+      aboutVersion: element("aboutVersion"),
+      aboutEditor: element("aboutEditor"),
+      aboutSystem: element("aboutSystem"),
+      aboutWhatsNew: element("aboutWhatsNew"),
+      aboutSponsor: element("aboutSponsor"),
+      aboutAuthor: element("aboutAuthor"),
+      aboutGithub: element("aboutGithub"),
+      aboutIssue: element("aboutIssue"),
+      aboutCopy: element("aboutCopy"),
       feedbackForm: element("feedbackForm"),
       feedbackCancel: element("feedbackCancel"),
       feedbackSuggestTab: element("feedbackSuggestTab"),
@@ -1233,12 +1256,13 @@
     showEvents: "Filter the Logs panel to the events this statement logged",
     open: "Open the log statement in the editor"
   };
-  function createDoctor(button, count, panel, list, api, scope, hostActionTaken, showExample = () => void 0, showTrace = () => void 0) {
+  function createDoctor(button, count, panel, list, api, scope, hostActionTaken, showExample = () => void 0, showTrace = () => void 0, stateChanged = () => void 0) {
     let revision;
     let findings = [];
     const voted = /* @__PURE__ */ new Set();
     function receive(doctor) {
-      button.hidden = !doctor;
+      button.hidden = !doctor?.total;
+      stateChanged(Boolean(doctor), doctor?.total ?? 0);
       if (!doctor) {
         revision = void 0;
         return;
@@ -1250,7 +1274,7 @@
         findings = doctor.findings;
       }
       count.hidden = !total;
-      count.textContent = total.toLocaleString();
+      count.textContent = `${total.toLocaleString()} issue${total === 1 ? "" : "s"}`;
       const warnings = findings.filter((finding) => finding.severity === "warning").length;
       if (total) button.classList.remove("is-clear");
       else button.classList.add("is-clear");
@@ -1502,7 +1526,7 @@
     section.append(title, stack);
     return section;
   }
-  function buildEventDetails(id, text2, exceptions, links = {}, leadingActions = []) {
+  function buildEventDetails(id, text2, exceptions, links = {}, leadingActions = [], beforeRaw) {
     const container = document.createElement("div");
     container.className = "event-details";
     const actions = document.createElement("div");
@@ -1595,6 +1619,7 @@
         (exception, blockIndex) => container.append(exceptionSection(links.crash.id, exception, blockIndex))
       );
     }
+    if (beforeRaw) container.append(beforeRaw);
     const pre2 = document.createElement("pre");
     pre2.textContent = text2 ?? "Loading\u2026";
     if (exceptions.length || links.crash) {
@@ -1605,6 +1630,56 @@
       container.append(raw);
     } else container.append(pre2);
     return container;
+  }
+  function buildEventFields(text2) {
+    if (!text2?.trimStart().startsWith("{")) return void 0;
+    let parsed;
+    try {
+      parsed = JSON.parse(text2);
+    } catch {
+      return void 0;
+    }
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return void 0;
+    const entries = Object.entries(parsed);
+    if (!entries.length) return void 0;
+    const list = document.createElement("div");
+    list.className = "event-fields";
+    list.setAttribute("role", "list");
+    list.setAttribute("aria-label", "Fields");
+    for (const [name, value] of entries) {
+      const row = document.createElement("div");
+      row.className = "event-field";
+      row.setAttribute("role", "listitem");
+      const key = document.createElement("span");
+      key.className = "event-field-name";
+      key.textContent = name;
+      const shown2 = document.createElement("span");
+      shown2.className = "event-field-value";
+      const scalar = value === null || typeof value !== "object";
+      shown2.textContent = scalar ? String(value) : JSON.stringify(value);
+      shown2.title = shown2.textContent;
+      row.append(key, shown2);
+      if (scalar && value !== null && value !== "") {
+        const filters = document.createElement("span");
+        filters.className = "event-field-filters";
+        for (const exclude of [false, true]) {
+          const button = document.createElement("button");
+          button.type = "button";
+          button.className = "field-filter";
+          button.textContent = exclude ? "\u2212" : "+";
+          const label = exclude ? `Exclude ${name}: ${String(value)}` : `Show only ${name}: ${String(value)}`;
+          button.title = label;
+          button.setAttribute("aria-label", label);
+          button.dataset.field = name;
+          button.dataset.value = String(value);
+          if (exclude) button.dataset.exclude = "true";
+          filters.append(button);
+        }
+        row.append(filters);
+      }
+      list.append(row);
+    }
+    return list;
   }
 
   // src/webview/inspection/context.ts
@@ -1731,6 +1806,59 @@
     return { showContext, selectContextEvent, handleDetailAction, receiveContext, receiveDetails };
   }
 
+  // src/webview/inspector.ts
+  function createInspector(elements, scope) {
+    let current;
+    let opener;
+    function fill(content) {
+      elements.inspectorTitle.textContent = content.title;
+      elements.inspectorTitle.title = content.tooltip ?? content.title;
+      elements.inspectorMeta.textContent = content.meta ?? "";
+      elements.inspectorMeta.hidden = !content.meta;
+      elements.inspectorNav.replaceChildren(...content.nav ?? []);
+      elements.inspectorBody.replaceChildren(...content.body);
+    }
+    function open(kind, content, selection = {}) {
+      const previous = current;
+      current = { ...selection, kind };
+      const focused = document.activeElement;
+      if (focused && focused !== document.body && !elements.inspector.contains(focused)) opener = focused;
+      if (previous && previous.kind !== kind) previous.closed?.();
+      fill(content);
+      elements.inspector.hidden = false;
+      if (document.body) document.body.dataset.inspector = kind;
+    }
+    function update(kind, content) {
+      if (current?.kind !== kind) return;
+      const top = elements.inspectorBody.scrollTop;
+      fill(content);
+      elements.inspectorBody.scrollTop = top;
+    }
+    function close(kind) {
+      if (!current || kind && current.kind !== kind) return;
+      const { closed, home } = current;
+      const focused = document.activeElement;
+      const refocus = Boolean(focused && elements.inspector.contains(focused));
+      const from = opener;
+      current = void 0;
+      opener = void 0;
+      elements.inspector.hidden = true;
+      elements.inspectorNav.replaceChildren();
+      elements.inspectorBody.replaceChildren();
+      if (document.body) delete document.body.dataset.inspector;
+      closed?.();
+      const target = refocus ? home?.() ?? from : void 0;
+      if (target && target.isConnected !== false) target.focus({ preventScroll: true });
+    }
+    scope.listen(elements.inspectorClose, "click", () => close());
+    scope.listen(elements.inspector, "keydown", (event) => {
+      if (event.key !== "Escape") return;
+      event.stopPropagation();
+      close();
+    });
+    return { open, update, close, kind: () => current?.kind };
+  }
+
   // src/webview/inspection/trace.ts
   function formatDuration(ms) {
     if (ms < 1) return `${ms.toFixed(2)} ms`;
@@ -1741,12 +1869,10 @@
     let current;
     function show(traceId) {
       current = traceId.toLowerCase();
-      elements.traceTitle.textContent = `Trace ${current.length > 12 ? `${current.slice(0, 8)}\u2026${current.slice(-4)}` : current}`;
-      elements.traceTitle.title = current;
       elements.traceStatus.textContent = "Loading\u2026";
       elements.traceRows.replaceChildren();
       elements.traceHotspots.hidden = true;
-      actions.reveal();
+      actions.inspect(`Trace ${current.length > 12 ? `${current.slice(0, 8)}\u2026${current.slice(-4)}` : current}`, current);
       api.postMessage({ type: "trace", traceId: current });
     }
     function hide() {
@@ -1755,7 +1881,6 @@
       elements.traceHotspotList.replaceChildren();
       elements.traceHotspots.hidden = true;
     }
-    scope.listen(elements.traceBack, "click", () => actions.showList());
     scope.listen(elements.traceHotspotList, "click", (event) => {
       const button = event.target.closest(".trace-hotspot");
       const row = button && [...elements.traceRows.querySelectorAll(".trace-span")].find(
@@ -1782,7 +1907,7 @@
       actions.showContext(Number(button.dataset.id));
     });
     function receive(trace) {
-      if (!actions.visible() || trace.traceId !== current) return;
+      if (!actions.inspecting() || trace.traceId !== current) return;
       elements.traceStatus.textContent = summary(trace);
       const shownHotspots = trace.spans.length + trace.omitted > 1 ? trace.hotspots : [];
       const top = shownHotspots[0]?.selfMs ?? 0;
@@ -1820,13 +1945,13 @@
       hide,
       receive,
       get open() {
-        return actions.visible();
+        return actions.inspecting();
       }
     };
   }
   function summary(trace) {
     if (!trace.spans.length && !trace.logs.length) {
-      return "No spans or retained logs have this trace id. Turn on the OpenTelemetry receiver in More actions to collect spans from instrumented apps.";
+      return "No spans or retained logs have this trace id. Start the OpenTelemetry receiver from the status icon, or Add logs in the Sources rail, to collect spans from instrumented apps.";
     }
     if (!trace.spans.length) {
       return `${trace.logs.length} retained log${trace.logs.length === 1 ? "" : "s"} with this trace id over ${formatDuration(trace.durationMs)}. No spans were received for it.`;
@@ -1953,7 +2078,9 @@
     const button = document.createElement("button");
     button.className = "trace-log-button";
     button.dataset.id = String(log.id);
-    button.style.marginInlineStart = `${Math.min(depth, 24) * 14}px`;
+    const indent = Math.min(depth, 24) * 14;
+    button.style.marginInlineStart = `${indent}px`;
+    button.style.maxWidth = `calc(100% - ${indent}px)`;
     button.title = "Show surrounding logs";
     const level = document.createElement("span");
     level.className = `level ${log.level}`;
@@ -2018,10 +2145,18 @@
       open(row.dataset.traceId);
     });
     function open(traceId) {
+      mark(traceId);
+      actions.showTrace(traceId);
+    }
+    function mark(traceId) {
       opened = traceId;
       for (const row of elements.tracesRows.querySelectorAll(".traces-row"))
         row.classList[row.dataset.traceId === traceId ? "add" : "remove"]("selected");
-      actions.showTrace(traceId);
+    }
+    function closed() {
+      opened = void 0;
+      for (const row of elements.tracesRows.querySelectorAll(".traces-row.selected"))
+        row.classList.remove("selected");
     }
     function railItems() {
       const counts = /* @__PURE__ */ new Map();
@@ -2147,7 +2282,7 @@ Trace ${trace.traceId}`;
         })
       );
     }
-    return { show, receive, receiverChanged };
+    return { show, receive, receiverChanged, mark, closed };
   }
 
   // src/core/connection-types.ts
@@ -2395,8 +2530,6 @@ Trace ${trace.traceId}`;
     }
     function update(summary2, receiverRunning = false) {
       elements.metrics.hidden = !summary2 && !receiverRunning;
-      elements.metricCount.hidden = !summary2;
-      elements.metricCount.textContent = summary2 ? summary2.series.toLocaleString() : "";
       elements.metrics.title = summary2 ? `${summary2.series.toLocaleString()} OpenTelemetry metric series. Show their latest values and trends.` : "Metrics from apps that send OpenTelemetry metrics to the receiver.";
       const changed = summary2?.revision !== revision;
       revision = summary2?.revision;
@@ -2594,6 +2727,8 @@ Trace ${trace.traceId}`;
     let current;
     let detail;
     let model;
+    let kind;
+    let errorsOnly = false;
     function load() {
       if (pending) return;
       pending = true;
@@ -2623,11 +2758,10 @@ Trace ${trace.traceId}`;
     function open(traceId, spanId) {
       current = { traceId: traceId.toLowerCase(), spanId: spanId.toLowerCase() };
       detail = void 0;
-      elements.aiCallTitle.textContent = "AI call";
       elements.aiCallStatus.textContent = "Loading\u2026";
       elements.aiCallTranscript.replaceChildren();
       elements.aiCallNavigation.hidden = true;
-      actions.revealCall();
+      actions.inspect("AI call");
       api.postMessage({ type: "aiCall", ...current });
     }
     function close() {
@@ -2646,23 +2780,7 @@ Trace ${trace.traceId}`;
       event.preventDefault();
       openRow(event.target);
     });
-    function chooseModel(target) {
-      const row = target?.closest("[data-model]");
-      if (row?.dataset.model === void 0) return;
-      model = model === row.dataset.model ? void 0 : row.dataset.model;
-      render();
-    }
-    scope.listen(elements.aiModelRows, "click", (event) => chooseModel(event.target));
-    scope.listen(elements.aiModelRows, "keydown", (event) => {
-      const key = event.key;
-      if (key !== "Enter" && key !== " ") return;
-      event.preventDefault();
-      chooseModel(event.target);
-    });
     scope.listen(elements.aiCallsFilter, "input", render);
-    scope.listen(elements.aiCallsKind, "change", render);
-    scope.listen(elements.aiCallsErrorsOnly, "change", render);
-    scope.listen(elements.aiCallBack, "click", show);
     scope.listen(elements.aiCallTrace, "click", () => {
       if (current) actions.showTrace(current.traceId);
     });
@@ -2677,8 +2795,6 @@ Trace ${trace.traceId}`;
     scope.listen(elements.aiCallNext, "click", () => step(1));
     function update(calls, receiverRunning = false) {
       elements.aiCalls.hidden = !calls && !receiverRunning;
-      elements.aiCallCount.hidden = !calls;
-      elements.aiCallCount.textContent = calls ? whole.format(calls.calls) : "";
       elements.aiCalls.title = calls ? `${whole.format(calls.calls)} LLM calls, tool executions, and agent runs from OpenTelemetry. Show their models, tokens, and conversations.` : "LLM calls, tool executions, and agent runs from apps that send OpenTelemetry GenAI spans.";
       const changed = calls?.revision !== revision;
       revision = calls?.revision;
@@ -2690,7 +2806,7 @@ Trace ${trace.traceId}`;
       if (actions.listVisible()) render();
     }
     function receiveCall(message) {
-      if (!actions.callVisible() || message.traceId !== current?.traceId || message.spanId !== current.spanId) return;
+      if (!actions.inspecting() || message.traceId !== current?.traceId || message.spanId !== current.spanId) return;
       if (!message.detail) {
         elements.aiCallStatus.textContent = "This call is no longer retained.";
         return;
@@ -2699,8 +2815,6 @@ Trace ${trace.traceId}`;
       renderCall(message.detail);
     }
     function shown2(calls) {
-      const kind = elements.aiCallsKind.value;
-      const errorsOnly = elements.aiCallsErrorsOnly.checked;
       const terms = elements.aiCallsFilter.value.trim().toLowerCase().split(/\s+/).filter(Boolean);
       return calls.filter((call) => {
         if (model !== void 0 && (call.kind !== "model" || (call.model ?? UNKNOWN_MODEL) !== model)) return false;
@@ -2711,6 +2825,63 @@ Trace ${trace.traceId}`;
         return terms.every((term) => text2.includes(term));
       });
     }
+    function railItems(list) {
+      const choose = (change) => () => {
+        change();
+        render();
+      };
+      return [
+        {
+          kind: "item",
+          key: "all",
+          label: "All calls",
+          icon: "all",
+          meta: whole.format(list.total),
+          selected: model === void 0 && kind === void 0,
+          onSelect: choose(() => {
+            model = void 0;
+            kind = void 0;
+          })
+        },
+        ...list.models.length ? [{ kind: "group", label: "Models" }] : [],
+        ...list.models.map((totals) => ({
+          kind: "item",
+          key: `model:${totals.model}`,
+          label: totals.model,
+          status: totals.provider,
+          meta: totals.errors ? `${whole.format(totals.errors)} failed \xB7 ${whole.format(totals.calls)}` : whole.format(totals.calls),
+          selected: model === totals.model,
+          title: model === totals.model ? "Show every call" : `Show only ${totals.model} calls, with its totals`,
+          // Choosing the chosen model again shows every call. A model's calls are all model calls, so it replaces a kind.
+          onSelect: choose(() => {
+            model = model === totals.model ? void 0 : totals.model;
+            kind = void 0;
+          })
+        })),
+        { kind: "group", label: "Kind" },
+        ...kindCounts(list).filter(([, , count]) => count > 0).map(([name, label, count]) => ({
+          kind: "item",
+          key: `kind:${name}`,
+          label,
+          meta: whole.format(count),
+          selected: kind === name,
+          // A kind replaces a model: a model's calls are never tool calls or agent runs.
+          onSelect: choose(() => {
+            kind = kind === name ? void 0 : name;
+            model = void 0;
+          })
+        })),
+        { kind: "group", label: "Show" },
+        {
+          kind: "item",
+          key: "errors",
+          label: "Errors only",
+          meta: whole.format(list.errors),
+          checked: errorsOnly,
+          onSelect: choose(() => errorsOnly = !errorsOnly)
+        }
+      ];
+    }
     function render() {
       if (!summary2) return;
       const empty = !summary2.total;
@@ -2720,17 +2891,18 @@ Trace ${trace.traceId}`;
         const { running, endpoint } = actions.receiver();
         elements.aiCallsStatus.textContent = "No AI calls yet. " + (running ? `Apps instrumented with the OpenTelemetry GenAI conventions, such as OpenLLMetry or the OpenAI and Anthropic instrumentations, send their LLM calls, tool executions, and agent runs to ${endpoint ?? "the receiver"}.` : "Start the OpenTelemetry receiver, then run an app instrumented with the GenAI conventions.");
         elements.aiCallsTiles.replaceChildren();
-        elements.aiModelsTable.hidden = true;
-        elements.aiModelRows.replaceChildren();
         elements.aiCallRows.replaceChildren();
+        actions.rail?.("AI calls", []);
         return;
       }
       if (model !== void 0 && !summary2.models.some((totals) => totals.model === model)) model = void 0;
+      if (kind !== void 0 && !kindCounts(summary2).some(([name, , count]) => name === kind && count > 0))
+        kind = void 0;
       const rows = shown2(summary2.calls);
       elements.aiCallsStatus.textContent = `${whole.format(summary2.total)} AI ${summary2.total === 1 ? "call" : "calls"}` + (summary2.errors ? ` \xB7 ${whole.format(summary2.errors)} failed` : "") + (summary2.total > summary2.calls.length ? ` \xB7 newest ${whole.format(summary2.calls.length)} listed` : "") + (rows.length < summary2.calls.length ? ` \xB7 ${whole.format(rows.length)} match` : "") + (model !== void 0 ? ` \xB7 ${model} only` : "") + " \xB7 Choose one to read its conversation";
-      elements.aiCallsTiles.replaceChildren(...tiles(summary2));
-      elements.aiModelRows.replaceChildren(...summary2.models.map((totals) => modelRow(totals, totals.model === model)));
-      elements.aiModelsTable.hidden = !summary2.models.length;
+      const chosen = summary2.models.find((totals) => totals.model === model);
+      elements.aiCallsTiles.replaceChildren(...chosen ? modelTiles(chosen) : tiles(summary2));
+      actions.rail?.("AI calls", railItems(summary2));
       elements.aiCallRows.replaceChildren(...rows.map(callRow));
     }
     function callRow(call) {
@@ -2765,10 +2937,12 @@ Trace ${trace.traceId}`;
     }
     function renderCall(view) {
       const { call } = view;
-      elements.aiCallTitle.textContent = `${KIND_GLYPHS[call.kind]} ${callLabel(call)}`;
-      elements.aiCallTitle.title = `${call.name}
+      actions.inspect(
+        `${KIND_GLYPHS[call.kind]} ${callLabel(call)}`,
+        `${call.name}
 Trace ${call.traceId}
-Span ${call.spanId}`;
+Span ${call.spanId}`
+      );
       elements.aiCallStatus.textContent = [
         call.provider,
         call.agent && `agent ${call.agent}`,
@@ -2838,29 +3012,24 @@ Span ${call.spanId}`;
       tile("Tool calls", whole.format(summary2.toolCalls), toolErrors ? `${whole.format(toolErrors)} failed` : void 0)
     ];
   }
-  function modelRow(model, selected) {
-    const row = document.createElement("tr");
-    row.className = `ai-model-row${selected ? " selected" : ""}`;
-    row.dataset.model = model.model;
-    row.tabIndex = 0;
-    row.setAttribute("aria-pressed", String(selected));
-    row.title = selected ? "Show every call" : `Show only ${model.model} calls`;
-    const name = cell(model.model, "trace-name");
-    if (model.provider) {
-      const provider = document.createElement("span");
-      provider.className = "ai-provider";
-      provider.textContent = ` \xB7 ${model.provider}`;
-      name.append(provider);
-    }
-    row.append(
-      name,
-      cell(whole.format(model.calls), "ai-number"),
-      cell(tokens(model.inputTokens, true), "ai-number"),
-      cell(tokens(model.outputTokens, true), "ai-number"),
-      cell(formatDuration(model.p95Ms), "trace-duration"),
-      cell(model.errors ? whole.format(model.errors) : "", model.errors ? "ai-number ai-errors" : "ai-number")
-    );
-    return row;
+  function kindCounts(summary2) {
+    return [
+      ["model", "Model calls", summary2.modelCalls],
+      ["tool", "Tool calls", summary2.toolCalls],
+      ["agent", "Agent runs", summary2.agentRuns]
+    ];
+  }
+  function modelTiles(model) {
+    const cached = model.inputTokens ? Math.round(model.cachedTokens / model.inputTokens * 100) : 0;
+    return [
+      tile(model.model, whole.format(model.calls), model.errors ? `${whole.format(model.errors)} failed` : "calls"),
+      tile(
+        "Tokens",
+        `${tokens(model.inputTokens, true)} \u2192 ${tokens(model.outputTokens, true)}`,
+        cached ? `${cached}% of input cached` : "input \u2192 output"
+      ),
+      tile("Latency", `p50 ${formatDuration(model.p50Ms)}`, `p95 ${formatDuration(model.p95Ms)}`)
+    ];
   }
   function block(summary2, body, open, className = "ai-block") {
     const details2 = document.createElement("details");
@@ -2968,7 +3137,7 @@ Span ${call.spanId}`;
           panel.style.bottom = "";
           panel.style.maxHeight = "";
           panel.style.position = "";
-          if (panel.classList.contains("fields-panel") || panel.classList.contains("cheat-sheet") || panel.classList.contains("level-menu") || panel.classList.contains("saved-searches") || panel.classList.contains("actions-menu") || panel.classList.contains("share-panel") || panel.classList.contains("memory-panel")) {
+          if (panel.classList.contains("fields-panel") || panel.classList.contains("cheat-sheet") || panel.classList.contains("level-menu") || panel.classList.contains("saved-searches") || panel.classList.contains("actions-menu") || panel.classList.contains("share-panel") || panel.classList.contains("status-panel")) {
             const trigger = button.getBoundingClientRect();
             const margin2 = 8;
             const spaceBelow2 = window.innerHeight - trigger.bottom - margin2;
@@ -3345,7 +3514,6 @@ Span ${call.spanId}`;
   // src/webview/state.ts
   var LEVELS = ["trace", "debug", "info", "warn", "error", "fatal", "unclassified"];
   var ViewerState = class {
-    paused = false;
     following;
     page = 0;
     pages = 1;
@@ -3385,10 +3553,14 @@ Span ${call.spanId}`;
     railCollapsed;
     /** The rails' width when resized by hand; undefined keeps the default. */
     railWidth;
+    /** The inspector's width when resized by hand; undefined keeps the default. */
+    inspectorWidth;
     constructor(saved = {}) {
       if (saved.rail === "collapsed" || saved.rail === "open") this.railCollapsed = saved.rail === "collapsed";
       if (typeof saved.railWidth === "number" && Number.isFinite(saved.railWidth) && saved.railWidth > 0)
         this.railWidth = saved.railWidth;
+      if (typeof saved.inspectorWidth === "number" && Number.isFinite(saved.inspectorWidth) && saved.inspectorWidth > 0)
+        this.inspectorWidth = saved.inspectorWidth;
       this.view = typeof saved.view === "string" ? saved.view : "logs";
       this.connectionRange = typeof saved.range === "string" && RANGE_CHOICES.includes(saved.range) ? saved.range : "1h";
       const native = {
@@ -3435,36 +3607,22 @@ Span ${call.spanId}`;
       this.selectedExceptions = [];
       this.selectedLinks = {};
     }
-    /** Explicit changes close inspection while keeping a fixed history boundary. */
-    browseFromInspection() {
-      if (!this.paused) return;
-      this.paused = false;
-      this.resetSelection();
-      this.following = false;
-      this.before ??= this.newest;
-      this.lastRows = void 0;
-    }
     resume() {
-      this.paused = false;
-      this.resetSelection();
       this.selectedSort = "";
       this.filterChanged();
       this.setFollowing(true);
     }
+    /** Selects an event for the inspector, or clears the selection when it is chosen again; true when it opened. */
     inspect(id) {
       const opening = this.selected !== id;
       this.resetSelection();
-      if (opening) {
-        this.selected = id;
-        this.paused = true;
-        this.before ??= this.newest;
-      }
+      if (opening) this.selected = id;
       return opening;
     }
     sort(field) {
       this.selectedSortDirection = this.selectedSort === field && this.selectedSortDirection === "desc" ? "asc" : "desc";
       this.selectedSort = field;
-      if (!this.paused) this.setFollowing(false);
+      this.setFollowing(false);
       this.filterChanged();
     }
     persist(query) {
@@ -3487,7 +3645,8 @@ Span ${call.spanId}`;
         ...this.connectionRange !== "1h" ? { range: this.connectionRange } : {},
         ...Object.keys(this.native).length ? { native: this.persistedNative() } : {},
         ...this.railCollapsed !== void 0 ? { rail: this.railCollapsed ? "collapsed" : "open" } : {},
-        ...this.railWidth !== void 0 ? { railWidth: this.railWidth } : {}
+        ...this.railWidth !== void 0 ? { railWidth: this.railWidth } : {},
+        ...this.inspectorWidth !== void 0 ? { inspectorWidth: this.inspectorWidth } : {}
       };
     }
     /** The query typed in a kind of connection's own syntax, and whether Run and Tail send it. */
@@ -4535,14 +4694,18 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
       if (!connections.length && !detached.length) {
         const empty = document.createElement("div");
         empty.className = "rail-empty";
-        const text2 = document.createElement("p");
-        text2.textContent = "Search Datadog, CloudWatch, Loki, Elasticsearch, Cloud Logging, or a database next to your local runs.";
+        const about = document.createElement("button");
+        about.type = "button";
+        about.className = "rail-info";
+        about.textContent = "i";
+        about.setAttribute("aria-label", "About connections");
+        about.title = "Search Datadog, CloudWatch, Loki, Elasticsearch, Cloud Logging, or a database next to your local runs.";
         const button = document.createElement("button");
         button.type = "button";
         button.className = "rail-empty-add";
         button.textContent = "Add connection";
         scope.listen(button, "click", () => api.postMessage({ type: "addConnection" }));
-        empty.append(text2, button);
+        empty.append(button, about);
         children.push(empty);
       }
       elements.railList.replaceChildren(...children);
@@ -5045,6 +5208,13 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
   }
 
   // src/webview/connection-form/form.ts
+  var TEST_SUMMARY = {
+    idle: "Not checked yet",
+    running: "Connecting\u2026",
+    ok: "Connected",
+    failed: "Could not connect",
+    stale: "Changed since the last test"
+  };
   function h(tag, props = {}, ...children) {
     const element2 = document.createElement(tag);
     for (const [key, value] of Object.entries(props)) {
@@ -5062,6 +5232,7 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
     return element2;
   }
   var SERVER_TYPES = ["postgres", "mysql"];
+  var FOUND_TABLES = 12;
   function createConnectionForm(api, root) {
     let mode = "add";
     let draft = emptyDraft();
@@ -5086,13 +5257,37 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
     let savedMapping;
     let saving = false;
     let saveError = "";
+    let current = -1;
+    let visited = 0;
     let testing = "";
     const tested = () => JSON.stringify({ ...draft, label: "" });
     const title = h("h1", {}, "Add connection");
+    const heading = h(
+      "div",
+      { className: "form-title" },
+      title,
+      h(
+        "button",
+        {
+          type: "button",
+          className: "type-info",
+          "aria-label": "About connections",
+          "aria-describedby": "connection-about"
+        },
+        "i"
+      ),
+      h(
+        "span",
+        { className: "type-description", id: "connection-about", role: "tooltip" },
+        `A connection searches the logs in ${new Intl.ListFormat("en", { type: "disjunction" }).format(
+          CONNECTION_TYPES.map((entry2) => entry2.label)
+        )} beside your local runs. It only reads, and nothing is saved until you add it.`
+      )
+    );
     const lead = h(
       "p",
       { className: "lead" },
-      "Search a log service next to your local runs, or query a database. Every connection is read-only, and passwords and keys stay in VS Code secret storage."
+      "Every connection is read-only, and passwords and keys stay in VS Code secret storage."
     );
     const types = h("div", { className: "type-groups", role: "radiogroup", "aria-label": "What to connect" });
     const details2 = h("div", { className: "details" });
@@ -5102,6 +5297,7 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
       "Test connection"
     );
     const testStatus = h("div", { className: "test-status", role: "status", "aria-live": "polite" });
+    const found = h("div", { className: "found" });
     const logs = h("div", { className: "logs" });
     const labelInput = h("input", {
       id: "field-label",
@@ -5112,6 +5308,9 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
         draft.label = labelInput.value;
         labelEdited = true;
         updateFooter();
+      },
+      onkeydown: (event) => {
+        if (event.key === "Enter") save();
       }
     });
     const saveButton = h("button", { type: "button", onclick: () => save() }, "Add connection");
@@ -5120,34 +5319,147 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
       { type: "button", className: "secondary", onclick: () => api.postMessage({ type: "cancel" }) },
       "Cancel"
     );
+    const backButton = h("button", { type: "button", className: "secondary", onclick: () => go(current - 1) }, "Back");
+    const nextButton = h("button", { type: "button", onclick: () => next() }, "Next");
     const footerNote = h("span", { className: "footer-note", role: "status", "aria-live": "polite" });
-    const step = (number2, heading, ...children) => h(
+    const step = (name, heading2, ...children) => h(
       "section",
-      { className: "step" },
-      h("h2", {}, h("span", { className: "step-number", "aria-hidden": "true" }, String(number2)), heading),
+      { className: "step", "aria-labelledby": `step-${name}`, hidden: true },
+      h("h2", { id: `step-${name}`, tabindex: "-1" }, heading2),
       ...children
     );
+    const connectHeading = h("span", {}, "Connect");
     const logsHeading = h("span", {}, "Logs");
-    const typeStep = step(1, "What are you connecting?", types);
-    const connectStep = step(2, "Connect", details2, h("div", { className: "test-row" }, testButton, testStatus));
-    const logsStep = step(3, logsHeading, logs);
+    const typeStep = step("type", "What are you connecting?", lead, types);
+    const connectStep = step("connect", connectHeading, details2);
+    const logsStep = step("logs", logsHeading, logs);
     const nameStep = step(
-      4,
+      "name",
       "Name",
       h("div", { className: "field" }, h("label", { for: "field-label" }, "Shown in the Sources list"), labelInput)
     );
+    const sections = [typeStep, connectStep, logsStep, nameStep];
+    const body = h("div", { className: "wizard-body" }, ...sections);
+    const stepButtons = sections.map((_, index) => {
+      const marker = h("span", { className: "wizard-marker", "aria-hidden": "true" }, String(index + 1));
+      const name = h("span", { className: "wizard-name" });
+      const summary2 = h("span", { className: "wizard-summary" });
+      const button = h(
+        "button",
+        { type: "button", className: "wizard-step", onclick: () => go(index) },
+        marker,
+        h("span", { className: "wizard-text" }, name, summary2)
+      );
+      return { button, marker, name, summary: summary2 };
+    });
     root.replaceChildren(
       h(
         "main",
         { className: "form" },
-        h("header", {}, title, lead),
-        typeStep,
-        connectStep,
-        logsStep,
-        nameStep,
-        h("footer", {}, footerNote, h("div", { className: "buttons" }, cancelButton, saveButton))
+        h(
+          "nav",
+          { className: "wizard-nav", "aria-label": "Steps" },
+          heading,
+          h("div", { className: "wizard-steps" }, ...stepButtons.map((entry2) => entry2.button))
+        ),
+        h(
+          "div",
+          { className: "wizard-main" },
+          body,
+          h(
+            "footer",
+            {},
+            cancelButton,
+            footerNote,
+            h("div", { className: "buttons" }, backButton, nextButton, saveButton)
+          )
+        ),
+        h(
+          "aside",
+          { className: "wizard-result", "aria-label": "Test result" },
+          h("div", { className: "result-header" }, h("strong", {}, "Test result"), testButton),
+          testStatus,
+          found
+        )
       )
     );
+    function blockedAt(index) {
+      if (index === 1) {
+        if (test.state === "running") return "Testing the connection\u2026";
+        if (test.state !== "ok") return "Test the connection to continue.";
+      }
+      if (index === 2) {
+        const kind = connectionKind(draft.type);
+        if (!kind.service) {
+          const word = kind.container ?? "table";
+          if (table === void 0 || table === null && kind.mappingRequired)
+            return `Choose the log ${word}${kind.mappingRequired ? "" : ", or None"}.`;
+          if (table && columnsState !== "ready") return `Reading ${table}\u2026`;
+          if (table && !mapping.timestamp) return "Choose the time column.";
+        }
+      }
+      if (index === 3 && !draft.label.trim()) return "Give the connection a name.";
+      return void 0;
+    }
+    function reachable(index) {
+      for (let before = 0; before < index; before++) if (blockedAt(before)) return false;
+      return true;
+    }
+    function go(index) {
+      if (index < 0 || index >= sections.length || !reachable(index)) return;
+      current = index;
+      updateFooter();
+      focusStep();
+    }
+    function next() {
+      if (current === 1 && test.state !== "ok") runTest();
+      else go(current + 1);
+    }
+    function focusStep() {
+      const section = sections[current];
+      if (!section) return;
+      const controls = [...section.querySelectorAll("input, select, textarea")];
+      const first = controls.find((control) => !control.disabled && (control.type !== "radio" || control.checked));
+      (first ?? section.querySelector("h2"))?.focus({ preventScroll: true });
+      body.scrollTop = 0;
+    }
+    function settle() {
+      while (current > 0 && !reachable(current)) current--;
+    }
+    function stepSummary(index) {
+      const kind = connectionKind(draft.type);
+      if (index === 0) return kind.label;
+      if (index === 1) return TEST_SUMMARY[test.state];
+      if (index === 2) {
+        if (kind.service) return "No table needed";
+        return table ?? (table === null ? "None" : kind.mappingRequired ? "Required" : "Optional");
+      }
+      return draft.label.trim() || "Not named yet";
+    }
+    function renderSteps() {
+      if (current < 0) return;
+      settle();
+      visited = Math.max(visited, current);
+      const last = sections.length - 1;
+      const names = ["Type", "Connect", logsHeading.textContent ?? "Logs", "Name"];
+      sections.forEach((section, index) => section.hidden = index !== current);
+      stepButtons.forEach((entry2, index) => {
+        const open = reachable(index);
+        const done = open && index !== current && index <= visited && !blockedAt(index);
+        entry2.button.className = `wizard-step${index === current ? " current" : ""}${done ? " done" : ""}`;
+        entry2.button.disabled = !open;
+        entry2.button.setAttribute("aria-current", index === current ? "step" : "false");
+        entry2.marker.textContent = done ? "\u2713" : String(index + 1);
+        entry2.name.textContent = names[index];
+        entry2.summary.textContent = stepSummary(index);
+      });
+      backButton.hidden = current === 0;
+      nextButton.hidden = current === last;
+      saveButton.hidden = current !== last;
+      const testFirst = current === 1 && test.state !== "ok";
+      nextButton.disabled = test.state === "running" ? current === 1 : !testFirst && !!blockedAt(current);
+      nextButton.textContent = !testFirst ? "Next" : test.state === "running" ? "Testing\u2026" : "Test connection";
+    }
     function result() {
       return readDraft(draft, { secret: keepsSecret2() });
     }
@@ -5442,19 +5754,36 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
             onchange: () => chooseType(entryType.type)
           }),
           h("span", { className: "type-name" }, entryType.label),
-          h("span", { className: "type-description" }, entryType.description)
+          // What the store is shows from its i, on hover or focus, so the cards stay one line each.
+          h(
+            "button",
+            {
+              type: "button",
+              className: "type-info",
+              "aria-label": `About ${entryType.label}`,
+              "aria-describedby": `type-about-${entryType.type}`,
+              // Inside the card's label, a click would otherwise choose the type.
+              onclick: (event) => event.preventDefault()
+            },
+            "i"
+          ),
+          h(
+            "span",
+            { className: "type-description", id: `type-about-${entryType.type}`, role: "tooltip" },
+            entryType.description
+          )
         );
       });
     }
     function chooseType(type) {
       if (type === draft.type) return;
       const keep = SERVER_TYPES.includes(type) && SERVER_TYPES.includes(draft.type);
-      const next = emptyDraft(type);
+      const next2 = emptyDraft(type);
       draft = keep ? {
         ...draft,
         type,
-        port: draft.port === emptyDraft(draft.type).port ? next.port : draft.port
-      } : { ...next, label: labelEdited ? draft.label : "" };
+        port: draft.port === emptyDraft(draft.type).port ? next2.port : draft.port
+      } : { ...next2, label: labelEdited ? draft.label : "" };
       urlText = keep && entry === "url" ? draftUrl(draft) : "";
       urlInvalid = false;
       outsideWorkspace = false;
@@ -5496,6 +5825,7 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
           break;
       }
       details2.replaceChildren(...children.filter((child) => !!child));
+      connectHeading.textContent = `Connect to ${connectionKind(draft.type).label}`;
       updateErrors();
     }
     function serverDetails() {
@@ -5522,13 +5852,13 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
         "aria-describedby": "error-url-entry",
         oninput: () => {
           urlText = urlInput.value;
-          const next = applyUrl(draft, urlInput.value);
-          urlInvalid = !next;
-          urlError.hidden = !!next || !urlInput.value.trim();
-          urlError.textContent = next ? "" : `Enter a URL such as ${example}`;
-          if (next) {
+          const next2 = applyUrl(draft, urlInput.value);
+          urlInvalid = !next2;
+          urlError.hidden = !!next2 || !urlInput.value.trim();
+          urlError.textContent = next2 ? "" : `Enter a URL such as ${example}`;
+          if (next2) {
             const movedPassword = withoutPassword(urlInput.value) !== urlInput.value;
-            draft = next;
+            draft = next2;
             if (movedPassword) {
               const password = details2.querySelector("#field-password");
               if (password) password.value = draft.password;
@@ -5636,10 +5966,10 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
           wide: true,
           hint: "A password in the URL moves to the password field, so the saved URL never holds one.",
           onInput: (value) => {
-            const next = applyUrl(draft, value);
-            if (next) {
+            const next2 = applyUrl(draft, value);
+            if (next2) {
               const movedPassword = withoutPassword(value) !== value;
-              draft = next;
+              draft = next2;
               const input = details2.querySelector("#field-url");
               if (input && movedPassword) input.value = draft.url;
               const passwordInput = details2.querySelector("#field-password");
@@ -5762,6 +6092,7 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
         details2.querySelector("#field-url-entry")?.focus();
         test = { state: "failed", error: "Enter a URL Logline can read, or use Fields." };
         updateTest();
+        updateFooter();
         return;
       }
       const { connection, errors } = result();
@@ -5770,6 +6101,7 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
         details2.querySelector(`#field-${first}`)?.focus();
         test = { state: "failed", error: Object.values(errors)[0] ?? "Fill in the connection first." };
         updateTest();
+        updateFooter();
         return;
       }
       test = { state: "running" };
@@ -5782,7 +6114,32 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
       testButton.disabled = test.state === "running";
       testButton.textContent = test.state === "running" ? "Testing\u2026" : test.state === "ok" ? "Test again" : "Test connection";
       testStatus.className = `test-status ${test.state}`;
-      testStatus.textContent = test.state === "running" ? "Connecting\u2026" : test.state === "ok" ? `\u2713 Connected \xB7 ${test.detail}` : test.state === "failed" ? test.error : test.state === "stale" ? "Changed since the last test. Test again to continue." : "";
+      testStatus.textContent = test.state === "ok" ? `\u2713 ${TEST_SUMMARY.ok} \xB7 ${test.detail}` : test.state === "failed" ? test.error : test.state === "stale" ? `${TEST_SUMMARY.stale}. Test again to continue.` : test.state === "running" ? TEST_SUMMARY.running : "";
+      renderFound();
+    }
+    function renderFound() {
+      if (test.state === "idle") {
+        found.replaceChildren(
+          h("p", { className: "hint" }, "Test the connection to see what Logline can reach. Nothing is saved yet.")
+        );
+        return;
+      }
+      const tables = test.state === "ok" ? test.tables ?? [] : [];
+      if (!tables.length) {
+        found.replaceChildren();
+        return;
+      }
+      const word = connectionKind(draft.type).container ?? "table";
+      const shown2 = tables.slice(0, FOUND_TABLES);
+      found.replaceChildren(
+        h("div", { className: "found-caption" }, `${tables.length} ${word}${tables.length === 1 ? "" : "s"}`),
+        h(
+          "ul",
+          { className: "found-list" },
+          ...shown2.map((name) => h("li", { title: name }, name)),
+          tables.length > shown2.length ? h("li", { className: "more" }, `and ${tables.length - shown2.length} more`) : void 0
+        )
+      );
     }
     function renderLogs() {
       const kind = connectionKind(draft.type);
@@ -5849,14 +6206,14 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
       }
       logs.replaceChildren(...children.filter((child) => !!child && typeof child !== "string"));
     }
-    function chooseTable(next) {
-      table = next;
+    function chooseTable(next2) {
+      table = next2;
       columns = [];
       rows = [];
       previewError = "";
       mapping = {};
-      columnsState = next ? "loading" : "idle";
-      if (next) api.postMessage({ type: "table", table: next });
+      columnsState = next2 ? "loading" : "idle";
+      if (next2) api.postMessage({ type: "table", table: next2 });
       renderLogs();
       updateFooter();
     }
@@ -5973,25 +6330,17 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
       );
     }
     function missing() {
-      if (test.state === "running") return "Testing the connection\u2026";
-      if (test.state !== "ok") return "Test the connection to continue.";
-      const kind = connectionKind(draft.type);
-      if (!kind.service) {
-        const word = kind.container ?? "table";
-        if (table === void 0 || table === null && kind.mappingRequired)
-          return `Choose the log ${word}${kind.mappingRequired ? "" : ", or None"}.`;
-        if (table && columnsState !== "ready") return `Reading ${table}\u2026`;
-        if (table && !mapping.timestamp) return "Choose the time column.";
-      }
-      if (!draft.label.trim()) return "Give the connection a name.";
-      return void 0;
+      return blockedAt(1) ?? blockedAt(2) ?? blockedAt(3);
     }
     function updateFooter() {
+      settle();
       const blocked = missing();
+      const needed = current === sections.length - 1 ? blocked : blockedAt(current);
       saveButton.disabled = saving || !!blocked;
       saveButton.textContent = saving ? "Saving\u2026" : mode === "edit" ? "Save changes" : "Add connection";
       footerNote.className = `footer-note${saveError ? " error" : ""}`;
-      footerNote.textContent = saveError || blocked || "";
+      footerNote.textContent = saveError || needed || "";
+      renderSteps();
     }
     function save() {
       if (missing() || saving) return;
@@ -6016,14 +6365,15 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
           if (!labelEdited) draft.label = suggestedLabel(draft);
           labelInput.value = draft.label;
           title.textContent = mode === "edit" ? `Edit ${draft.label}` : "Add connection";
-          typeStep.hidden = false;
+          current = mode === "edit" ? 1 : 0;
+          visited = current;
           renderTypes();
           renderDetails();
           updateTest();
           renderLogs();
           updateFooter();
           if (mode === "edit" && result().connection) runTest();
-          else details2.querySelector("input")?.focus();
+          else focusStep();
           return;
         case "tested":
           test = tested() !== testing ? { state: "stale" } : update.ok ? { state: "ok", detail: update.detail, tables: update.tables } : { state: "failed", error: update.error };
@@ -6074,7 +6424,6 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
           return;
       }
     }
-    typeStep.hidden = true;
     updateFooter();
     return { receive };
   }
@@ -6094,24 +6443,20 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
     return typeof value === "string" && TABS.includes(value);
   }
   function tabOf(view) {
-    return view === "trace" ? "traces" : view === "aiCall" ? "aiCalls" : view;
+    return view;
   }
   function createViews(tabs, panels, scope, activate, changed) {
     let current = "logs";
     function show(view, focus = false) {
       const previous = current;
       current = view;
-      for (const name of Object.keys(panels))
-        panels[name].hidden = name !== view && !(view === "trace" && name === "traces");
+      for (const name of Object.keys(panels)) panels[name].hidden = name !== view;
       const selected = tabOf(view);
       for (const name of TABS) {
         tabs[name].setAttribute("aria-selected", String(name === selected));
         tabs[name].tabIndex = name === selected ? 0 : -1;
       }
-      if (document.body) {
-        document.body.dataset.view = selected;
-        document.body.dataset.subview = view;
-      }
+      if (document.body) document.body.dataset.view = selected;
       if (focus) tabs[selected].focus();
       if (view !== previous) changed(view, previous);
     }
@@ -6229,22 +6574,71 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
   function widest() {
     return Math.max(RAIL_WIDTH.min, Math.min(RAIL_WIDTH.max, (window.innerWidth || 0) - 240));
   }
-  function clampRailWidth(width) {
-    return Math.round(Math.max(RAIL_WIDTH.min, Math.min(widest(), width)));
-  }
+  var INSPECTOR_WIDTH = { min: 280, max: 900, default: 440 };
+  var LIST_ROOM = 320;
   function createRailResize(handles, state, scope, actions) {
+    return createEdgeResize(
+      {
+        handles,
+        variable: "--rail-width",
+        bounds: RAIL_WIDTH,
+        widest,
+        grows: 1,
+        get: () => state.railWidth,
+        set: (width) => state.railWidth = width,
+        saveState: actions.saveState
+      },
+      scope
+    );
+  }
+  function createInspectorResize(handle, inspector, state, scope, actions) {
+    return createEdgeResize(
+      {
+        handles: [handle],
+        variable: "--inspector-width",
+        bounds: INSPECTOR_WIDTH,
+        // The list beside it keeps at least 320px of the space the two share,
+        // which leaves out the rails beside them.
+        widest: () => {
+          const shared = inspector.parentElement?.getBoundingClientRect().width || window.innerWidth || 0;
+          return Math.max(INSPECTOR_WIDTH.min, Math.min(INSPECTOR_WIDTH.max, shared - LIST_ROOM));
+        },
+        drawn: () => inspector.hidden ? void 0 : inspector.getBoundingClientRect().width || void 0,
+        grows: -1,
+        get: () => state.inspectorWidth,
+        set: (width) => state.inspectorWidth = width,
+        saveState: actions.saveState
+      },
+      scope
+    );
+  }
+  function createEdgeResize(edge, scope) {
+    const { handles, bounds } = edge;
+    const clamp = (width, widest2 = edge.widest()) => Math.round(Math.max(bounds.min, Math.min(widest2, width)));
+    const current = (widest2 = edge.widest()) => clamp(edge.get() ?? edge.drawn?.() ?? bounds.default, widest2);
     function apply() {
-      const width = state.railWidth === void 0 ? RAIL_WIDTH.default : clampRailWidth(state.railWidth);
-      if (state.railWidth === void 0) document.body.style.removeProperty("--rail-width");
-      else document.body.style.setProperty("--rail-width", `${width}px`);
+      const widest2 = edge.widest();
+      const chosen = edge.get();
+      const width = current(widest2);
+      if (chosen === void 0) document.body.style.removeProperty(edge.variable);
+      else document.body.style.setProperty(edge.variable, `${width}px`);
       for (const handle of handles) {
         handle.setAttribute("aria-valuenow", String(width));
-        handle.setAttribute("aria-valuemin", String(RAIL_WIDTH.min));
-        handle.setAttribute("aria-valuemax", String(widest()));
+        handle.setAttribute("aria-valuemin", String(bounds.min));
+        handle.setAttribute("aria-valuemax", String(widest2));
       }
     }
+    let applyQueued = false;
+    function applySoon() {
+      if (applyQueued) return;
+      applyQueued = true;
+      scope.frame(() => {
+        applyQueued = false;
+        apply();
+      });
+    }
     function set(width) {
-      state.railWidth = width === void 0 ? void 0 : clampRailWidth(width);
+      edge.set(width === void 0 ? void 0 : clamp(width));
       apply();
     }
     for (const handle of handles) {
@@ -6252,15 +6646,15 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
         if (event.button !== void 0 && event.button !== 0) return;
         handle.setPointerCapture?.(event.pointerId);
         const startX = event.clientX;
-        const startWidth = state.railWidth ?? RAIL_WIDTH.default;
+        const startWidth = current();
         handle.classList.add("dragging");
-        const move = (pointer) => set(startWidth + pointer.clientX - startX);
+        const move = (pointer) => set(startWidth + (pointer.clientX - startX) * edge.grows);
         const finish = () => {
           document.removeEventListener?.("pointermove", move);
           document.removeEventListener?.("pointerup", finish);
           document.removeEventListener?.("pointercancel", finish);
           handle.classList.remove("dragging");
-          actions.saveState();
+          edge.saveState();
         };
         scope.listen(document, "pointermove", move);
         scope.listen(document, "pointerup", finish, { once: true });
@@ -6269,17 +6663,18 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
       });
       scope.listen(handle, "dblclick", () => {
         set(void 0);
-        actions.saveState();
+        edge.saveState();
       });
       scope.listen(handle, "keydown", (event) => {
         if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
         event.preventDefault();
-        const step = event.shiftKey ? STEP * 3 : STEP;
-        set((state.railWidth ?? RAIL_WIDTH.default) + (event.key === "ArrowLeft" ? -step : step));
-        actions.saveState();
+        const step = (event.shiftKey ? STEP * 3 : STEP) * edge.grows;
+        set(current() + (event.key === "ArrowLeft" ? -step : step));
+        edge.saveState();
       });
     }
-    scope.listen(window, "resize", apply);
+    for (const handle of handles) scope.listen(handle, "focus", apply);
+    scope.listen(window, "resize", applySoon);
     apply();
     return { apply };
   }
@@ -6455,7 +6850,7 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
     {
       target: "sourceRail",
       title: "Your sources",
-      text: "Everything Logline captures, in one list: terminals, tasks, debug sessions, OpenTelemetry, and imports. Click one to see only its logs; point at it to stop or remove it. Drag the rail\u2019s right edge to widen it."
+      text: "Everything Logline captures, in one list: terminals, tasks, debug sessions, OpenTelemetry, and imports. Click one to see only its logs; point at it to stop or remove it. The + in its header adds logs: a command, a file, a browser, an import, a connection, or OpenTelemetry."
     },
     {
       target: "railAddConnection",
@@ -6470,12 +6865,12 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
       example: "level:error service:checkout"
     },
     {
-      // The first row's message, which is what you click, not the whole table: the card then
+      // The first row's message, not the whole table: the card then
       // has room beside it rather than over it, even in a short panel.
       select: "#logs > tr.event-row .message-content",
       target: "logsView",
       title: "Every event, explained",
-      text: "Click a row for its fields, stack trace, the line of code that logged it, and the logs around it."
+      text: "Click a row to open it beside the list, with its fields, stack trace, the line of code that logged it, and the logs around it. The list keeps updating while it is open."
     },
     {
       target: "viewTabs",
@@ -6490,7 +6885,7 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
     {
       target: "statusBar",
       title: "What is running",
-      text: "Turn terminal capture and the OpenTelemetry receiver on or off here, see memory use, and check that everything is working."
+      text: "Capture turns terminal capture on and off here. The check mark opens a panel for capture, the OpenTelemetry receiver, agents, and memory, with a link to troubleshooting."
     }
   ];
   function shown(element2) {
@@ -6679,6 +7074,36 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
     };
   }
 
+  // src/webview/about-dialog.ts
+  var COPIED_MS = 1500;
+  function createAboutDialog(elements, api, scope) {
+    let info;
+    let copied;
+    scope.track(() => clearTimeout(copied));
+    scope.listen(elements.close, "click", () => elements.dialog.close());
+    for (const [action, button] of Object.entries(elements.buttons))
+      scope.listen(button, "click", () => {
+        api.postMessage({ type: "aboutAction", action, ...action === "copy" && info ? { info } : {} });
+        if (action === "copy") {
+          button.textContent = "Copied";
+          clearTimeout(copied);
+          copied = setTimeout(() => {
+            copied = void 0;
+            button.textContent = "Copy";
+          }, COPIED_MS);
+        }
+      });
+    return {
+      open(next) {
+        info = next;
+        elements.version.textContent = `v${next.version}`;
+        elements.editor.textContent = next.editor;
+        elements.system.textContent = next.system;
+        if (!elements.dialog.open) elements.dialog.showModal?.();
+      }
+    };
+  }
+
   // src/core/redaction.ts
   var DEFAULT_REPLACEMENT = "[REDACTED]";
   var SENSITIVE_KEY = /(?:password|passwd|passphrase|secret|token|api[-_ ]?key|authorization|cookie|private[-_ ]?key|access[-_ ]?key|credential|(?:^|[-_. ])pwd$)/i;
@@ -6759,13 +7184,29 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
   function normalizedKey(key) {
     return key.toLowerCase().replace(/[^a-z0-9]/g, "");
   }
+  var KNOWN_KEYS_LIMIT = 4096;
+  var knownKeys = /* @__PURE__ */ new Map();
+  function hasSensitiveName(key) {
+    let sensitive = knownKeys.get(key);
+    if (sensitive !== void 0) return sensitive;
+    sensitive = SENSITIVE_KEY.test(key) && !NOT_SENSITIVE_KEY.test(key);
+    if (key.length <= 64) {
+      if (knownKeys.size >= KNOWN_KEYS_LIMIT) knownKeys.clear();
+      knownKeys.set(key, sensitive);
+    }
+    return sensitive;
+  }
   function isSensitiveKey(key, fields = []) {
-    const normalized = normalizedKey(key);
-    if (fields.some((field) => normalizedKey(field) === normalized)) return true;
-    return SENSITIVE_KEY.test(key) && !NOT_SENSITIVE_KEY.test(key);
+    if (fields.length) {
+      const normalized = normalizedKey(key);
+      if (fields.some((field) => normalizedKey(field) === normalized)) return true;
+    }
+    return hasSensitiveName(key);
   }
   function isKeyCharacter(value) {
-    return value !== void 0 && /[A-Za-z0-9_.-]/.test(value);
+    if (value === void 0) return false;
+    const code = value.charCodeAt(0);
+    return code >= 97 && code <= 122 || code >= 65 && code <= 90 || code >= 48 && code <= 57 || code === 95 || code === 46 || code === 45;
   }
   function redactAssignments(text2, replacement, sensitive, depth = 0) {
     let output = "";
@@ -7685,7 +8126,7 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
     if (!columnElements.size) return;
     const defaults = { "base:time": 140, "base:level": 110, "base:source": 110 };
     const messageFloor = 300;
-    const messageMin = 140;
+    let messageMin = 140;
     const minWidth = 72;
     const floors = { "base:time": 124, "base:level": 80 };
     const floorFor = (key) => floors[key] ?? minWidth;
@@ -7698,16 +8139,24 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
     const sourceElement = columnElements.get("base:source");
     const collapseSource = Boolean(sourceElement) && available > 0 && fullOtherWidth + messageFloor > available;
     const collapsed = new Set(collapseSource ? ["base:source"] : []);
+    let needed = () => 0;
     if (available > 0) {
       const fields = displayedColumns.filter((column) => !column.key.startsWith("base:")).reverse();
-      const needed = () => displayedColumns.filter((column) => column.key !== "base:message" && !collapsed.has(column.key)).reduce((sum, column) => sum + (isExplicit(column.key) ? widthFor(column.key) : floorFor(column.key)), 0) + messageMin;
+      needed = () => displayedColumns.filter((column) => column.key !== "base:message" && !collapsed.has(column.key)).reduce((sum, column) => sum + (isExplicit(column.key) ? widthFor(column.key) : floorFor(column.key)), 0) + messageMin;
       for (const field of fields) {
         if (needed() <= available) break;
         collapsed.add(field.key);
       }
     }
+    const compact2 = available > 0 && columnElements.has("base:level") && !isExplicit("base:level") && needed() > available;
+    if (compact2) {
+      collapsed.add("base:level");
+      floors["base:time"] = 72;
+      messageMin = 120;
+    }
+    table.dataset.compact = String(compact2);
     for (const [key, element2] of columnElements)
-      if (key === "base:source" || !key.startsWith("base:"))
+      if (key === "base:source" || key === "base:level" || !key.startsWith("base:"))
         element2.style.visibility = collapsed.has(key) ? "collapse" : "";
     const columns = displayedColumns.filter((column) => !collapsed.has(column.key));
     const explicitWidth = columns.filter((column) => isExplicit(column.key)).reduce((sum, column) => sum + widthFor(column.key), 0);
@@ -7755,7 +8204,7 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
   function createRows(state, columns, formatTimestamp) {
     function buildRow(event) {
       const row = document.createElement("tr");
-      row.className = "event-row";
+      row.className = /^[a-z]+$/.test(event.level) ? `event-row level-${event.level}` : "event-row";
       row.dataset.id = String(event.id);
       const messageCell = cell("", "message-cell");
       const messageContent = document.createElement("div");
@@ -7763,7 +8212,9 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
       const button = document.createElement("button");
       button.className = "message-button";
       button.textContent = `${event.message}${event.truncated ? " [truncated]" : ""}`;
-      button.setAttribute("aria-expanded", String(event.id === state.selected));
+      button.setAttribute("aria-pressed", String(event.id === state.selected));
+      button.setAttribute("aria-controls", "inspector");
+      if (event.id === state.selected) row.classList.add("selected");
       messageContent.append(button);
       const quick = document.createElement("span");
       quick.className = event.site ? "row-quick has-site" : "row-quick";
@@ -7816,37 +8267,6 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
       }
       return row;
     }
-    function buildDetailRow(event) {
-      const details2 = document.createElement("tr");
-      details2.className = "detail-row";
-      const container = cell("", "detail-cell");
-      container.colSpan = columns().length;
-      const context = eventAction(
-        "context-button",
-        "context",
-        "Surrounding logs",
-        "Show the logs just before and after this event from the same run"
-      );
-      context.dataset.id = String(event.id);
-      container.append(
-        buildEventDetails(event.id, state.selectedDetailText, state.selectedExceptions, state.selectedLinks, [context])
-      );
-      if (!state.cellHintDismissed) {
-        const hint = document.createElement("p");
-        hint.className = "detail-hint";
-        const dismiss = document.createElement("button");
-        dismiss.type = "button";
-        dismiss.className = "dismiss-hint";
-        dismiss.textContent = "Got it";
-        hint.append(
-          document.createTextNode("Tip: right-click any cell in the table to include or exclude its value."),
-          dismiss
-        );
-        container.append(hint);
-      }
-      details2.append(container);
-      return details2;
-    }
     function fillQuickActions(row) {
       const slot = row.querySelector(".row-quick");
       if (!slot || slot.firstChild) return;
@@ -7871,7 +8291,7 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
       for (const item of quick) item.tabIndex = -1;
       slot.append(...quick);
     }
-    return { buildRow, buildDetailRow, fillQuickActions };
+    return { buildRow, fillQuickActions };
   }
 
   // src/webview/table/controller.ts
@@ -7881,7 +8301,7 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
     function totalColumnCount() {
       return displayedColumns.length;
     }
-    const { buildRow, buildDetailRow, fillQuickActions } = createRows(state, () => displayedColumns, formatTimestamp);
+    const { buildRow, fillQuickActions } = createRows(state, () => displayedColumns, formatTimestamp);
     let hoveredId;
     scope.listen(elements.logs, "pointerover", (event) => {
       const row = event.target.closest?.("tr.event-row");
@@ -7898,13 +8318,10 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
     let rowHeightMeasured = false;
     let topSpacer;
     let bottomSpacer;
-    let expandedHeight = 0;
-    let expandedRow;
     let renderRevision = 0;
     let renderedWindow;
     let rowCache = /* @__PURE__ */ new Map();
     let rowCacheRevision = -1;
-    const detailResizeObserver = scope.observer(() => scheduleRenderWindow());
     let measured;
     function viewportTop() {
       return measured?.top ?? scrollViewport.scrollTop;
@@ -7954,26 +8371,19 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
       ensureSpacers();
       ensureRowHeight();
       const total = virtualEvents.length;
-      const selectedIndex = virtualEvents.findIndex((event) => event.id === state.selected);
-      if (selectedIndex < 0) expandedHeight = 0;
-      else {
-        const detail = elements.logs.querySelector(".detail-row");
-        if (detail) expandedHeight = detail.getBoundingClientRect().height;
-      }
       const overscan = 8;
       const top = viewportTop();
       const height = viewportHeight();
       const visibleCount = Math.max(1, Math.ceil(height / rowHeight)) + overscan * 2;
-      const detailTop = (selectedIndex + 1) * rowHeight;
-      const offset = atTail ? Math.max(0, total * rowHeight - height) : selectedIndex >= 0 && top > detailTop ? top - Math.min(expandedHeight, top - detailTop) : top;
+      const offset = atTail ? Math.max(0, total * rowHeight - height) : top;
       let start = Math.floor(offset / rowHeight) - overscan;
       start = Math.max(0, Math.min(start, Math.max(0, total - visibleCount)));
       const end = Math.min(total, start + visibleCount);
       const totalCols = totalColumnCount();
       topSpacer.firstChild.colSpan = totalCols;
-      topSpacer.firstChild.style.height = `${start * rowHeight + (selectedIndex >= 0 && selectedIndex < start ? expandedHeight : 0)}px`;
+      topSpacer.firstChild.style.height = `${start * rowHeight}px`;
       bottomSpacer.firstChild.colSpan = totalCols;
-      bottomSpacer.firstChild.style.height = `${(total - end) * rowHeight + (selectedIndex >= end ? expandedHeight : 0)}px`;
+      bottomSpacer.firstChild.style.height = `${(total - end) * rowHeight}px`;
       const windowKey = `${start}:${end}:${renderRevision}:${rowsVersion}`;
       if (renderedWindow === windowKey) return;
       renderedWindow = windowKey;
@@ -7981,9 +8391,6 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
       const focusedRow = !!focused && elements.logs.contains(focused) ? focused.closest("tr") : void 0;
       const refocusId = focusedRow?.classList.contains("event-row") ? focusedRow.dataset.id : void 0;
       const refocusColumn = focused?.dataset.column;
-      const detailScrollers = [...expandedRow?.querySelectorAll(".event-details, pre") ?? []].map(
-        (element2) => ({ element: element2, top: element2.scrollTop, left: element2.scrollLeft })
-      );
       if (rowCacheRevision !== renderRevision) {
         rowCache = /* @__PURE__ */ new Map();
         rowCacheRevision = renderRevision;
@@ -7996,15 +8403,6 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
         const row = cached?.event === event ? cached.row : buildRow(event);
         builtRows.set(event.id, { event, row });
         wanted.push(row);
-        if (event.id === state.selected) {
-          if (!expandedRow) {
-            detailResizeObserver.disconnect();
-            expandedRow = buildDetailRow(event);
-            detailResizeObserver.observe(expandedRow);
-          }
-          expandedRow.firstChild.colSpan = totalCols;
-          wanted.push(expandedRow);
-        }
       }
       placeRows(wanted);
       rowCache = builtRows;
@@ -8015,10 +8413,6 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
         if (hovered) fillQuickActions(hovered);
       }
       onRowsChanged();
-      for (const { element: element2, top: top2, left } of detailScrollers) {
-        element2.scrollTop = top2;
-        element2.scrollLeft = left;
-      }
       if (focused && !!focused && elements.logs.contains(focused)) focused.focus({ preventScroll: true });
       else if (refocusId !== void 0) {
         const row = [...elements.logs.querySelectorAll(".event-row")].find(
@@ -8028,11 +8422,6 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
           (cell2) => cell2.dataset.column === refocusColumn
         ) : row?.querySelector(".message-button");
         target?.focus({ preventScroll: true });
-      }
-      const measured2 = elements.logs.querySelector(".detail-row")?.getBoundingClientRect().height;
-      if (measured2 !== void 0 && measured2 !== expandedHeight) {
-        expandedHeight = measured2;
-        scheduleRenderWindow();
       }
     }
     function placeRows(wanted) {
@@ -8060,7 +8449,7 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
         const followTail2 = followTailRequested;
         followTailRequested = false;
         renderWindow();
-        if (followTail2 && state.following && !state.paused && !state.selectedSort) {
+        if (followTail2 && state.following && !state.selectedSort) {
           const edge = liveAtTop() ? 0 : scrollViewport.scrollHeight;
           if (scrollViewport.scrollTop !== edge) {
             scrollViewport.scrollTop = edge;
@@ -8074,13 +8463,13 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
       rowHeightMeasured = false;
       renderRevision++;
       layoutColumns();
-      scheduleRenderWindow(state.following && !state.paused && !state.selectedSort);
+      scheduleRenderWindow(state.following && !state.selectedSort);
     }).observe(scrollViewport);
     function liveAtTop() {
       return state.newestFirst && !state.selectedSort;
     }
     function renderRows(events) {
-      const followTail = state.following && !state.paused && !state.selectedSort;
+      const followTail = state.following && !state.selectedSort;
       const anchorIndex = !followTail && liveAtTop() ? Math.floor(viewportTop() / rowHeight) : -1;
       const anchor = anchorIndex > 0 ? virtualEvents[anchorIndex] : void 0;
       sourceEvents = events;
@@ -8365,35 +8754,41 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
         })
       );
     }
-    function toggleExpand(id) {
-      const oldRow = elements.logs.querySelector(`tr.event-row[data-id="${id}"]`);
-      const viewportTop2 = scrollViewport.getBoundingClientRect().top;
-      const oldTop = oldRow?.getBoundingClientRect().top;
-      const rowOffset = oldTop === void 0 ? void 0 : oldTop - viewportTop2;
-      expandedHeight = 0;
-      expandedRow = void 0;
-      detailResizeObserver.disconnect();
-      renderRevision++;
-      if (state.inspect(id)) api.postMessage({ type: "details", id });
-      updateFollowControl();
-      updateModeLabel();
-      renderWindow();
-      if (rowOffset !== void 0 && Number.isFinite(rowOffset)) {
-        const newTop = elements.logs.querySelector(`tr.event-row[data-id="${id}"]`)?.getBoundingClientRect().top;
-        if (newTop !== void 0 && Number.isFinite(newTop)) scrollViewport.scrollTop += newTop - viewportTop2 - rowOffset;
+    let selectedEvent;
+    function select(id) {
+      const previous = state.selected;
+      const opening = state.inspect(id);
+      selectedEvent = opening ? sourceEvents.find((event) => event.id === id) : void 0;
+      markSelected(previous);
+      if (opening) api.postMessage({ type: "details", id });
+      return opening;
+    }
+    function clearSelection() {
+      if (state.selected === void 0) return;
+      const previous = state.selected;
+      state.resetSelection();
+      selectedEvent = void 0;
+      markSelected(previous);
+    }
+    function markSelected(previous) {
+      for (const id of /* @__PURE__ */ new Set([previous, state.selected])) {
+        if (id === void 0) continue;
+        const row = rowCache.get(id)?.row;
+        if (!row) continue;
+        const selected = id === state.selected;
+        row.classList.toggle("selected", selected);
+        row.querySelector(".message-button")?.setAttribute("aria-pressed", String(selected));
       }
+    }
+    function neighbor(offset) {
+      const index = virtualEvents.findIndex((event) => event.id === state.selected);
+      return index < 0 ? void 0 : virtualEvents[index + offset];
     }
     function invalidateRows() {
       renderRevision++;
     }
-    function resetDetails() {
-      expandedHeight = 0;
-      expandedRow = void 0;
-      detailResizeObserver.disconnect();
-      renderRevision++;
-    }
     function receiveDetails(data) {
-      if (data.id !== state.selected) return;
+      if (data.id !== state.selected) return false;
       state.selectedDetailText = data.text;
       state.selectedExceptions = data.exceptions;
       state.selectedLinks = {
@@ -8403,8 +8798,7 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
         crash: data.crash,
         attachedTo: data.attachedTo
       };
-      resetDetails();
-      renderWindow();
+      return true;
     }
     return {
       updateColumns,
@@ -8415,8 +8809,10 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
       renderRows,
       renderWindow,
       scheduleRenderWindow,
-      toggleExpand,
-      resetDetails,
+      select,
+      clearSelection,
+      selectedEvent: () => selectedEvent,
+      neighbor,
       receiveDetails,
       invalidateRows,
       measureViewport,
@@ -8429,9 +8825,6 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
       },
       get events() {
         return sourceEvents;
-      },
-      get expandedHeight() {
-        return expandedHeight;
       }
     };
   }
@@ -8629,6 +9022,8 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
       collapsedChanged: () => rail.applyCollapsed()
     });
     createRailResize([elements.railResizer, elements.tabRailResizer], state, scope, { saveState: () => saveState() });
+    createInspectorResize(elements.inspectorResizer, elements.inspector, state, scope, { saveState: () => saveState() });
+    const inspector = createInspector(elements, scope);
     createTooltips(scope);
     let restoreTab;
     const views = createViews(
@@ -8647,10 +9042,8 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
         analysis: elements.analysisView,
         compare: elements.compareView,
         traces: elements.tracesView,
-        trace: elements.traceView,
         metrics: elements.metricsView,
         aiCalls: elements.aiCallsView,
-        aiCall: elements.aiCallView,
         doctor: elements.doctorView,
         connection: elements.connectionView
       },
@@ -8664,7 +9057,7 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
       {
         show: (view) => views.show(view),
         active: () => views.active(),
-        back: (tab) => openView(views.available(tab) ? tab : "logs")
+        back: (tab) => openView(canOpen(tab) ? tab : "logs")
       },
       (title, items) => tabRail.set("connection", title, items)
     );
@@ -8723,10 +9116,22 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
         views.show("logs");
         search.setQuery(query, true);
       },
-      showList: () => traceList.show(),
       openAiCall: (traceId, spanId) => aiCalls.open(traceId, spanId),
-      reveal: () => views.show("trace"),
-      visible: () => views.active() === "trace"
+      inspect: (title, traceId) => {
+        if (views.active() !== "traces") traceList.show();
+        traceList.mark(traceId);
+        inspector.open(
+          "trace",
+          { title, tooltip: traceId, body: [elements.traceView] },
+          {
+            closed: () => {
+              traceView.hide();
+              traceList.closed();
+            }
+          }
+        );
+      },
+      inspecting: () => inspector.kind() === "trace"
     });
     const traceList = createTraceList(elements, api, scope, {
       showTrace: (traceId) => traceView.show(traceId),
@@ -8770,13 +9175,21 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
       showTrace: (traceId) => traceView.show(traceId),
       formatTime: (ms) => formatTimestamp({ id: 0, level: "", timestampMs: ms }) ?? "",
       revealList: () => views.show("aiCalls"),
-      revealCall: () => views.show("aiCall"),
+      inspect: (title, tooltip) => {
+        if (views.active() !== "aiCalls") aiCalls.show();
+        const content = { title, tooltip, nav: [elements.aiCallNavigation], body: [elements.aiCallView] };
+        if (inspector.kind() === "aiCall") inspector.update("aiCall", content);
+        else inspector.open("aiCall", content, { closed: () => aiCalls.close() });
+      },
+      inspecting: () => inspector.kind() === "aiCall",
+      rail: (title, items) => tabRail.set("aiCalls", title, items),
       listVisible: () => views.active() === "aiCalls",
-      callVisible: () => views.active() === "aiCall",
       receiver: () => ({ running: otlpRunning, endpoint: otlpEndpoint })
     });
+    elements.doctor.hidden = true;
+    let doctorEnabled = false;
     const doctor = createDoctor(
-      elements.doctor,
+      elements.issuesChip,
       elements.doctorCount,
       elements.doctorView,
       elements.doctorList,
@@ -8787,7 +9200,13 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
         if (action === "showEvents") views.show("logs");
       },
       (id) => inspection.showContext(id),
-      (traceId) => traceView.show(traceId)
+      (traceId) => traceView.show(traceId),
+      (enabled, total) => {
+        doctorEnabled = enabled;
+        if (!enabled) elements.doctor.hidden = true;
+        elements.statusIssuesRow.hidden = !enabled;
+        elements.statusIssuesText.textContent = total ? `${numberFormat.format(total)} problem${total === 1 ? "" : "s"} with log statements` : "No problems found so far";
+      }
     );
     let otlpRunning = false;
     let changedFiles;
@@ -8920,7 +9339,7 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
       }
       if (data.type === "details") {
         if (data.target === "context") inspection.receiveDetails(data);
-        else table.receiveDetails(data);
+        else if (table.receiveDetails(data)) inspector.update("event", eventContent());
         return;
       }
       if (data.type === "autocomplete") {
@@ -8958,6 +9377,8 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
       if (data.startTour) scope.frame(() => startTour());
       const openFeedback = data.openFeedback;
       if (openFeedback) scope.frame(() => feedback.open(openFeedback));
+      const openAbout = data.openAbout;
+      if (openAbout) scope.frame(() => about.open(openAbout));
       const reveal = data.reveal;
       if (reveal) scope.frame(() => revealControl(reveal.target, reveal.fallback));
       if (data.applySource && data.servers?.some((server) => server.id === data.applySource) && (data.applySource !== state.selectedServer || (data.applyRun ?? "") !== state.selectedSession)) {
@@ -8972,6 +9393,10 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
       otlpRunning = data.otlp?.running === true;
       otlpEndpoint = data.otlp?.endpoint;
       if (otlpRunning !== receiverWasRunning) traceList.receiverChanged();
+      elements.otlpStatus.hidden = !otlpRunning && !data.otlp?.error;
+      elements.statusOtlpText.textContent = otlpRunning ? `On \xB7 ${data.otlp?.endpoint?.replace(/^https?:\/\//, "") ?? "localhost"}${data.otlp?.error ? ` \xB7 ${data.otlp.error}` : ""}` : data.otlp?.error ?? "Off";
+      elements.statusOtlp.textContent = otlpRunning ? "Stop" : "Start";
+      elements.railAddOtlp.hidden = otlpRunning;
       elements.otlpStatus.setAttribute("aria-pressed", String(otlpRunning));
       elements.otlpStatus.textContent = otlpRunning ? `OpenTelemetry ${data.otlp?.endpoint?.replace(/^https?:\/\//, "") ?? ""}`.trim() : "OpenTelemetry off";
       elements.otlpStatus.title = otlpRunning ? `Receiving OpenTelemetry logs, traces, and metrics on ${data.otlp?.endpoint ?? "localhost"}${data.otlp?.error ? ` (${data.otlp.error})` : ""}. Click to stop the receiver.` : "Receive OpenTelemetry logs, traces, and metrics from instrumented apps on this machine. Click to start the receiver.";
@@ -8983,8 +9408,6 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
       metricList.setConnections(data.connections);
       aiCalls.update(data.aiCalls, otlpRunning);
       views.ensureVisible();
-      elements.traceCount.hidden = !data.traceCount;
-      elements.traceCount.textContent = data.traceCount ? numberFormat.format(data.traceCount) : "";
       elements.traces.title = data.traceCount ? `${numberFormat.format(data.traceCount)} traces received from OpenTelemetry. Show requests across services.` : "Requests across services, from OpenTelemetry spans and logs with a trace id";
       if (data.generation < minimumSnapshotGeneration) {
         bridge.flush();
@@ -8992,20 +9415,17 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
       }
       minimumSnapshotGeneration = 0;
       const generationChanged = state.generation !== void 0 && state.generation !== data.generation;
-      if (generationChanged && !state.paused) {
+      if (generationChanged) {
         state.before = void 0;
         state.page = 0;
         state.lastRows = void 0;
-        state.selected = void 0;
-        state.selectedDetailText = void 0;
-        state.selectedExceptions = [];
-        table.resetDetails();
+        inspector.close("event");
         table.resetAutomaticColumns();
         bridge.forget();
         table.renderRows([]);
         bridge.refreshRequested = true;
       }
-      if (!generationChanged || !state.paused) state.generation = data.generation;
+      state.generation = data.generation;
       if (data.timezone && data.timezone !== state.displayTimezone) {
         state.displayTimezone = data.timezone;
         state.lastRows = void 0;
@@ -9025,6 +9445,8 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
         data.captureStatus?.state === "capturing" ? "Capturing\u2026" : data.captureStatus?.state === "attention" ? "Capture needs attention" : data.captureTerminals ? "Capture on" : "Capture off"
       );
       elements.captureToggle.setAttribute("aria-pressed", String(data.captureTerminals));
+      elements.statusCaptureText.textContent = data.captureStatus?.state === "capturing" ? "Capturing\u2026" : data.captureStatus?.state === "attention" ? "Needs attention" : data.captureTerminals ? "On" : "Off";
+      elements.statusCapture.textContent = data.captureTerminals ? "Turn off" : "Turn on";
       elements.captureToggle.title = data.captureStatus?.detail || (data.captureTerminals ? "Terminal capture is on. Click to turn it off." : "Terminal capture is off. Click to turn it on.");
       const sharing = data.agentSharing?.active;
       sharePanel.update(data);
@@ -9037,6 +9459,7 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
       const readers = sharing && data.agentClients?.length ? ` \xB7 read by ${data.agentClients.join(", ")}` : "";
       elements.shareScope.textContent = (sharingAll ? "Sharing all runs" : sharing ? `Sharing ${sharedRuns} run${sharedRuns === 1 ? "" : "s"}` : "") + readers;
       elements.shareScope.title = sharingAll ? "Agents can read existing and new runs in this window, redacted, until you stop sharing." : sharing ? `Agents can read ${sharedRuns} selected run${sharedRuns === 1 ? "" : "s"} in this window, redacted, until you stop sharing. Later commands are not included.` : "";
+      elements.statusAgentsText.textContent = sharing ? elements.shareScope.textContent : "Not sharing";
       let selectionChanged = false;
       if (data.servers) {
         visibleSources = data.servers;
@@ -9053,7 +9476,7 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
       if (restoreTab) {
         const tab = restoreTab;
         restoreTab = void 0;
-        if (views.available(tab)) openView(tab);
+        if (canOpen(tab)) openView(tab);
       }
       if (data.openCompare) compareView.open(data.openCompare);
       if (data.sessions) {
@@ -9086,16 +9509,18 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
       table.renderFieldList();
       if (Array.isArray(data.fields)) state.allFields = data.fields;
       if (data.searches) search.renderSearchState(data.searches);
-      if (rows && !bridge.refreshRequested && !state.paused && holdingLive()) {
+      if (rows && !bridge.refreshRequested && holdingLive()) {
         heldEvents = rows;
         updateModeLabel();
-      } else if (rows && !bridge.refreshRequested && !state.paused) {
+      } else if (rows && !bridge.refreshRequested) {
         heldEvents = void 0;
         state.page = data.page ?? 0;
         state.pages = data.pages ?? 1;
         const matched = data.matched ?? 0;
-        elements.page.textContent = matched ? `${number2(matched)} match${matched === 1 ? "" : "es"}` : "No matches";
+        elements.page.textContent = matched ? `${number2(matched)} match${matched === 1 ? "" : "es"}` : data.total ? "No matches" : "No logs yet";
         elements.pageNumber.textContent = `${state.page + 1} / ${state.pages}`;
+        if (elements.pageNumber.parentElement) elements.pageNumber.parentElement.hidden = state.pages <= 1;
+        if (document.body) document.body.dataset.empty = String(!data.total);
         elements.older.disabled = state.page >= state.pages - 1;
         elements.newer.disabled = state.page === 0;
         if (rows !== table.events || state.lastRows === void 0) {
@@ -9111,7 +9536,7 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
         elements.empty.textContent = connectionEmpty ?? (data.total ? "No matching events in retained history." : data.captureTerminals ? "Capture is on. Run your app in a terminal, or press F5, and its logs appear here." : "Nothing captured yet. Run your app with F5 and its logs appear here, or start with one of these:");
         elements.emptyActions.hidden = rows.length > 0 || data.total > 0 || connectionEmpty !== void 0;
         elements.emptyCapture.hidden = data.captureTerminals;
-        if (state.following && !state.paused && !state.selectedSort) table.scheduleRenderWindow(true);
+        if (state.following && !state.selectedSort) table.scheduleRenderWindow(true);
       }
       bridge.flush();
     }
@@ -9141,7 +9566,7 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
     function releaseHeld() {
       const events = heldEvents;
       heldEvents = void 0;
-      if (events && state.following && !state.paused) {
+      if (events && state.following) {
         state.lastRows = events.map((event) => event.id).join(",");
         table.renderRows(events);
         elements.empty.hidden = events.length > 0;
@@ -9151,14 +9576,6 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
       updateModeLabel();
     }
     function updateFollowControl() {
-      if (state.paused) {
-        elements.follow.setAttribute("aria-pressed", "false");
-        elements.follow.setAttribute("aria-label", "Resume live updates");
-        elements.follow.title = "Paused while you inspect an event; capture continues. Click to resume live logs.";
-        elements.follow.dataset.mode = "resume";
-        setLabel(elements.follow, "Resume");
-        return;
-      }
       elements.follow.setAttribute("aria-pressed", String(state.following));
       elements.follow.setAttribute("aria-label", state.following ? "Live updates" : "Browse retained history");
       elements.follow.title = state.following ? "Live: new logs appear as they arrive. Click to stop following and browse history." : "Browsing history: the table stays where it is. Click to follow live logs.";
@@ -9172,9 +9589,9 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
       elements.older.title = older;
       elements.newer.setAttribute("aria-label", newer);
       elements.newer.title = newer;
-      elements.mode.textContent = state.paused ? "Paused \u2014 collection continues" : state.selectedSort ? `Sorted ${state.selectedSortDirection === "asc" ? "ascending" : "descending"}${state.following ? " \xB7 Live updates" : ""}` : state.following ? heldEvents ? "Live \xB7 new rows held while you point at the table" : "Live \xB7 newest 1,000" : state.newestFirst && state.page === 0 && state.before !== void 0 && state.newest > state.before ? "Browsing \xB7 newer logs arrived \u2014 scroll to the top for Live" : "Browsing retained history";
-      elements.mode.className = state.following && !state.paused ? "live-mode" : "";
-      elements.mode.hidden = state.following && !state.paused && !heldEvents && !state.selectedSort;
+      elements.mode.textContent = state.selectedSort ? `Sorted ${state.selectedSortDirection === "asc" ? "ascending" : "descending"}${state.following ? " \xB7 Live updates" : ""}` : state.following ? heldEvents ? "Live \xB7 new rows held while you point at the table" : "Live \xB7 newest 1,000" : state.newestFirst && state.page === 0 && state.before !== void 0 && state.newest > state.before ? "Browsing \xB7 newer logs arrived \u2014 scroll to the top for Live" : "Browsing retained history";
+      elements.mode.className = state.following ? "live-mode" : "";
+      elements.mode.hidden = state.following && !heldEvents && !state.selectedSort;
     }
     function setFollowing(value) {
       state.setFollowing(value);
@@ -9217,11 +9634,6 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
       elements.help.title = status.unread ? `Open the Logline Guide \xB7 New in ${status.version}` : "Open the Logline Guide";
     }
     function requestInteraction() {
-      if (state.paused) {
-        state.browseFromInspection();
-        table.resetDetails();
-        table.renderWindow();
-      }
       updateFollowControl();
       updateModeLabel();
       request(true);
@@ -9237,14 +9649,6 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
     }
     scope.listen(elements.logs, "click", (event) => {
       const target = event.target;
-      const dismiss = target.closest(".dismiss-hint");
-      if (dismiss) {
-        state.cellHintDismissed = true;
-        saveState();
-        dismiss.closest(".detail-hint")?.remove();
-        return;
-      }
-      if (doctor.handleAction(event) || inspection.handleDetailAction(event)) return;
       const rowButton = target.closest(".row-icon, .row-action");
       const rowId = Number(rowButton?.dataset.id);
       if (rowButton && Number.isSafeInteger(rowId)) {
@@ -9252,7 +9656,7 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
         else if (rowButton.classList.contains("row-break-button")) api.postMessage({ type: "breakOnEvent", id: rowId });
         else if (rowButton.classList.contains("row-context-button") || rowButton.classList.contains("row-attached-button"))
           inspection.showContext(rowId);
-        else if (rowButton.classList.contains("row-finding-button") && state.selected !== rowId) toggleExpand(rowId);
+        else if (rowButton.classList.contains("row-finding-button") && state.selected !== rowId) selectEvent(rowId);
         return;
       }
       const trace = event.target.closest(".row-trace-button");
@@ -9260,9 +9664,51 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
         traceView.show(trace.dataset.traceId);
         return;
       }
-      const button = event.target.closest(".message-button");
-      if (!button) return;
-      toggleExpand(Number(button.closest("tr").dataset.id));
+      const button = target.closest(".message-button");
+      let row = button?.closest("tr");
+      if (!row) {
+        if (target.closest("button, a, input, select, textarea")) return;
+        if (window.getSelection?.()?.isCollapsed === false) return;
+        row = target.closest("tr.event-row");
+      }
+      if (row) selectEvent(Number(row.dataset.id));
+    });
+    scope.listen(elements.logs, "keydown", (event) => {
+      const target = event.target;
+      if (inspector.kind() !== "event" || !target.closest?.("tr.event-row")) return;
+      if (event.key === "Escape") {
+        event.preventDefault();
+        inspector.close("event");
+        return;
+      }
+      if (event.key !== "ArrowDown" && event.key !== "ArrowUp" || !target.closest(".message-button")) return;
+      const next = table.neighbor(event.key === "ArrowDown" ? 1 : -1);
+      if (!next) return;
+      event.preventDefault();
+      selectEvent(next.id);
+      elements.logs.querySelector(`tr.event-row[data-id="${next.id}"] .message-button`)?.focus({ preventScroll: false });
+    });
+    scope.listen(elements.inspectorBody, "click", (event) => {
+      const target = event.target;
+      const dismiss = target.closest(".dismiss-hint");
+      if (dismiss) {
+        state.cellHintDismissed = true;
+        saveState();
+        dismiss.closest(".detail-hint")?.remove();
+        return;
+      }
+      const filter = target.closest(".field-filter");
+      if (filter?.dataset.field) {
+        const choice = cellFilterQuery(
+          search.query(),
+          { field: filter.dataset.field, value: filter.dataset.value },
+          filter.dataset.exclude === "true"
+        );
+        if (choice.query === void 0) filter.title = choice.reason;
+        else search.setQuery(choice.query, true);
+        return;
+      }
+      if (inspector.kind() === "event" && !doctor.handleAction(event)) inspection.handleDetailAction(event);
     });
     scope.listen(elements.search, "input", () => {
       search.clearAutocomplete();
@@ -9317,50 +9763,71 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
       }
       elements.rowHint.hidden = true;
     }
-    function toggleExpand(id) {
-      table.toggleExpand(id);
+    function selectEvent(id) {
+      dismissRowHint();
+      if (table.select(id))
+        inspector.open("event", eventContent(), {
+          closed: () => table.clearSelection(),
+          // Rows are rebuilt as logs arrive, so the event's row is looked up when the pane closes.
+          home: () => elements.logs.querySelector(`tr.event-row[data-id="${id}"] .message-button`)
+        });
+      else inspector.close("event");
+    }
+    function eventContent() {
+      const id = state.selected;
+      const event = table.selectedEvent();
+      const context = eventAction(
+        "context-button",
+        "context",
+        "Surrounding logs",
+        "Show the logs just before and after this event from the same run"
+      );
+      context.dataset.id = String(id);
+      const body = [
+        buildEventDetails(
+          id,
+          state.selectedDetailText,
+          state.selectedExceptions,
+          state.selectedLinks,
+          [context],
+          buildEventFields(state.selectedDetailText)
+        )
+      ];
+      if (!state.cellHintDismissed) {
+        const hint = document.createElement("p");
+        hint.className = "detail-hint";
+        const dismiss = document.createElement("button");
+        dismiss.type = "button";
+        dismiss.className = "dismiss-hint";
+        dismiss.textContent = "Got it";
+        hint.append(
+          document.createTextNode("Tip: right-click any cell in the table to include or exclude its value."),
+          dismiss
+        );
+        body.push(hint);
+      }
+      const source = event?.serverId ? visibleSources.find((server) => server.id === event.serverId)?.label ?? event.serverId : void 0;
+      return {
+        title: event?.message ?? "Event",
+        meta: event ? [event.level.toUpperCase(), formatTimestamp(event), source, event.stream].filter(Boolean).join(" \xB7 ") : void 0,
+        body
+      };
     }
     const actionsMenu = createPopover(actionsContainer, elements.moreActions, elements.actionsMenu);
     const actionItems = [
       elements.copyResults,
       elements.export,
-      elements.import,
-      elements.openBrowser,
-      elements.clear,
       elements.breakOnLogs,
       elements.manage,
       elements.config,
       elements.help,
       elements.takeTour,
       elements.suggestFeature,
-      elements.voteOnNext
+      elements.about,
+      elements.clear
     ];
     const shownActions = () => actionItems.filter((item) => !item.hidden);
-    scope.listen(elements.moreActions, "click", () => {
-      if (actionsMenu.isOpen()) shownActions()[0].focus();
-    });
-    scope.listen(elements.moreActions, "keydown", (event) => {
-      if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
-      event.preventDefault();
-      actionsMenu.open();
-      const items = shownActions();
-      items[event.key === "ArrowUp" ? items.length - 1 : 0].focus();
-    });
-    scope.listen(elements.actionsMenu, "keydown", (event) => {
-      if (event.key === "Tab") {
-        actionsMenu.close(true);
-        return;
-      }
-      const items = shownActions();
-      const index = items.indexOf(document.activeElement);
-      const next = event.key === "Home" ? 0 : event.key === "End" ? items.length - 1 : event.key === "ArrowDown" ? (index + 1) % items.length : event.key === "ArrowUp" ? (index - 1 + items.length) % items.length : void 0;
-      if (next === void 0) return;
-      event.preventDefault();
-      items[next].focus();
-    });
-    scope.listen(actionsContainer, "focusout", (event) => {
-      if (!actionsContainer.contains(event.relatedTarget)) actionsMenu.close();
-    });
+    menuKeys(actionsContainer, elements.moreActions, elements.actionsMenu, actionsMenu, shownActions);
     for (const item of actionItems) scope.listen(item, "click", () => actionsMenu.close(true));
     scope.listen(elements.copyResults, "click", () => {
       if (!hasActiveFilter()) return;
@@ -9380,7 +9847,37 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
       event.stopPropagation();
       sharePanel.open();
     });
-    scope.listen(elements.statusIcon, "click", () => api.postMessage({ type: "showStatus" }));
+    const statusPanel = createPopover(
+      elements.statusIcon.closest(".popover-container"),
+      elements.statusIcon,
+      elements.statusPanel
+    );
+    scope.listen(elements.counts, "click", (event) => {
+      event.stopPropagation();
+      statusPanel.open();
+    });
+    scope.listen(
+      elements.statusCapture,
+      "click",
+      () => api.postMessage({
+        type: "toggleTerminalCapture",
+        enabled: elements.captureToggle.getAttribute("aria-pressed") !== "true"
+      })
+    );
+    scope.listen(elements.statusOtlp, "click", () => api.postMessage({ type: "toggleOtlp", enabled: !otlpRunning }));
+    scope.listen(elements.statusAgents, "click", (event) => {
+      event.stopPropagation();
+      sharePanel.open();
+    });
+    scope.listen(elements.statusIssues, "click", () => {
+      statusPanel.close();
+      openIssues();
+    });
+    scope.listen(elements.issuesChip, "click", () => openIssues());
+    scope.listen(elements.statusTroubleshoot, "click", () => {
+      statusPanel.close();
+      api.postMessage({ type: "showStatus" });
+    });
     const feedback = createFeedbackForm(
       {
         dialog: elements.feedbackDialog,
@@ -9399,6 +9896,25 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
         status: elements.feedbackStatus,
         send: elements.feedbackSend,
         github: elements.feedbackGithub
+      },
+      api,
+      scope
+    );
+    const about = createAboutDialog(
+      {
+        dialog: elements.aboutDialog,
+        close: elements.aboutClose,
+        version: elements.aboutVersion,
+        editor: elements.aboutEditor,
+        system: elements.aboutSystem,
+        buttons: {
+          whatsNew: elements.aboutWhatsNew,
+          sponsor: elements.aboutSponsor,
+          author: elements.aboutAuthor,
+          github: elements.aboutGithub,
+          issue: elements.aboutIssue,
+          copy: elements.aboutCopy
+        }
       },
       api,
       scope
@@ -9483,7 +9999,6 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
     }
     if (globalThis.innerWidth > 0) api.postMessage({ type: "panelSize", width: globalThis.innerWidth });
     scope.listen(elements.updateButton, "click", () => api.postMessage({ type: "installUpdate" }));
-    createPopover(elements.counts.closest(".popover-container"), elements.counts, elements.memoryPanel);
     scope.listen(
       elements.memorySettings,
       "click",
@@ -9529,22 +10044,32 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
       else if (tab === "metrics") metricList.show();
       else if (tab === "compare") compareView.show();
       else if (tab === "aiCalls") aiCalls.show();
+      else if (tab === "doctor") openIssues();
       else views.show(tab);
+    }
+    function canOpen(tab) {
+      return tab === "doctor" ? doctorEnabled : views.available(tab);
+    }
+    function openIssues() {
+      if (!doctorEnabled) return;
+      elements.doctor.hidden = false;
+      views.show("doctor");
     }
     function viewChanged(view, previous) {
       restoreTab = void 0;
-      if (previous === "trace") traceView.hide();
       if (previous === "metrics") metricList.hide();
       if (previous === "compare") compareView.hide();
       if (previous === "aiCalls") aiCalls.hide();
-      if (previous === "aiCall") aiCalls.close();
+      if (previous === "doctor") elements.doctor.hidden = true;
+      if (view !== "logs") inspector.close("event");
+      if (view !== "traces") inspector.close("trace");
+      if (view !== "aiCalls") inspector.close("aiCall");
       state.view = tabOf(view);
       tabRail.show(tabOf(view));
       saveState();
     }
     function resumeLive() {
       state.resume();
-      table.resetDetails();
       saveState();
       table.updateColumns(table.automaticColumns, true);
       updateFollowControl();
@@ -9553,7 +10078,7 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
       table.scheduleRenderWindow(true);
     }
     scope.listen(elements.follow, "click", () => {
-      if (state.paused || !state.following) resumeLive();
+      if (!state.following) resumeLive();
       else {
         setFollowing(false);
         updateFollowControl();
@@ -9565,12 +10090,12 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
       const top = scrollViewport.scrollTop;
       const wasAtTop = lastScrollTop <= 1;
       lastScrollTop = top;
-      if (!state.newestFirst || state.paused || state.selectedSort) return;
+      if (!state.newestFirst || state.selectedSort) return;
       if (state.following && top > 1) setFollowing(false);
       else if (!state.following && top <= 1 && !wasAtTop && state.page === 0) resumeLive();
     });
     scope.listen(elements.older, "click", () => {
-      if (state.following && !state.paused) setFollowing(false);
+      if (state.following) setFollowing(false);
       state.page = Math.min(state.pages - 1, state.page + 1);
       requestInteraction();
     });
@@ -9585,8 +10110,7 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
       table.updateColumns([], true);
       table.renderFieldList();
       search.clearAutocomplete();
-      state.browseFromInspection();
-      table.resetDetails();
+      inspector.close("event");
       api.postMessage({ type: "clear" });
       requestInteraction();
     });
@@ -9611,7 +10135,29 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
     scope.listen(elements.import, "click", () => api.postMessage({ type: "import" }));
     scope.listen(elements.openBrowser, "click", () => api.postMessage({ type: "openBrowser" }));
     scope.listen(elements.suggestFeature, "click", () => api.postMessage({ type: "suggestFeature" }));
-    scope.listen(elements.voteOnNext, "click", () => api.postMessage({ type: "voteOnNext" }));
+    scope.listen(elements.about, "click", () => api.postMessage({ type: "showAbout" }));
+    const addContainer = elements.railAdd.closest(".popover-container");
+    const addMenu = createPopover(addContainer, elements.railAdd, elements.railAddMenu);
+    const addItems = [
+      elements.railAddRun,
+      elements.railAddFile,
+      elements.openBrowser,
+      elements.import,
+      elements.railAddConnectionItem,
+      elements.railAddOtlp
+    ];
+    menuKeys(
+      addContainer,
+      elements.railAdd,
+      elements.railAddMenu,
+      addMenu,
+      () => addItems.filter((item) => !item.hidden)
+    );
+    for (const item of addItems) scope.listen(item, "click", () => addMenu.close(true));
+    scope.listen(elements.railAddRun, "click", () => api.postMessage({ type: "run" }));
+    scope.listen(elements.railAddFile, "click", () => api.postMessage({ type: "followFile" }));
+    scope.listen(elements.railAddConnectionItem, "click", () => api.postMessage({ type: "addConnection" }));
+    scope.listen(elements.railAddOtlp, "click", () => api.postMessage({ type: "toggleOtlp", enabled: true }));
     scope.listen(
       elements.breakOnLogs,
       "click",
@@ -9623,7 +10169,7 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
     const fallbackTimer = setInterval(() => request(), 5e3);
     views.show("logs");
     if (state.view !== "logs" && isTabName(state.view)) {
-      if (views.available(state.view)) openView(state.view);
+      if (canOpen(state.view)) openView(state.view);
       else restoreTab = state.view;
     }
     request();
@@ -9647,16 +10193,41 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
         window.removeEventListener("message", onMessage);
       }
     };
+    function menuKeys(container, trigger, menu, popover, shownItems) {
+      scope.listen(trigger, "click", () => {
+        if (popover.isOpen()) shownItems()[0].focus();
+      });
+      scope.listen(trigger, "keydown", (event) => {
+        if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
+        event.preventDefault();
+        popover.open();
+        const items = shownItems();
+        items[event.key === "ArrowUp" ? items.length - 1 : 0].focus();
+      });
+      scope.listen(menu, "keydown", (event) => {
+        if (event.key === "Tab") {
+          popover.close(true);
+          return;
+        }
+        const items = shownItems();
+        const index = items.indexOf(document.activeElement);
+        const next = event.key === "Home" ? 0 : event.key === "End" ? items.length - 1 : event.key === "ArrowDown" ? (index + 1) % items.length : event.key === "ArrowUp" ? (index - 1 + items.length) % items.length : void 0;
+        if (next === void 0) return;
+        event.preventDefault();
+        items[next].focus();
+      });
+      scope.listen(container, "focusout", (event) => {
+        if (!container.contains(event.relatedTarget)) popover.close();
+      });
+    }
     function tabForPanel(id) {
       const tabs = {
         logsView: "logs",
         analysisView: "analysis",
         compareView: "compare",
         tracesView: "traces",
-        traceView: "traces",
         metricsView: "metrics",
         aiCallsView: "aiCalls",
-        aiCallView: "aiCalls",
         doctorView: "doctor",
         connectionView: "connection"
       };
@@ -9668,13 +10239,15 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
     }
     function bringIntoView(element2) {
       if (elements.actionsMenu.contains(element2)) actionsMenu.open();
+      else if (elements.railAddMenu.contains(element2)) addMenu.open();
+      else if (elements.statusPanel.contains(element2)) statusPanel.open();
       else if (elements.sharePanel.contains(element2)) sharePanel.open();
       const panel = element2.closest(".view-panel");
       if (panel?.classList.contains("view-panel")) {
         const tab = tabForPanel(panel.id);
-        if (!tab || !views.available(tab)) return false;
+        if (!tab || !canOpen(tab)) return false;
         if (tabOf(views.active()) !== tab) openView(tab);
-      } else if ((elements.sourceRail.contains(element2) || element2.closest(".workspace-main")) && views.active() !== "logs" && views.active() !== "analysis")
+      } else if ((elements.sourceRail.contains(element2) || element2.closest(".workspace-main") || element2.closest(".search-toolbar")) && views.active() !== "logs" && views.active() !== "analysis")
         views.show("logs");
       return shown2(element2);
     }
@@ -9697,6 +10270,7 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
       elements.memoryFill.classList[share >= 0.9 ? "add" : "remove"]("full");
       const memory = `${used.toFixed(used < 10 ? 1 : 0)} / ${budget ? budget.toFixed(0) : "?"} MiB`;
       elements.memoryText.textContent = memory;
+      elements.counts.hidden = share < 0.8;
       elements.counts.title = `${number2(data.retained)} logs kept, using ${memory}. Click for details.`;
       elements.memorySummary.textContent = `${memory} of memory for ${number2(data.retained)} logs. The oldest go first when it fills.`;
       const rows = [

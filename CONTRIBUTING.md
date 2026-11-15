@@ -34,7 +34,7 @@ The webview's source is `src/webview/`. `npm run compile` bundles it into `media
 | `npm run coverage` | Runs the unit tests and measures coverage of the TypeScript sources. It fails when line, branch, or function coverage falls below the minimums in `scripts/test.mjs`. CI runs it on Linux. |
 | `npm run benchmark` | Measures the hot paths (ingestion, search, analysis, snapshots, and more) and the sizes of messages and retained memory. |
 | `npm run perf:compare -- --base <dir>` | Compares this build with the one in `<dir>` and fails when a case is more than 15% slower or a size grows by more than 5%. CI also compares with the baseline commit in `.github/performance-baseline`, so small slowdowns cannot add up past 15%. |
-| `npm run test:layout` | Opens the Logs panel in headless Chromium at a short size and two narrow ones, clicks through every tab, the rails, and the Connection form, and fails if the page itself scrolls or grows larger than the panel, or a control is out of reach. Run `npx playwright install chromium` once first. |
+| `npm run test:layout` | Opens the Logs panel in headless Chromium at a short size and two narrow ones, clicks through every tab, the rails, and the Connection form, opens an event, a trace, and an AI call in the inspector at each size, and fails if the page itself scrolls or grows larger than the panel, or a control is out of reach. Run `npx playwright install chromium` once first. |
 | `npm run test:browser` | Runs browser capture against a real headless Chromium (Playwright's, or a browser installed on your machine) and checks the console, error, and request events it produces. Run it after changing `src/capture/browser-capture.ts` or `src/core/browser-events.ts`. |
 | `npm run smoke` | Starts a real VS Code with the extension and runs the smoke test. Set `VSCODE_VERSION=stable` to download VS Code instead of using your installed `code`. |
 
@@ -76,7 +76,7 @@ By contributing, you agree that your contributions are licensed under the [MIT L
 
 ## Releases
 
-To release, open a pull request that sets the new version in `package.json` (`npm version <version> --no-git-tag-version`), renames `## Unreleased` in `CHANGELOG.md` to `## <version> — <date>`, and updates the guide's cards and the release highlights in `src/vscode/guide-content.ts` (keep their section IDs aligned with the guide). When the panel looks different, refresh the README's images in `media/readme/`. Merge it last, after every other pull request for the release, so the commit the tag points to is the release's own merge. After it merges, tag the merge commit and push the tag:
+To release, open a pull request that sets the new version in `package.json` (`npm version <version> --no-git-tag-version`), renames `## Unreleased` in `CHANGELOG.md` to `## <version> — <date>`, and updates the guide's cards and the release highlights in `src/vscode/guide-content.ts` (keep their section IDs aligned with the guide). When the panel looks different, run `npm run screenshots` to refresh the README's images in `media/readme/`. Merge it last, after every other pull request for the release, so the commit the tag points to is the release's own merge. After it merges, tag the merge commit and push the tag:
 
 ```sh
 git tag v<version> origin/main

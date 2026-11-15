@@ -42,6 +42,7 @@ export async function run(): Promise<void> {
       'showLogSite',
       'connectAgent',
       'showStatus',
+      'about',
       'addConnection',
       'searchConnection',
       'runConnectionSql',

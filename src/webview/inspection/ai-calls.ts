@@ -4,6 +4,7 @@ import type { Snapshot } from '../../protocol/messages';
 import type { Elements } from '../dom';
 import { cell } from '../dom';
 import type { EventScope } from '../event-scope';
+import type { TabRailItem } from '../tab-rail';
 import type { WebviewApi } from '../types';
 import { formatDuration } from './trace';
 
@@ -32,8 +33,10 @@ export function callLabel(call: GenAiCall): string {
 
 /**
  * The AI calls tab: LLM calls, tool executions, and agent runs from
- * OpenTelemetry GenAI spans, with totals per model. Opening a call shows its
- * conversation, with each tool call's result beside it.
+ * OpenTelemetry GenAI spans. Its rail narrows the list to a model, a kind of
+ * call, or the failures, and the totals above the list follow the model chosen.
+ * Opening a call shows its conversation in the inspector, with each tool
+ * call's result beside it.
  */
 export function createAiCalls(
   elements: Elements,
@@ -42,11 +45,15 @@ export function createAiCalls(
   actions: {
     showTrace(traceId: string): void;
     formatTime(ms: number): string;
-    /** Shows the list, or one call, in place of the table. */
+    /** Shows the list in place of the table. */
     revealList(): void;
-    revealCall(): void;
     listVisible(): boolean;
-    callVisible(): boolean;
+    /** Shows the open call in the inspector, under a title. */
+    inspect(title: string, tooltip?: string): void;
+    /** Whether the inspector shows a call. */
+    inspecting(): boolean;
+    /** The rail beside the list: its models and filters. */
+    rail?(title: string, items: TabRailItem[]): void;
     receiver(): { running: boolean; endpoint?: string };
   },
 ) {
@@ -57,8 +64,11 @@ export function createAiCalls(
   let refresh: ReturnType<typeof setTimeout> | undefined;
   let current: { traceId: string; spanId: string } | undefined;
   let detail: GenAiCallDetail | undefined;
-  /** The model whose row was chosen; the list shows only its calls. */
+  /** The model chosen in the rail; the list shows only its calls. A model and a kind are never chosen together. */
   let model: string | undefined;
+  /** The kind of call chosen in the rail; none shows every kind. */
+  let kind: GenAiCall['kind'] | undefined;
+  let errorsOnly = false;
 
   function load() {
     if (pending) return;
@@ -96,15 +106,14 @@ export function createAiCalls(
   function open(traceId: string, spanId: string) {
     current = { traceId: traceId.toLowerCase(), spanId: spanId.toLowerCase() };
     detail = undefined;
-    elements.aiCallTitle.textContent = 'AI call';
     elements.aiCallStatus.textContent = 'Loading…';
     elements.aiCallTranscript.replaceChildren();
     elements.aiCallNavigation.hidden = true;
-    actions.revealCall();
+    actions.inspect('AI call');
     api.postMessage({ type: 'aiCall', ...current });
   }
 
-  /** Forgets the call when another view is shown, so a late reply for it is ignored. */
+  /** Forgets the call when the inspector closes, so a late reply for it is ignored. */
   function close() {
     current = undefined;
     detail = undefined;
@@ -122,24 +131,7 @@ export function createAiCalls(
     event.preventDefault();
     openRow(event.target);
   });
-  // A model's row narrows the list to exactly its calls; choosing it again shows every call.
-  function chooseModel(target: EventTarget | null) {
-    const row = (target as HTMLElement | null)?.closest<HTMLElement>('[data-model]');
-    if (row?.dataset.model === undefined) return;
-    model = model === row.dataset.model ? undefined : row.dataset.model;
-    render();
-  }
-  scope.listen(elements.aiModelRows, 'click', (event) => chooseModel(event.target));
-  scope.listen(elements.aiModelRows, 'keydown', (event) => {
-    const key = (event as KeyboardEvent).key;
-    if (key !== 'Enter' && key !== ' ') return;
-    event.preventDefault();
-    chooseModel(event.target);
-  });
   scope.listen(elements.aiCallsFilter, 'input', render);
-  scope.listen(elements.aiCallsKind, 'change', render);
-  scope.listen(elements.aiCallsErrorsOnly, 'change', render);
-  scope.listen(elements.aiCallBack, 'click', show);
   scope.listen(elements.aiCallTrace, 'click', () => {
     if (current) actions.showTrace(current.traceId);
   });
@@ -160,8 +152,6 @@ export function createAiCalls(
    */
   function update(calls: Snapshot['aiCalls'], receiverRunning = false) {
     elements.aiCalls.hidden = !calls && !receiverRunning;
-    elements.aiCallCount.hidden = !calls;
-    elements.aiCallCount.textContent = calls ? whole.format(calls.calls) : '';
     elements.aiCalls.title = calls
       ? `${whole.format(calls.calls)} LLM calls, tool executions, and agent runs from OpenTelemetry. Show their models, tokens, and conversations.`
       : 'LLM calls, tool executions, and agent runs from apps that send OpenTelemetry GenAI spans.';
@@ -177,7 +167,7 @@ export function createAiCalls(
   }
 
   function receiveCall(message: { traceId: string; spanId: string; detail?: GenAiCallDetail }) {
-    if (!actions.callVisible() || message.traceId !== current?.traceId || message.spanId !== current.spanId) return;
+    if (!actions.inspecting() || message.traceId !== current?.traceId || message.spanId !== current.spanId) return;
     if (!message.detail) {
       elements.aiCallStatus.textContent = 'This call is no longer retained.';
       return;
@@ -187,8 +177,6 @@ export function createAiCalls(
   }
 
   function shown(calls: GenAiCall[]): GenAiCall[] {
-    const kind = elements.aiCallsKind.value;
-    const errorsOnly = elements.aiCallsErrorsOnly.checked;
     const terms = elements.aiCallsFilter.value.trim().toLowerCase().split(/\s+/).filter(Boolean);
     return calls.filter((call) => {
       if (model !== undefined && (call.kind !== 'model' || (call.model ?? UNKNOWN_MODEL) !== model)) return false;
@@ -201,6 +189,69 @@ export function createAiCalls(
         .toLowerCase();
       return terms.every((term) => text.includes(term));
     });
+  }
+
+  /** The rail: every call, each model with its calls and failures, each kind of call, and the failures only. */
+  function railItems(list: GenAiSummary): TabRailItem[] {
+    const choose = (change: () => void) => () => {
+      change();
+      render();
+    };
+    return [
+      {
+        kind: 'item',
+        key: 'all',
+        label: 'All calls',
+        icon: 'all',
+        meta: whole.format(list.total),
+        selected: model === undefined && kind === undefined,
+        onSelect: choose(() => {
+          model = undefined;
+          kind = undefined;
+        }),
+      },
+      ...(list.models.length ? [{ kind: 'group', label: 'Models' } as TabRailItem] : []),
+      ...list.models.map((totals): TabRailItem => ({
+        kind: 'item',
+        key: `model:${totals.model}`,
+        label: totals.model,
+        status: totals.provider,
+        meta: totals.errors
+          ? `${whole.format(totals.errors)} failed · ${whole.format(totals.calls)}`
+          : whole.format(totals.calls),
+        selected: model === totals.model,
+        title: model === totals.model ? 'Show every call' : `Show only ${totals.model} calls, with its totals`,
+        // Choosing the chosen model again shows every call. A model's calls are all model calls, so it replaces a kind.
+        onSelect: choose(() => {
+          model = model === totals.model ? undefined : totals.model;
+          kind = undefined;
+        }),
+      })),
+      { kind: 'group', label: 'Kind' },
+      ...kindCounts(list)
+        .filter(([, , count]) => count > 0)
+        .map(([name, label, count]): TabRailItem => ({
+          kind: 'item',
+          key: `kind:${name}`,
+          label,
+          meta: whole.format(count),
+          selected: kind === name,
+          // A kind replaces a model: a model's calls are never tool calls or agent runs.
+          onSelect: choose(() => {
+            kind = kind === name ? undefined : name;
+            model = undefined;
+          }),
+        })),
+      { kind: 'group', label: 'Show' },
+      {
+        kind: 'item',
+        key: 'errors',
+        label: 'Errors only',
+        meta: whole.format(list.errors),
+        checked: errorsOnly,
+        onSelect: choose(() => (errorsOnly = !errorsOnly)),
+      },
+    ];
   }
 
   function render() {
@@ -216,12 +267,14 @@ export function createAiCalls(
           ? `Apps instrumented with the OpenTelemetry GenAI conventions, such as OpenLLMetry or the OpenAI and Anthropic instrumentations, send their LLM calls, tool executions, and agent runs to ${endpoint ?? 'the receiver'}.`
           : 'Start the OpenTelemetry receiver, then run an app instrumented with the GenAI conventions.');
       elements.aiCallsTiles.replaceChildren();
-      elements.aiModelsTable.hidden = true;
-      elements.aiModelRows.replaceChildren();
       elements.aiCallRows.replaceChildren();
+      actions.rail?.('AI calls', []);
       return;
     }
+    // A choice whose calls are no longer retained has left the rail, so it no longer narrows the list.
     if (model !== undefined && !summary.models.some((totals) => totals.model === model)) model = undefined;
+    if (kind !== undefined && !kindCounts(summary).some(([name, , count]) => name === kind && count > 0))
+      kind = undefined;
     const rows = shown(summary.calls);
     elements.aiCallsStatus.textContent =
       `${whole.format(summary.total)} AI ${summary.total === 1 ? 'call' : 'calls'}` +
@@ -230,9 +283,9 @@ export function createAiCalls(
       (rows.length < summary.calls.length ? ` · ${whole.format(rows.length)} match` : '') +
       (model !== undefined ? ` · ${model} only` : '') +
       ' · Choose one to read its conversation';
-    elements.aiCallsTiles.replaceChildren(...tiles(summary));
-    elements.aiModelRows.replaceChildren(...summary.models.map((totals) => modelRow(totals, totals.model === model)));
-    elements.aiModelsTable.hidden = !summary.models.length;
+    const chosen = summary.models.find((totals) => totals.model === model);
+    elements.aiCallsTiles.replaceChildren(...(chosen ? modelTiles(chosen) : tiles(summary)));
+    actions.rail?.('AI calls', railItems(summary));
     elements.aiCallRows.replaceChildren(...rows.map(callRow));
   }
 
@@ -273,8 +326,10 @@ export function createAiCalls(
 
   function renderCall(view: GenAiCallDetail) {
     const { call } = view;
-    elements.aiCallTitle.textContent = `${KIND_GLYPHS[call.kind]} ${callLabel(call)}`;
-    elements.aiCallTitle.title = `${call.name}\nTrace ${call.traceId}\nSpan ${call.spanId}`;
+    actions.inspect(
+      `${KIND_GLYPHS[call.kind]} ${callLabel(call)}`,
+      `${call.name}\nTrace ${call.traceId}\nSpan ${call.spanId}`,
+    );
     elements.aiCallStatus.textContent = [
       call.provider,
       call.agent && `agent ${call.agent}`,
@@ -355,29 +410,27 @@ function tiles(summary: GenAiSummary): HTMLElement[] {
   ];
 }
 
-function modelRow(model: GenAiSummary['models'][number], selected: boolean): HTMLTableRowElement {
-  const row = document.createElement('tr');
-  row.className = `ai-model-row${selected ? ' selected' : ''}`;
-  row.dataset.model = model.model;
-  row.tabIndex = 0;
-  row.setAttribute('aria-pressed', String(selected));
-  row.title = selected ? 'Show every call' : `Show only ${model.model} calls`;
-  const name = cell(model.model, 'trace-name');
-  if (model.provider) {
-    const provider = document.createElement('span');
-    provider.className = 'ai-provider';
-    provider.textContent = ` · ${model.provider}`;
-    name.append(provider);
-  }
-  row.append(
-    name,
-    cell(whole.format(model.calls), 'ai-number'),
-    cell(tokens(model.inputTokens, true), 'ai-number'),
-    cell(tokens(model.outputTokens, true), 'ai-number'),
-    cell(formatDuration(model.p95Ms), 'trace-duration'),
-    cell(model.errors ? whole.format(model.errors) : '', model.errors ? 'ai-number ai-errors' : 'ai-number'),
-  );
-  return row;
+/** The kinds of call the rail offers, with how many of each are retained. */
+function kindCounts(summary: GenAiSummary): [GenAiCall['kind'], string, number][] {
+  return [
+    ['model', 'Model calls', summary.modelCalls],
+    ['tool', 'Tool calls', summary.toolCalls],
+    ['agent', 'Agent runs', summary.agentRuns],
+  ];
+}
+
+/** One model's totals, shown in place of every call's while the rail narrows the list to it. */
+function modelTiles(model: GenAiSummary['models'][number]): HTMLElement[] {
+  const cached = model.inputTokens ? Math.round((model.cachedTokens / model.inputTokens) * 100) : 0;
+  return [
+    tile(model.model, whole.format(model.calls), model.errors ? `${whole.format(model.errors)} failed` : 'calls'),
+    tile(
+      'Tokens',
+      `${tokens(model.inputTokens, true)} → ${tokens(model.outputTokens, true)}`,
+      cached ? `${cached}% of input cached` : 'input → output',
+    ),
+    tile('Latency', `p50 ${formatDuration(model.p50Ms)}`, `p95 ${formatDuration(model.p95Ms)}`),
+  ];
 }
 
 function block(summary: string, body: HTMLElement[], open: boolean, className = 'ai-block'): HTMLDetailsElement {

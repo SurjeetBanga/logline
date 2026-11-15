@@ -1,0 +1,144 @@
+/* Layouts that carry the logs scene to 2:1 (the social preview) and 16:9 (the video thumbnail). */
+* {
+  box-sizing: border-box;
+}
+html,
+body {
+  margin: 0;
+  background: #070a14;
+  font-family: -apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+section {
+  position: relative;
+  overflow: hidden;
+  display: none;
+}
+body.social #social,
+body.video #video {
+  display: block;
+}
+.social {
+  width: 1280px;
+  height: 640px;
+  background: radial-gradient(900px 640px at 18% 20%, #1f2a55 0%, #121a38 45%, #090d1c 100%);
+  color: #fff;
+}
+.social .copy {
+  position: absolute;
+  left: 72px;
+  top: 92px;
+  width: 530px;
+}
+.social .logo {
+  width: 96px;
+  height: 96px;
+  display: block;
+  border-radius: 24px;
+}
+.social h1 {
+  margin: 38px 0 0;
+  font-size: 76px;
+  line-height: 1;
+  font-weight: 800;
+  letter-spacing: -0.035em;
+}
+.social .tagline {
+  margin: 32px 0 0;
+  font-size: 28px;
+  line-height: 1.4;
+  color: #b8c3e6;
+  letter-spacing: -0.01em;
+}
+.chips {
+  list-style: none;
+  margin: 28px 0 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.chips li {
+  padding: 11px 20px;
+  border-radius: 999px;
+  background: rgba(148, 163, 255, 0.14);
+  color: #c9d3f3;
+  font-size: 19px;
+  font-weight: 500;
+}
+.social .window {
+  position: absolute;
+  left: 690px;
+  top: 70px;
+  width: 880px;
+  border-radius: 10px;
+  box-shadow:
+    0 0 0 1px rgba(255, 255, 255, 0.14),
+    0 30px 70px rgba(0, 0, 0, 0.55);
+}
+.video {
+  width: 1280px;
+  height: 720px;
+  color: #fff;
+  background: #070a14;
+}
+.video .backdrop {
+  position: absolute;
+  inset: -40px;
+  width: calc(100% + 80px);
+  height: calc(100% + 80px);
+  object-fit: cover;
+  filter: blur(7px);
+}
+.video .veil {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, rgba(8, 11, 22, 0.86), rgba(8, 11, 22, 0.78));
+}
+.video .copy {
+  position: absolute;
+  left: 72px;
+  top: 150px;
+  width: 560px;
+}
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  font-size: 27px;
+  font-weight: 700;
+}
+.video .logo {
+  width: 64px;
+  height: 64px;
+  border-radius: 16px;
+}
+.video h1 {
+  margin: 34px 0 0;
+  font-size: 57px;
+  line-height: 1.05;
+  font-weight: 800;
+  letter-spacing: -0.04em;
+}
+.video .sub {
+  margin: 26px 0 0;
+  font-size: 23px;
+  color: #a5b4fc;
+}
+.play {
+  position: absolute;
+  left: 880px;
+  top: 270px;
+  width: 150px;
+  height: 150px;
+  border-radius: 50%;
+  background: #f2f2f4;
+  display: grid;
+  place-items: center;
+}
+.play svg {
+  width: 62px;
+  height: 62px;
+  fill: #0b1020;
+  margin-left: 6px;
+}

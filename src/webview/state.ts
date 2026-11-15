@@ -33,10 +33,11 @@ export interface PersistedState {
   rail?: 'collapsed' | 'open';
   /** The rails' width in pixels when resized by hand. */
   railWidth?: number;
+  /** The inspector's width in pixels when resized by hand. */
+  inspectorWidth?: number;
 }
 /** Persistent preferences and interaction state, independent of DOM rendering. */
 export class ViewerState {
-  paused = false;
   following: boolean;
   page = 0;
   pages = 1;
@@ -76,10 +77,14 @@ export class ViewerState {
   railCollapsed?: boolean;
   /** The rails' width when resized by hand; undefined keeps the default. */
   railWidth?: number;
+  /** The inspector's width when resized by hand; undefined keeps the default. */
+  inspectorWidth?: number;
   constructor(saved: PersistedState = {}) {
     if (saved.rail === 'collapsed' || saved.rail === 'open') this.railCollapsed = saved.rail === 'collapsed';
     if (typeof saved.railWidth === 'number' && Number.isFinite(saved.railWidth) && saved.railWidth > 0)
       this.railWidth = saved.railWidth;
+    if (typeof saved.inspectorWidth === 'number' && Number.isFinite(saved.inspectorWidth) && saved.inspectorWidth > 0)
+      this.inspectorWidth = saved.inspectorWidth;
     this.view = typeof saved.view === 'string' ? saved.view : 'logs';
     this.connectionRange = typeof saved.range === 'string' && RANGE_CHOICES.includes(saved.range) ? saved.range : '1h';
     const native: Partial<Record<string, { query?: unknown; on?: unknown }>> = {
@@ -132,36 +137,22 @@ export class ViewerState {
     this.selectedExceptions = [];
     this.selectedLinks = {};
   }
-  /** Explicit changes close inspection while keeping a fixed history boundary. */
-  browseFromInspection(): void {
-    if (!this.paused) return;
-    this.paused = false;
-    this.resetSelection();
-    this.following = false;
-    this.before ??= this.newest;
-    this.lastRows = undefined;
-  }
   resume(): void {
-    this.paused = false;
-    this.resetSelection();
     this.selectedSort = '';
     this.filterChanged();
     this.setFollowing(true);
   }
+  /** Selects an event for the inspector, or clears the selection when it is chosen again; true when it opened. */
   inspect(id: number): boolean {
     const opening = this.selected !== id;
     this.resetSelection();
-    if (opening) {
-      this.selected = id;
-      this.paused = true;
-      this.before ??= this.newest;
-    }
+    if (opening) this.selected = id;
     return opening;
   }
   sort(field: string): void {
     this.selectedSortDirection = this.selectedSort === field && this.selectedSortDirection === 'desc' ? 'asc' : 'desc';
     this.selectedSort = field;
-    if (!this.paused) this.setFollowing(false);
+    this.setFollowing(false);
     this.filterChanged();
   }
   persist(query: string): PersistedState {
@@ -185,6 +176,7 @@ export class ViewerState {
       ...(Object.keys(this.native).length ? { native: this.persistedNative() } : {}),
       ...(this.railCollapsed !== undefined ? { rail: this.railCollapsed ? 'collapsed' : 'open' } : {}),
       ...(this.railWidth !== undefined ? { railWidth: this.railWidth } : {}),
+      ...(this.inspectorWidth !== undefined ? { inspectorWidth: this.inspectorWidth } : {}),
     };
   }
 

@@ -474,15 +474,20 @@ export function createSourceRail(
     if (!connections.length && !detached.length) {
       const empty = document.createElement('div');
       empty.className = 'rail-empty';
-      const text = document.createElement('p');
-      text.textContent =
+      // What a connection is waits behind an i, shown on hover or focus, so the card is one line.
+      const about = document.createElement('button');
+      about.type = 'button';
+      about.className = 'rail-info';
+      about.textContent = 'i';
+      about.setAttribute('aria-label', 'About connections');
+      about.title =
         'Search Datadog, CloudWatch, Loki, Elasticsearch, Cloud Logging, or a database next to your local runs.';
       const button = document.createElement('button');
       button.type = 'button';
       button.className = 'rail-empty-add';
       button.textContent = 'Add connection';
       scope.listen(button, 'click', () => api.postMessage({ type: 'addConnection' }));
-      empty.append(text, button);
+      empty.append(button, about);
       children.push(empty);
     }
     elements.railList.replaceChildren(...children);

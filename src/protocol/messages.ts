@@ -38,11 +38,20 @@ export interface UpdateStatus {
   state: 'available' | 'installing' | 'ready';
 }
 
+/** What the About dialog shows: Logline's version, the editor, and the system. */
+export interface AboutInfo {
+  version: string;
+  editor: string;
+  system: string;
+}
+/** A button in the About dialog. */
+export type AboutAction = 'whatsNew' | 'sponsor' | 'author' | 'github' | 'issue' | 'copy';
+const ABOUT_ACTIONS: readonly AboutAction[] = ['whatsNew', 'sponsor', 'author', 'github', 'issue', 'copy'];
+
 export type ViewRequest =
   | ({
       type: 'snapshot';
       columns?: string[];
-      statsOnly?: boolean;
       requestId?: number;
       doctorRevision?: number;
       have?: HeldRows;
@@ -67,6 +76,8 @@ export type ViewRequest =
   | { type: 'installUpdate' }
   | { type: 'panelSize'; width: number }
   | { type: 'showStatus' }
+  | { type: 'showAbout' }
+  | { type: 'aboutAction'; action: AboutAction; info?: AboutInfo }
   | { type: 'emptyAction'; action: 'capture' | 'openFile' | 'browser' | 'agent' }
   | ({ type: 'breakOnQuery' } & Filter)
   | { type: 'trace'; traceId: string }
@@ -111,7 +122,7 @@ export type ViewRequest =
   | { type: 'connectionAgents'; connectionId: string; enabled: boolean }
   | ({ type: 'compare' } & CompareRequest)
   | { type: 'config'; setting?: string }
-  | { type: 'import' | 'clear' | 'manageServers' | 'addConnection' | 'openBrowser' }
+  | { type: 'import' | 'clear' | 'manageServers' | 'addConnection' | 'openBrowser' | 'followFile' }
   /** Suggest a feature or vote on what's next, from the More actions menu. */
   | { type: 'suggestFeature' | 'voteOnNext' }
   /** What the feedback form submitted. */
@@ -226,6 +237,8 @@ export interface Snapshot extends Stats {
   startTour?: boolean;
   /** Open the feedback form, applied once. */
   openFeedback?: FeedbackOpen;
+  /** Open the About dialog, applied once. */
+  openAbout?: AboutInfo;
   /** Open the Connection form as a tab, applied once; its messages carry `session`. */
   openConnectionForm?: { session: number; title: string; connectionId?: string };
   otlp?: ReceiverStatus;
@@ -287,7 +300,7 @@ export interface DoctorFindingView {
 }
 /** What the Logs panel can do with a finding; `report` opens the health report. */
 export type DoctorAction = 'open' | 'showEvents' | 'fix' | 'report';
-/** Links offered with an expanded event, resolved by the host. */
+/** Links offered with an open event, resolved by the host. */
 export interface DetailLinks {
   /** The log statement that produced the event, as `path:line`. */
   site?: string;
@@ -395,7 +408,6 @@ export function parseViewRequest(value: unknown): ViewRequest | undefined {
         sort: string('sort'),
         sortDirection: msg.sortDirection === 'desc' ? 'desc' : 'asc',
         columns: strings('columns'),
-        statsOnly: msg.statsOnly === true,
         requestId: index('requestId'),
         doctorRevision: index('doctorRevision'),
         have: heldRows(msg.have),
@@ -488,8 +500,23 @@ export function parseViewRequest(value: unknown): ViewRequest | undefined {
         : { type: msg.type };
     case 'stopSharing':
     case 'showStatus':
+    case 'showAbout':
     case 'installUpdate':
       return { type: msg.type };
+    case 'aboutAction': {
+      if (!ABOUT_ACTIONS.includes(msg.action as AboutAction)) return undefined;
+      const info = msg.info as Record<string, unknown> | undefined;
+      const field = (key: string) =>
+        typeof info?.[key] === 'string' ? (info[key] as string).slice(0, 200) : undefined;
+      const version = field('version');
+      const editor = field('editor');
+      const system = field('system');
+      return {
+        type: msg.type,
+        action: msg.action as AboutAction,
+        ...(version && editor && system ? { info: { version, editor, system } } : {}),
+      };
+    }
     case 'emptyAction':
       return msg.action === 'capture' || msg.action === 'openFile' || msg.action === 'browser' || msg.action === 'agent'
         ? { type: msg.type, action: msg.action }
@@ -603,6 +630,7 @@ export function parseViewRequest(value: unknown): ViewRequest | undefined {
     case 'manageServers':
     case 'addConnection':
     case 'openBrowser':
+    case 'followFile':
     case 'suggestFeature':
     case 'voteOnNext':
       return { type: msg.type };

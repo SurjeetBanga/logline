@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { ViewerState } from './state';
 
-test('resume clears inspection and sorting while preserving filters and column preferences', () => {
+test('resume clears paging and sorting but keeps the selected event, filters and column preferences', () => {
   const state = new ViewerState({
     server: 'api',
     levels: ['error'],
@@ -16,10 +16,9 @@ test('resume clears inspection and sorting while preserving filters and column p
   state.inspect(42);
   state.resume();
   assert.equal(state.following, true);
-  assert.equal(state.paused, false);
   assert.equal(state.before, undefined);
   assert.equal(state.page, 0);
-  assert.equal(state.selected, undefined);
+  assert.equal(state.selected, 42, 'the inspected event stays open while live logs resume');
   assert.equal(state.selectedSort, '');
   assert.deepEqual(state.persist('timeout'), {
     query: 'timeout',
@@ -34,6 +33,34 @@ test('resume clears inspection and sorting while preserving filters and column p
   });
 });
 
+test('inspect selects an event without freezing the result set, and choosing it again clears it', () => {
+  const state = new ViewerState();
+  state.newest = 50;
+  assert.equal(state.following, true);
+  assert.equal(state.inspect(7), true);
+  assert.equal(state.selected, 7);
+  assert.equal(state.following, true, 'live logs keep arriving');
+  assert.equal(state.before, undefined, 'no history boundary is fixed');
+  assert.equal('paused' in state, false);
+  assert.equal(state.inspect(8), true);
+  assert.equal(state.selected, 8);
+  assert.equal(state.inspect(8), false);
+  assert.equal(state.selected, undefined);
+});
+
+test('the inspector width is restored when valid and persisted only once set', () => {
+  assert.equal(new ViewerState().inspectorWidth, undefined);
+  assert.equal(new ViewerState().persist('').inspectorWidth, undefined);
+  for (const bad of [0, -5, Number.NaN, Number.POSITIVE_INFINITY, '500'])
+    assert.equal(new ViewerState({ inspectorWidth: bad as number }).inspectorWidth, undefined, String(bad));
+  const state = new ViewerState({ inspectorWidth: 520, railWidth: 300 });
+  assert.equal(state.inspectorWidth, 520);
+  assert.equal(state.railWidth, 300);
+  assert.equal(state.persist('').inspectorWidth, 520);
+  state.inspectorWidth = undefined;
+  assert.equal(state.persist('').inspectorWidth, undefined);
+});
+
 test('sort switches to a fixed capture boundary and toggles the same field', () => {
   const state = new ViewerState();
   state.newest = 12;
@@ -45,6 +72,11 @@ test('sort switches to a fixed capture boundary and toggles the same field', () 
   assert.equal(state.selectedSortDirection, 'asc');
   state.sort('level');
   assert.equal(state.selectedSortDirection, 'desc');
+  const inspecting = new ViewerState();
+  inspecting.inspect(3);
+  inspecting.sort('message');
+  assert.equal(inspecting.following, false, 'sorting stops following even with an event open');
+  assert.equal(inspecting.selected, 3);
   state.checkedLevels.clear();
   assert.deepEqual(state.currentLevels(), []);
 });

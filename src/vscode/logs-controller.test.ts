@@ -467,6 +467,18 @@ test('Suggest a feature and Vote on what’s next open in the panel with the nex
   });
 });
 
+test('About Logline opens in the panel with the next snapshot, once', async (t) => {
+  const controller = setup(t);
+  const info = { version: '1.20.0', editor: 'Visual Studio Code 1.99.0', system: 'Darwin arm64 25.0.0' };
+  await controller.openAbout(info);
+  assert.deepEqual(controller.snapshot({ type: 'snapshot', limit: 50 } as any).openAbout, info);
+  assert.equal(
+    controller.snapshot({ type: 'snapshot', limit: 50 } as any).openAbout,
+    undefined,
+    'a later snapshot does not open it again',
+  );
+});
+
 test('the newest local address a run printed is found for the browser, and each run start is heard', (t) => {
   const controller = setup(t);
   const started: string[] = [];

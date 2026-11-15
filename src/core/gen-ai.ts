@@ -81,6 +81,7 @@ export interface GenAiSummary {
   total: number;
   modelCalls: number;
   toolCalls: number;
+  agentRuns: number;
   errors: number;
   inputTokens: number;
   outputTokens: number;
@@ -508,6 +509,7 @@ export function summarizeGenAiCalls(calls: readonly GenAiCall[], limit = 500): G
   const modelDurations: number[] = [];
   let modelCalls = 0,
     toolCalls = 0,
+    agentRuns = 0,
     errors = 0,
     inputTokens = 0,
     outputTokens = 0,
@@ -548,7 +550,7 @@ export function summarizeGenAiCalls(calls: readonly GenAiCall[], limit = 500): G
       if (call.error) totals.errors++;
       totals.durations.push(call.durationMs);
       tools.set(key, totals);
-    }
+    } else if (call.kind === 'agent') agentRuns++;
   }
   modelDurations.sort((a, b) => a - b);
   return {
@@ -556,6 +558,7 @@ export function summarizeGenAiCalls(calls: readonly GenAiCall[], limit = 500): G
     total: calls.length,
     modelCalls,
     toolCalls,
+    agentRuns,
     errors,
     inputTokens,
     outputTokens,

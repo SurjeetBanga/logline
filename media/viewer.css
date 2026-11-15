@@ -79,10 +79,6 @@
   text-decoration: underline;
   background: transparent;
 }
-.detail-cell > .event-details {
-  max-height: 320px;
-  overflow: auto;
-}
 .exception-block {
   margin: 12px 0;
 }
@@ -377,33 +373,6 @@
   .view-panel {
     padding-inline: 8px;
   }
-  .trace-table th:nth-child(1) {
-    width: 48%;
-  }
-  /* Collapsed rather than hidden, so rows spanning every column keep the table's column count. */
-  .trace-table th:nth-child(2),
-  .trace-service {
-    width: 0;
-    padding: 0;
-    overflow: hidden;
-    font-size: 0;
-  }
-  .trace-table th:nth-child(4) {
-    width: 72px;
-  }
-  #traceView .trace-table th:nth-child(5),
-  .trace-self {
-    width: 0;
-    padding: 0;
-    overflow: hidden;
-    font-size: 0;
-  }
-  .trace-hotspot {
-    grid-template-columns: minmax(0, 1fr) 96px;
-  }
-  .trace-hotspot .trace-track {
-    display: none;
-  }
   #contextDialog {
     padding: 8px;
   }
@@ -423,6 +392,8 @@
 }
 body {
   margin: 0;
+  /* VS Code gives every webview's body 20px of padding at each side; the panel runs edge to edge. */
+  padding: 0;
   height: 100vh;
   overflow: hidden;
   display: flex;
@@ -432,7 +403,7 @@ body {
   font: 13px/1.5 var(--vscode-font-family, system-ui);
 }
 header {
-  padding: 4px 14px 6px;
+  padding: 4px 14px 0;
   flex: none;
 }
 /* The divider under the tabs spans the panel, so it meets the rails' edge and the table's. */
@@ -548,9 +519,9 @@ body > header {
   min-width: 0;
   min-height: 0;
 }
-.workspace-main > .search-toolbar,
 .workspace-main > .connection-bar,
 .workspace-main > .table-hint {
+  margin-top: 6px;
   /* In line with the tabs above and the table's first column below. */
   margin-left: 14px;
   margin-right: 14px;
@@ -577,9 +548,6 @@ body > header {
   min-width: 0;
   min-height: 0;
   overflow: hidden;
-  /* Up through the header's bottom padding, so its edge meets the divider under the tabs. */
-  margin-top: -6px;
-  padding-top: 6px;
   border-right: 1px solid var(--vscode-panel-border, #444);
 }
 .rail-header {
@@ -787,21 +755,40 @@ body > header {
 }
 .rail-empty {
   display: flex;
-  flex-direction: column;
-  align-items: flex-start;
+  align-items: center;
   gap: 8px;
-  /* As wide as the rows, its text in line with the group labels. */
+  /* Part of the Connections group: no frame, the button's edge in line with the group's label. */
   margin: 4px 0 0;
-  padding: 10px 10px 10px 7px;
-  border: 1px dashed var(--vscode-panel-border, #444);
-  border-radius: 6px;
+  padding: 2px 2px 2px 8px;
 }
-.rail-empty p {
-  margin: 0;
+.rail-info {
+  display: inline-grid;
+  flex: none;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  min-height: 0;
+  padding: 0;
+  border: 1px solid currentColor;
+  border-radius: 50%;
+  background: transparent;
   color: var(--vscode-descriptionForeground, #aaa);
-  font-size: 12px;
+  font-family: Georgia, 'Times New Roman', serif;
+  font-size: 11px;
+  font-style: italic;
+  line-height: 1;
+  cursor: help;
 }
+.rail-info:hover,
+.rail-info:focus {
+  background: transparent;
+  color: var(--vscode-foreground, #d4d4d4);
+}
+/* In a narrow rail the button gives up its text before the i is pushed past the edge. */
 .rail-empty-add {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
   border-color: transparent;
   background: var(--vscode-button-background, #0e639c);
   color: var(--vscode-button-foreground, #fff);
@@ -863,13 +850,14 @@ body > header {
 }
 .source-rail.collapsed .rail-title,
 .source-rail.collapsed #railStopAll,
+.source-rail.collapsed .rail-add,
 .source-rail.collapsed .rail-group-label,
 .source-rail.collapsed .rail-text,
 .source-rail.collapsed .rail-meta,
 .source-rail.collapsed .rail-agents,
 .source-rail.collapsed .rail-actions,
 .source-rail.collapsed .rail-runs,
-.source-rail.collapsed .rail-empty p {
+.source-rail.collapsed .rail-info {
   display: none;
 }
 /* Outranks the rules that show a pointed-at or selected row's actions in place of its dot. */
@@ -911,9 +899,10 @@ body > header {
 .source-rail.collapsed .rail-empty-add {
   display: none;
 }
-/* Sources apply to the logs and their analysis; Compare, Traces, and Metrics have a rail of their own. */
+/* Sources apply to the logs and their analysis; Compare, Traces, AI calls, and Metrics have a rail of their own. */
 body:not([data-view='logs']):not([data-view='analysis']) #sourceRail,
-body:not([data-view='compare']):not([data-view='traces']):not([data-view='metrics']) #tabRail {
+body:not([data-view='compare']):not([data-view='traces']):not([data-view='aiCalls']):not([data-view='metrics'])
+  #tabRail {
   display: none;
 }
 .rail-swatch {
@@ -1023,6 +1012,10 @@ body:not([data-view='compare']):not([data-view='traces']):not([data-view='metric
   background: transparent;
   color: var(--vscode-menu-foreground, var(--vscode-foreground, #d4d4d4));
 }
+/* Clear logs cannot be undone, so it sits apart, in the error color. */
+.actions-menu .menu-danger {
+  color: var(--vscode-errorForeground, #f48771);
+}
 .menu-separator {
   margin: 4px 6px;
   border-top: 1px solid var(--vscode-menu-separatorBackground, var(--vscode-panel-border, #444));
@@ -1053,10 +1046,17 @@ body:not([data-view='compare']):not([data-view='traces']):not([data-view='metric
   overflow-x: auto;
   scrollbar-width: thin;
   overscroll-behavior-x: contain;
-  /* Each row above the views (toolbar, connection bar, hint) keeps 8px below it and none above,
-     so the table never meets the search box, whichever rows are showing. The 3px above, with the
-     header's padding, matches the gap below. */
-  margin: 3px 0 8px;
+  /* Between the tabs and the actions: the search box takes the room the two leave. */
+  flex: 1 1 320px;
+  margin: 3px 0;
+}
+/* A panel too narrow for tabs, search, and actions in one row gives the search a row of its own. */
+@media (max-width: 1099.98px) {
+  .view-bar > .search-toolbar {
+    order: 3;
+    flex: 1 0 100%;
+    margin: 0 0 6px;
+  }
 }
 .search-toolbar > .popover-container:not(.search-group),
 .search-toolbar > button {
@@ -2227,33 +2227,33 @@ select {
   background: var(--vscode-charts-purple, #b180d7);
 }
 /* Analyze: summary tiles, breakdowns and groups. Every row is a button into its logs. */
+/* The totals are one line of figures, each with its name before it and a note after, so the charts
+   and rows below them start near the top of a short panel. */
 .analysis-tiles {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
-  gap: 8px;
-}
-/* A faint wash of the text color reads as a surface in every theme, without an outline. */
-.analysis-tile {
   display: flex;
-  flex-direction: column;
-  gap: 2px;
-  padding: 8px 12px;
-  border-radius: 6px;
-  background: color-mix(in srgb, var(--vscode-foreground, #cccccc) 5%, transparent);
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 22px;
+  padding: 2px 0 6px;
+}
+.analysis-tile {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
   min-width: 0;
+  white-space: nowrap;
 }
 .tile-label {
-  font-size: 11px;
+  font-size: 12px;
   color: var(--vscode-descriptionForeground, #aaa);
 }
 .tile-value {
-  font-size: 20px;
+  font-size: 13px;
   font-weight: 600;
   font-variant-numeric: tabular-nums;
-  line-height: 1.2;
 }
 .tile-detail {
-  font-size: 11px;
+  font-size: 12px;
   color: var(--vscode-descriptionForeground, #aaa);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -2460,7 +2460,7 @@ button:disabled {
   min-height: 60px;
   overflow: auto;
   overflow-anchor: none;
-  border-block: 1px solid var(--vscode-panel-border, #444);
+  border-bottom: 1px solid var(--vscode-panel-border, #444);
 }
 /* Each tab's view fills the space between the toolbar and the status bar. */
 .views {
@@ -2506,19 +2506,6 @@ button:disabled {
 .view-header .view-status {
   margin: 0;
 }
-/* Analyze's line sits under the search toolbar, which already keeps its space. */
-#analysisStatus {
-  margin-top: 0;
-}
-.back-button {
-  padding: 2px 6px;
-  border-color: transparent;
-  background: transparent;
-  color: var(--vscode-textLink-foreground, #3794ff);
-}
-.back-button:hover {
-  background: var(--vscode-toolbar-hoverBackground, rgba(90, 93, 94, 0.31));
-}
 /* Paging, Live, and columns only apply to the table. */
 body:not([data-view='logs']) .pagination,
 body:not([data-view='logs']) #follow,
@@ -2545,7 +2532,7 @@ body[data-view='connection'] .table-hint {
 }
 table {
   width: 100%;
-  min-width: 380px;
+  min-width: 200px;
   border-collapse: collapse;
   table-layout: fixed;
 }
@@ -2655,10 +2642,25 @@ th:hover .remove-column,
     opacity: 1;
   }
 }
+/* Rows are as tall as the editor's own lists, with no rule between them: more events fit, and the eye
+   follows the level colors down the table. */
 th,
 td {
-  padding: 5px 14px;
+  padding: 1px 14px;
+}
+th {
   border-bottom: 1px solid var(--vscode-panel-border, #333);
+}
+/* A narrow panel gives the columns' padding to the message. */
+table[data-compact='true'] th,
+table[data-compact='true'] td {
+  padding-left: 8px;
+  padding-right: 8px;
+}
+/* Its time is cut after the seconds rather than ending in an ellipsis. */
+table[data-compact='true'] td.time {
+  padding-right: 0;
+  text-overflow: clip;
 }
 .resize-handle {
   position: absolute;
@@ -2688,7 +2690,16 @@ td {
 td {
   font-family: var(--vscode-editor-font-family, monospace);
   font-size: var(--vscode-editor-font-size, 13px);
-  line-height: 1.6;
+  line-height: 20px;
+}
+/* An error or a warning is marked at the row's edge, so it shows while scrolling and when the Level
+   column has given way in a narrow panel. */
+.event-row.level-error > td:first-child,
+.event-row.level-fatal > td:first-child {
+  box-shadow: inset 3px 0 0 var(--vscode-errorForeground, #f48771);
+}
+.event-row.level-warn > td:first-child {
+  box-shadow: inset 3px 0 0 var(--vscode-charts-yellow, #e2c08d);
 }
 td.time {
   white-space: nowrap;
@@ -2712,6 +2723,9 @@ td.time {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+.event-row {
+  cursor: pointer;
 }
 .event-row:hover {
   background: var(--vscode-list-hoverBackground, #292929);
@@ -2739,19 +2753,240 @@ td.time {
 .source {
   color: var(--vscode-descriptionForeground, #aaa);
 }
-.detail-cell {
-  background: var(--vscode-textCodeBlock-background, #252526);
-  padding: 10px 20px;
+/* The list and, beside it, what is selected in it. In a narrow panel the selection shows below the list. */
+.content-split {
+  display: flex;
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
 }
-.detail-cell pre {
-  white-space: pre;
+.content-split > .views {
+  min-width: 0;
+}
+.inspector {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  flex: none;
+  width: var(--inspector-width, clamp(320px, 38%, 560px));
+  min-height: 0;
+  border-left: 1px solid var(--vscode-panel-border, #444);
+  background: var(--vscode-editor-background, #1e1e1e);
+}
+.inspector-resizer {
+  right: auto;
+  left: -2px;
+}
+.inspector-header {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: none;
+  min-height: 30px;
+  padding: 2px 6px 0 12px;
+}
+.inspector-title {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: var(--vscode-editor-font-size, 13px);
+  font-weight: 600;
+}
+.inspector-nav {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  flex: none;
+  color: var(--vscode-descriptionForeground, #aaa);
+  font-size: 12px;
+}
+.inspector-meta {
+  flex: none;
+  margin: 0;
+  padding: 0 12px 6px;
+  color: var(--vscode-descriptionForeground, #aaa);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+.inspector-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  padding: 0 12px 10px;
+  overflow: auto;
+  border-top: 1px solid var(--vscode-panel-border, #444);
+}
+.inspector-body .event-actions {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  gap: 0 8px;
+  margin: 0 -12px 6px;
+  padding: 3px 6px;
+  background: var(--vscode-editor-background, #1e1e1e);
+  font-size: 12px;
+}
+.inspector-body .event-action-group {
+  gap: 0;
+}
+.inspector-body .event-actions .event-action {
+  padding: 2px 6px;
+}
+.inspector-body pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
   tab-size: 4;
   margin: 8px 0;
-  font: inherit;
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: var(--vscode-editor-font-size, 13px);
+}
+/* An event's fields, each value with buttons to search for it or exclude it. */
+.event-fields {
+  margin: 0 -12px 8px;
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: var(--vscode-editor-font-size, 13px);
+}
+.event-field {
+  display: grid;
+  grid-template-columns: minmax(72px, 30%) minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  min-height: 22px;
+  padding: 0 8px 0 12px;
+}
+.event-field:hover,
+.event-field:focus-within {
+  background: var(--vscode-list-hoverBackground, #2a2d2e);
+}
+.event-field-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--vscode-descriptionForeground, #aaa);
+}
+.event-field-value {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.event-field-filters {
+  display: inline-flex;
+  gap: 2px;
+  visibility: hidden;
+}
+.event-field:hover .event-field-filters,
+.event-field:focus-within .event-field-filters {
+  visibility: visible;
+}
+.field-filter {
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border-color: transparent;
+  background: transparent;
+  color: var(--vscode-icon-foreground, #c5c5c5);
+  line-height: 1;
+}
+.field-filter:hover {
+  background: var(--vscode-toolbar-hoverBackground, rgba(90, 93, 94, 0.31));
+}
+@media (hover: none) {
+  .event-field-filters {
+    visibility: visible;
+  }
+}
+/* A trace's waterfall or an AI call's conversation, kept out of sight until the inspector shows it. */
+.inspector {
+  container-type: inline-size;
+}
+.inspector-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin: 0 -12px 6px;
+  padding: 3px 6px;
+  border-bottom: 1px solid var(--vscode-panel-border, #444);
+}
+.inspector-actions button {
+  padding: 2px 8px;
+  border-color: transparent;
+  background: transparent;
+  color: var(--vscode-foreground, #d4d4d4);
+  font-size: 12px;
+}
+.inspector-actions button:hover {
+  background: var(--vscode-toolbar-hoverBackground, rgba(90, 93, 94, 0.31));
+}
+.inspector-part .trace-scroll {
+  overflow: visible;
+}
+.inspector-part .view-status {
+  margin: 0 0 6px;
+  white-space: normal;
+}
+/* In a narrow inspector the waterfall keeps the operation, its bar, and its duration. */
+@container (max-width: 520px) {
+  #traceView .trace-table th:nth-child(1) {
+    width: 44%;
+  }
+  /* Collapsed rather than hidden, so rows spanning every column keep the table's column count. */
+  #traceView .trace-table th:nth-child(2),
+  #traceView .trace-service,
+  #traceView .trace-table th:nth-child(5),
+  #traceView .trace-self {
+    width: 0;
+    padding: 0;
+    overflow: hidden;
+    font-size: 0;
+  }
+  #traceView .trace-table th:nth-child(4) {
+    width: 72px;
+  }
+  #traceView .trace-hotspot {
+    grid-template-columns: minmax(0, 1fr) 96px;
+  }
+  #traceView .trace-hotspot .trace-track {
+    display: none;
+  }
+}
+@media (max-width: 899.98px) {
+  .content-split {
+    flex-direction: column;
+  }
+  .inspector {
+    width: auto;
+    height: 45%;
+    min-height: 120px;
+    border-left: 0;
+    border-top: 1px solid var(--vscode-panel-border, #444);
+  }
+  .inspector-resizer {
+    display: none;
+  }
 }
 #empty {
   padding: 18px 14px;
   color: var(--vscode-descriptionForeground, #aaa);
+}
+/* Nothing captured: no header over an empty table, and the ways to get logs in at the center. */
+body[data-empty='true'] #eventsTable thead {
+  display: none;
+}
+body[data-empty='true'] #empty {
+  padding-top: 32px;
+  text-align: center;
+}
+body[data-empty='true'] .empty-actions {
+  justify-content: center;
+}
+#emptyCapture {
+  background: var(--vscode-button-background, #0e639c);
+  color: var(--vscode-button-foreground, #fff);
+}
+#emptyCapture:hover {
+  background: var(--vscode-button-hoverBackground, #1177bb);
 }
 /* With nothing captured yet, the three ways to get logs in, one click each. */
 .empty-actions {
@@ -2817,6 +3052,13 @@ td.time {
   background: transparent;
   color: inherit;
 }
+.pager svg {
+  width: 14px;
+  height: 14px;
+}
+.pager:not(:disabled) {
+  color: var(--vscode-foreground, #d4d4d4);
+}
 .pager:hover:not(:disabled) {
   background: var(--vscode-toolbar-hoverBackground, rgba(90, 93, 94, 0.31));
 }
@@ -2868,23 +3110,52 @@ td.time {
 .memory-fill.full {
   background: var(--vscode-editorWarning-foreground, #cca700);
 }
-.popover.memory-panel {
-  width: 280px;
-  padding: 10px 12px;
+/* Issues found by log doctor, in the warning color so they read as something to look at. */
+.issues-chip {
+  color: var(--vscode-editorWarning-foreground, #cca700);
 }
-.memory-panel h3 {
-  margin: 0 0 6px;
+/* The status panel: what is running, each with its switch, then memory. */
+.popover.status-panel {
+  width: 320px;
+  max-width: calc(100vw - 16px);
+  padding: 10px 12px;
+  white-space: normal;
+}
+.status-panel h3 {
+  margin: 0 0 4px;
   font-size: 13px;
 }
-.memory-summary {
-  margin: 0 0 8px;
-  white-space: normal;
+.status-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  padding: 7px 0;
+  border-bottom: 1px solid var(--vscode-panel-border, #444);
+}
+.status-row strong {
+  display: block;
+  font-weight: 600;
+  color: var(--vscode-foreground, #d4d4d4);
+}
+.status-row-detail {
+  display: block;
+  overflow-wrap: anywhere;
+}
+.status-row button {
+  padding: 2px 10px;
+}
+.status-memory {
+  align-items: start;
+}
+.status-panel > .link-button {
+  margin-top: 8px;
 }
 .memory-details {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   gap: 2px 12px;
-  margin: 0 0 8px;
+  margin: 4px 0 0;
 }
 .memory-details dt {
   color: var(--vscode-descriptionForeground, #aaa);
@@ -3019,18 +3290,14 @@ td[data-column]:focus-visible {
   overflow: auto;
 }
 .ai-tiles {
-  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
-  margin-bottom: 12px;
+  margin-bottom: 4px;
 }
-.ai-models-table {
-  margin-bottom: 12px;
+.ai-call-row {
+  cursor: pointer;
 }
-.ai-models-table th:nth-child(1) {
-  width: auto;
-}
-.ai-models-table th:nth-child(n + 2) {
-  width: 84px;
-  text-align: right;
+.ai-call-row:hover,
+.ai-call-row:focus-visible {
+  background: var(--vscode-list-hoverBackground, #2a2d2e);
 }
 .ai-calls-table th:nth-child(1) {
   width: 110px;
@@ -3052,21 +3319,6 @@ td[data-column]:focus-visible {
 .ai-calls-table th:nth-child(6) {
   width: 110px;
 }
-.ai-call-row,
-.ai-model-row {
-  cursor: pointer;
-}
-.ai-call-row:hover,
-.ai-call-row:focus-visible,
-.ai-model-row:hover,
-.ai-model-row:focus-visible {
-  background: var(--vscode-list-hoverBackground, #2a2d2e);
-}
-/* The model the list is narrowed to. */
-.ai-model-row.selected {
-  background: var(--vscode-list-inactiveSelectionBackground, #37373d);
-  box-shadow: inset 2px 0 var(--vscode-focusBorder, #007fd4);
-}
 .ai-operation,
 .ai-agent {
   overflow: hidden;
@@ -3074,8 +3326,7 @@ td[data-column]:focus-visible {
   white-space: nowrap;
 }
 .ai-agent,
-.ai-finish,
-.ai-provider {
+.ai-finish {
   color: var(--vscode-descriptionForeground, #aaa);
 }
 .ai-number,
@@ -3455,11 +3706,12 @@ td[data-column]:focus-visible {
   white-space: nowrap;
   font-size: 12px;
 }
-@media (max-width: 640px) {
-  /* Four tiles fold into two rows of two rather than three and one. */
-  .ai-tiles {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
+/* The lists drop their least needed columns when the view is narrow: in a narrow panel, or beside an open
+   rail and inspector. */
+.content-split > .views {
+  container-type: inline-size;
+}
+@container (max-width: 760px) {
   .view-header-actions {
     margin-left: 0;
   }
@@ -3471,20 +3723,11 @@ td[data-column]:focus-visible {
   .traces-table th:nth-child(3),
   .traces-services,
   .traces-table th:nth-child(5),
-  .traces-counts {
-    width: 0;
-    padding: 0;
-    overflow: hidden;
-    font-size: 0;
-  }
+  .traces-counts,
   .ai-calls-table th:nth-child(3),
   .ai-agent,
   .ai-calls-table th:nth-child(6),
   .ai-finish,
-  .ai-models-table th:nth-child(4),
-  .ai-models-table td:nth-child(4),
-  .ai-models-table th:nth-child(6),
-  .ai-models-table td:nth-child(6),
   .metrics-table th:nth-child(3),
   .metric-attributes {
     width: 0;
@@ -3496,27 +3739,37 @@ td[data-column]:focus-visible {
     width: 140px;
   }
 }
+/* Narrower still, the operation matters more than when it started: the start time gives way too. */
+@container (max-width: 460px) {
+  .traces-table th:nth-child(1),
+  .traces-table td.time,
+  .ai-calls-table th:nth-child(1),
+  .ai-calls-table td.time {
+    width: 0;
+    padding: 0;
+    overflow: hidden;
+    font-size: 0;
+  }
+  .traces-table th:nth-child(4) {
+    width: 130px;
+  }
+  .ai-calls-table th:nth-child(4) {
+    width: 104px;
+  }
+  .ai-calls-table th:nth-child(5) {
+    width: 68px;
+  }
+}
 /* Rows show what they link to, and reveal quick actions on hover or focus. */
-/* Messages start after their expand marker, so the header starts there too. */
-th[data-column='base:message'] .column-label {
-  padding-left: 16px;
+/* The event shown in the inspector. */
+.event-row.selected,
+.event-row.selected:hover {
+  background: var(--vscode-list-activeSelectionBackground, #04395e);
+  color: var(--vscode-list-activeSelectionForeground, #fff);
 }
-.message-button::before {
-  content: '›';
-  display: inline-block;
-  width: 12px;
-  margin-right: 4px;
-  color: var(--vscode-descriptionForeground, #888);
-  opacity: 0;
-  transition: transform 0.1s;
-}
-.event-row:hover .message-button::before,
-.message-button:focus-visible::before,
-.message-button[aria-expanded='true']::before {
-  opacity: 1;
-}
-.message-button[aria-expanded='true']::before {
-  transform: rotate(90deg);
+.event-row.selected .level,
+.event-row.selected .source {
+  color: inherit;
 }
 .row-icon {
   flex: none;
@@ -3975,8 +4228,12 @@ th[data-column='base:message'] .column-label {
     margin-right: 0;
   }
 }
-/* The narrowest side bars: the memory meter gives up width so the pager's arrows still fit. */
+/* The narrowest side bars: the issues chip keeps its icon, and the memory meter gives up width, so the
+   pager's arrows still fit. */
 @media (max-width: 280px) {
+  .issues-chip .button-label {
+    display: none;
+  }
   .memory-meter {
     width: 14px;
   }
@@ -4014,14 +4271,7 @@ th[data-column='base:message'] .column-label {
   }
 }
 
-/* Traces: an open waterfall sits below the list, so another trace can be chosen without going back. */
-body[data-subview='trace'] #tracesView {
-  flex: 0 0 38%;
-  border-bottom: 1px solid var(--vscode-panel-border, #444);
-}
-body[data-subview='trace'] #traceView {
-  flex: 1 1 auto;
-}
+/* Traces: the open trace is marked in the list while its waterfall shows in the inspector. */
 .traces-row.selected {
   background: var(--vscode-list-inactiveSelectionBackground, #37373d);
 }
@@ -4246,7 +4496,9 @@ body:not([data-view='logs']) .match-count {
   box-shadow: 0 6px 24px var(--vscode-widget-shadow, rgba(0, 0, 0, 0.5));
 }
 
-/* The Connection form: a tab of its own while a connection is added or edited, scrolling under its pinned footer. */
+/* The Connection form: a tab of its own while a connection is added or edited. One step shows at a time,
+   between the list of steps and what the test found. In a narrow panel the three stack and scroll together
+   under the pinned footer; in a wide one they sit side by side and each scrolls by itself. */
 .view-panel.connection-view {
   /* Positioned, so a hidden radio placed absolutely scrolls with the form rather than the page. */
   position: relative;
@@ -4279,53 +4531,191 @@ body:not([data-view='logs']) .match-count {
 }
 
 .connection-view .form {
-  max-width: 820px;
-  margin: 0 auto;
-  padding: 12px 16px 0;
+  display: flex;
+  flex-direction: column;
+  min-height: 100%;
 }
-.connection-view header h1 {
-  margin: 0 0 2px;
-  font-size: 15px;
+/* The step and the footer are laid out as the form's own children, so the test's result can sit between them. */
+.connection-view .wizard-main {
+  display: contents;
+}
+.connection-view .wizard-nav {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 12px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+}
+.connection-view .form-title {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+/* Below the title, since nothing sits above it. */
+.connection-view .form-title .type-description {
+  top: calc(100% + 4px);
+  bottom: auto;
+  right: auto;
+  width: max-content;
+  max-width: min(320px, calc(100vw - 32px));
+  font-weight: normal;
+}
+.connection-view .wizard-nav h1 {
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  font-size: 13px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.connection-view .wizard-steps {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px;
+  min-width: 0;
+}
+.connection-view button.wizard-step {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  min-height: 0;
+  padding: 3px 8px;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+}
+.connection-view button.wizard-step:hover:not(:disabled) {
+  background: var(--vscode-list-hoverBackground, rgba(255, 255, 255, 0.04));
+}
+.connection-view button.wizard-step.current,
+.connection-view button.wizard-step.current:hover {
+  background: var(--vscode-list-activeSelectionBackground, #04395e);
+  color: var(--vscode-list-activeSelectionForeground, #fff);
+}
+.connection-view button.wizard-step:disabled {
+  opacity: 1;
+  color: var(--muted);
+}
+.connection-view .wizard-marker {
+  display: inline-grid;
+  flex: none;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  border: 1px solid currentColor;
+  border-radius: 50%;
+  font-size: 10px;
+  line-height: 1;
+}
+.connection-view .wizard-step.done .wizard-marker {
+  border-color: transparent;
+  color: var(--ok);
+  font-size: 13px;
+}
+.connection-view .wizard-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  line-height: 1.3;
+}
+/* Where each step stands shows in the side list of a wide panel; a narrow one has room for the names only. */
+.connection-view .wizard-summary {
+  display: none;
+  overflow: hidden;
+  font-size: 11px;
+  opacity: 0.8;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.connection-view .wizard-body {
+  flex: 1 0 auto;
+  min-width: 0;
+  padding: 12px 16px 16px;
+}
+.connection-view .step {
+  max-width: 680px;
+}
+.connection-view .step h2 {
+  margin: 0 0 12px;
+  font-size: 14px;
   font-weight: 600;
 }
+.connection-view .step h2:focus {
+  outline: none;
+}
 .connection-view .lead {
-  margin: 0 0 16px;
-  max-width: 64ch;
+  margin: -6px 0 14px;
   color: var(--muted);
 }
 
-/* Steps sit flat on the page, divided by a rule; a locked one waits for the test. */
-.connection-view .step {
-  padding: 16px 0 20px;
+/* What the test found. */
+.connection-view .wizard-result {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+  padding: 10px 16px 12px;
   border-top: 1px solid var(--border);
 }
-.connection-view .step h2 {
+.connection-view .result-header {
   display: flex;
   align-items: center;
   gap: 10px;
-  margin: 0 0 12px;
-  font-size: 13px;
+}
+.connection-view .result-header strong {
+  flex: 1;
   font-weight: 600;
 }
-.connection-view .step-number {
-  display: inline-grid;
-  place-items: center;
-  width: 20px;
-  height: 20px;
-  border-radius: 50%;
-  background: var(--vscode-badge-background, #4d4d4d);
-  color: var(--vscode-badge-foreground, #fff);
-  font-size: 11px;
+.connection-view .result-header button {
+  min-height: 24px;
+  padding: 1px 10px;
 }
-.connection-view .step.locked {
-  opacity: 0.6;
+.connection-view .found:empty,
+.connection-view .test-status:empty {
+  display: none;
+}
+.connection-view .found-caption {
+  margin-bottom: 4px;
+  color: var(--muted);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.connection-view .found-list {
+  margin: 0;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--surface);
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: 12px;
+  list-style: none;
+}
+.connection-view .found-list li {
+  padding: 3px 8px;
+  overflow: hidden;
+  border-bottom: 1px solid var(--border);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.connection-view .found-list li:last-child {
+  border-bottom: 0;
+}
+.connection-view .found-list .more {
+  color: var(--muted);
+  font-family: var(--vscode-font-family, sans-serif);
 }
 
 /* Step 1: a card for each kind of store, log services apart from databases. */
 .connection-view .type-groups {
   display: grid;
-  grid-template-columns: minmax(140px, 1fr) minmax(0, 4fr);
-  gap: 16px;
+  gap: 12px;
 }
 .connection-view .type-caption {
   margin-bottom: 6px;
@@ -4334,20 +4724,17 @@ body:not([data-view='logs']) .match-count {
   text-transform: uppercase;
   letter-spacing: 0.04em;
 }
-.connection-view .type-group.service .type-grid {
-  grid-template-columns: 1fr;
-}
 .connection-view .type-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
-  gap: 8px;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 6px;
 }
 .connection-view .type-card {
   position: relative;
   display: flex;
-  flex-direction: column;
-  gap: 2px;
-  padding: 8px 10px;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 6px 5px 10px;
   border: 1px solid var(--border);
   border-radius: 4px;
   cursor: pointer;
@@ -4373,12 +4760,58 @@ body:not([data-view='logs']) .match-count {
   cursor: default;
 }
 .connection-view .type-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
   font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* The i on a card: what the store is shows over the card while the i is pointed at or focused. Over it, since
+   under the last row it would run past the step in a short panel. */
+.connection-view button.type-info {
+  display: inline-grid;
+  flex: none;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  min-height: 0;
+  padding: 0;
+  border: 1px solid currentColor;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--muted);
+  font-family: Georgia, 'Times New Roman', serif;
+  font-size: 11px;
+  font-style: italic;
+  line-height: 1;
+  cursor: help;
+}
+.connection-view button.type-info:hover:not(:disabled),
+.connection-view button.type-info:focus {
+  background: transparent;
+  color: var(--text);
 }
 .connection-view .type-description {
-  color: var(--muted);
-  font-size: 11px;
+  position: absolute;
+  bottom: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  z-index: 5;
+  display: none;
+  padding: 5px 8px;
+  border: 1px solid var(--vscode-editorHoverWidget-border, #454545);
+  border-radius: 4px;
+  background: var(--vscode-editorHoverWidget-background, #252526);
+  box-shadow: 0 2px 8px var(--vscode-widget-shadow, rgba(0, 0, 0, 0.36));
+  color: var(--vscode-editorHoverWidget-foreground, var(--text));
+  font-size: 12px;
   line-height: 1.35;
+  cursor: default;
+}
+.connection-view .type-info:hover + .type-description,
+.connection-view .type-info:focus + .type-description {
+  display: block;
 }
 
 /* Fields. */
@@ -4561,17 +4994,9 @@ body:not([data-view='logs']) .match-count {
   cursor: default;
 }
 
-/* The test: its button and what it found. */
-.connection-view .test-row {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 12px;
-  margin-top: 16px;
-}
+/* The test's answer. */
 .connection-view .test-status {
-  flex: 1;
-  min-width: 200px;
+  overflow-wrap: anywhere;
 }
 .connection-view .test-status.running,
 .connection-view .test-status.stale {
@@ -4678,18 +5103,19 @@ body:not([data-view='logs']) .match-count {
 .connection-view footer {
   position: sticky;
   bottom: 0;
+  /* After the test's result, which follows it in the markup. */
+  order: 1;
   display: flex;
   align-items: center;
   flex-wrap: wrap;
-  gap: 12px;
-  margin: 0 -16px;
+  gap: 8px 12px;
   padding: 10px 16px;
   border-top: 1px solid var(--border);
   background: var(--surface);
 }
 .connection-view .footer-note {
   flex: 1;
-  min-width: 180px;
+  min-width: 140px;
   color: var(--muted);
 }
 .connection-view .footer-note.error {
@@ -4700,18 +5126,89 @@ body:not([data-view='logs']) .match-count {
   gap: 8px;
 }
 
-@media (max-width: 640px) {
-  .connection-view .type-groups {
-    grid-template-columns: 1fr;
+/* A wide panel: the steps down the left, the step shown, and the test's result on the right. */
+@media (min-width: 860px) {
+  .view-panel.connection-view {
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
   }
-}
-@media (max-width: 520px) {
+  .connection-view > div {
+    display: flex;
+    flex: 1 1 auto;
+    min-height: 0;
+  }
   .connection-view .form {
-    padding: 10px 10px 0;
+    display: grid;
+    flex: 1 1 auto;
+    grid-template-columns: 200px minmax(0, 1fr) minmax(260px, 30%);
+    grid-template-rows: minmax(0, 1fr) auto;
+    min-height: 0;
+  }
+  .connection-view .wizard-nav {
+    grid-column: 1;
+    grid-row: 1 / -1;
+    flex-direction: column;
+    flex-wrap: nowrap;
+    align-items: stretch;
+    gap: 8px;
+    padding: 10px 0;
+    overflow-y: auto;
+    border-right: 1px solid var(--border);
+    border-bottom: 0;
+  }
+  .connection-view .wizard-nav .form-title {
+    flex: none;
+    padding: 0 14px;
+  }
+  .connection-view .form-title .type-description {
+    left: 14px;
+  }
+  .connection-view .wizard-steps {
+    flex-direction: column;
+    flex-wrap: nowrap;
+    gap: 0;
+  }
+  .connection-view button.wizard-step {
+    gap: 10px;
+    padding: 5px 14px;
+    border-radius: 0;
+  }
+  .connection-view .wizard-summary {
+    display: block;
+  }
+  .connection-view .wizard-body {
+    /* Positioned for the same reason as the view: a hidden radio scrolls with the step. */
+    position: relative;
+    grid-column: 2;
+    grid-row: 1;
+    padding: 14px 20px 20px;
+    overflow-y: auto;
   }
   .connection-view footer {
-    margin: 0 -10px;
-    padding: 10px;
+    position: static;
+    grid-column: 2;
+    grid-row: 2;
+    padding: 10px 20px;
+  }
+  .connection-view .wizard-result {
+    grid-column: 3;
+    grid-row: 1 / -1;
+    padding: 10px 14px 12px;
+    overflow-y: auto;
+    border-top: 0;
+    border-left: 1px solid var(--border);
+    background: var(--raised);
+  }
+}
+
+@media (max-width: 520px) {
+  .connection-view .wizard-nav,
+  .connection-view .wizard-body,
+  .connection-view .wizard-result,
+  .connection-view footer {
+    padding-left: 10px;
+    padding-right: 10px;
   }
   .connection-view .mapping-row,
   .connection-view .grid.server {
@@ -4720,5 +5217,315 @@ body:not([data-view='logs']) .match-count {
   }
   .connection-view .grid.server > :nth-child(n) {
     grid-column: 1 / -1;
+  }
+}
+/* About Logline: the mark and version beside the links, who made it, a sponsor call, and the details for a bug report.
+   Side by side and short, since the Logs panel usually sits in VS Code's bottom panel. */
+.about-dialog {
+  position: relative;
+  width: min(640px, calc(100vw - 24px));
+  max-height: calc(100vh - 16px);
+  padding: 0;
+  overflow: auto;
+  border: 1px solid var(--vscode-widget-border, #454545);
+  border-radius: 12px;
+  background: var(--vscode-editorWidget-background, #252526);
+  color: var(--vscode-foreground, #cccccc);
+  box-shadow: 0 20px 56px var(--vscode-widget-shadow, rgba(0, 0, 0, 0.6));
+}
+.about-dialog[open] {
+  display: grid;
+  grid-template-columns: 200px minmax(0, 1fr);
+  animation: about-in 160ms ease-out;
+}
+@keyframes about-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px) scale(0.98);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .about-dialog[open] {
+    animation: none;
+  }
+}
+.about-dialog::backdrop {
+  background: rgba(0, 0, 0, 0.55);
+}
+.about-hero {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 18px 16px;
+  text-align: center;
+  background:
+    radial-gradient(120% 80% at 10% 0%, rgba(34, 211, 238, 0.22), transparent 60%),
+    radial-gradient(120% 80% at 90% 20%, rgba(167, 139, 250, 0.24), transparent 60%),
+    radial-gradient(90% 60% at 50% 100%, rgba(244, 114, 182, 0.14), transparent 70%);
+  border-right: 1px solid var(--vscode-widget-border, #454545);
+}
+.about-close {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--vscode-descriptionForeground, #aaa);
+  font-size: 16px;
+  line-height: 1;
+}
+.about-close:hover {
+  background: var(--vscode-toolbar-hoverBackground, rgba(90, 93, 94, 0.31));
+  color: var(--vscode-foreground, #ccc);
+}
+.about-mark {
+  display: block;
+  flex: none;
+  width: 52px;
+  height: 52px;
+  border-radius: 13px;
+  overflow: hidden;
+  box-shadow:
+    0 6px 20px rgba(34, 211, 238, 0.25),
+    0 2px 6px rgba(0, 0, 0, 0.4);
+}
+.about-name {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+.about-name h2 {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+.about-version {
+  padding: 1px 8px;
+  border: 1px solid color-mix(in srgb, #a78bfa 45%, transparent);
+  border-radius: 999px;
+  background: color-mix(in srgb, #a78bfa 14%, transparent);
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: 11px;
+  font-weight: 600;
+}
+.about-tagline {
+  margin: 0;
+  color: var(--vscode-descriptionForeground, #aaa);
+  font-size: 12px;
+  line-height: 1.4;
+}
+.about-legal {
+  margin: 0;
+  color: var(--vscode-descriptionForeground, #aaa);
+  font-size: 10px;
+  opacity: 0.85;
+}
+.about-body {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 8px;
+  padding: 14px 16px;
+}
+.about-icon {
+  flex: none;
+  fill: currentColor;
+}
+#aboutIssue .about-icon path {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.3;
+  stroke-linecap: round;
+}
+.about-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding-right: 24px;
+}
+.about-links button {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border: 1px solid var(--vscode-widget-border, #454545);
+  border-radius: 999px;
+  background: transparent;
+  color: inherit;
+  font-size: 12px;
+  transition:
+    border-color 120ms,
+    background 120ms;
+}
+.about-links button:hover {
+  border-color: var(--vscode-focusBorder, #007fd4);
+  background: var(--vscode-list-hoverBackground, #2a2d2e);
+}
+.about-links .about-icon {
+  width: 14px;
+  height: 14px;
+}
+.about-author {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: var(--vscode-textCodeBlock-background, rgba(127, 127, 127, 0.1));
+}
+.about-avatar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #22d3ee, #a78bfa 60%, #f472b6);
+  color: #0f172a;
+  font-size: 11px;
+  font-weight: 800;
+}
+.about-author-text {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+}
+.about-author-text span {
+  color: var(--vscode-descriptionForeground, #aaa);
+  font-size: 12px;
+}
+.about-author button {
+  flex: none;
+  border-radius: 999px;
+}
+.about-sponsor {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  border: 1px solid color-mix(in srgb, #f472b6 45%, transparent);
+  border-radius: 10px;
+  background: linear-gradient(
+    135deg,
+    color-mix(in srgb, #f472b6 18%, transparent),
+    color-mix(in srgb, #a78bfa 18%, transparent)
+  );
+  color: inherit;
+  text-align: left;
+  white-space: normal;
+  transition:
+    border-color 120ms,
+    transform 120ms;
+}
+.about-sponsor:hover {
+  border-color: #f472b6;
+  background: linear-gradient(
+    135deg,
+    color-mix(in srgb, #f472b6 26%, transparent),
+    color-mix(in srgb, #a78bfa 26%, transparent)
+  );
+  transform: translateY(-1px);
+}
+.about-sponsor .about-icon {
+  width: 18px;
+  height: 18px;
+  fill: #f472b6;
+}
+.about-sponsor:hover .about-icon {
+  animation: about-beat 700ms ease-in-out infinite;
+}
+@keyframes about-beat {
+  50% {
+    transform: scale(1.18);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .about-sponsor:hover .about-icon {
+    animation: none;
+  }
+}
+.about-sponsor span {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  column-gap: 8px;
+}
+.about-sponsor small {
+  color: var(--vscode-descriptionForeground, #aaa);
+  font-size: 12px;
+}
+.about-details {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 10px;
+  border: 1px dashed var(--vscode-widget-border, #454545);
+  border-radius: 10px;
+}
+.about-details dl {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0 10px;
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  font-size: 11px;
+}
+.about-details dt {
+  color: var(--vscode-descriptionForeground, #aaa);
+}
+.about-details dd {
+  margin: 0;
+  overflow: hidden;
+  font-family: var(--vscode-editor-font-family, monospace);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* A narrow panel, such as a side bar: the mark and name above the rest, in one short row. */
+@media (max-width: 560px) {
+  .about-dialog[open] {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .about-hero {
+    flex-direction: row;
+    justify-content: flex-start;
+    gap: 10px;
+    padding: 12px 40px 12px 14px;
+    text-align: left;
+    border-right: none;
+    border-bottom: 1px solid var(--vscode-widget-border, #454545);
+  }
+  .about-mark {
+    width: 36px;
+    height: 36px;
+    border-radius: 9px;
+  }
+  .about-name {
+    flex-direction: row;
+    /* In the narrowest side bar the version goes under the name rather than past the dialog's edge. */
+    flex-wrap: wrap;
+    min-width: 0;
+  }
+  .about-tagline,
+  .about-legal,
+  .about-author-text span,
+  .about-sponsor small {
+    display: none;
+  }
+  .about-links {
+    padding-right: 0;
   }
 }

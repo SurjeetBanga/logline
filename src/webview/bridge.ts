@@ -73,7 +73,6 @@ export class SnapshotBridge {
       type: 'snapshot',
       requestId,
       ...params,
-      statsOnly: state.paused && !force,
       doctorRevision: this.doctorRevision(),
       ...(this.pendingHave ? { have: this.pendingHave } : {}),
     });

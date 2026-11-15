@@ -23,7 +23,7 @@ export function createTable(
     return displayedColumns.length;
   }
 
-  const { buildRow, buildDetailRow, fillQuickActions } = createRows(state, () => displayedColumns, formatTimestamp);
+  const { buildRow, fillQuickActions } = createRows(state, () => displayedColumns, formatTimestamp);
   // Quick actions are built for the row under the pointer only. Remember
   // which one, so a re-render under a still pointer rebuilds them.
   let hoveredId: string | undefined;
@@ -56,10 +56,6 @@ export function createTable(
 
   let bottomSpacer: HTMLTableRowElement | undefined;
 
-  let expandedHeight = 0;
-
-  let expandedRow: HTMLTableRowElement | undefined;
-
   let renderRevision = 0;
 
   let renderedWindow: string | undefined;
@@ -71,8 +67,6 @@ export function createTable(
   let rowCache = new Map<number, { event: LogEvent; row: HTMLTableRowElement }>();
 
   let rowCacheRevision = -1;
-
-  const detailResizeObserver = scope.observer(() => scheduleRenderWindow());
 
   // A snapshot updates the toolbar before the rows. Reading the viewport after
   // those writes would force a layout of the half-updated page, so the viewer
@@ -135,44 +129,28 @@ export function createTable(
     ensureSpacers();
     ensureRowHeight();
     const total = virtualEvents.length;
-    const selectedIndex = virtualEvents.findIndex((event) => event.id === state.selected);
-    if (selectedIndex < 0) expandedHeight = 0;
-    else {
-      const detail = elements.logs.querySelector<HTMLTableRowElement>('.detail-row');
-      if (detail) expandedHeight = detail.getBoundingClientRect().height;
-    }
     const overscan = 8;
     const top = viewportTop();
     const height = viewportHeight();
     const visibleCount = Math.max(1, Math.ceil(height / rowHeight)) + overscan * 2;
-    const detailTop = (selectedIndex + 1) * rowHeight;
-    const offset = atTail
-      ? Math.max(0, total * rowHeight - height)
-      : selectedIndex >= 0 && top > detailTop
-        ? top - Math.min(expandedHeight, top - detailTop)
-        : top;
+    const offset = atTail ? Math.max(0, total * rowHeight - height) : top;
     let start = Math.floor(offset / rowHeight) - overscan;
     start = Math.max(0, Math.min(start, Math.max(0, total - visibleCount)));
     const end = Math.min(total, start + visibleCount);
     const totalCols = totalColumnCount();
     (topSpacer!.firstChild as HTMLTableCellElement).colSpan = totalCols;
-    (topSpacer!.firstChild as HTMLTableCellElement).style.height =
-      `${start * rowHeight + (selectedIndex >= 0 && selectedIndex < start ? expandedHeight : 0)}px`;
+    (topSpacer!.firstChild as HTMLTableCellElement).style.height = `${start * rowHeight}px`;
     (bottomSpacer!.firstChild as HTMLTableCellElement).colSpan = totalCols;
-    (bottomSpacer!.firstChild as HTMLTableCellElement).style.height =
-      `${(total - end) * rowHeight + (selectedIndex >= end ? expandedHeight : 0)}px`;
+    (bottomSpacer!.firstChild as HTMLTableCellElement).style.height = `${(total - end) * rowHeight}px`;
     const windowKey = `${start}:${end}:${renderRevision}:${rowsVersion}`;
     if (renderedWindow === windowKey) return;
     renderedWindow = windowKey;
-    // Capture focus before moving the expanded row into a fragment. Rebuilding
-    // must never scroll a focused event back into view during wheel scrolling.
+    // Capture focus before rows are replaced. Rebuilding must never scroll a
+    // focused event back into view during wheel scrolling.
     const focused = document.activeElement as HTMLElement | null;
     const focusedRow = !!focused && elements.logs.contains(focused) ? focused.closest('tr') : undefined;
     const refocusId = focusedRow?.classList.contains('event-row') ? focusedRow.dataset.id : undefined;
     const refocusColumn = focused?.dataset.column;
-    const detailScrollers = [...(expandedRow?.querySelectorAll<HTMLElement>('.event-details, pre') ?? [])].map(
-      (element) => ({ element, top: element.scrollTop, left: element.scrollLeft }),
-    );
     if (rowCacheRevision !== renderRevision) {
       rowCache = new Map();
       rowCacheRevision = renderRevision;
@@ -185,15 +163,6 @@ export function createTable(
       const row = cached?.event === event ? cached.row : buildRow(event);
       builtRows.set(event.id, { event, row });
       wanted.push(row);
-      if (event.id === state.selected) {
-        if (!expandedRow) {
-          detailResizeObserver.disconnect();
-          expandedRow = buildDetailRow(event);
-          detailResizeObserver.observe(expandedRow);
-        }
-        (expandedRow.firstChild as HTMLTableCellElement).colSpan = totalCols;
-        wanted.push(expandedRow);
-      }
     }
     // Rebuilding replaces the focused button's element out from under it, which
     // (besides dropping keyboard focus) makes Chrome yank the scroll position
@@ -207,10 +176,6 @@ export function createTable(
       if (hovered) fillQuickActions(hovered);
     }
     onRowsChanged();
-    for (const { element, top, left } of detailScrollers) {
-      element.scrollTop = top;
-      element.scrollLeft = left;
-    }
     if (focused && !!focused && elements.logs.contains(focused)) focused.focus({ preventScroll: true });
     else if (refocusId !== undefined) {
       const row = [...elements.logs.querySelectorAll<HTMLTableRowElement>('.event-row')].find(
@@ -222,11 +187,6 @@ export function createTable(
           )
         : row?.querySelector<HTMLElement>('.message-button');
       target?.focus({ preventScroll: true });
-    }
-    const measured = elements.logs.querySelector<HTMLTableRowElement>('.detail-row')?.getBoundingClientRect().height;
-    if (measured !== undefined && measured !== expandedHeight) {
-      expandedHeight = measured;
-      scheduleRenderWindow();
     }
   }
 
@@ -265,7 +225,7 @@ export function createTable(
       const followTail = followTailRequested;
       followTailRequested = false;
       renderWindow();
-      if (followTail && state.following && !state.paused && !state.selectedSort) {
+      if (followTail && state.following && !state.selectedSort) {
         const edge = liveAtTop() ? 0 : scrollViewport.scrollHeight;
         if (scrollViewport.scrollTop !== edge) {
           scrollViewport.scrollTop = edge;
@@ -282,7 +242,7 @@ export function createTable(
       rowHeightMeasured = false;
       renderRevision++;
       layoutColumns();
-      scheduleRenderWindow(state.following && !state.paused && !state.selectedSort);
+      scheduleRenderWindow(state.following && !state.selectedSort);
     })
     .observe(scrollViewport);
 
@@ -292,7 +252,7 @@ export function createTable(
   }
 
   function renderRows(events: LogEvent[]) {
-    const followTail = state.following && !state.paused && !state.selectedSort;
+    const followTail = state.following && !state.selectedSort;
     // Rows added above the reader would push what they are reading down, so
     // keep the row at the top of the viewport where it is.
     const anchorIndex = !followTail && liveAtTop() ? Math.floor(viewportTop() / rowHeight) : -1;
@@ -626,40 +586,53 @@ export function createTable(
     );
   }
 
-  function toggleExpand(id: number) {
-    // Virtual rows are replaced when details open. Preserve the clicked row's
-    // position so a pending Live layout cannot move it out of the viewport.
-    const oldRow = elements.logs.querySelector<HTMLTableRowElement>(`tr.event-row[data-id="${id}"]`);
-    const viewportTop = scrollViewport.getBoundingClientRect().top;
-    const oldTop = oldRow?.getBoundingClientRect().top;
-    const rowOffset = oldTop === undefined ? undefined : oldTop - viewportTop;
-    expandedHeight = 0;
-    expandedRow = undefined;
-    detailResizeObserver.disconnect();
-    renderRevision++;
-    if (state.inspect(id)) api.postMessage({ type: 'details', id });
-    updateFollowControl();
-    updateModeLabel();
-    renderWindow();
-    if (rowOffset !== undefined && Number.isFinite(rowOffset)) {
-      const newTop = elements.logs
-        .querySelector<HTMLTableRowElement>(`tr.event-row[data-id="${id}"]`)
-        ?.getBoundingClientRect().top;
-      if (newTop !== undefined && Number.isFinite(newTop)) scrollViewport.scrollTop += newTop - viewportTop - rowOffset;
+  // The selected event, kept so the inspector can still show it after it leaves the page.
+  let selectedEvent: LogEvent | undefined;
+
+  /**
+   * Selects an event for the inspector, asking the host for its details; choosing the selected
+   * event again clears the selection. Returns whether an event is now selected.
+   */
+  function select(id: number): boolean {
+    const previous = state.selected;
+    const opening = state.inspect(id);
+    selectedEvent = opening ? sourceEvents.find((event) => event.id === id) : undefined;
+    markSelected(previous);
+    if (opening) api.postMessage({ type: 'details', id });
+    return opening;
+  }
+  function clearSelection() {
+    if (state.selected === undefined) return;
+    const previous = state.selected;
+    state.resetSelection();
+    selectedEvent = undefined;
+    markSelected(previous);
+  }
+  /**
+   * Move the selected mark from the previous row to the selected one. Only those two rows change, so the
+   * rendered rows are kept rather than rebuilt; rows built later read the selection themselves.
+   */
+  function markSelected(previous: number | undefined) {
+    for (const id of new Set([previous, state.selected])) {
+      if (id === undefined) continue;
+      const row = rowCache.get(id)?.row;
+      if (!row) continue;
+      const selected = id === state.selected;
+      row.classList.toggle('selected', selected);
+      row.querySelector('.message-button')?.setAttribute('aria-pressed', String(selected));
     }
+  }
+  /** The event shown above or below the selected one, for the arrow keys. */
+  function neighbor(offset: number): LogEvent | undefined {
+    const index = virtualEvents.findIndex((event) => event.id === state.selected);
+    return index < 0 ? undefined : virtualEvents[index + offset];
   }
   /** Rebuild rows whose content depends on display settings, such as the timezone. */
   function invalidateRows() {
     renderRevision++;
   }
-  function resetDetails() {
-    expandedHeight = 0;
-    expandedRow = undefined;
-    detailResizeObserver.disconnect();
-    renderRevision++;
-  }
   function receiveDetails(data: Extract<HostMessage, { type: 'details' }>) {
-    if (data.id !== state.selected) return;
+    if (data.id !== state.selected) return false;
     state.selectedDetailText = data.text;
     state.selectedExceptions = data.exceptions;
     state.selectedLinks = {
@@ -669,8 +642,7 @@ export function createTable(
       crash: data.crash,
       attachedTo: data.attachedTo,
     };
-    resetDetails();
-    renderWindow();
+    return true;
   }
 
   return {
@@ -682,8 +654,10 @@ export function createTable(
     renderRows,
     renderWindow,
     scheduleRenderWindow,
-    toggleExpand,
-    resetDetails,
+    select,
+    clearSelection,
+    selectedEvent: () => selectedEvent,
+    neighbor,
     receiveDetails,
     invalidateRows,
     measureViewport,
@@ -696,9 +670,6 @@ export function createTable(
     },
     get events() {
       return sourceEvents;
-    },
-    get expandedHeight() {
-      return expandedHeight;
     },
   };
 }

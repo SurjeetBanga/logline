@@ -279,7 +279,7 @@ export class LogDoctor implements vscode.Disposable, vscode.CodeActionProvider {
   private sourceVersion = -1;
   // Diagnostics as set per file, so unchanged files are not re-sent to the Problems panel.
   private readonly published = new Map<string, { uri: vscode.Uri; signature: string }>();
-  // Findings per statement, worst first, for rows and expanded events in the Logs panel.
+  // Findings per statement, worst first, for rows and open events in the Logs panel.
   private bySite = new Map<string, Finding[]>();
   private viewSignature = '';
   private viewCache?: DoctorFindingView[];
