@@ -32,3 +32,6 @@ SECURITY.md
 .nvmrc
 coverage/**
 performance/**
+test-results/**
+playwright-report/**
+playwright.config.ts
