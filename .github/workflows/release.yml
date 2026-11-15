@@ -3,9 +3,9 @@ name: Release
 # Pushing a tag such as v1.14.1 releases that commit. The tag must match package.json, CHANGELOG.md must have a section
 # for the version, and the commit must be on main. CI already ran on that commit when it reached main, so the VSIX that
 # run built and tested is the one published, after approval, to the VS Code Marketplace and Open VSX, then attached to a
-# GitHub release. When that run did not succeed or its VSIX has expired, the whole of CI runs again on the tag instead.
-# Either way the dependencies are audited again, and the VSIX's build provenance attestation must show it was built by
-# ci.yml from this commit.
+# GitHub release. When that run did not succeed or its VSIX has expired (after 14 days), the release stops: rerun CI on
+# main for the commit and push the tag again. The dependencies are audited again, and the VSIX's build provenance
+# attestation must show it was built by ci.yml from this commit.
 #
 # No stored token publishes to the Marketplace: the publish job signs in to Azure as a managed identity federated with
 # the `release` environment, which only `v*` tags reach and which waits for a reviewer. Open VSX uses trusted
@@ -67,27 +67,12 @@ jobs:
             echo "Publishing the VSIX from CI run $id."
             echo "id=$id" >> "$GITHUB_OUTPUT"
           else
-            echo "No successful CI run on main with a VSIX for $GITHUB_SHA; running CI on the tag."
+            echo "::error::No successful CI run on main with an unexpired VSIX for $GITHUB_SHA. Rerun CI on main for this commit (gh run rerun <id>), then delete and push the tag again."
+            exit 1
           fi
 
-  # The same checks as every pull request, on the tagged commit, when main has no run to publish from; its package job
-  # uploads the VSIX published below.
-  ci:
-    needs: verify
-    if: needs.verify.outputs.ci-run == ''
-    uses: ./.github/workflows/ci.yml
-    # A called workflow can only use permissions its caller grants. Its comment job (pull requests only, so it does
-    # not run here) asks to write pull request comments, and its package job to attest the VSIX.
-    permissions:
-      contents: read
-      pull-requests: write
-      id-token: write
-      attestations: write
-
   publish:
-    needs: [verify, ci]
-    # ci is skipped when main's run is reused.
-    if: ${{ !cancelled() && needs.verify.result == 'success' && contains(fromJSON('["success", "skipped"]'), needs.ci.result) }}
+    needs: verify
     runs-on: ubuntu-latest
     timeout-minutes: 15
     environment: release
@@ -108,7 +93,7 @@ jobs:
         with:
           name: logline-vsix
           path: vsix
-          run-id: ${{ needs.verify.outputs.ci-run || github.run_id }}
+          run-id: ${{ needs.verify.outputs.ci-run }}
           github-token: ${{ github.token }}
       - name: Check the VSIX is this version
         run: test -f "vsix/logline-${{ needs.verify.outputs.version }}.vsix"
@@ -141,7 +126,6 @@ jobs:
 
   github-release:
     needs: [verify, publish]
-    if: ${{ !cancelled() && needs.publish.result == 'success' }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
@@ -153,7 +137,7 @@ jobs:
         with:
           name: logline-vsix
           path: vsix
-          run-id: ${{ needs.verify.outputs.ci-run || github.run_id }}
+          run-id: ${{ needs.verify.outputs.ci-run }}
           github-token: ${{ github.token }}
       - name: Create the GitHub release with the changelog section and the VSIX
         env:
