@@ -1487,7 +1487,7 @@
     "benchmark": "npm run compile && node --expose-gc scripts/benchmark.mjs",
     "smoke": "npm run compile && tsc -p tsconfig.test.json && node scripts/smoke.mjs",
     "screenshots": "node scripts/screenshots.mjs",
-    "test:layout": "npm run compile && tsc -p tsconfig.test.json && node --test out-tests/test/viewer-layout.js",
+    "test:layout": "npm run compile && playwright test",
     "test:browser": "npm run compile && tsc -p tsconfig.test.json && node --test out-tests/test/browser-real.js",
     "lint": "oxlint --type-aware --tsconfig tsconfig.test.json src",
     "format": "prettier --write .",
@@ -1496,6 +1496,7 @@
     "perf:compare": "node scripts/perf-compare.mjs"
   },
   "devDependencies": {
+    "@playwright/test": "1.65.0",
     "@types/node": "^20.19.43",
     "@types/vscode": "^1.99.0",
     "@vscode/test-electron": "^3.1.0",

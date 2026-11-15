@@ -11,3 +11,5 @@ CHANGELOG.md
 samples/
 coverage/
 performance/
+test-results/
+playwright-report/

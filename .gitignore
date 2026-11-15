@@ -9,3 +9,5 @@ out-tests/
 .vscode-test/
 coverage/
 performance/
+test-results/
+playwright-report/
