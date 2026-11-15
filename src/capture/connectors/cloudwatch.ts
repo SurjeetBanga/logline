@@ -13,6 +13,19 @@ const PAGE = 10000;
 const PARALLEL = 2;
 // A request over that rate is sent again after these waits before the search gives up.
 const THROTTLE_RETRY_MS = [500, 1000, 2000];
+
+/** Waits `ms`, or until `signal` aborts, so a cancelled search does not sit out a retry's wait. */
+function pause(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve) => {
+    const done = () => {
+      clearTimeout(timer);
+      signal?.removeEventListener('abort', done);
+      resolve();
+    };
+    const timer = setTimeout(done, ms);
+    signal?.addEventListener('abort', done, { once: true });
+  });
+}
 // FilterLogEvents searches a log group in parts and may answer a part with no events; it is read on this far.
 const MAX_EMPTY_PAGES = 200;
 // The most events one window of a search reads from a group; a busier window is read again, shorter.
@@ -175,7 +188,8 @@ export class CloudWatchConnector implements Connector {
       // A burst of requests over the account's rate waits a little and goes again.
       const wait = this.retryMs[throttled];
       if ((error as { retryAfterMs?: number }).retryAfterMs !== undefined && wait !== undefined && !signal?.aborted) {
-        await new Promise((resolve) => setTimeout(resolve, wait));
+        await pause(wait, signal);
+        signal?.throwIfAborted();
         return this.request(action, payload, signal, retried, throttled + 1);
       }
       // Credentials that expired since they were read are read again, once.

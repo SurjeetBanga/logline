@@ -150,6 +150,28 @@ test("a request over the account's rate is sent again after a wait", async () =>
   }
 });
 
+test('cancelling a search while it waits to retry a throttled request ends it without the wait', async () => {
+  const fake = await startFakeCloudWatch({ events: asEvents(contractLogsFor(5)), accessKeyId: KEY_ID });
+  try {
+    const connector = new CloudWatchConnector(connection(fake.url, ['/aws/lambda/checkout']), () => 5000, {
+      credentials: async () => credentials,
+      retryMs: [60_000],
+    });
+    fake.state.throttled = 1;
+    const controller = new AbortController();
+    const started = Date.now();
+    const search = connector.fetchLogs(
+      { query: '', fromMs: CONTRACT_START, toMs: CONTRACT_START + 60000, limit: 10, order: 'desc' },
+      controller.signal,
+    );
+    setTimeout(() => controller.abort(), 50);
+    await assert.rejects(search);
+    assert.ok(Date.now() - started < 5000, 'the search ended without waiting out the retry');
+  } finally {
+    await fake.close();
+  }
+});
+
 test('expired credentials are read again once, and refusals say which permissions a search needs', async () => {
   const fake = await startFakeCloudWatch({ events: asEvents(contractLogsFor(5)), accessKeyId: KEY_ID });
   try {

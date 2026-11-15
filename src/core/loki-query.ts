@@ -4,7 +4,7 @@
 // matches fewer logs than the search. Fetched logs are filtered again with the
 // whole search, so what LogQL cannot express still applies.
 import { LOKI_SELECTOR } from './connections';
-import { pushDown, termGroups, typedValue } from './pushdown';
+import { LEVEL_CODES, pushDown, re2Literal, termGroups, typedValue } from './pushdown';
 import { canonicalField, type Token } from './query';
 
 export interface LokiQuery {
@@ -22,17 +22,14 @@ const NAMES: Record<string, string[]> = {
   traceId: ['traceId', 'trace_id', 'traceID'],
   durationMs: ['durationMs', 'duration', 'duration_ms', 'responseTime'],
 };
-// pino and bunyan write levels as numbers.
-const LEVEL_CODES: Record<string, number> = { trace: 10, debug: 20, info: 30, warn: 40, error: 50, fatal: 60 };
 
 type Term = { kind: 'line'; filter: string } | { kind: 'label'; filter: string } | { kind: 'service'; matcher: string };
 
 /** A Go string literal, as LogQL reads one. */
 const quote = (value: string) => JSON.stringify(value);
-/** RE2 for text that matches itself, `*` standing for any text. */
-const literal = (value: string) => value.replace(/[.+?^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*');
 /** Text anywhere in a value, without case, unless it has `*`: then the whole value. */
-const valuePattern = (value: string) => (value.includes('*') ? `(?i)${literal(value)}` : `(?i).*${literal(value)}.*`);
+const valuePattern = (value: string) =>
+  value.includes('*') ? `(?i)${re2Literal(value)}` : `(?i).*${re2Literal(value)}.*`;
 const any = (filters: string[]) => (filters.length === 1 ? filters[0] : `(${filters.join(' or ')})`);
 const all = (filters: string[]) => (filters.length === 1 ? filters[0] : `(${filters.join(' and ')})`);
 
@@ -54,7 +51,7 @@ function term(token: Token, text: string): Term | undefined {
     if (!token.value || token.regex !== undefined) return undefined;
     return {
       kind: 'line',
-      filter: `${token.negate ? '!~' : '|~'} ${quote(`(?i)${literal(typedValue(text, token))}`)}`,
+      filter: `${token.negate ? '!~' : '|~'} ${quote(`(?i)${re2Literal(typedValue(text, token))}`)}`,
     };
   }
   if (token.regex !== undefined) return undefined;
@@ -84,7 +81,7 @@ function term(token: Token, text: string): Term | undefined {
     filters = names.map((name) => `(${name}>=${low} and ${name}<=${low + 99})`);
   } else if (token.canonical === 'level') {
     const code = LEVEL_CODES[token.value];
-    const pattern = `(?i).*${literal(token.value)}.*${code ? `|${code}` : ''}`;
+    const pattern = `(?i).*${re2Literal(token.value)}.*${code ? `|${code}` : ''}`;
     filters = names.map((name) => `${name}${token.negate ? '!~' : '=~'}${quote(pattern)}`);
     return { kind: 'label', filter: token.negate ? all(filters) : any(filters) };
   } else {

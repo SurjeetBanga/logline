@@ -4,6 +4,19 @@
 import { parseToken, type Token } from './query';
 import { queryTokens } from './query-tokens';
 
+/** The numbers pino and bunyan write for each level. */
+export const LEVEL_CODES: Readonly<Record<string, number>> = {
+  trace: 10,
+  debug: 20,
+  info: 30,
+  warn: 40,
+  error: 50,
+  fatal: 60,
+};
+
+/** An RE2 pattern for text that matches itself, `*` standing for any text. */
+export const re2Literal = (value: string): string => value.replace(/[.+?^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*');
+
 // A regular expression term, with or without a field: this loop never pushes
 // one to a store, so it is not parsed here, which would compile it for nothing.
 export const REGEX_TERM = /^-?(?:@?[A-Za-z_][A-Za-z0-9_.]*:(?!\/\/))?\/.+\/[dgimsuvy]*$/;
