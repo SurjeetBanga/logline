@@ -414,6 +414,7 @@ export const GUIDE_SECTIONS: GuideSection[] = [
     id: 'traces',
     title: 'Traces and AI calls',
     summary: 'Follow requests across services, and read what your app asks the model.',
+    isNew: true,
   },
   {
     id: 'compare',
@@ -744,6 +745,14 @@ export const GUIDE_CARDS: GuideCard[] = [
     example: 'gen_ai.*',
     target: 'aiCalls',
     fallback: 'traces',
+  },
+  {
+    section: 'traces',
+    title: 'See Codex usage',
+    where: ['VS Code status bar', 'Logline icon'],
+    text: 'The Logline icon on the right of the VS Code status bar opens the Logs panel. Turn on Codex usage and it shows how much of Codex’s plan limit is used, with each limit, when it resets, and today’s tokens on hover. Codex’s session files are read on this machine only.',
+    command: 'logline.enableCodexUsage',
+    docs: 'ai-usage-in-the-status-bar',
   },
   {
     section: 'traces',
