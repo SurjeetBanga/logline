@@ -15,7 +15,7 @@ import {
 
 export interface AgentBridgeOptions {
   /** Run a Logline tool and return its bounded JSON text; `client` is the name the MCP client gave. */
-  run(tool: string, input: unknown, token: { isCancellationRequested: boolean }, client?: string): Promise<string>;
+  run(tool: string, input: unknown, token: BridgeCancellation, client?: string): Promise<string>;
   folders(): string[];
   name(): string;
   /** Called when a client calls for the first time in a while, so the panel can show it. */
@@ -27,6 +27,24 @@ export interface AgentBridgeOptions {
 }
 
 const RECENT_MS = 10 * 60 * 1000;
+
+/** A bridge call's cancellation: requested when the agent's connection closes, and said at once. */
+export class BridgeCancellation {
+  isCancellationRequested = false;
+  private readonly listeners = new Set<() => unknown>();
+
+  onCancellationRequested(listener: () => unknown): { dispose(): void } {
+    if (!this.isCancellationRequested) this.listeners.add(listener);
+    return { dispose: () => void this.listeners.delete(listener) };
+  }
+
+  cancel(): void {
+    if (this.isCancellationRequested) return;
+    this.isCancellationRequested = true;
+    for (const listener of this.listeners) listener();
+    this.listeners.clear();
+  }
+}
 
 /**
  * Lets MCP clients such as Claude Code and Codex call the same read-only
@@ -123,7 +141,7 @@ export class AgentBridge {
   }
 
   private accept(socket: Socket): void {
-    const cancellation = { isCancellationRequested: false };
+    const cancellation = new BridgeCancellation();
     let buffer = Buffer.alloc(0);
     let handled = false;
     socket.setNoDelay?.(true);
@@ -131,9 +149,7 @@ export class AgentBridge {
     socket.setTimeout(30_000, () => {
       if (!handled) socket.destroy();
     });
-    socket.on('close', () => {
-      cancellation.isCancellationRequested = true;
-    });
+    socket.on('close', () => cancellation.cancel());
     socket.on('error', () => socket.destroy());
     socket.on('data', (chunk) => {
       if (handled) return;
@@ -153,11 +169,7 @@ export class AgentBridge {
     });
   }
 
-  private async handle(
-    line: string,
-    socket: Socket,
-    cancellation: { isCancellationRequested: boolean },
-  ): Promise<void> {
+  private async handle(line: string, socket: Socket, cancellation: BridgeCancellation): Promise<void> {
     const reply = (value: object) => {
       if (!socket.destroyed) socket.end(`${JSON.stringify(value)}\n`);
     };

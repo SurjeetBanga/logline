@@ -1,12 +1,18 @@
 import * as vscode from 'vscode';
-import type { AgentAiCallsInput, AgentLogAccess, AgentSearchInput, ProductionFetchInput } from './agent-access';
+import type {
+  AgentAiCallsInput,
+  AgentLogAccess,
+  AgentSearchInput,
+  CancellationTokenLike as AccessCancellation,
+  ProductionFetchInput,
+} from './agent-access';
 import { AgentAccessError } from './agent-access';
 import { agentClient } from '../core/usage-events';
 import type { Usage } from './usage';
 
 const MAX_BYTES = 64 * 1024;
 type ToolInput = Record<string, unknown>;
-type CancellationTokenLike = { isCancellationRequested?: boolean } | undefined;
+type CancellationTokenLike = AccessCancellation | undefined;
 type ToolCallback = (input: ToolInput, token?: CancellationTokenLike) => unknown | Promise<unknown>;
 interface LanguageModelRuntime {
   lm?: { registerTool(name: string, tool: unknown): vscode.Disposable };

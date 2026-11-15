@@ -5,6 +5,7 @@ import { SessionRegistry } from '../capture/session-registry';
 import { LogStore } from '../core/log-store';
 import type { AgentConnection } from '../core/agent-types';
 import { AgentAccessError, AgentLogAccess, type ProductionFetchResult } from './agent-access';
+import { BridgeCancellation } from './agent-bridge';
 import { ProductionCompare } from './production-compare';
 
 // Built at runtime: a credential-shaped literal would look like a leaked secret to scanners.
@@ -145,9 +146,9 @@ test('a production fetch the agent gives up on is stopped', async () => {
         );
       }),
   };
-  const token = { isCancellationRequested: false };
+  const token = new BridgeCancellation();
   const pending = access.fetchProduction({ shareId: shareId!, connectionId: 'prod' }, token);
-  token.isCancellationRequested = true;
+  token.cancel();
   await assert.rejects(pending, code('CANCELLED'));
   assert.equal(signal?.aborted, true);
 });

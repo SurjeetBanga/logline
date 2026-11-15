@@ -77,7 +77,7 @@ export type ViewRequest =
   | { type: 'panelSize'; width: number }
   | { type: 'showStatus' }
   | { type: 'showAbout' }
-  | { type: 'aboutAction'; action: AboutAction; info?: AboutInfo }
+  | { type: 'aboutAction'; action: AboutAction }
   | { type: 'emptyAction'; action: 'capture' | 'openFile' | 'browser' | 'agent' }
   | ({ type: 'breakOnQuery' } & Filter)
   | { type: 'trace'; traceId: string }
@@ -329,6 +329,8 @@ export type HostMessage =
       text: string;
       target: 'main' | 'context';
       exceptions: ExceptionBlock[];
+      /** The event is no longer retained. */
+      missing?: boolean;
     } & DetailLinks)
   | { type: 'searches'; searches: { saved: SavedSearch[] }; saved?: SavedSearch }
   | { type: 'autocomplete'; input: string; serverId?: string; fields: string[]; values: SuggestedValue[] }
@@ -503,20 +505,10 @@ export function parseViewRequest(value: unknown): ViewRequest | undefined {
     case 'showAbout':
     case 'installUpdate':
       return { type: msg.type };
-    case 'aboutAction': {
-      if (!ABOUT_ACTIONS.includes(msg.action as AboutAction)) return undefined;
-      const info = msg.info as Record<string, unknown> | undefined;
-      const field = (key: string) =>
-        typeof info?.[key] === 'string' ? (info[key] as string).slice(0, 200) : undefined;
-      const version = field('version');
-      const editor = field('editor');
-      const system = field('system');
-      return {
-        type: msg.type,
-        action: msg.action as AboutAction,
-        ...(version && editor && system ? { info: { version, editor, system } } : {}),
-      };
-    }
+    case 'aboutAction':
+      return ABOUT_ACTIONS.includes(msg.action as AboutAction)
+        ? { type: msg.type, action: msg.action as AboutAction }
+        : undefined;
     case 'emptyAction':
       return msg.action === 'capture' || msg.action === 'openFile' || msg.action === 'browser' || msg.action === 'agent'
         ? { type: msg.type, action: msg.action }

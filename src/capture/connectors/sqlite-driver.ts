@@ -156,8 +156,25 @@ function terminatorAt(sql: string, start: number): boolean {
   const line = end < 0 ? sql.slice(start) : sql.slice(start, start + end);
   const rest = /^[^\S\r\n]*(?:\/|go)(.*)$/is.exec(line)?.[1];
   if (rest === undefined) return false;
-  // A block comment may run onto later lines; sqlite3 then reads on, so count it as a terminator.
-  return /^(?:\s|\/\*[\s\S]*?(?:\*\/|$)|--.*$)*$/.test(rest);
+  return onlyComments(rest);
+}
+
+/**
+ * Whether the rest of a line holds only whitespace and comments. Scanned rather than matched with a
+ * regular expression, which can backtrack exponentially on many comment closers and openers in a row.
+ */
+function onlyComments(rest: string): boolean {
+  for (let i = 0; i < rest.length;) {
+    if (/\s/.test(rest[i])) i++;
+    else if (rest.startsWith('--', i)) return true;
+    else if (rest.startsWith('/*', i)) {
+      const end = rest.indexOf('*/', i + 2);
+      // A block comment may run onto later lines; sqlite3 then reads on, so count it as a terminator.
+      if (end < 0) return true;
+      i = end + 2;
+    } else return false;
+  }
+  return true;
 }
 
 /** An SQL literal for a parameter value. */

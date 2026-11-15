@@ -196,6 +196,8 @@ export class LogsController {
   private pendingTour = false;
   private pendingFeedback?: FeedbackOpen;
   private pendingAbout?: AboutInfo;
+  /** What About Logline last showed. */
+  private aboutShown?: AboutInfo;
   readonly transfer = new LogTransfer(this.store, this.config, this.ingestion, this.state);
   readonly searches: SavedSearches;
   private readonly globalState: Pick<vscode.ExtensionContext, 'globalState'>['globalState'];
@@ -443,6 +445,7 @@ export class LogsController {
         clear: () => this.clear(),
         stop: (serverId, sessionId) => this.stop(serverId, sessionId),
         removeSource: (serverId) => this.removeSource(serverId),
+        about: () => this.aboutShown,
         removeRun: (sessionId) => this.removeRun(sessionId),
         removeFinishedRuns: (serverId) => this.removeFinishedRuns(serverId),
         welcomed: () => this.welcomed(),
@@ -576,7 +579,7 @@ export class LogsController {
   }
   /** Open the About dialog in the Logs panel, with the next snapshot like the feedback form. */
   async openAbout(info: AboutInfo): Promise<void> {
-    this.pendingAbout = info;
+    this.pendingAbout = this.aboutShown = info;
     await vscode.commands.executeCommand('logline.logs.focus');
     this.notifications.send({ type: 'update' });
   }
@@ -874,7 +877,8 @@ export class LogsController {
     const removed = this.store.removeSource(serverId);
     // A run that is still capturing, such as OpenTelemetry, a terminal, or a process that is
     // shutting down, keeps adding logs under its record, so only finished runs are dropped. A
-    // browser that is closing adds nothing more, so its run goes now, not at a second press.
+    // browser being closed adds nothing more (BrowserCapture stops ingesting once it is asked to
+    // close), so its run goes now, not at a second press.
     for (const [id, record] of this.registry.records)
       if (
         belongsTo(record.serverId) &&

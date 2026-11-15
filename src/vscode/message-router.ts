@@ -24,7 +24,7 @@ import { manageServers } from './servers';
 import { openSource } from './source-navigation';
 import type { AgentLogAccess } from './agent-access';
 import type { ConnectionManager } from './connections';
-import type { CompareRequest, CompareView } from '../protocol/messages';
+import type { AboutInfo, CompareRequest, CompareView } from '../protocol/messages';
 import type { Usage } from './usage';
 import type { PanelAction } from '../core/usage-events';
 import type { FeedbackRequest, FeedbackResult } from '../core/feedback';
@@ -105,6 +105,8 @@ interface MessageServices {
   doctorAction(action: DoctorAction, siteId?: string): Promise<void>;
   connectAgent(agent?: 'claude' | 'codex'): Promise<void>;
   showStatus(): Promise<void>;
+  /** The details About Logline last showed, which its Copy button copies. */
+  about?(): AboutInfo | undefined;
   /** A way in chosen from the empty Logs panel. */
   emptyAction?(action: 'capture' | 'openFile' | 'browser' | 'agent'): Promise<void>;
   connections?: Pick<
@@ -250,7 +252,7 @@ export async function handleMessage(
       await vscode.commands.executeCommand('logline.about');
       return;
     case 'aboutAction':
-      await runAboutAction(msg.action, msg.info);
+      await runAboutAction(msg.action, services.about?.());
       return;
     case 'emptyAction':
       services.usage?.record('entry', { from: 'empty_state' });
@@ -289,7 +291,7 @@ export async function handleMessage(
           text,
           target: msg.target ?? 'main',
           exceptions: event ? extractExceptions(event) : [],
-          ...(event ? services.detailLinks(event) : {}),
+          ...(event ? services.detailLinks(event) : { missing: true }),
         });
       return;
     }

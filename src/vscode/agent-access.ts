@@ -43,9 +43,17 @@ export type AgentErrorCode =
 /** Production fetches an agent may make, for each connection, per minute. */
 const PRODUCTION_FETCHES_PER_MINUTE = 10;
 /** How often a running production fetch checks whether the agent cancelled it. */
-const CANCEL_CHECK_MS = 250;
 /** The ranges an agent may fetch: up to a day. */
 const PRODUCTION_RANGES = ['15m', '1h', '4h', '24h'];
+
+/**
+ * A call's cancellation: VS Code's token, or the agent bridge's, which is cancelled when the agent's
+ * connection closes. Either says so at once through `onCancellationRequested`.
+ */
+export interface CancellationTokenLike {
+  readonly isCancellationRequested?: boolean;
+  onCancellationRequested?(listener: () => unknown): { dispose(): unknown };
+}
 
 export interface ProductionFetchInput {
   shareId: string;
@@ -364,7 +372,7 @@ export class AgentLogAccess {
    * Fetch production logs from a connection the user allowed, into a run of
    * its own, and summarize them: the agent reads them with the other tools.
    */
-  async fetchProduction(input: ProductionFetchInput, token?: { isCancellationRequested?: boolean }): Promise<unknown> {
+  async fetchProduction(input: ProductionFetchInput, token?: CancellationTokenLike): Promise<unknown> {
     if (!input || typeof input !== 'object' || typeof input.shareId !== 'string')
       throw new AgentAccessError('INVALID_INPUT', 'shareId is required.');
     this.assertShare(input.shareId);
@@ -400,12 +408,10 @@ export class AgentLogAccess {
         `At most ${PRODUCTION_FETCHES_PER_MINUTE} fetches a minute from ${connection.label}; search the runs already fetched with logline_search_logs.`,
       );
     this.productionFetches.set(connection.id, [...recent, now]);
-    // The token is a flag, so it is checked often; the fetch stops once the agent gives up on it.
+    // The fetch stops once the agent gives up on it.
     const abort = new AbortController();
     if (token?.isCancellationRequested) abort.abort();
-    const watch = setInterval(() => {
-      if (token?.isCancellationRequested) abort.abort();
-    }, CANCEL_CHECK_MS);
+    const cancelled = token?.onCancellationRequested?.(() => abort.abort());
     let result: ProductionFetchResult;
     try {
       result = await this.production!.fetch({
@@ -417,7 +423,7 @@ export class AgentLogAccess {
         signal: abort.signal,
       });
     } finally {
-      clearInterval(watch);
+      cancelled?.dispose();
     }
     if (abort.signal.aborted || token?.isCancellationRequested)
       throw new AgentAccessError('CANCELLED', 'The fetch was cancelled.');
