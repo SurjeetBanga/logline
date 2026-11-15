@@ -33,7 +33,7 @@ Log content. Search text or queries, including SQL, Datadog, and other connectio
 
 ## Suggestions and votes
 
-**Suggest a feature…** and **Vote on what's next…**, in **More actions** in the Logs panel or the Command Palette, open a short form in the panel. Nothing is sent until you press **Send**, and a suggestion shows exactly what will be sent. Before it leaves, Logline replaces credentials, email addresses, phone and long numbers, IP addresses, host names, URLs, and file paths, as you see in the form. Still, leave out anything that identifies you or your company. A suggestion and a vote are the only text Logline sends, and each is sent under a one-time ID of its own, so it cannot be tied to your anonymous ID or your usage counts.
+**Send feedback…**, in **More actions** in the Logs panel, opens a short form in the panel with **Suggest a feature** and **Vote on what's next** tabs, as do **Logline: Suggest a Feature** and **Logline: Vote on What's Next** in the Command Palette. Nothing is sent until you press **Send**, and a suggestion shows exactly what will be sent. Before it leaves, Logline replaces credentials, email addresses, phone and long numbers, IP addresses, host names, URLs, and file paths, as you see in the form. Still, leave out anything that identifies you or your company. A suggestion and a vote are the only text Logline sends, and each is sent under a one-time ID of its own, so it cannot be tied to your anonymous ID or your usage counts.
 
 With usage counts off, or if sending fails, the form offers a GitHub issue instead. A GitHub issue is public and shows your GitHub account, so read it before you submit it.
 
@@ -43,7 +43,7 @@ If `extensions.autoUpdate` is off and `extensions.autoCheckUpdates` is on, Logli
 
 ## Where it goes
 
-Events are sent in batches about once a minute over HTTPS to [PostHog](https://posthog.com) in the EU (`eu.i.posthog.com`), and kept for 12 months. If a batch cannot be sent it is dropped; nothing is stored on disk to send later. Administrators can block that host.
+Events are sent in batches about once a minute over HTTPS to [PostHog](https://posthog.com) in the EU (`eu.i.posthog.com`), and kept for 12 months. If a batch cannot be sent it is tried once more, then dropped; nothing is stored on disk to send later. Administrators can block that host.
 
 ## Turning it off
 
