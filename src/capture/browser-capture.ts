@@ -28,6 +28,8 @@ const KILL_GRACE_MS = 2000;
 const FIRST_TAB_MS = 1500;
 /** How often answered requests whose body was never read are looked for. */
 const SWEEP_MS = 1000;
+/** How long after Logline opened a tab of its own the browser's late starting tab is looked for. */
+const OWN_TAB_MS = 10_000;
 
 /** A launched browser: its protocol pipe and its end. */
 export interface BrowserProcess {
@@ -200,8 +202,14 @@ interface Source {
   server: string;
 }
 
+interface Tab extends Source {
+  /** The tab's target, which is also its main frame's id. */
+  targetId?: string;
+}
+
 interface Running {
   record: SessionSummary;
+  launch: BrowserLaunch;
   process: BrowserProcess;
   pipe: CdpPipe;
   requests: RequestTracker;
@@ -210,9 +218,16 @@ interface Running {
   /** Called when a tab has taken `first`. */
   claimed: () => void;
   /** The open tabs by protocol session, each with the source of the site it is showing. */
-  tabs: Map<string, Source>;
-  /** Whether Logline opened a tab because the browser had reported none yet. */
-  openedOwnTab: boolean;
+  tabs: Map<string, Tab>;
+  /** When Logline opened a tab because the browser had reported none yet. */
+  openedOwnTabAt?: number;
+  /** How many tabs Logline asked for that the browser has not answered yet, and the targets of those it has. */
+  creating: number;
+  created: Set<string>;
+  /** Blank tabs reported while Logline waited for those answers, by session: each may be the browser's starting tab. */
+  blank: Map<string, string>;
+  /** Logline is connected and `open` has resolved. */
+  connected: boolean;
   exited: Promise<void>;
   stopping: boolean;
   /** The person closed the last tab; the browser is closed for them. */
@@ -249,6 +264,11 @@ export class BrowserCapture {
     return this.running?.record;
   }
 
+  /** The profile folder of the open browser, which keeps it until the browser has exited. */
+  get profileDir(): string | undefined {
+    return this.running?.launch.profileDir;
+  }
+
   /** The sites its tabs are showing, such as `localhost:5173`. */
   get sites(): string[] {
     const running = this.running;
@@ -275,7 +295,7 @@ export class BrowserCapture {
   private async openNow(url: string, launch: BrowserLaunch): Promise<string> {
     const existing = this.running;
     if (existing && !existing.stopping) {
-      await existing.pipe.send('Target.createTarget', { url });
+      await this.createTab(existing, url);
       return existing.record.id;
     }
     // A browser on its way out still holds the profile. One that will not go is not waited for.
@@ -309,19 +329,25 @@ export class BrowserCapture {
     const firstClaimed = new Promise<void>((resolve) => (claimed = resolve));
     const running: Running = {
       record,
+      launch,
       process,
       pipe: new CdpPipe(process.input, process.output, (event) => this.event(running, event)),
       requests: new RequestTracker(() => this.mode()),
       first: url,
       claimed,
       tabs: new Map(),
-      openedOwnTab: false,
+      creating: 0,
+      created: new Set(),
+      blank: new Map(),
+      connected: false,
       exited,
       stopping: false,
     };
     process.onExit((error) => {
-      failure = error ?? new Error('The browser closed before Logline connected to it.');
-      this.finish(running, error);
+      // One that ends before Logline is connected, such as by handing its tab to a browser already
+      // open on the profile, failed to open.
+      failure ??= error ?? new Error('The browser closed before Logline connected to it.');
+      this.finish(running, error ?? (running.connected ? undefined : failure));
       exit();
     });
     running.sweeper = setInterval(() => {
@@ -345,15 +371,47 @@ export class BrowserCapture {
       if (failure) throw failure;
       if (running.first) {
         running.first = undefined;
-        running.openedOwnTab = true;
-        await running.pipe.send('Target.createTarget', { url });
+        running.openedOwnTabAt = Date.now();
+        await this.createTab(running, url);
       }
+      if (failure) throw failure;
+      running.connected = true;
     } catch (error) {
-      const reason = failure ?? (error instanceof Error ? error : new Error(String(error)));
+      const reason = (failure ??= error instanceof Error ? error : new Error(String(error)));
       if (this.running === running) this.stopRunning(running);
       throw reason;
     }
     return record.id;
+  }
+
+  /** Open a tab showing `url`, remembering it as one Logline opened. */
+  private async createTab(running: Running, url: string): Promise<void> {
+    // Counted before it is sent: the browser can report the tab before `send` returns.
+    running.creating++;
+    try {
+      const { targetId } = await running.pipe.send('Target.createTarget', { url });
+      if (typeof targetId === 'string') running.created.add(targetId);
+    } finally {
+      running.creating--;
+      if (!running.creating) {
+        const blank = [...running.blank];
+        running.blank.clear();
+        for (const [sessionId, targetId] of blank) if (this.closeStartingTab(running, sessionId, targetId)) break;
+      }
+    }
+  }
+
+  /**
+   * Close the blank tab a browser opened with, reported only after Logline had opened one of its own;
+   * returns whether it did. A tab Logline opened is never closed.
+   */
+  private closeStartingTab(running: Running, sessionId: string, targetId: string): boolean {
+    if (running.openedOwnTabAt === undefined || running.created.has(targetId) || !running.tabs.has(sessionId))
+      return false;
+    running.openedOwnTabAt = undefined;
+    running.tabs.delete(sessionId);
+    running.pipe.send('Target.closeTarget', { targetId }).catch(() => undefined);
+    return true;
   }
 
   private event(running: Running, { method, params, sessionId }: ProtocolEvent): void {
@@ -378,21 +436,32 @@ export class BrowserCapture {
     else if (method === 'Runtime.exceptionThrown') record = exceptionRecord(params);
     else if (method === 'Log.entryAdded') record = browserLogRecord(params, this.mode());
     else if (method.startsWith('Network.')) {
-      // Every request names the document that made it, which says what site the tab is on now.
-      if (method === 'Network.requestWillBeSent') this.visiting(running, sessionId, params.documentURL);
+      // Every request names the document that made it, which says what site the tab is on now; a
+      // request of an embedded frame, such as a payment form's, says nothing about the tab.
+      if (method === 'Network.requestWillBeSent' && this.mainFrame(running, sessionId, params.frameId))
+        this.visiting(running, sessionId, params.documentURL);
       record = running.requests.handle(method, params, sessionId);
     }
     if (record) this.ingest(running, record, sessionId);
   }
 
+  /** Whether `frameId` is the tab's own page rather than a frame embedded in it; unknown counts as the page. */
+  private mainFrame(running: Running, sessionId: string, frameId: unknown): boolean {
+    const targetId = running.tabs.get(sessionId)?.targetId;
+    return typeof frameId !== 'string' || !targetId || frameId === targetId;
+  }
+
   /** A tab is showing `url`: its events from here on belong to that site's source. */
   private visiting(running: Running, sessionId: string, url: unknown): void {
-    if (typeof url !== 'string' || !/^https?:/i.test(url) || !running.tabs.has(sessionId)) return;
+    const tab = running.tabs.get(sessionId);
+    if (typeof url !== 'string' || !/^https?:/i.test(url) || !tab) return;
     const { serverId, server } = browserSource(url);
-    if (running.tabs.get(sessionId)!.serverId !== serverId) running.tabs.set(sessionId, { serverId, server });
+    if (tab.serverId !== serverId) running.tabs.set(sessionId, { ...tab, serverId, server });
   }
 
   private ingest(running: Running, record: BrowserRecord, tab: string): void {
+    // A browser being closed adds nothing more, so a source removed while it closes stays removed.
+    if (running.stopping) return;
     const source = running.tabs.get(tab) ?? running.record;
     const event = this.ingestion.accept(JSON.stringify(record), 'browser', {
       serverId: source.serverId,
@@ -419,15 +488,28 @@ export class BrowserCapture {
       running.claimed();
     }
     if (page) {
+      const targetId = typeof info.targetId === 'string' ? info.targetId : undefined;
       // Until it loads something, a tab belongs to the site the browser was opened for.
-      running.tabs.set(sessionId, { serverId: running.record.serverId, server: running.record.server });
+      running.tabs.set(sessionId, {
+        serverId: running.record.serverId,
+        server: running.record.server,
+        ...(targetId ? { targetId } : {}),
+      });
       this.visiting(running, sessionId, first ?? info.url);
-      // The blank tab of a browser that reported it only after Logline had opened one of its own.
-      if (running.openedOwnTab && info.url === 'about:blank' && !info.openerId && typeof info.targetId === 'string') {
-        running.openedOwnTab = false;
-        running.tabs.delete(sessionId);
-        await quietly(pipe.send('Target.closeTarget', { targetId: info.targetId }));
-        return;
+      // The browser's starting tab, reported after Logline opened one of its own, is closed. A tab
+      // Logline opened can be reported blank too, before the browser has answered for it, so while
+      // answers are awaited a blank tab is let run and decided on once they are in. The browser
+      // answers only once that tab runs, so it cannot be held until then.
+      const since = running.openedOwnTabAt;
+      if (
+        targetId &&
+        since !== undefined &&
+        Date.now() - since <= OWN_TAB_MS &&
+        info.url === 'about:blank' &&
+        !info.openerId
+      ) {
+        if (running.creating) running.blank.set(sessionId, targetId);
+        else if (this.closeStartingTab(running, sessionId, targetId)) return;
       }
       // One that cannot be read is no reason to leave the tab waiting, or the address unopened.
       await Promise.all(
@@ -445,6 +527,7 @@ export class BrowserCapture {
   private stopRunning(running: Running): void {
     if (running.stopping) return;
     running.stopping = true;
+    clearInterval(running.sweeper);
     running.record.status = 'stopping';
     // Asked to close first, so the profile is written; then told to end; then ended.
     running.pipe.send('Browser.close').catch(() => undefined);
@@ -464,7 +547,8 @@ export class BrowserCapture {
     running.pipe.close();
     running.requests.clear();
     running.tabs.clear();
-    if (this.running === running) this.running = undefined;
+    const current = this.running === running;
+    if (current) this.running = undefined;
     const { record } = running;
     record.status = error ? 'failed' : 'exited';
     record.endedAt = Date.now();
@@ -474,7 +558,8 @@ export class BrowserCapture {
       : running.stopping && !running.closedByUser
         ? 'stopped'
         : 'browser closed';
-    this.state.status = `${record.server} closed`;
+    // A browser opened since, while this one was closing, keeps its own status.
+    if (current) this.state.status = `${record.server} closed`;
     this.registry.pruneSessionRegistry();
     this.state.notify();
   }

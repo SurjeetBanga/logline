@@ -323,12 +323,22 @@ test('a profile another window’s browser holds is left to it, and this window 
     assert.equal(profileInUse(shared), false);
     h.browsers[0].exit();
     // What a running Chromium leaves in its profile: a link to nowhere on macOS and Linux, a file on Windows.
-    await symlink('host-1234', path.join(shared, 'SingletonLock'));
+    const lock = path.join(shared, 'SingletonLock');
+    // One left by a browser that was killed names a process that is gone.
+    await symlink('host-1234', lock);
+    assert.equal(
+      profileInUse(shared, () => false),
+      false,
+    );
+    await rm(lock);
+    await symlink(`host-${process.pid}`, lock);
     assert.equal(profileInUse(shared), true);
     await h.browser.open('http://localhost:5173/');
     const own = h.browsers[1].args[1].replace('--user-data-dir=', '');
     assert.match(own, new RegExp(`^${shared.replace(/[\\^$.*+?()[\]{}|]/g, '\\$&')}-[0-9a-f]{16}$`));
     assert.ok((await stat(own)).isDirectory());
+    // This window's own browser keeps its profile until it has exited: its lock is not another window's.
+    assert.equal(h.capture.profileDir, own);
 
     const windows = path.join(h.storagePath, 'windows-profile');
     await mkdir(windows);

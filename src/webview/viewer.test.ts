@@ -1164,7 +1164,7 @@ test('live rows keep arriving and rendering while an event is selected', () => {
 });
 
 test('clearing the logs while an event is selected applies at once and closes the inspector', () => {
-  const { app, receive, get } = viewer();
+  const { app, receive, get, messages } = viewer();
   const snapshot = (generation: number, id: number) =>
     receive({
       type: 'snapshot',
@@ -1189,9 +1189,23 @@ test('clearing the logs while an event is selected applies at once and closes th
   snapshot(2, 7);
   assert.equal(app.state.generation, 2, 'the reset is applied immediately');
   assert.equal(app.state.page, 0);
+  assert.equal(app.table.events.length, 0, 'the old rows are dropped until the next snapshot');
+  // The host is asked whether the open event is still kept; it is gone, so the inspector closes.
+  assert.deepEqual(JSON.parse(JSON.stringify(messages.filter((message) => message.type === 'details').at(-1))), {
+    type: 'details',
+    id: 42,
+  });
+  receive({ type: 'details', id: 42, text: 'discarded', target: 'main', exceptions: [], missing: true });
   assert.equal(app.state.selected, undefined);
   assert.equal(get('inspector').hidden, true);
-  assert.equal(app.table.events.length, 0, 'the old rows are dropped until the next snapshot');
+
+  // Removing another source keeps an event that is still kept open.
+  snapshot(2, 7);
+  get('logs').listeners.get('click')!(clickOn('.message-button', rowButton(get, 7)));
+  snapshot(3, 7);
+  receive({ type: 'details', id: 7, text: 'line 7', target: 'main', exceptions: [] });
+  assert.equal(app.state.selected, 7);
+  assert.equal(get('inspector').hidden, false);
 });
 
 test('snapshot errors release the bridge and keep the next refresh possible', () => {
@@ -5017,7 +5031,7 @@ test('About Logline is a dialog in the panel with the version, links, and a copy
   const pending = new Set(timers.keys());
   const copyTimers = () => [...timers.keys()].filter((id) => !pending.has(id));
   get('aboutCopy').listeners.get('click')!();
-  assert.deepEqual(JSON.parse(JSON.stringify(messages.at(-1))), { type: 'aboutAction', action: 'copy', info });
+  assert.deepEqual(JSON.parse(JSON.stringify(messages.at(-1))), { type: 'aboutAction', action: 'copy' });
   assert.equal(get('aboutCopy').textContent, 'Copied');
   // Copying again restarts the moment Copied shows, instead of a second timer cutting it short.
   const first = copyTimers();

@@ -28,6 +28,11 @@ All notable changes to Logline are documented in this file.
 
 ### Fixes
 
+- Browser capture: removing a Browser source while its window closes no longer brings its logs back, and a request made by a frame embedded in your page, such as a payment form or a video, no longer moves the tab to that frame's site. When the browser is slow to report its first tab, Logline no longer closes the tab it opened for your app instead of the blank one. Opening the browser again while the last one closes keeps the workspace's profile and its sign-ins, and a profile left locked by a browser that was killed is used again instead of being replaced by an empty one. A browser that closes before Logline connects to it shows as a failed run, and the old browser exiting no longer marks a new one closed.
+- Removing a source or a run no longer closes an event open in the inspector that is still kept.
+- On a SQLite connection in an editor without built-in SQLite, a query that divides across lines with a comment after the `/`, such as `/ /* ratio */ b`, runs instead of being refused.
+- The MCP server runs on Node 18 again: tool calls no longer fail with `AbortSignal.any is not a function`.
+- **Copy** in About Logline copies the details Logline showed, built in the extension rather than sent back by the panel.
 - In the narrowest side bar, the About dialog puts the version under the name instead of past the dialog's edge.
 - Faster with many logs retained: removing a source or a run no longer rebuilds what Logline knows about every other source, and copying or sharing redacted logs, and finding the log statement behind each event, take less time. Moving the selection with **Up** and **Down** in the inspector no longer rebuilds every visible row, and resizing the panel narrows the rails and the inspector once a frame.
 - The Logs panel runs edge to edge: the 20 pixels VS Code leaves at each side of a webview no longer frame the tabs, the Sources rail, and the table.

@@ -157,7 +157,7 @@ function terminatorAt(sql: string, start: number): boolean {
   const rest = /^[^\S\r\n]*(?:\/|go)(.*)$/is.exec(line)?.[1];
   if (rest === undefined) return false;
   // A block comment may run onto later lines; sqlite3 then reads on, so count it as a terminator.
-  return /^(?:\s|\/\*[\s\S]*?(?:\*\/|$)|--.*$)*$/.test(rest);
+  return /^(?:\s|\/\*[\s\S]*?\*\/|--.*$)*(?:\/\*(?:(?!\*\/)[\s\S])*)?$/.test(rest);
 }
 
 /** An SQL literal for a parameter value. */

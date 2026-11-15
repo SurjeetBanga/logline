@@ -272,6 +272,11 @@ export function buildEventDetails(
  * Undefined when the event's text is not a JSON object, which has no fields to list.
  */
 export function buildEventFields(text: string | undefined): HTMLElement | undefined {
+  return renderEventFields(eventFieldEntries(text));
+}
+
+/** The top-level fields of an event's JSON details, or undefined when they are not a JSON object. */
+export function eventFieldEntries(text: string | undefined): [string, unknown][] | undefined {
   if (!text?.trimStart().startsWith('{')) return undefined;
   let parsed: unknown;
   try {
@@ -281,7 +286,12 @@ export function buildEventFields(text: string | undefined): HTMLElement | undefi
   }
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return undefined;
   const entries = Object.entries(parsed as Record<string, unknown>);
-  if (!entries.length) return undefined;
+  return entries.length ? entries : undefined;
+}
+
+/** The fields list for entries from `eventFieldEntries`. */
+export function renderEventFields(entries: [string, unknown][] | undefined): HTMLElement | undefined {
+  if (!entries) return undefined;
   const list = document.createElement('div');
   list.className = 'event-fields';
   list.setAttribute('role', 'list');

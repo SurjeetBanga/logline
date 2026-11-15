@@ -273,6 +273,7 @@ test('a line ending a sqlite3 statement is found outside quotes and comments onl
     'SELECT 1 /*\ngo\n*/',
     'SELECT 1 -- go\n',
     'SELECT 6\n/ 2',
+    'SELECT a\n/ /* ratio */ b FROM t',
     'SELECT 1\ngone',
   ])
     assert.equal(endsStatementEarly(sql), false, sql);

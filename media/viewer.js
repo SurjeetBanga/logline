@@ -1631,7 +1631,7 @@
     } else container.append(pre2);
     return container;
   }
-  function buildEventFields(text2) {
+  function eventFieldEntries(text2) {
     if (!text2?.trimStart().startsWith("{")) return void 0;
     let parsed;
     try {
@@ -1641,7 +1641,10 @@
     }
     if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return void 0;
     const entries = Object.entries(parsed);
-    if (!entries.length) return void 0;
+    return entries.length ? entries : void 0;
+  }
+  function renderEventFields(entries) {
+    if (!entries) return void 0;
     const list = document.createElement("div");
     list.className = "event-fields";
     list.setAttribute("role", "list");
@@ -7077,13 +7080,12 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
   // src/webview/about-dialog.ts
   var COPIED_MS = 1500;
   function createAboutDialog(elements, api, scope) {
-    let info;
     let copied;
     scope.track(() => clearTimeout(copied));
     scope.listen(elements.close, "click", () => elements.dialog.close());
     for (const [action, button] of Object.entries(elements.buttons))
       scope.listen(button, "click", () => {
-        api.postMessage({ type: "aboutAction", action, ...action === "copy" && info ? { info } : {} });
+        api.postMessage({ type: "aboutAction", action });
         if (action === "copy") {
           button.textContent = "Copied";
           clearTimeout(copied);
@@ -7095,7 +7097,6 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
       });
     return {
       open(next) {
-        info = next;
         elements.version.textContent = `v${next.version}`;
         elements.editor.textContent = next.editor;
         elements.system.textContent = next.system;
@@ -9259,6 +9260,7 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
       scope
     );
     let minimumSnapshotGeneration = 0;
+    let recheckingSelected;
     const onMessage = (event) => {
       if (event.data?.type !== "snapshot") {
         receive(event.data);
@@ -9339,7 +9341,10 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
       }
       if (data.type === "details") {
         if (data.target === "context") inspection.receiveDetails(data);
-        else if (table.receiveDetails(data)) inspector.update("event", eventContent());
+        else if (data.missing && data.id === recheckingSelected && data.id === state.selected) {
+          recheckingSelected = void 0;
+          inspector.close("event");
+        } else if (table.receiveDetails(data)) inspector.update("event", eventContent());
         return;
       }
       if (data.type === "autocomplete") {
@@ -9419,7 +9424,8 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
         state.before = void 0;
         state.page = 0;
         state.lastRows = void 0;
-        inspector.close("event");
+        recheckingSelected = state.selected;
+        if (recheckingSelected !== void 0) api.postMessage({ type: "details", id: recheckingSelected });
         table.resetAutomaticColumns();
         bridge.forget();
         table.renderRows([]);
@@ -9773,6 +9779,12 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
         });
       else inspector.close("event");
     }
+    let parsedFields;
+    function selectedFields() {
+      const text2 = state.selectedDetailText;
+      if (!parsedFields || parsedFields.text !== text2) parsedFields = { text: text2, entries: eventFieldEntries(text2) };
+      return parsedFields.entries;
+    }
     function eventContent() {
       const id = state.selected;
       const event = table.selectedEvent();
@@ -9790,7 +9802,7 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
           state.selectedExceptions,
           state.selectedLinks,
           [context],
-          buildEventFields(state.selectedDetailText)
+          renderEventFields(selectedFields())
         )
       ];
       if (!state.cellHintDismissed) {

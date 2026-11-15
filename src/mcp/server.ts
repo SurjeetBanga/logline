@@ -131,6 +131,21 @@ export function pickWindow(
  */
 export const CALL_TIMEOUT_MS = 10 * 60 * 1000;
 
+/** A signal that aborts when either does; `AbortSignal.any` needs Node 20.3, and this runs on Node 18. */
+function eitherSignal(a: AbortSignal, b: AbortSignal): AbortSignal {
+  if (a.aborted) return a;
+  if (b.aborted) return b;
+  const controller = new AbortController();
+  const abort = () => {
+    controller.abort();
+    a.removeEventListener('abort', abort);
+    b.removeEventListener('abort', abort);
+  };
+  a.addEventListener('abort', abort, { once: true });
+  b.addEventListener('abort', abort, { once: true });
+  return controller.signal;
+}
+
 /**
  * Send one tool call to a window. Aborting, or the timeout, closes the
  * connection; the window then cancels the call, production fetches included.
@@ -145,7 +160,7 @@ export function callWindow(
 ): Promise<BridgeResponse> {
   return new Promise((done) => {
     const timeout = AbortSignal.timeout(timeoutMs);
-    const stopped = signal ? AbortSignal.any([signal, timeout]) : timeout;
+    const stopped = signal ? eitherSignal(signal, timeout) : timeout;
     if (stopped.aborted) return done(stoppedResponse(timeout, timeoutMs));
     const socket = connect({ host: '127.0.0.1', port: window.port });
     let data = '';

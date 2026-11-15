@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { existsSync, lstatSync } from 'node:fs';
+import { existsSync, lstatSync, readlinkSync } from 'node:fs';
 import { mkdir } from 'node:fs/promises';
 import * as path from 'node:path';
 import * as vscode from 'vscode';
@@ -8,6 +8,7 @@ import { locateBrowser } from '../capture/browser-locate';
 import { browserSource, browserUrl } from '../core/browser-events';
 import type { Settings } from '../core/settings';
 import type { NudgeStep } from '../core/usage-events';
+import { OfferMemory } from './offer-memory';
 
 /** The address last opened in this workspace, offered again next time. */
 export const BROWSER_URL_KEY = 'logline.browser.lastUrl';
@@ -41,14 +42,34 @@ export interface BrowserLauncherOptions {
   inUse?: (profileDir: string) => boolean;
 }
 
-/** Whether a running Chromium holds the profile: its lock is a link on macOS and Linux, a file on Windows. */
-export function profileInUse(profileDir: string): boolean {
+/** Whether process `pid` is running; one that cannot be signalled for want of permission is. */
+function alive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === 'EPERM';
+  }
+}
+
+/**
+ * Whether a running Chromium holds the profile: its lock is a link on macOS and Linux, a file on
+ * Windows. The link names `<host>-<pid>` and outlives a browser that was killed, so a link naming a
+ * process that is gone is no lock.
+ */
+export function profileInUse(profileDir: string, isAlive: (pid: number) => boolean = alive): boolean {
+  const link = path.join(profileDir, 'SingletonLock');
   try {
     // The link points at no file, so only looking at the link itself finds it.
-    lstatSync(path.join(profileDir, 'SingletonLock'));
-    return true;
+    lstatSync(link);
   } catch {
     return existsSync(path.join(profileDir, 'lockfile'));
+  }
+  try {
+    const pid = Number(/-(\d+)$/.exec(readlinkSync(link))?.[1]);
+    return !pid || isAlive(pid);
+  } catch {
+    return true;
   }
 }
 
@@ -79,6 +100,9 @@ export class BrowserLauncher {
    * profile of its own, without the sign-ins of the shared one.
    */
   private profileDir(): string {
+    // A browser this window opened keeps its profile, even while it closes: it is not another window's.
+    const own = this.options.capture.profileDir;
+    if (own) return own;
     const folder = vscode.workspace.workspaceFolders?.[0]?.uri.toString() ?? '';
     const name = (text: string) => createHash('sha256').update(text).digest('hex').slice(0, 16);
     const shared = path.join(this.options.storagePath, 'browser-profiles', name(folder));
@@ -137,11 +161,6 @@ export class BrowserLauncher {
   }
 }
 
-interface OfferState {
-  asked?: number;
-  done?: boolean;
-}
-
 export interface BrowserOfferOptions {
   workspace: Memento;
   global: Memento;
@@ -164,31 +183,33 @@ export class BrowserOffer {
   private asking = false;
   /** Asked in this window already, whether or not it was answered. */
   private asked = false;
+  private readonly memory: OfferMemory;
 
-  constructor(private readonly options: BrowserOfferOptions) {}
+  constructor(private readonly options: BrowserOfferOptions) {
+    this.memory = new OfferMemory(
+      options.workspace,
+      options.global,
+      BROWSER_OFFER_KEY,
+      BROWSER_OFFER_WORKSPACE_KEY,
+      BROWSER_OFFER_LIMIT,
+    );
+  }
 
   /** Whether an address found now would be offered; cheap enough to check before looking for one. */
   canAsk(): boolean {
-    const { workspace, global } = this.options;
-    if (this.asking || this.asked || !this.options.enabled()) return false;
-    const state = global.get<OfferState>(BROWSER_OFFER_KEY) ?? {};
-    if (state.done || (state.asked ?? 0) >= BROWSER_OFFER_LIMIT || workspace.get<boolean>(BROWSER_OFFER_WORKSPACE_KEY))
-      return false;
+    if (this.asking || this.asked || !this.options.enabled() || !this.memory.allowed()) return false;
     return this.options.available();
   }
 
   /** A dev server printed `url`; returns whether it asked. */
   async found(url: string): Promise<boolean> {
-    const { workspace, global, record } = this.options;
+    const { record } = this.options;
+    const { memory } = this;
     if (!this.canAsk()) return false;
-    const state = global.get<OfferState>(BROWSER_OFFER_KEY) ?? {};
     this.asking = true;
     this.asked = true;
     try {
-      // What cannot be remembered is asked again; that is no reason to fail.
-      const put = (memento: Memento, key: string, value: unknown) =>
-        Promise.resolve(memento.update(key, value)).catch(() => undefined);
-      await put(global, BROWSER_OFFER_KEY, { ...state, asked: (state.asked ?? 0) + 1 });
+      await memory.counted();
       record?.('shown');
       const answer = await vscode.window.showInformationMessage(
         `Your app is at ${url}. Open it in a browser Logline captures, to see its console and requests beside these logs?`,
@@ -198,16 +219,14 @@ export class BrowserOffer {
       );
       // A notification that went away unanswered may never have been seen: the workspace is asked
       // again in a later session, within the limit. An answer settles it for the workspace.
-      if (answer) await put(workspace, BROWSER_OFFER_WORKSPACE_KEY, true);
-      // Other windows may have asked, or been answered, while this one waited.
-      const latest = () => global.get<OfferState>(BROWSER_OFFER_KEY) ?? {};
+      if (answer) await memory.askedHere();
       if (answer === NEVER) {
         record?.('never');
-        await put(global, BROWSER_OFFER_KEY, { ...latest(), done: true });
+        await memory.done();
       } else if (answer === OPEN) {
         record?.('accepted');
         // Someone who has opened it knows it is there.
-        if (await this.options.open(url)) await put(global, BROWSER_OFFER_KEY, { ...latest(), done: true });
+        if (await this.options.open(url)) await memory.done();
       } else record?.('dismissed');
       return true;
     } finally {

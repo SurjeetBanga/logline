@@ -319,6 +319,9 @@ test('opening while the last browser is still closing waits for it', async (t) =
   t.mock.timers.tick(2000);
   await next;
   assert.equal(h.browsers.length, 2);
+  // The old browser exiting at last does not report the new one closed.
+  h.browsers[0].exit();
+  assert.equal(h.state.status, 'Capturing Browser · localhost:5173');
 });
 
 test('a browser that cannot start, or closes at once, fails the open and its run', async () => {
@@ -338,6 +341,9 @@ test('a browser that cannot start, or closes at once, fails the open and its run
     setImmediate(() => browser.exit());
   });
   await assert.rejects(handedOver.capture.open('http://localhost:5173/', LAUNCH), /closed before Logline connected/);
+  const [handed] = [...handedOver.registry.records.values()];
+  assert.equal(handed.status, 'failed');
+  assert.equal(handed.exitReason, 'The browser closed before Logline connected to it.');
 });
 
 test('a browser that refuses to be read is closed', async () => {
@@ -485,6 +491,29 @@ test('a request answered but never read is reported while the browser runs, and 
   browser.exit();
   t.mock.timers.tick(5000);
   assert.equal(h.store.all().length, 1);
+
+  // Nor once it is being closed, so a source removed meanwhile stays removed.
+  const closing = harness({}, (next) => {
+    next.answer = (command) => {
+      if (command.method === 'Target.setAutoAttach') next.attachPage('tab-1');
+      return command.method === 'Browser.close' ? 'silent' : undefined;
+    };
+  });
+  await closing.capture.open('http://localhost:5173/', LAUNCH);
+  await settle();
+  const [slow] = closing.browsers;
+  slow.emit(
+    'Network.requestWillBeSent',
+    { requestId: 'x', request: { url: 'http://localhost:4000/api/x', method: 'GET' }, timestamp: 1, type: 'Fetch' },
+    'tab-1',
+  );
+  slow.emit('Network.responseReceived', { requestId: 'x', timestamp: 1.04, response: { status: 500 } }, 'tab-1');
+  await settle();
+  closing.capture.stop();
+  t.mock.timers.tick(5000);
+  slow.emit('Runtime.consoleAPICalled', { type: 'log', args: [{ type: 'string', value: 'late' }] }, 'tab-1');
+  await settle();
+  assert.equal(closing.store.all().length, 0);
 });
 
 const page = (sessionId: string, url: string, extra: object = {}) => ({
@@ -517,6 +546,20 @@ test('each tab’s events go to the source of the site it is showing, under the 
   await settle();
   log('tab-1', 'shop');
   log('tab-2', 'admin');
+  // A frame embedded in the first tab is not where the tab is.
+  browser.emit(
+    'Network.requestWillBeSent',
+    {
+      requestId: 'f1',
+      frameId: 'frame-checkout',
+      documentURL: 'https://js.stripe.example/',
+      request: { url: 'https://js.stripe.example/v3', method: 'GET' },
+      timestamp: 1,
+      type: 'Script',
+    },
+    'tab-1',
+  );
+  log('tab-1', 'still shop');
   // The first tab then goes to a third site; a page of another scheme changes nothing.
   request(browser, 'tab-1', 'r1', 'http://localhost:8080/api', 'http://localhost:8080/');
   request(browser, 'tab-1', 'r2', 'http://localhost:8080/api', 'chrome-error://chromewebdata/');
@@ -527,6 +570,7 @@ test('each tab’s events go to the source of the site it is showing, under the 
     [
       ['browser:localhost:5173', 'Browser · localhost:5173', 'shop', true],
       ['browser:localhost:4000', 'Browser · localhost:4000', 'admin', true],
+      ['browser:localhost:5173', 'Browser · localhost:5173', 'still shop', true],
       ['browser:localhost:8080', 'Browser · localhost:8080', 'GET /api 200 (10 ms)', true],
       ['browser:localhost:8080', 'Browser · localhost:8080', 'GET /api 200 (10 ms)', true],
       ['browser:localhost:8080', 'Browser · localhost:8080', 'docs', true],
@@ -620,6 +664,34 @@ test('a starting tab reported late is waited for; one reported after Logline ope
   await settle();
   assert.equal(never.registry.records.get(id)!.status, 'running');
   assert.equal(browser.methods().filter((method) => method === 'Target.closeTarget').length, 1);
+
+  // The tab Logline opened, reported blank before the browser answered for it, is kept.
+  let answerCreate!: () => void;
+  const own = harness({}, (next) => {
+    next.answer = (command) => {
+      if (command.method !== 'Target.createTarget') return undefined;
+      answerCreate = () => next.write({ id: command.id, result: { targetId: 'target-mine' } });
+      next.emit('Target.attachedToTarget', {
+        sessionId: 'mine',
+        targetInfo: { type: 'page', targetId: 'target-mine', url: 'about:blank' },
+      });
+      return 'silent';
+    };
+  });
+  const ownOpening = own.capture.open('http://localhost:5173/', LAUNCH);
+  await settle();
+  t.mock.timers.tick(1500);
+  await settle();
+  answerCreate();
+  await ownOpening;
+  await settle();
+  assert.ok(!own.browsers[0].methods().includes('Target.closeTarget'));
+  // The browser's own starting tab, reported after that, is still closed.
+  own.browsers[0].emit('Target.attachedToTarget', page('start', 'about:blank'));
+  await settle();
+  assert.deepEqual(own.browsers[0].commands.find((command) => command.method === 'Target.closeTarget')?.params, {
+    targetId: 'target-start',
+  });
 });
 
 test('a first tab that cannot be sent to the address gets a new tab for it, and a waiting tab is always let run', async () => {

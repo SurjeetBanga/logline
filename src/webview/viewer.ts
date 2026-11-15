@@ -9,7 +9,7 @@ import { getElements, setLabel } from './dom';
 import { createTooltips } from './tooltip';
 import { EventScope } from './event-scope';
 import { createInspection } from './inspection/context';
-import { buildEventDetails, buildEventFields, eventAction } from './inspection/details';
+import { buildEventDetails, eventAction, eventFieldEntries, renderEventFields } from './inspection/details';
 import { createInspector, type InspectorContent } from './inspector';
 import { createTraceView } from './inspection/trace';
 import { createTraceList } from './inspection/traces';
@@ -305,6 +305,8 @@ export function createViewer(api: WebviewApi) {
   // The host increments its generation when logs are cleared. An older
   // snapshot can arrive afterwards, so keep it from restoring the old schema.
   let minimumSnapshotGeneration = 0;
+  /** The open event, asked about again after the logs changed under it. */
+  let recheckingSelected: number | undefined;
   const onMessage = (event: MessageEvent<HostMessage>) => {
     if (event.data?.type !== 'snapshot') {
       receive(event.data);
@@ -389,7 +391,11 @@ export function createViewer(api: WebviewApi) {
     }
     if (data.type === 'details') {
       if (data.target === 'context') inspection.receiveDetails(data);
-      else if (table.receiveDetails(data)) inspector.update('event', eventContent());
+      else if (data.missing && data.id === recheckingSelected && data.id === state.selected) {
+        // The logs changed under the open event, and it went with them.
+        recheckingSelected = undefined;
+        inspector.close('event');
+      } else if (table.receiveDetails(data)) inspector.update('event', eventContent());
       return;
     }
     if (data.type === 'autocomplete') {
@@ -490,8 +496,9 @@ export function createViewer(api: WebviewApi) {
       state.before = undefined;
       state.page = 0;
       state.lastRows = undefined;
-      // The logs were cleared, so the selected event is gone with them.
-      inspector.close('event');
+      // The logs were cleared, or a source or run removed: the open event stays only if it is still kept.
+      recheckingSelected = state.selected;
+      if (recheckingSelected !== undefined) api.postMessage({ type: 'details', id: recheckingSelected });
       table.resetAutomaticColumns();
       bridge.forget();
       table.renderRows([]);
@@ -965,6 +972,13 @@ export function createViewer(api: WebviewApi) {
       });
     else inspector.close('event');
   }
+  // The selected event's details parsed once, not again each time the inspector is drawn.
+  let parsedFields: { text: string | undefined; entries: [string, unknown][] | undefined } | undefined;
+  function selectedFields(): [string, unknown][] | undefined {
+    const text = state.selectedDetailText;
+    if (!parsedFields || parsedFields.text !== text) parsedFields = { text, entries: eventFieldEntries(text) };
+    return parsedFields.entries;
+  }
   /** The selected event for the inspector: its message, where and when it was logged, its actions and fields. */
   function eventContent(): InspectorContent {
     const id = state.selected!;
@@ -983,7 +997,7 @@ export function createViewer(api: WebviewApi) {
         state.selectedExceptions,
         state.selectedLinks,
         [context],
-        buildEventFields(state.selectedDetailText),
+        renderEventFields(selectedFields()),
       ),
     ];
     if (!state.cellHintDismissed) {

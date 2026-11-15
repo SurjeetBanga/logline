@@ -381,7 +381,10 @@ test('a button in the About dialog opens its page, the release notes, or copies 
   calls.length = 0;
   await handleMessage(services() as any, () => undefined, { type: 'aboutAction', action: 'sponsor' });
   await handleMessage(services() as any, () => undefined, { type: 'aboutAction', action: 'whatsNew' });
-  await handleMessage(services() as any, () => undefined, { type: 'aboutAction', action: 'copy', info });
+  await handleMessage({ ...services(), about: () => info } as any, () => undefined, {
+    type: 'aboutAction',
+    action: 'copy',
+  });
   assert.deepEqual(
     calls.map(({ name, value }) => [name, value]),
     [
