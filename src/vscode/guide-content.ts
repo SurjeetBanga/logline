@@ -17,6 +17,27 @@ export interface GuideRelease {
 
 export const GUIDE_RELEASES: GuideRelease[] = [
   {
+    version: '1.21.0',
+    date: '2026-11-15',
+    highlights: [
+      {
+        title: 'An inspector beside the list',
+        text: 'Click anywhere in a row to open the event beside the table, with its fields, exceptions, and actions, while live logs keep arriving. Up and Down move between events, and Escape closes it. Traces and AI calls open there too.',
+        section: 'inspect',
+      },
+      {
+        title: 'Your app in the browser',
+        text: 'Open a browser…, in the Sources rail’s + menu, opens your app in Chrome, Edge, Chromium, or Brave and puts its console, uncaught errors, and requests beside your server logs. status:5xx finds the failed request and the server error behind it in one search.',
+        section: 'capture',
+      },
+      {
+        title: 'Set up for your agent in one step',
+        text: 'Logline: Set Up for My Agent turns on terminal capture, shares what Logline captures, and connects the agent in your editor, whether Cursor, Windsurf, Kiro, Claude Code, Codex, or Copilot.',
+        section: 'share',
+      },
+    ],
+  },
+  {
     version: '1.20.0',
     date: '2026-11-05',
     highlights: [
@@ -373,6 +394,7 @@ export const GUIDE_SECTIONS: GuideSection[] = [
     id: 'capture',
     title: 'Capture',
     summary: 'Bring a terminal, command, task, debug session, or app into the Logs panel.',
+    isNew: true,
   },
   {
     id: 'connections',
@@ -386,6 +408,7 @@ export const GUIDE_SECTIONS: GuideSection[] = [
     id: 'inspect',
     title: 'Inspect and analyze',
     summary: 'Move from a row to the story around it, and see the patterns in what is retained.',
+    isNew: true,
   },
   {
     id: 'traces',
@@ -401,6 +424,7 @@ export const GUIDE_SECTIONS: GuideSection[] = [
     id: 'share',
     title: 'Share with agents',
     summary: 'Let Copilot, Claude Code, or Codex read what you choose, redacted and read-only.',
+    isNew: true,
   },
   {
     id: 'settings',
@@ -758,6 +782,14 @@ export const GUIDE_CARDS: GuideCard[] = [
     where: ['Share with agent', '▾'],
     text: 'Share everything, or only the runs you pick. Share with agent in an open event also shares its exact run.',
     target: 'shareMenuButton',
+  },
+  {
+    section: 'share',
+    title: 'Set up for my agent',
+    where: ['Command Palette', 'Logline: Set Up for My Agent'],
+    text: 'One step turns on terminal capture, shares what Logline captures in every window, and connects the agent found in your editor. It shows what it will do first, and Stop sharing ends it.',
+    command: 'logline.setUpForAgent',
+    docs: 'set-up-for-your-agent-in-one-step',
   },
   {
     section: 'share',
