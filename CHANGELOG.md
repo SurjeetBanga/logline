@@ -14,6 +14,9 @@ All notable changes to Logline are documented in this file.
 
 - **Analyze** says **Could not analyze these logs** with the reason when analysis fails, instead of staying on **Loading analysis…**, and the Traces tab shows a failure to load the list or a trace. Changing filters quickly no longer lets an older answer replace a newer one.
 - **Analyze** shows the first 20 error groups with **Show all N** for the rest, which were not shown before. A status code that is not three digits is shown as plain text instead of a button that did nothing.
+- A trace's waterfall narrows with a narrow inspector instead of scrolling sideways.
+- The trace list reads trace ids from the newest 5,000 logs, as intended, where it read 1,000, and its count of traces includes those known only from logs.
+- `logline_get_trace` no longer lets span rows shown in Logs use up the logs it reads for a trace.
 - When a trace has more spans than the waterfall shows (2,000), logs of the spans left out are listed under **Logs of spans not shown** instead of being described as not linked to a received span.
 
 ## 1.21.0 — 2026-11-15

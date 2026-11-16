@@ -521,7 +521,12 @@ export function summarizeTraces(
     let start = Infinity,
       end = -Infinity,
       errors = 0;
-    const ids = new Set(spans.map((span) => span.spanId));
+    const ids = new Set<string>();
+    const services = new Set<string>();
+    for (const span of spans) {
+      ids.add(span.spanId);
+      services.add(span.service);
+    }
     for (const span of spans) {
       if (span.startMs < start) start = span.startMs;
       if (span.endMs > end) end = span.endMs;
@@ -533,7 +538,7 @@ export function summarizeTraces(
       traceId,
       name: root?.name ?? spans[0].name,
       service: root?.service,
-      services: [...new Set(spans.map((span) => span.service))].sort(),
+      services: [...services].sort(),
       startMs: start,
       durationMs: Math.round((end - start) * 1000) / 1000,
       spans: spans.length,
@@ -547,7 +552,9 @@ export function summarizeTraces(
   >();
   for (const event of events) {
     const value = getField(event, 'traceId');
-    if (typeof value !== 'string' || !value || getField(event, 'kind') === 'span') continue;
+    // A span's own table row is written with `kind` at the top, so its fields are read directly: most
+    // logs have no `kind`, and looking for one under other names costs more than the rest of this loop.
+    if (typeof value !== 'string' || !value || event.fields?.kind === 'span') continue;
     const traceId = value.toLowerCase();
     const known = summaries.get(traceId);
     const failed = event.level === 'error' || event.level === 'fatal';

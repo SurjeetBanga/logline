@@ -114,6 +114,8 @@ export const SHARE_ON_START_KEY = 'logline.shareOnStart.v1';
 /** Composition root for services used by commands, tasks and the Logs view. */
 // A trend line is 100 units wide; more points than this only make the message bigger.
 const METRIC_TREND_POINTS = 60;
+/** How many traces the Traces tab lists, newest first. */
+const TRACE_LIST_LIMIT = 200;
 
 export class LogsController {
   readonly config = new Configuration();
@@ -470,6 +472,7 @@ export class LogsController {
         openLogSite: (id) => this.openLogSite(id),
         traceView: (traceId) => this.traceView(traceId),
         traceList: () => this.traceList(),
+        traceTotal: () => this.traceTotal(),
         metricList: () => this.metricList(),
         aiCallList: () => this.aiCallList(),
         aiCallDetail: (traceId, spanId) => this.aiCallDetail(traceId, spanId),
@@ -1097,11 +1100,17 @@ export class LogsController {
     if (this.traceListCache?.basis !== basis) {
       // summarizeTraces skips span rows whether or not their spans are retained, so they only take room here.
       const events = this.store.reversePage({ query: 'exists:traceId -kind:/^span$/' }, 5000).events;
-      this.traceListCache = { basis, traces: summarizeTraces(this.spans.entries(), events) };
+      const all = summarizeTraces(this.spans.entries(), events, Infinity);
+      this.traceListCache = { basis, traces: all.slice(0, TRACE_LIST_LIMIT), total: all.length };
     }
     return this.traceListCache.traces;
   }
-  private traceListCache?: { basis: string; traces: TraceSummary[] };
+  /** How many traces there are to list, of which `traceList` holds the newest. */
+  traceTotal(): number {
+    this.traceList();
+    return this.traceListCache!.total;
+  }
+  private traceListCache?: { basis: string; traces: TraceSummary[]; total: number };
   /** Semantic convention findings in received spans and metrics, recomputed only when either changes. */
   telemetryFindings(): { findings: TelemetryFinding[]; version: number } {
     const basis = `${this.spans.revision}:${this.metrics.revision}`;

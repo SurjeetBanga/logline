@@ -10,8 +10,6 @@ import { formatDuration } from './trace';
 /** Slower than this is a slow request, for the rail's filter. */
 const SLOW_MS = 1000;
 const REFRESH_MS = 5000;
-/** How many traces the host lists, newest first. */
-const LIST_LIMIT = 200;
 
 /**
  * The Traces tab: recent requests across services, from OpenTelemetry
@@ -47,10 +45,8 @@ export function createTraceList(
   let drawn = false;
   let loadedAt = -Infinity;
   let refresh: ReturnType<typeof setTimeout> | undefined;
-  /** Traces with retained spans, as the snapshot counts them; more than the list holds means it is cut. */
-  let traceCount = 0;
-  /** The list holds the newest traces of a larger set, so its status says so. */
-  const cut = () => traces.length >= LIST_LIMIT && traceCount > traces.length;
+  /** Every trace the host had to list; more than the list holds means it is the newest of them. */
+  let total = 0;
 
   function load() {
     if (pending) return;
@@ -88,13 +84,9 @@ export function createTraceList(
   scope.track(hide);
 
   /** Follows the retained spans and logs: a shown list loads again once they change. */
-  function update(next: string, count = 0) {
+  function update(next: string) {
     const changed = basis !== undefined && next !== basis;
     basis = next;
-    const wasCut = cut() ? traceCount : 0;
-    traceCount = count;
-    // The count moves with every span, so the list draws again only when its wording changes.
-    if ((cut() ? traceCount : 0) !== wasCut && drawn && !failed && actions.visible()) render();
     if (changed && actions.visible()) refreshSoon();
   }
 
@@ -186,12 +178,13 @@ export function createTraceList(
     if (actions.visible() && !failed) render();
   }
 
-  function receive(list: TraceSummary[]) {
+  function receive(list: TraceSummary[], count = list.length) {
     pending = false;
     // Most refreshes find the list as it was; leaving the rows alone keeps focus and scroll steady.
-    const unchanged = !failed && drawn && JSON.stringify(list) === JSON.stringify(traces);
+    const unchanged = !failed && drawn && count === total && JSON.stringify(list) === JSON.stringify(traces);
     failed = false;
     traces = list;
+    total = count;
     if (actions.visible() && !unchanged) render();
   }
 
@@ -218,8 +211,8 @@ export function createTraceList(
     }
     const failed = traces.filter((trace) => trace.errors).length;
     elements.tracesStatus.textContent =
-      (cut()
-        ? `Newest ${traces.length.toLocaleString()} of ${traceCount.toLocaleString()} traces`
+      (total > traces.length
+        ? `Newest ${traces.length.toLocaleString()} of ${total.toLocaleString()} traces`
         : `${traces.length.toLocaleString()} recent ${traces.length === 1 ? 'trace' : 'traces'}`) +
       ` · ${failed.toLocaleString()} with errors` +
       (withSpans < traces.length ? ` · ${(traces.length - withSpans).toLocaleString()} from logs only` : '') +

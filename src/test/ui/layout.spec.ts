@@ -241,13 +241,13 @@ test('a trace with a span’s details open fits', async ({ openPanel }) => {
   await panel.post(traces);
   await page.locator('#tracesRows tr').first().click();
   await panel.post(traceDetail);
-  // The waterfall may scroll sideways in a narrow panel; opening a span must not make it scroll further.
+  // The waterfall narrows with the inspector: it never scrolls sideways, with a span open or not.
   const overflow = () =>
     page.evaluate(() => {
       const box = document.getElementById('inspectorBody')!;
       return box.scrollWidth - box.clientWidth;
     });
-  const before = await overflow();
+  expect(await overflow(), 'the waterfall fits across the inspector').toBeLessThanOrEqual(1);
   await page.locator('#traceRows tr.trace-span[data-span-id="b"]').click();
   await panel.post(spanDetail);
   const details = page.locator('#traceRows tr.trace-detail');
@@ -257,7 +257,7 @@ test('a trace with a span’s details open fits', async ({ openPanel }) => {
   expect(
     await overflow(),
     'a long value wraps inside the details instead of widening the inspector',
-  ).toBeLessThanOrEqual(Math.max(before, 0) + 1);
+  ).toBeLessThanOrEqual(1);
   await page.locator('#traceRows tr.trace-span[data-span-id="b"]').click();
   await expect(details).toHaveCount(0);
   await panel.fits('the span closed again');

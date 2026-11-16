@@ -366,7 +366,7 @@ export function createViewer(api: WebviewApi) {
       return;
     }
     if (data.type === 'traces') {
-      traceList.receive(data.traces);
+      traceList.receive(data.traces, data.total);
       return;
     }
     if (data.type === 'span') {
@@ -519,7 +519,7 @@ export function createViewer(api: WebviewApi) {
     // Analyze and Traces follow the retained logs and spans: a view left open catches up as they arrive.
     const logsBasis = `${data.generation}:${data.newest}`;
     const tracesBasis = `${logsBasis}:${data.tracesRevision ?? 0}`;
-    traceList.update(tracesBasis, data.traceCount);
+    traceList.update(tracesBasis);
     traceView.update(tracesBasis);
     if (
       views.active() === 'analysis' &&

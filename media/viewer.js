@@ -2348,7 +2348,6 @@
   // src/webview/inspection/traces.ts
   var SLOW_MS = 1e3;
   var REFRESH_MS2 = 5e3;
-  var LIST_LIMIT = 200;
   function createTraceList(elements, api, scope, actions) {
     let traces = [];
     const hidden = /* @__PURE__ */ new Set();
@@ -2361,8 +2360,7 @@
     let drawn = false;
     let loadedAt = -Infinity;
     let refresh;
-    let traceCount = 0;
-    const cut = () => traces.length >= LIST_LIMIT && traceCount > traces.length;
+    let total = 0;
     function load() {
       if (pending) return;
       pending = true;
@@ -2391,12 +2389,9 @@
       refresh = void 0;
     }
     scope.track(hide);
-    function update(next, count = 0) {
+    function update(next) {
       const changed = basis !== void 0 && next !== basis;
       basis = next;
-      const wasCut = cut() ? traceCount : 0;
-      traceCount = count;
-      if ((cut() ? traceCount : 0) !== wasCut && drawn && !failed && actions.visible()) render();
       if (changed && actions.visible()) refreshSoon();
     }
     function fail(message) {
@@ -2473,11 +2468,12 @@
     function receiverChanged() {
       if (actions.visible() && !failed) render();
     }
-    function receive(list) {
+    function receive(list, count = list.length) {
       pending = false;
-      const unchanged = !failed && drawn && JSON.stringify(list) === JSON.stringify(traces);
+      const unchanged = !failed && drawn && count === total && JSON.stringify(list) === JSON.stringify(traces);
       failed = false;
       traces = list;
+      total = count;
       if (actions.visible() && !unchanged) render();
     }
     function render() {
@@ -2496,7 +2492,7 @@
         return;
       }
       const failed2 = traces.filter((trace) => trace.errors).length;
-      elements.tracesStatus.textContent = (cut() ? `Newest ${traces.length.toLocaleString()} of ${traceCount.toLocaleString()} traces` : `${traces.length.toLocaleString()} recent ${traces.length === 1 ? "trace" : "traces"}`) + ` \xB7 ${failed2.toLocaleString()} with errors` + (withSpans < traces.length ? ` \xB7 ${(traces.length - withSpans).toLocaleString()} from logs only` : "") + (shown2.length < traces.length ? ` \xB7 ${shown2.length.toLocaleString()} shown` : "") + " \xB7 Choose one to see its waterfall";
+      elements.tracesStatus.textContent = (total > traces.length ? `Newest ${traces.length.toLocaleString()} of ${total.toLocaleString()} traces` : `${traces.length.toLocaleString()} recent ${traces.length === 1 ? "trace" : "traces"}`) + ` \xB7 ${failed2.toLocaleString()} with errors` + (withSpans < traces.length ? ` \xB7 ${(traces.length - withSpans).toLocaleString()} from logs only` : "") + (shown2.length < traces.length ? ` \xB7 ${shown2.length.toLocaleString()} shown` : "") + " \xB7 Choose one to see its waterfall";
       const longest = Math.max(1, ...shown2.map((trace) => trace.durationMs));
       const focused = document.activeElement?.closest(".traces-row");
       const focusedId = focused && elements.tracesRows.contains(focused) ? focused.dataset.traceId : void 0;
@@ -9592,7 +9588,7 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
         return;
       }
       if (data.type === "traces") {
-        traceList.receive(data.traces);
+        traceList.receive(data.traces, data.total);
         return;
       }
       if (data.type === "span") {
@@ -9722,7 +9718,7 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
       aiCalls.update(data.aiCalls, otlpRunning);
       const logsBasis = `${data.generation}:${data.newest}`;
       const tracesBasis = `${logsBasis}:${data.tracesRevision ?? 0}`;
-      traceList.update(tracesBasis, data.traceCount);
+      traceList.update(tracesBasis);
       traceView.update(tracesBasis);
       if (views.active() === "analysis" && (retainedBasis !== void 0 && retainedBasis !== logsBasis || analysisStale)) {
         analysisStale = false;

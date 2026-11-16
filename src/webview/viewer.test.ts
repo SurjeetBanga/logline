@@ -6745,14 +6745,13 @@ test('the Traces list says when it holds the newest 200 of more traces', () => {
     errors: 0,
   });
   get('traces').listeners.get('click')!();
-  receive({ ...railSnapshot, traceCount: 300 });
-  receive({ type: 'traces', traces: Array.from({ length: 200 }, (_, index) => trace(index)) });
+  const list = Array.from({ length: 200 }, (_, index) => trace(index));
+  receive({ type: 'traces', traces: list, total: 300 });
   assert.match(get('tracesStatus').textContent, /^Newest 200 of 300 traces · 0 with errors/);
-  receive({ ...railSnapshot, traceCount: 350 });
+  receive({ type: 'traces', traces: list, total: 350 });
   assert.match(get('tracesStatus').textContent, /^Newest 200 of 350 traces/, 'the count follows');
-  receive({ ...railSnapshot, traceCount: 200 });
+  receive({ type: 'traces', traces: list, total: 200 });
   assert.match(get('tracesStatus').textContent, /^200 recent traces/, 'nothing is cut once the count matches');
   receive({ type: 'traces', traces: [trace(1), trace(2)] });
-  receive({ ...railSnapshot, traceCount: 300 });
   assert.match(get('tracesStatus').textContent, /^2 recent traces/, 'a short list is not cut');
 });

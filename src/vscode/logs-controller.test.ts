@@ -211,6 +211,19 @@ test('span rows shown in Logs do not use up the logs a trace or the trace list r
   assert.equal(controller.traceList().find((trace) => trace.traceId === traceId)?.logs, 5);
 });
 
+test('the trace list reads traces from more than a thousand logs, and counts those past the newest 200', async (t) => {
+  const controller = setup(t);
+  // Oldest first: the first trace is known only from a log 1,500 lines back.
+  for (let index = 0; index < 1500; index++)
+    controller.ingestion.accept(
+      `{"msg":"log ${index}","trace_id":"${index.toString(16).padStart(32, '0')}"}`,
+      'stdout',
+      { serverId: 'web', server: 'web', sessionId: 'r' },
+    );
+  assert.equal(controller.traceList().length, 200, 'the list holds the newest');
+  assert.equal(controller.traceTotal(), 1500, 'and every trace is counted, the oldest log included');
+});
+
 test('a trace with no retained spans still shows its span rows', async (t) => {
   const controller = setup(t);
   const traceId = '4bf92f3577b34da6a3ce929d0e0e4736';

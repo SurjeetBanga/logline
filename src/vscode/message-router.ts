@@ -96,6 +96,8 @@ interface MessageServices {
   openLogSite(id: number): Promise<void>;
   traceView(traceId: string): TraceView;
   traceList(): TraceSummary[];
+  /** How many traces there are, when the list holds only the newest of them. */
+  traceTotal?(): number;
   metricList(): MetricSeriesView[];
   aiCallList(): GenAiSummary;
   aiCallDetail(traceId: string, spanId: string): GenAiCallDetail | undefined;
@@ -177,7 +179,7 @@ export async function handleMessage(
       return;
     case 'traces':
       try {
-        send({ type: 'traces', traces: services.traceList() });
+        send({ type: 'traces', traces: services.traceList(), total: services.traceTotal?.() });
       } catch (error) {
         send({ type: 'viewError', view: 'traces', message: errorText(error) });
       }

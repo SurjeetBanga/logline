@@ -335,6 +335,10 @@
 .trace-detail-actions button {
   padding: 2px 8px;
   font-size: 12px;
+  /* In the narrowest inspector a label wraps instead of widening the waterfall. */
+  max-width: 100%;
+  white-space: normal;
+  text-align: left;
 }
 .trace-detail-event {
   margin-top: 6px;
@@ -2986,6 +2990,10 @@ td.time {
 .inspector-part .view-status {
   margin: 0 0 6px;
   white-space: normal;
+}
+/* The waterfall narrows with the inspector instead of keeping a table's least width and scrolling sideways. */
+#traceView .trace-table {
+  min-width: 0;
 }
 /* In a narrow inspector the waterfall keeps the operation, its bar, and its duration. */
 @container (max-width: 520px) {

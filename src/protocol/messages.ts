@@ -350,7 +350,11 @@ export type HostMessage =
       message: string;
     }
   | { type: 'trace'; trace: TraceView }
-  | { type: 'traces'; traces: TraceSummary[] }
+  | {
+      type: 'traces';
+      traces: TraceSummary[];
+      /** Every trace there is to list, when `traces` is the newest of them. */ total?: number;
+    }
   | { type: 'span'; traceId: string; spanId: string; detail?: SpanDetail }
   | { type: 'aiCalls'; aiCalls: GenAiSummary }
   | { type: 'aiCall'; traceId: string; spanId: string; detail?: GenAiCallDetail }

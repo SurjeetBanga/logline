@@ -41,6 +41,37 @@ test('OpenTelemetry defaults never replace a configured destination or set value
   );
 });
 
+test('span rows shown in Logs do not use up the logs an agent reads for a trace', async () => {
+  const { AgentLogAccess } = withVscode({}, () => require('./agent-access') as typeof import('./agent-access'));
+  const store = new LogStore();
+  const spans = new SpanStore();
+  const traceId = '4bf92f3577b34da6a3ce929d0e0e4736';
+  const add = (id: number, line: string) =>
+    store.add({ ...parseLogLine(line, 'otlp', id, new Date()), serverId: 'otel:api', server: 'api', sessionId: 'run' });
+  for (let id = 1; id <= 5; id++) add(id, `{"msg":"log ${id}","traceId":"${traceId}"}`);
+  // Newer than every log, and more of them than the read takes.
+  for (let id = 6; id <= 305; id++) add(id, `{"msg":"GET /orders","kind":"span","traceId":"${traceId}"}`);
+  spans.add({
+    traceId,
+    spanId: '1111111111111111',
+    name: 'GET /orders',
+    kind: 2,
+    startMs: 0,
+    endMs: 5,
+    service: 'api',
+    events: [],
+    status: { code: 0 },
+    attributes: {},
+  });
+  const access = new AgentLogAccess(store, new SessionRegistry(), () => 306, {}, spans);
+  const trace = access.trace(access.share(['otel:api']).shareId!, traceId);
+  assert.deepEqual(
+    trace.logs.map((log) => log.message),
+    ['log 1', 'log 2', 'log 3', 'log 4', 'log 5'],
+  );
+  assert.equal(trace.coverage.limited, false);
+});
+
 test('agent traces include only spans and logs from shared sources, redacted', async () => {
   const { AgentLogAccess } = withVscode({}, () => require('./agent-access') as typeof import('./agent-access'));
   const store = new LogStore();
