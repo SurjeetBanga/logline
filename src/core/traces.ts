@@ -207,6 +207,8 @@ export interface TraceLog {
   message: string;
   offsetMs?: number;
   spanId?: string;
+  /** The log's span was received but is not among the rows, because the trace has more spans than the display limit. */
+  spanOmitted?: true;
   server?: string;
 }
 
@@ -233,6 +235,8 @@ export interface TraceView {
   /** Operations that spent the most time themselves, most first. */
   hotspots: TraceHotspot[];
   logs: TraceLog[];
+  /** More logs matched the trace than were read, so `logs` holds the newest of them. */
+  logsLimited?: true;
 }
 
 const MAX_ROW_ATTRIBUTES = 24;
@@ -389,6 +393,7 @@ export function buildTrace(
     for (const child of (children.get(span.spanId) ?? []).slice().reverse())
       stack.push({ span: child, depth: depth + 1 });
   }
+  const shownIds = new Set(rows.map((row) => row.spanId));
   return {
     traceId,
     startMs,
@@ -401,6 +406,8 @@ export function buildTrace(
     logs: logs.map(({ timeMs, ...log }) => ({
       ...log,
       offsetMs: timeMs === undefined || startMs === undefined ? undefined : timeMs - startMs,
+      // A log of a received span that the rows leave out is not unlinked; it says so.
+      ...(log.spanId && byId.has(log.spanId) && !shownIds.has(log.spanId) ? { spanOmitted: true as const } : {}),
     })),
   };
 }

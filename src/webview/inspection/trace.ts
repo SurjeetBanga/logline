@@ -210,7 +210,7 @@ export function createTraceView(
     if (!actions.inspecting() || next.traceId !== current) return;
     pending = false;
     // Most refreshes find the trace as it was; leaving the rows alone keeps tooltips, focus, and scroll steady.
-    const signature = `${next.traceId}:${next.spans.length}:${next.omitted}:${next.errors}:${next.durationMs}:${next.logs.length}:${next.logs.at(-1)?.id ?? ''}`;
+    const signature = `${next.traceId}:${next.spans.length}:${next.omitted}:${next.errors}:${next.durationMs}:${next.logs.length}:${next.logs.at(-1)?.id ?? ''}:${next.logsLimited ?? ''}`;
     if (signature === shown) return;
     shown = signature;
     trace = next;
@@ -233,10 +233,12 @@ export function createTraceView(
     const total = Math.max(trace.durationMs, 0.001);
     const logsBySpan = new Map<string, TraceLog[]>();
     const unattached: TraceLog[] = [];
+    const omittedSpans: TraceLog[] = [];
     const spanIds = new Set(trace.spans.map((span) => span.spanId));
     for (const log of trace.logs) {
       if (log.spanId && spanIds.has(log.spanId))
         logsBySpan.set(log.spanId, [...(logsBySpan.get(log.spanId) ?? []), log]);
+      else if (log.spanOmitted) omittedSpans.push(log);
       else unattached.push(log);
     }
     const rows: HTMLTableRowElement[] = [];
@@ -251,17 +253,20 @@ export function createTraceView(
       if (span.spanId === selected) rows.push(spanDetails(span, detail));
       for (const log of logsBySpan.get(span.spanId) ?? []) rows.push(logRow(log, total, span.depth + 1));
     }
-    if (unattached.length) {
-      if (trace.spans.length) {
+    const section = (title: string, logs: TraceLog[]) => {
+      if (!logs.length) return;
+      if (trace!.spans.length) {
         const heading = document.createElement('tr');
         heading.className = 'trace-section';
-        const label = cell('Logs not linked to a received span');
+        const label = cell(title);
         label.colSpan = 5;
         heading.append(label);
         rows.push(heading);
       }
-      for (const log of unattached) rows.push(logRow(log, total, 0));
-    }
+      for (const log of logs) rows.push(logRow(log, total, 0));
+    };
+    section('Logs of spans not shown', omittedSpans);
+    section('Logs not linked to a received span', unattached);
     elements.traceRows.replaceChildren(...rows);
     if (focusId) rows.find((row) => row.dataset.spanId === focusId)?.focus();
   }
@@ -281,11 +286,12 @@ export function createTraceView(
 }
 
 function summary(trace: TraceView): string {
+  const limited = trace.logsLimited ? ` · Newest ${trace.logs.length} logs shown` : '';
   if (!trace.spans.length && !trace.logs.length) {
     return 'No spans or retained logs have this trace id. Start the OpenTelemetry receiver from the status icon, or Add logs in the Sources rail, to collect spans from instrumented apps.';
   }
   if (!trace.spans.length) {
-    return `${trace.logs.length} retained log${trace.logs.length === 1 ? '' : 's'} with this trace id over ${formatDuration(trace.durationMs)}. No spans were received for it.`;
+    return `${trace.logs.length} retained log${trace.logs.length === 1 ? '' : 's'} with this trace id over ${formatDuration(trace.durationMs)}. No spans were received for it.${trace.logsLimited ? ` Newest ${trace.logs.length} logs shown.` : ''}`;
   }
   const spans = trace.spans.length + trace.omitted;
   const parts = [
@@ -295,7 +301,7 @@ function summary(trace: TraceView): string {
     trace.errors ? `${trace.errors} error${trace.errors === 1 ? '' : 's'}` : 'no errors',
     `${trace.logs.length} log${trace.logs.length === 1 ? '' : 's'}`,
   ];
-  return `${parts.join(' · ')} · Highlighted spans are the critical path${trace.omitted ? ` · First ${trace.spans.length} spans shown` : ''}`;
+  return `${parts.join(' · ')} · Highlighted spans are the critical path${trace.omitted ? ` · First ${trace.spans.length} spans shown` : ''}${limited}`;
 }
 
 function hotspotItem(hotspot: TraceHotspot, top: number): HTMLLIElement {

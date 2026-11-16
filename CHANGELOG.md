@@ -2,6 +2,20 @@
 
 All notable changes to Logline are documented in this file.
 
+## Unreleased
+
+### Changes
+
+- **Span details in the waterfall**: click a span row in a trace's waterfall, or press Enter or Space on it, to open its details directly beneath it: service, kind, duration and self time, start offset, instrumentation scope, error message, every attribute kept for the span (the hover tooltip showed at most 24), and its events with their attributes. Up and Down move between span rows, and Home and End go to the first and last. Choosing an operation under **Where the time went** opens that span too. **Show this span's logs** filters Logs to that span, **Copy span ID** and **Copy span** (the span as JSON, redacted like exports) copy it, and the waterfall has **Copy trace ID**. Prompts and responses of GenAI spans stay in **AI calls**.
+- **Analyze and Traces stay current**: while open, **Analyze** analyzes again when logs arrive or are cleared, and the trace list and an open waterfall refresh as spans and logs with trace ids arrive, each at most every five seconds, keeping your scroll position and focus. Spans that arrive late appear without reopening the trace, and **Analyze** waits while you drag out or hold a time window on the volume chart, so the selection is not lost.
+- **Limits are stated**: the trace list says when more than the newest 200 traces are retained, and a waterfall says when its trace has more than the 500 logs it reads. Span rows shown in Logs no longer count against that limit or against the logs the list counts per trace.
+
+### Fixes
+
+- **Analyze** says **Could not analyze these logs** with the reason when analysis fails, instead of staying on **Loading analysis…**, and the Traces tab shows a failure to load the list or a trace. Changing filters quickly no longer lets an older answer replace a newer one.
+- **Analyze** shows the first 20 error groups with **Show all N** for the rest, which were not shown before. A status code that is not three digits is shown as plain text instead of a button that did nothing.
+- When a trace has more spans than the waterfall shows (2,000), logs of the spans left out are listed under **Logs of spans not shown** instead of being described as not linked to a received span.
+
 ## 1.21.0 — 2026-11-15
 
 ### Changes

@@ -519,7 +519,7 @@ export function createViewer(api: WebviewApi) {
     // Analyze and Traces follow the retained logs and spans: a view left open catches up as they arrive.
     const logsBasis = `${data.generation}:${data.newest}`;
     const tracesBasis = `${logsBasis}:${data.tracesRevision ?? 0}`;
-    traceList.update(tracesBasis);
+    traceList.update(tracesBasis, data.traceCount);
     traceView.update(tracesBasis);
     if (
       views.active() === 'analysis' &&

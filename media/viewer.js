@@ -63,6 +63,7 @@
     let cachedFormatter;
     let dragging = false;
     let windowSelected = false;
+    let allErrorGroups = false;
     function svgEl(tag, attrs = {}) {
       const el = document.createElementNS(SVG_NS, tag);
       for (const [key, value] of Object.entries(attrs)) el.setAttribute(key, String(value));
@@ -484,12 +485,13 @@
       return tiles2;
     }
     function barRow(label, value, total, max, target, tone = "") {
-      const row = document.createElement("button");
-      row.type = "button";
-      row.className = "bar-row";
+      const interactive = target.source !== void 0 || !!target.term;
+      const row = document.createElement(interactive ? "button" : "div");
+      if (interactive) row.type = "button";
+      row.className = interactive ? "bar-row" : "bar-row static";
       if (target.source !== void 0) row.dataset.source = target.source;
       else if (target.term) row.dataset.term = target.term;
-      row.title = `${label}: ${count(value)} (${percent(value, total)}). Click to show these events.`;
+      row.title = `${label}: ${count(value)} (${percent(value, total)})${interactive ? ". Click to show these events." : ""}`;
       const name = document.createElement("span");
       name.className = "bar-label";
       name.textContent = label;
@@ -614,8 +616,21 @@
       );
       const errorTotal = errorGroups.reduce((sum, item) => sum + item.count, 0);
       const errorMax = Math.max(1, ...errorGroups.map((item) => item.count));
-      for (const item of errorGroups.slice(0, 20))
-        groups2.append(groupRow(item, errorTotal, errorMax, { detail: seen(item, analysis.range) }));
+      const shown2 = 20;
+      if (errorGroups.length <= shown2) allErrorGroups = false;
+      const errorRow = (item) => groupRow(item, errorTotal, errorMax, { detail: seen(item, analysis.range) });
+      for (const item of errorGroups.slice(0, allErrorGroups ? errorGroups.length : shown2)) groups2.append(errorRow(item));
+      if (errorGroups.length > shown2 && !allErrorGroups) {
+        const more = document.createElement("button");
+        more.type = "button";
+        more.className = "show-more";
+        more.textContent = `Show all ${count(errorGroups.length)}`;
+        more.addEventListener("click", () => {
+          allErrorGroups = true;
+          more.replaceWith(...errorGroups.slice(shown2).map(errorRow));
+        });
+        groups2.append(more);
+      }
       if (!errorGroups.length) groups2.append(empty("No errors in these logs."));
       content.append(groups2);
       const breakdowns = document.createElement("div");
@@ -2030,7 +2045,7 @@
     function receive(next) {
       if (!actions.inspecting() || next.traceId !== current) return;
       pending = false;
-      const signature = `${next.traceId}:${next.spans.length}:${next.omitted}:${next.errors}:${next.durationMs}:${next.logs.length}:${next.logs.at(-1)?.id ?? ""}`;
+      const signature = `${next.traceId}:${next.spans.length}:${next.omitted}:${next.errors}:${next.durationMs}:${next.logs.length}:${next.logs.at(-1)?.id ?? ""}:${next.logsLimited ?? ""}`;
       if (signature === shown2) return;
       shown2 = signature;
       trace = next;
@@ -2049,10 +2064,12 @@
       const total = Math.max(trace.durationMs, 1e-3);
       const logsBySpan = /* @__PURE__ */ new Map();
       const unattached = [];
+      const omittedSpans = [];
       const spanIds = new Set(trace.spans.map((span2) => span2.spanId));
       for (const log of trace.logs) {
         if (log.spanId && spanIds.has(log.spanId))
           logsBySpan.set(log.spanId, [...logsBySpan.get(log.spanId) ?? [], log]);
+        else if (log.spanOmitted) omittedSpans.push(log);
         else unattached.push(log);
       }
       const rows = [];
@@ -2066,17 +2083,20 @@
         if (span2.spanId === selected) rows.push(spanDetails(span2, detail));
         for (const log of logsBySpan.get(span2.spanId) ?? []) rows.push(logRow(log, total, span2.depth + 1));
       }
-      if (unattached.length) {
+      const section = (title, logs) => {
+        if (!logs.length) return;
         if (trace.spans.length) {
           const heading = document.createElement("tr");
           heading.className = "trace-section";
-          const label = cell("Logs not linked to a received span");
+          const label = cell(title);
           label.colSpan = 5;
           heading.append(label);
           rows.push(heading);
         }
-        for (const log of unattached) rows.push(logRow(log, total, 0));
-      }
+        for (const log of logs) rows.push(logRow(log, total, 0));
+      };
+      section("Logs of spans not shown", omittedSpans);
+      section("Logs not linked to a received span", unattached);
       elements.traceRows.replaceChildren(...rows);
       if (focusId) rows.find((row) => row.dataset.spanId === focusId)?.focus();
     }
@@ -2094,11 +2114,12 @@
     };
   }
   function summary(trace) {
+    const limited = trace.logsLimited ? ` \xB7 Newest ${trace.logs.length} logs shown` : "";
     if (!trace.spans.length && !trace.logs.length) {
       return "No spans or retained logs have this trace id. Start the OpenTelemetry receiver from the status icon, or Add logs in the Sources rail, to collect spans from instrumented apps.";
     }
     if (!trace.spans.length) {
-      return `${trace.logs.length} retained log${trace.logs.length === 1 ? "" : "s"} with this trace id over ${formatDuration(trace.durationMs)}. No spans were received for it.`;
+      return `${trace.logs.length} retained log${trace.logs.length === 1 ? "" : "s"} with this trace id over ${formatDuration(trace.durationMs)}. No spans were received for it.${trace.logsLimited ? ` Newest ${trace.logs.length} logs shown.` : ""}`;
     }
     const spans = trace.spans.length + trace.omitted;
     const parts = [
@@ -2108,7 +2129,7 @@
       trace.errors ? `${trace.errors} error${trace.errors === 1 ? "" : "s"}` : "no errors",
       `${trace.logs.length} log${trace.logs.length === 1 ? "" : "s"}`
     ];
-    return `${parts.join(" \xB7 ")} \xB7 Highlighted spans are the critical path${trace.omitted ? ` \xB7 First ${trace.spans.length} spans shown` : ""}`;
+    return `${parts.join(" \xB7 ")} \xB7 Highlighted spans are the critical path${trace.omitted ? ` \xB7 First ${trace.spans.length} spans shown` : ""}${limited}`;
   }
   function hotspotItem(hotspot, top) {
     const item = document.createElement("li");
@@ -2327,6 +2348,7 @@
   // src/webview/inspection/traces.ts
   var SLOW_MS = 1e3;
   var REFRESH_MS2 = 5e3;
+  var LIST_LIMIT = 200;
   function createTraceList(elements, api, scope, actions) {
     let traces = [];
     const hidden = /* @__PURE__ */ new Set();
@@ -2339,6 +2361,8 @@
     let drawn = false;
     let loadedAt = -Infinity;
     let refresh;
+    let traceCount = 0;
+    const cut = () => traces.length >= LIST_LIMIT && traceCount > traces.length;
     function load() {
       if (pending) return;
       pending = true;
@@ -2367,9 +2391,12 @@
       refresh = void 0;
     }
     scope.track(hide);
-    function update(next) {
+    function update(next, count = 0) {
       const changed = basis !== void 0 && next !== basis;
       basis = next;
+      const wasCut = cut() ? traceCount : 0;
+      traceCount = count;
+      if ((cut() ? traceCount : 0) !== wasCut && drawn && !failed && actions.visible()) render();
       if (changed && actions.visible()) refreshSoon();
     }
     function fail(message) {
@@ -2469,7 +2496,7 @@
         return;
       }
       const failed2 = traces.filter((trace) => trace.errors).length;
-      elements.tracesStatus.textContent = `${traces.length.toLocaleString()} recent ${traces.length === 1 ? "trace" : "traces"} \xB7 ${failed2.toLocaleString()} with errors` + (withSpans < traces.length ? ` \xB7 ${(traces.length - withSpans).toLocaleString()} from logs only` : "") + (shown2.length < traces.length ? ` \xB7 ${shown2.length.toLocaleString()} shown` : "") + " \xB7 Choose one to see its waterfall";
+      elements.tracesStatus.textContent = (cut() ? `Newest ${traces.length.toLocaleString()} of ${traceCount.toLocaleString()} traces` : `${traces.length.toLocaleString()} recent ${traces.length === 1 ? "trace" : "traces"}`) + ` \xB7 ${failed2.toLocaleString()} with errors` + (withSpans < traces.length ? ` \xB7 ${(traces.length - withSpans).toLocaleString()} from logs only` : "") + (shown2.length < traces.length ? ` \xB7 ${shown2.length.toLocaleString()} shown` : "") + " \xB7 Choose one to see its waterfall";
       const longest = Math.max(1, ...shown2.map((trace) => trace.durationMs));
       const focused = document.activeElement?.closest(".traces-row");
       const focusedId = focused && elements.tracesRows.contains(focused) ? focused.dataset.traceId : void 0;
@@ -9695,7 +9722,7 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
       aiCalls.update(data.aiCalls, otlpRunning);
       const logsBasis = `${data.generation}:${data.newest}`;
       const tracesBasis = `${logsBasis}:${data.tracesRevision ?? 0}`;
-      traceList.update(tracesBasis);
+      traceList.update(tracesBasis, data.traceCount);
       traceView.update(tracesBasis);
       if (views.active() === "analysis" && (retainedBasis !== void 0 && retainedBasis !== logsBasis || analysisStale)) {
         analysisStale = false;

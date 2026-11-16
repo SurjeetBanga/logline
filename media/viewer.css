@@ -2333,7 +2333,6 @@ select {
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
   gap: 12px;
 }
-/* Error groups beside latency: what failed, and when it got slow. */
 /* Each chart and breakdown sits on a quiet card, like the summary tiles. */
 .analysis-content .chart-section {
   padding: 8px 12px 10px;
@@ -2377,7 +2376,7 @@ select {
   text-align: left;
   white-space: nowrap;
 }
-.bar-row:hover,
+.bar-row:not(.static):hover,
 .group-row:not(.static):hover {
   background: var(--vscode-list-hoverBackground, rgba(255, 255, 255, 0.06));
 }
@@ -2386,6 +2385,7 @@ select {
   outline: 1px solid var(--vscode-focusBorder, #007fd4);
   outline-offset: -1px;
 }
+.bar-row.static,
 .group-row.static {
   cursor: default;
 }
@@ -3226,14 +3226,19 @@ body[data-empty='true'] .empty-actions {
   text-align: right;
   font-variant-numeric: tabular-nums;
 }
-.link-button {
+.link-button,
+.show-more {
   padding: 0;
   border: 0;
   background: transparent;
   color: var(--vscode-textLink-foreground, #3794ff);
 }
-.link-button:hover {
+.link-button:hover,
+.show-more:hover {
   text-decoration: underline;
+}
+.show-more {
+  margin-top: 8px;
 }
 .status-bar .pagination button {
   padding: 1px 8px;
@@ -3648,22 +3653,6 @@ td[data-column]:focus-visible {
   fill: none;
   stroke: var(--vscode-charts-blue, #3794ff);
   stroke-width: 1.5;
-}
-.traces-filter {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  margin-right: 10px;
-  color: var(--vscode-descriptionForeground, #aaa);
-  font-size: 12px;
-}
-.traces-filter input[type='checkbox'] {
-  margin: 0;
-  width: auto;
-  height: auto;
-  padding: 0;
-  border: none;
-  background: none;
 }
 .traces-table th:nth-child(1) {
   width: 104px;

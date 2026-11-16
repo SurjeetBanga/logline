@@ -84,6 +84,14 @@ class Element {
     const siblings = this.parent?.children ?? [];
     return siblings[siblings.indexOf(this) + 1] ?? null;
   }
+  replaceWith(...nodes: Element[]) {
+    const parent = this.parent;
+    if (!parent) return;
+    const index = parent.children.indexOf(this);
+    parent.children.splice(index, 1, ...nodes);
+    for (const node of nodes) node.parent = parent;
+    this.parent = undefined;
+  }
   removeChild(child: Element) {
     this.children = this.children.filter((item) => item !== child);
     if (child.parent === this) child.parent = undefined;
@@ -6622,4 +6630,129 @@ test('an open waterfall loads again as spans arrive, keeps the open span, and re
   assert.match(get('traceStatus').textContent, /spans/);
   receive({ type: 'viewError', view: 'trace', traceId: 'abc123', message: 'store closed' });
   assert.equal(get('traceStatus').textContent, 'Could not load this trace: store closed');
+});
+
+const errorGroupsOf = (count: number) =>
+  Array.from({ length: count }, (_, index) => ({
+    key: `g${index}`,
+    message: `failure ${index}`,
+    count: count - index,
+    sampleIds: [],
+    trend: [],
+    query: `message:"failure ${index}"`,
+  }));
+
+test('a status code that is not three digits is a plain row, not a button that does nothing', () => {
+  const { get, receive, messages } = viewer();
+  get('analyze').listeners.get('click')!();
+  receive({
+    type: 'analysis',
+    requestId: analysisRequests(messages).at(-1)!.requestId,
+    analysis: {
+      ...emptyAnalysis,
+      statusCodes: [
+        { code: '404', count: 3 },
+        { code: 'ERR', count: 2 },
+      ],
+    },
+  });
+  const [coded, other] = get('analysisContent').querySelectorAll('.bar-row');
+  assert.equal(coded.className, 'bar-row');
+  assert.equal(coded.dataset.term, 'status:404');
+  assert.match(coded.title, /Click to show/);
+  assert.equal(other.className, 'bar-row static');
+  assert.equal(other.dataset.term, undefined);
+  assert.doesNotMatch(other.title, /Click/);
+});
+
+test('Analyze lists 20 error groups with Show all N, and keeps showing all as it refreshes', () => {
+  const { get, receive, messages } = viewer();
+  get('analyze').listeners.get('click')!();
+  const answer = (groups: number) =>
+    receive({
+      type: 'analysis',
+      requestId: analysisRequests(messages).at(-1)!.requestId,
+      analysis: { ...emptyAnalysis, errorGroups: errorGroupsOf(groups) },
+    });
+  const groupRows = () => get('analysisContent').querySelectorAll('.group-row');
+  const showAll = () => get('analysisContent').querySelectorAll('.show-more')[0];
+  answer(25);
+  assert.equal(groupRows().length, 20);
+  assert.equal(showAll().textContent, 'Show all 25');
+  assert.equal(showAll().dataset.term, undefined, 'it is not a way into the logs');
+  assert.equal(showAll().dataset.source, undefined);
+  showAll().listeners.get('click')!();
+  assert.equal(groupRows().length, 25);
+  assert.equal(showAll(), undefined, 'the button removes itself');
+  // A later answer keeps showing all of them.
+  answer(26);
+  assert.equal(groupRows().length, 26);
+  assert.equal(showAll(), undefined);
+  // Once 20 or fewer remain, the choice is forgotten.
+  answer(5);
+  assert.equal(groupRows().length, 5);
+  answer(30);
+  assert.equal(groupRows().length, 20);
+  assert.equal(showAll().textContent, 'Show all 30');
+});
+
+test('a waterfall lists logs of spans it leaves out under their own heading', () => {
+  const { get, app, receive } = viewer();
+  app.traceView.show('abc123');
+  receive({
+    type: 'trace',
+    trace: waterfall({
+      omitted: 1,
+      logs: [
+        { id: 1, level: 'info', message: 'from a span left out', offsetMs: 5, spanId: 'zz', spanOmitted: true },
+        { id: 2, level: 'info', message: 'no span', offsetMs: 6 },
+        { id: 3, level: 'info', message: 'from a span shown', offsetMs: 7, spanId: 'b' },
+      ],
+    }),
+  });
+  const rows = get('traceRows').children;
+  assert.deepEqual(
+    rows.map((row) => row.dataset.spanId ?? row.className),
+    ['a', 'b', 'trace-log', 'c', 'trace-section', 'trace-log', 'trace-section', 'trace-log'],
+  );
+  assert.equal(rows[4].children[0].textContent, 'Logs of spans not shown');
+  assert.equal(rows[6].children[0].textContent, 'Logs not linked to a received span');
+});
+
+test('a waterfall says when it read only the newest logs of its trace', () => {
+  const { get, app, receive } = viewer();
+  app.traceView.show('abc123');
+  const logs = [{ id: 1, level: 'info', message: 'one', offsetMs: 1 }];
+  receive({ type: 'trace', trace: waterfall({ logs, omitted: 1 }) });
+  assert.doesNotMatch(get('traceStatus').textContent, /logs shown/);
+  receive({ type: 'trace', trace: waterfall({ logs, omitted: 1, logsLimited: true }) });
+  assert.match(get('traceStatus').textContent, /spans shown · Newest 1 logs shown$/);
+  receive({ type: 'trace', trace: waterfall({ spans: [], logs, logsLimited: true }) });
+  assert.match(get('traceStatus').textContent, /No spans were received for it\. Newest 1 logs shown\.$/);
+});
+
+test('the Traces list says when it holds the newest 200 of more traces', () => {
+  const { get, receive } = viewer();
+  const trace = (index: number) => ({
+    traceId: `t${index}`,
+    name: `GET /${index}`,
+    service: 'api',
+    services: ['api'],
+    startMs: 1000,
+    durationMs: 10,
+    spans: 1,
+    logs: 0,
+    errors: 0,
+  });
+  get('traces').listeners.get('click')!();
+  receive({ ...railSnapshot, traceCount: 300 });
+  receive({ type: 'traces', traces: Array.from({ length: 200 }, (_, index) => trace(index)) });
+  assert.match(get('tracesStatus').textContent, /^Newest 200 of 300 traces · 0 with errors/);
+  receive({ ...railSnapshot, traceCount: 350 });
+  assert.match(get('tracesStatus').textContent, /^Newest 200 of 350 traces/, 'the count follows');
+  receive({ ...railSnapshot, traceCount: 200 });
+  assert.match(get('tracesStatus').textContent, /^200 recent traces/, 'nothing is cut once the count matches');
+  receive({ type: 'traces', traces: [trace(1), trace(2)] });
+  receive({ ...railSnapshot, traceCount: 300 });
+  assert.match(get('tracesStatus').textContent, /^2 recent traces/, 'a short list is not cut');
 });

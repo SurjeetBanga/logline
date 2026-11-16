@@ -10,6 +10,8 @@ import { formatDuration } from './trace';
 /** Slower than this is a slow request, for the rail's filter. */
 const SLOW_MS = 1000;
 const REFRESH_MS = 5000;
+/** How many traces the host lists, newest first. */
+const LIST_LIMIT = 200;
 
 /**
  * The Traces tab: recent requests across services, from OpenTelemetry
@@ -45,6 +47,10 @@ export function createTraceList(
   let drawn = false;
   let loadedAt = -Infinity;
   let refresh: ReturnType<typeof setTimeout> | undefined;
+  /** Traces with retained spans, as the snapshot counts them; more than the list holds means it is cut. */
+  let traceCount = 0;
+  /** The list holds the newest traces of a larger set, so its status says so. */
+  const cut = () => traces.length >= LIST_LIMIT && traceCount > traces.length;
 
   function load() {
     if (pending) return;
@@ -82,9 +88,13 @@ export function createTraceList(
   scope.track(hide);
 
   /** Follows the retained spans and logs: a shown list loads again once they change. */
-  function update(next: string) {
+  function update(next: string, count = 0) {
     const changed = basis !== undefined && next !== basis;
     basis = next;
+    const wasCut = cut() ? traceCount : 0;
+    traceCount = count;
+    // The count moves with every span, so the list draws again only when its wording changes.
+    if ((cut() ? traceCount : 0) !== wasCut && drawn && !failed && actions.visible()) render();
     if (changed && actions.visible()) refreshSoon();
   }
 
@@ -208,7 +218,10 @@ export function createTraceList(
     }
     const failed = traces.filter((trace) => trace.errors).length;
     elements.tracesStatus.textContent =
-      `${traces.length.toLocaleString()} recent ${traces.length === 1 ? 'trace' : 'traces'} · ${failed.toLocaleString()} with errors` +
+      (cut()
+        ? `Newest ${traces.length.toLocaleString()} of ${traceCount.toLocaleString()} traces`
+        : `${traces.length.toLocaleString()} recent ${traces.length === 1 ? 'trace' : 'traces'}`) +
+      ` · ${failed.toLocaleString()} with errors` +
       (withSpans < traces.length ? ` · ${(traces.length - withSpans).toLocaleString()} from logs only` : '') +
       (shown.length < traces.length ? ` · ${shown.length.toLocaleString()} shown` : '') +
       ' · Choose one to see its waterfall';

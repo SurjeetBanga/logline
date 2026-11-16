@@ -287,6 +287,32 @@ test('builds a depth-first waterfall with the critical path and orphan roots', (
   assert.deepEqual([logsOnly.durationMs, logsOnly.logs.map((log) => log.offsetMs)], [30, [0, 30]]);
 });
 
+test('logs of spans left out of the rows are flagged, and logs of other spans are not', () => {
+  const pad = (id: string) => id.padEnd(16, '0');
+  const spans = [span('a', undefined, 1000, 1100), span('b', 'a', 1010, 1050), span('c', 'a', 1060, 1090)];
+  const logs = [
+    { id: 1, level: 'info', message: 'in a', spanId: pad('a') },
+    { id: 2, level: 'info', message: 'in c, left out', spanId: pad('c') },
+    { id: 3, level: 'info', message: 'unknown span', spanId: pad('z') },
+    { id: 4, level: 'info', message: 'no span' },
+  ];
+  const view = buildTrace(TRACE, spans, logs, 2);
+  assert.equal(view.omitted, 1);
+  assert.deepEqual(
+    view.logs.map((log) => [log.id, log.spanOmitted]),
+    [
+      [1, undefined],
+      [2, true],
+      [3, undefined],
+      [4, undefined],
+    ],
+  );
+  assert.ok(
+    buildTrace(TRACE, spans, logs).logs.every((log) => log.spanOmitted === undefined),
+    'with every span shown, none is left out',
+  );
+});
+
 test('self time leaves out time covered by children, counting overlaps once', () => {
   const parent = span('a', undefined, 0, 100);
   assert.equal(selfTimeMs(parent, []), 100);

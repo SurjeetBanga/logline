@@ -1080,15 +1080,23 @@ export class LogsController {
   traceView(traceId: string): TraceView {
     const id = traceId.toLowerCase();
     const spans = this.spans.trace(id);
-    const read = this.store.reversePage({ query: `traceId:${JSON.stringify(id)}` }, 500);
-    return buildTrace(id, spans, traceLogs(read.events, id, spans.length > 0));
+    const hasSpans = spans.length > 0;
+    // Span rows shown in Logs carry the trace id too, and are not wanted when the spans are drawn; leaving them
+    // out of the query keeps them from using up the 500 logs read. `kind:/^span$/` matches only that exact value.
+    const query = `traceId:${JSON.stringify(id)}${hasSpans ? ' -kind:/^span$/' : ''}`;
+    const read = this.store.reversePage({ query }, 500);
+    return {
+      ...buildTrace(id, spans, traceLogs(read.events, id, hasSpans)),
+      ...(read.hasMore ? { logsLimited: true as const } : {}),
+    };
   }
   /** Recent traces from spans and from logs that carry a trace id. */
   traceList(): TraceSummary[] {
     // An open list asks again as spans and logs arrive, so an unchanged one is answered from the last answer.
     const basis = `${this.spans.revision}:${this.ingestion.sequence}:${this.state.generation}`;
     if (this.traceListCache?.basis !== basis) {
-      const events = this.store.reversePage({ query: 'exists:traceId' }, 5000).events;
+      // summarizeTraces skips span rows whether or not their spans are retained, so they only take room here.
+      const events = this.store.reversePage({ query: 'exists:traceId -kind:/^span$/' }, 5000).events;
       this.traceListCache = { basis, traces: summarizeTraces(this.spans.entries(), events) };
     }
     return this.traceListCache.traces;

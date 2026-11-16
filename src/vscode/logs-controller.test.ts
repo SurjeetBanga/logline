@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { spanLine } from '../core/otlp';
 import { withVscode } from '../test/vscode-mock';
 
 const notices: string[] = [];
@@ -179,6 +180,64 @@ test('the trace list is answered from the last answer until a span or a log arri
   assert.equal(withLog[0].logs, 1);
   controller.clear();
   assert.deepEqual(controller.traceList(), [], 'clearing makes a new list');
+});
+
+test('span rows shown in Logs do not use up the logs a trace or the trace list reads', async (t) => {
+  const controller = setup(t);
+  const traceId = '4bf92f3577b34da6a3ce929d0e0e4736';
+  const logOnly = '00000000000000000000000000000abc';
+  const accept = (line: string) =>
+    controller.ingestion.accept(line, 'stdout', { serverId: 'web', server: 'web', sessionId: 'r' });
+  for (let index = 0; index < 5; index++) accept(`{"msg":"log ${index}","trace_id":"${traceId}"}`);
+  accept(`{"msg":"alone","trace_id":"${logOnly}"}`);
+  // Newer than every log, and more of them than either read takes.
+  for (let index = 0; index < 1100; index++) {
+    const spanId = index.toString(16).padStart(16, '0');
+    const span = spanOf(spanId);
+    accept(spanLine(span));
+    if (index < 3) controller.spans.add(span);
+  }
+  const view = controller.traceView(traceId);
+  assert.deepEqual(
+    view.logs.map((log) => log.message),
+    ['log 0', 'log 1', 'log 2', 'log 3', 'log 4'],
+    'every log is read, and no span row stands in for one',
+  );
+  assert.equal(view.logsLimited, undefined);
+  assert.ok(
+    controller.traceList().some((trace) => trace.traceId === logOnly),
+    'a trace known from its logs is still listed',
+  );
+  assert.equal(controller.traceList().find((trace) => trace.traceId === traceId)?.logs, 5);
+});
+
+test('a trace with no retained spans still shows its span rows', async (t) => {
+  const controller = setup(t);
+  const traceId = '4bf92f3577b34da6a3ce929d0e0e4736';
+  controller.ingestion.accept(spanLine(spanOf('1111111111111111')), 'stdout', {
+    serverId: 'web',
+    server: 'web',
+    sessionId: 'r',
+  });
+  assert.equal(controller.traceView(traceId).logs.length, 1);
+});
+
+test('a trace says when it has more logs than the 500 it reads', async (t) => {
+  const controller = setup(t);
+  const traceId = '4bf92f3577b34da6a3ce929d0e0e4736';
+  const accept = (index: number) =>
+    controller.ingestion.accept(`{"msg":"log ${index}","trace_id":"${traceId}"}`, 'stdout', {
+      serverId: 'web',
+      server: 'web',
+      sessionId: 'r',
+    });
+  for (let index = 0; index < 500; index++) accept(index);
+  assert.equal(controller.traceView(traceId).logsLimited, undefined, 'exactly 500 is not cut');
+  accept(500);
+  const view = controller.traceView(traceId);
+  assert.equal(view.logs.length, 500);
+  assert.equal(view.logsLimited, true);
+  assert.equal(view.logs.at(-1)?.message, 'log 500', 'the newest are kept');
 });
 
 test('a span is read in full by either case of its ids, and copied as an id or as redacted JSON', async (t) => {

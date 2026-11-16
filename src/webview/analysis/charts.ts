@@ -12,8 +12,8 @@ export interface AnalysisActions {
 }
 
 /**
- * The Analyze dialog. Every chart bar, value, pattern and error group is a
- * way into the matching logs, as in Datadog, Kibana and Grafana.
+ * The Analyze tab. Every chart bar, value, pattern and error group is a
+ * way into the matching logs.
  */
 export function createAnalysis(elements: Elements, state: ViewerState, actions?: AnalysisActions, scope?: EventScope) {
   const SVG_NS = 'http://www.w3.org/2000/svg';
@@ -38,6 +38,8 @@ export function createAnalysis(elements: Elements, state: ViewerState, actions?:
   /** A time window is being dragged out or is waiting to be shown in Logs; drawing again would discard it. */
   let dragging = false;
   let windowSelected = false;
+  /** The reader chose Show all error groups; later draws keep showing them until there are 20 or fewer. */
+  let allErrorGroups = false;
 
   function svgEl(tag: string, attrs: Record<string, string | number> = {}) {
     const el = document.createElementNS(SVG_NS, tag);
@@ -348,8 +350,8 @@ export function createAnalysis(elements: Elements, state: ViewerState, actions?:
   }
 
   // Average + p95 latency over the same time axis as the volume chart, rather than two
-  // separate bar lists - this is how APM tools (Datadog, Grafana) conventionally pair
-  // a mean line with a percentile line so tail latency is visible alongside the average.
+  // separate bar lists: a mean line beside a percentile line shows tail latency
+  // next to the average.
   function latencyChart(latency: AnalysisResult['latency'], range: AnalysisResult['range']) {
     const bucketCount = latency.length;
     if (!bucketCount || !latency.some((item) => item.count > 0)) return emptySection('Latency');
@@ -531,7 +533,7 @@ export function createAnalysis(elements: Elements, state: ViewerState, actions?:
     return tiles;
   }
 
-  /** A clickable row with a proportional bar, for status codes and field values. */
+  /** A row with a proportional bar, for status codes and field values; a plain row when it has no way into the logs. */
   function barRow(
     label: string,
     value: number,
@@ -540,12 +542,13 @@ export function createAnalysis(elements: Elements, state: ViewerState, actions?:
     target: { term?: string; source?: string },
     tone = '',
   ) {
-    const row = document.createElement('button');
-    row.type = 'button';
-    row.className = 'bar-row';
+    const interactive = target.source !== undefined || !!target.term;
+    const row = document.createElement(interactive ? 'button' : 'div');
+    if (interactive) (row as HTMLButtonElement).type = 'button';
+    row.className = interactive ? 'bar-row' : 'bar-row static';
     if (target.source !== undefined) row.dataset.source = target.source;
     else if (target.term) row.dataset.term = target.term;
-    row.title = `${label}: ${count(value)} (${percent(value, total)}). Click to show these events.`;
+    row.title = `${label}: ${count(value)} (${percent(value, total)})${interactive ? '. Click to show these events.' : ''}`;
     const name = document.createElement('span');
     name.className = 'bar-label';
     name.textContent = label;
@@ -690,8 +693,21 @@ export function createAnalysis(elements: Elements, state: ViewerState, actions?:
     );
     const errorTotal = errorGroups.reduce((sum, item) => sum + item.count, 0);
     const errorMax = Math.max(1, ...errorGroups.map((item) => item.count));
-    for (const item of errorGroups.slice(0, 20))
-      groups.append(groupRow(item, errorTotal, errorMax, { detail: seen(item, analysis.range) }));
+    const shown = 20;
+    if (errorGroups.length <= shown) allErrorGroups = false;
+    const errorRow = (item: ErrorGroup) => groupRow(item, errorTotal, errorMax, { detail: seen(item, analysis.range) });
+    for (const item of errorGroups.slice(0, allErrorGroups ? errorGroups.length : shown)) groups.append(errorRow(item));
+    if (errorGroups.length > shown && !allErrorGroups) {
+      const more = document.createElement('button');
+      more.type = 'button';
+      more.className = 'show-more';
+      more.textContent = `Show all ${count(errorGroups.length)}`;
+      more.addEventListener('click', () => {
+        allErrorGroups = true;
+        more.replaceWith(...errorGroups.slice(shown).map(errorRow));
+      });
+      groups.append(more);
+    }
     if (!errorGroups.length) groups.append(empty('No errors in these logs.'));
     content.append(groups);
     const breakdowns = document.createElement('div');
