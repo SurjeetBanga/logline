@@ -11,6 +11,8 @@ export function formatDuration(ms: number): string {
   return `${(ms / 1000).toFixed(2)} s`;
 }
 
+const REFRESH_MS = 5000;
+
 /** One trace's waterfall, in the inspector beside the list of traces: spans across services with their logs interleaved. */
 export function createTraceView(
   elements: Elements,
@@ -27,19 +29,62 @@ export function createTraceView(
   },
 ) {
   let current: string | undefined;
+  /** What the retained spans and logs were when the host last described them; a change means the waterfall is behind. */
+  let basis: string | undefined;
+  let pending = false;
+  let loadedAt = -Infinity;
+  let refresh: ReturnType<typeof setTimeout> | undefined;
+  /** What the rows on screen were drawn from, so an unchanged trace is not drawn again. */
+  let shown: string | undefined;
+
+  function load() {
+    if (!current) return;
+    pending = true;
+    loadedAt = Date.now();
+    api.postMessage({ type: 'trace', traceId: current });
+  }
 
   function show(traceId: string) {
     current = traceId.toLowerCase();
+    shown = undefined;
     elements.traceStatus.textContent = 'Loading…';
     elements.traceRows.replaceChildren();
     elements.traceHotspots.hidden = true;
     actions.inspect(`Trace ${current.length > 12 ? `${current.slice(0, 8)}…${current.slice(-4)}` : current}`, current);
-    api.postMessage({ type: 'trace', traceId: current });
+    load();
   }
+
+  /** Follows the retained spans and logs: an open trace loads again once they change, as its later spans arrive. */
+  function update(next: string) {
+    const changed = basis !== undefined && next !== basis;
+    basis = next;
+    if (!changed || !current || refresh) return;
+    refresh = setTimeout(
+      () => {
+        refresh = undefined;
+        if (actions.inspecting() && !pending) load();
+      },
+      Math.max(0, loadedAt + REFRESH_MS - Date.now()),
+    );
+  }
+
+  /** The host could not read the trace: say so in place of a waterfall that would never load. */
+  function fail(traceId: string | undefined, message: string) {
+    if (!actions.inspecting() || traceId !== current) return;
+    pending = false;
+    shown = undefined;
+    elements.traceStatus.textContent = `Could not load this trace: ${message}`;
+  }
+
+  scope.track(() => clearTimeout(refresh));
 
   /** Forgets the trace when the inspector closes, so a late reply for it is ignored. */
   function hide() {
     current = undefined;
+    shown = undefined;
+    pending = false;
+    clearTimeout(refresh);
+    refresh = undefined;
     elements.traceRows.replaceChildren();
     elements.traceHotspotList.replaceChildren();
     elements.traceHotspots.hidden = true;
@@ -76,6 +121,11 @@ export function createTraceView(
 
   function receive(trace: TraceView) {
     if (!actions.inspecting() || trace.traceId !== current) return;
+    pending = false;
+    // Most refreshes find the trace as it was; leaving the rows alone keeps tooltips, focus, and scroll steady.
+    const signature = `${trace.traceId}:${trace.spans.length}:${trace.omitted}:${trace.errors}:${trace.durationMs}:${trace.logs.length}:${trace.logs.at(-1)?.id ?? ''}`;
+    if (signature === shown) return;
+    shown = signature;
     elements.traceStatus.textContent = summary(trace);
     // With one span, self time says nothing the waterfall does not.
     const shownHotspots = trace.spans.length + trace.omitted > 1 ? trace.hotspots : [];
@@ -113,6 +163,8 @@ export function createTraceView(
   return {
     show,
     hide,
+    update,
+    fail,
     receive,
     get open() {
       return actions.inspecting();

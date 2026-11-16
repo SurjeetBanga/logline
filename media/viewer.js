@@ -61,6 +61,8 @@
     });
     let formatterKey;
     let cachedFormatter;
+    let dragging = false;
+    let windowSelected = false;
     function svgEl(tag, attrs = {}) {
       const el = document.createElementNS(SVG_NS, tag);
       for (const [key, value] of Object.entries(attrs)) el.setAttribute(key, String(value));
@@ -266,9 +268,11 @@
         if (event.button !== 0) return;
         start = bucketAt(event);
         dragged = false;
+        dragging = true;
         svg2.setPointerCapture?.(event.pointerId);
       });
       scope.listen(svg2, "pointercancel", () => {
+        dragging = false;
         if (start === void 0) return;
         start = void 0;
         if (dragged && bar.hidden) outline.setAttribute("visibility", "hidden");
@@ -280,6 +284,7 @@
         if (dragged) show(start, here);
       });
       scope.listen(svg2, "pointerup", (event) => {
+        dragging = false;
         if (start === void 0) return;
         const first = start;
         start = void 0;
@@ -299,11 +304,13 @@
         clear.type = "button";
         clear.textContent = "Clear";
         scope.listen(clear, "click", () => {
+          windowSelected = false;
           bar.hidden = true;
           outline.setAttribute("visibility", "hidden");
         });
         bar.replaceChildren(text2, showLogs, clear);
         bar.hidden = false;
+        windowSelected = true;
       });
       scope.listen(
         svg2,
@@ -621,9 +628,20 @@
         patterns.append(groupRow(item, total, patternMax, { level: item.level }));
       if (!analysis.patterns?.length) patterns.append(empty("No data in this range."));
       content.append(patterns);
-      elements.analysisContent.replaceChildren(content);
+      const view = elements.analysisContent;
+      const scrollTop = view.scrollTop;
+      const focused = document.activeElement;
+      const held = focused && view.contains(focused) ? { ...focused.dataset } : void 0;
+      view.replaceChildren(content);
+      dragging = false;
+      windowSelected = false;
+      view.scrollTop = scrollTop;
+      const key = held?.term !== void 0 ? "term" : held?.source !== void 0 ? "source" : void 0;
+      if (key)
+        [...view.querySelectorAll(`[data-${key}]`)].find((element2) => element2.dataset[key] === held[key])?.focus();
     }
-    return { renderAnalysis };
+    const busy = () => dragging || windowSelected;
+    return { renderAnalysis, busy };
   }
 
   // src/core/query-tokens.ts
@@ -1868,18 +1886,54 @@
     if (ms < 1e3) return `${Math.round(ms * 10) / 10} ms`;
     return `${(ms / 1e3).toFixed(2)} s`;
   }
+  var REFRESH_MS = 5e3;
   function createTraceView(elements, api, scope, actions) {
     let current;
+    let basis;
+    let pending = false;
+    let loadedAt = -Infinity;
+    let refresh;
+    let shown2;
+    function load() {
+      if (!current) return;
+      pending = true;
+      loadedAt = Date.now();
+      api.postMessage({ type: "trace", traceId: current });
+    }
     function show(traceId) {
       current = traceId.toLowerCase();
+      shown2 = void 0;
       elements.traceStatus.textContent = "Loading\u2026";
       elements.traceRows.replaceChildren();
       elements.traceHotspots.hidden = true;
       actions.inspect(`Trace ${current.length > 12 ? `${current.slice(0, 8)}\u2026${current.slice(-4)}` : current}`, current);
-      api.postMessage({ type: "trace", traceId: current });
+      load();
     }
+    function update(next) {
+      const changed = basis !== void 0 && next !== basis;
+      basis = next;
+      if (!changed || !current || refresh) return;
+      refresh = setTimeout(
+        () => {
+          refresh = void 0;
+          if (actions.inspecting() && !pending) load();
+        },
+        Math.max(0, loadedAt + REFRESH_MS - Date.now())
+      );
+    }
+    function fail(traceId, message) {
+      if (!actions.inspecting() || traceId !== current) return;
+      pending = false;
+      shown2 = void 0;
+      elements.traceStatus.textContent = `Could not load this trace: ${message}`;
+    }
+    scope.track(() => clearTimeout(refresh));
     function hide() {
       current = void 0;
+      shown2 = void 0;
+      pending = false;
+      clearTimeout(refresh);
+      refresh = void 0;
       elements.traceRows.replaceChildren();
       elements.traceHotspotList.replaceChildren();
       elements.traceHotspots.hidden = true;
@@ -1911,6 +1965,10 @@
     });
     function receive(trace) {
       if (!actions.inspecting() || trace.traceId !== current) return;
+      pending = false;
+      const signature = `${trace.traceId}:${trace.spans.length}:${trace.omitted}:${trace.errors}:${trace.durationMs}:${trace.logs.length}:${trace.logs.at(-1)?.id ?? ""}`;
+      if (signature === shown2) return;
+      shown2 = signature;
       elements.traceStatus.textContent = summary(trace);
       const shownHotspots = trace.spans.length + trace.omitted > 1 ? trace.hotspots : [];
       const top = shownHotspots[0]?.selfMs ?? 0;
@@ -1946,6 +2004,8 @@
     return {
       show,
       hide,
+      update,
+      fail,
       receive,
       get open() {
         return actions.inspecting();
@@ -2121,17 +2181,56 @@
 
   // src/webview/inspection/traces.ts
   var SLOW_MS = 1e3;
+  var REFRESH_MS2 = 5e3;
   function createTraceList(elements, api, scope, actions) {
     let traces = [];
     const hidden = /* @__PURE__ */ new Set();
     let errorsOnly = false;
     let slowOnly = false;
     let opened;
+    let basis;
+    let pending = false;
+    let failed = false;
+    let drawn = false;
+    let loadedAt = -Infinity;
+    let refresh;
+    function load() {
+      if (pending) return;
+      pending = true;
+      loadedAt = Date.now();
+      api.postMessage({ type: "traces" });
+    }
+    function refreshSoon() {
+      if (refresh) return;
+      refresh = setTimeout(
+        () => {
+          refresh = void 0;
+          if (actions.visible()) load();
+        },
+        Math.max(0, loadedAt + REFRESH_MS2 - Date.now())
+      );
+    }
     function show() {
+      drawn = false;
       elements.tracesStatus.textContent = "Loading\u2026";
       elements.tracesRows.replaceChildren();
       actions.reveal();
-      api.postMessage({ type: "traces" });
+      load();
+    }
+    function hide() {
+      clearTimeout(refresh);
+      refresh = void 0;
+    }
+    scope.track(hide);
+    function update(next) {
+      const changed = basis !== void 0 && next !== basis;
+      basis = next;
+      if (changed && actions.visible()) refreshSoon();
+    }
+    function fail(message) {
+      pending = false;
+      failed = true;
+      if (actions.visible()) elements.tracesStatus.textContent = `Could not load traces: ${message}`;
     }
     scope.listen(elements.tracesStartReceiver, "click", () => actions.startReceiver());
     scope.listen(elements.tracesRows, "click", (event) => {
@@ -2200,13 +2299,17 @@
       ];
     }
     function receiverChanged() {
-      if (actions.visible()) render();
+      if (actions.visible() && !failed) render();
     }
     function receive(list) {
+      pending = false;
+      const unchanged = !failed && drawn && JSON.stringify(list) === JSON.stringify(traces);
+      failed = false;
       traces = list;
-      if (actions.visible()) render();
+      if (actions.visible() && !unchanged) render();
     }
     function render() {
+      drawn = true;
       actions.rail?.("Services", railItems());
       const shown2 = traces.filter(
         (trace) => (!errorsOnly || trace.errors) && (!slowOnly || trace.durationMs >= SLOW_MS) && // A trace through no listed service, such as one from logs alone, stays.
@@ -2220,9 +2323,11 @@
         elements.tracesRows.replaceChildren();
         return;
       }
-      const failed = traces.filter((trace) => trace.errors).length;
-      elements.tracesStatus.textContent = `${traces.length.toLocaleString()} recent ${traces.length === 1 ? "trace" : "traces"} \xB7 ${failed.toLocaleString()} with errors` + (withSpans < traces.length ? ` \xB7 ${(traces.length - withSpans).toLocaleString()} from logs only` : "") + (shown2.length < traces.length ? ` \xB7 ${shown2.length.toLocaleString()} shown` : "") + " \xB7 Choose one to see its waterfall";
+      const failed2 = traces.filter((trace) => trace.errors).length;
+      elements.tracesStatus.textContent = `${traces.length.toLocaleString()} recent ${traces.length === 1 ? "trace" : "traces"} \xB7 ${failed2.toLocaleString()} with errors` + (withSpans < traces.length ? ` \xB7 ${(traces.length - withSpans).toLocaleString()} from logs only` : "") + (shown2.length < traces.length ? ` \xB7 ${shown2.length.toLocaleString()} shown` : "") + " \xB7 Choose one to see its waterfall";
       const longest = Math.max(1, ...shown2.map((trace) => trace.durationMs));
+      const focused = document.activeElement?.closest(".traces-row");
+      const focusedId = focused && elements.tracesRows.contains(focused) ? focused.dataset.traceId : void 0;
       elements.tracesRows.replaceChildren(
         ...shown2.map((trace) => {
           const row = document.createElement("tr");
@@ -2284,8 +2389,10 @@ Trace ${trace.traceId}`;
           return row;
         })
       );
+      if (focusedId)
+        [...elements.tracesRows.querySelectorAll(".traces-row")].find((row) => row.dataset.traceId === focusedId)?.focus();
     }
-    return { show, receive, receiverChanged, mark, closed };
+    return { show, hide, update, fail, receive, receiverChanged, mark, closed };
   }
 
   // src/core/connection-types.ts
@@ -2417,7 +2524,7 @@ Trace ${trace.traceId}`;
   }
 
   // src/webview/inspection/metrics.ts
-  var REFRESH_MS = 5e3;
+  var REFRESH_MS3 = 5e3;
   var MEASURE_LABELS = {
     value: "",
     rate: "rate",
@@ -2511,7 +2618,7 @@ Trace ${trace.traceId}`;
           refresh = void 0;
           if (actions.visible()) load();
         },
-        Math.max(0, loadedAt + REFRESH_MS - Date.now())
+        Math.max(0, loadedAt + REFRESH_MS3 - Date.now())
       );
     }
     function show() {
@@ -2705,7 +2812,7 @@ Trace ${trace.traceId}`;
   }
 
   // src/webview/inspection/ai-calls.ts
-  var REFRESH_MS2 = 5e3;
+  var REFRESH_MS4 = 5e3;
   var OPEN_BELOW_CHARACTERS = 600;
   var KIND_GLYPHS = { model: "\u25C6", tool: "\u2699", agent: "\u25B8", other: "\xB7" };
   var CUT_SHORT = /* @__PURE__ */ new Set(["length", "max_tokens", "content_filter", "max_output_tokens"]);
@@ -2745,7 +2852,7 @@ Trace ${trace.traceId}`;
           refresh = void 0;
           if (actions.listVisible()) load();
         },
-        Math.max(0, loadedAt + REFRESH_MS2 - Date.now())
+        Math.max(0, loadedAt + REFRESH_MS4 - Date.now())
       );
     }
     function show() {
@@ -7563,7 +7670,7 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
     new: "var(--vscode-charts-orange, #d18616)",
     localOnly: "var(--vscode-charts-orange, #d18616)"
   };
-  var REFRESH_MS3 = 2e3;
+  var REFRESH_MS5 = 2e3;
   function createCompare(elements, api, scope, actions) {
     let status = "all";
     let changedOnly = false;
@@ -7631,7 +7738,7 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
       }
       if (latest !== newest) {
         newest = latest;
-        if (actions.visible() && view && !refresh) refresh = setTimeout(load, REFRESH_MS3);
+        if (actions.visible() && view && !refresh) refresh = setTimeout(load, REFRESH_MS5);
       }
     }
     function open(target = {}) {
@@ -9062,6 +9169,7 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
       },
       (title, items) => tabRail.set("connection", title, items)
     );
+    const ANALYSIS_REFRESH_MS = 5e3;
     const formatTimestamp = createTimestampFormatter(state);
     const analysis = createAnalysis(
       elements,
@@ -9070,6 +9178,7 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
         drill: (term) => {
           const choice = addFilterTerm(search.query(), term);
           if (choice.query === void 0) {
+            analysisStatus = "note";
             elements.analysisStatus.textContent = choice.reason;
             return;
           }
@@ -9235,6 +9344,13 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
       () => doctor.revision()
     );
     let visibleSources = [];
+    let analysisStatus = "loading";
+    let analysisRequest = 0;
+    let analysisPending = false;
+    let analysisLoadedAt = -Infinity;
+    let analysisRefresh;
+    let analysisStale = false;
+    let retainedBasis;
     function analysisContext() {
       const filter = search.query();
       const source = state.selectedServer ? visibleSources.find((server) => server.id === state.selectedServer)?.label ?? state.selectedServer : "";
@@ -9354,8 +9470,23 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
         return;
       }
       if (data.type === "analysis") {
-        analysisContext();
+        if (data.requestId !== void 0 && data.requestId !== analysisRequest) return;
+        analysisPending = false;
+        if (analysisStatus !== "note") {
+          analysisStatus = "ready";
+          analysisContext();
+        }
         analysis.renderAnalysis(data.analysis);
+        return;
+      }
+      if (data.type === "viewError") {
+        if (data.view === "traces") traceList.fail(data.message);
+        else if (data.view === "trace") traceView.fail(data.traceId, data.message);
+        else if (data.requestId === void 0 || data.requestId === analysisRequest) {
+          analysisPending = false;
+          analysisStatus = "error";
+          elements.analysisStatus.textContent = `Could not analyze these logs: ${data.message}`;
+        }
         return;
       }
       if (data.type === "searches") {
@@ -9412,6 +9543,15 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
       metricQuery.update(data.connections);
       metricList.setConnections(data.connections);
       aiCalls.update(data.aiCalls, otlpRunning);
+      const logsBasis = `${data.generation}:${data.newest}`;
+      const tracesBasis = `${logsBasis}:${data.tracesRevision ?? 0}`;
+      traceList.update(tracesBasis);
+      traceView.update(tracesBasis);
+      if (views.active() === "analysis" && (retainedBasis !== void 0 && retainedBasis !== logsBasis || analysisStale)) {
+        analysisStale = false;
+        refreshAnalysisSoon();
+      }
+      retainedBasis = logsBasis;
       views.ensureVisible();
       elements.traces.title = data.traceCount ? `${numberFormat.format(data.traceCount)} traces received from OpenTelemetry. Show requests across services.` : "Requests across services, from OpenTelemetry spans and logs with a trace id";
       if (data.generation < minimumSnapshotGeneration) {
@@ -9469,7 +9609,7 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
       let selectionChanged = false;
       if (data.servers) {
         visibleSources = data.servers;
-        if (elements.analysisStatus.textContent) analysisContext();
+        if (analysisStatus === "ready") analysisContext();
         const selectedServer = data.servers.some((server) => server.id === state.selectedServer) ? state.selectedServer : "";
         if (selectedServer !== state.selectedServer) {
           state.selectedServer = selectedServer;
@@ -10038,16 +10178,35 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
     scope.listen(elements.changedOnly, "click", () => {
       search.setQuery(withChangedScope(search.query(), !hasChangedScope(search.query())), true);
     });
-    function requestAnalysis() {
-      elements.analysisStatus.textContent = "Loading analysis\u2026";
+    function requestAnalysis(background = false) {
+      if (!background) {
+        analysisStatus = "loading";
+        elements.analysisStatus.textContent = "Loading analysis\u2026";
+      }
+      analysisPending = true;
+      analysisLoadedAt = Date.now();
       api.postMessage({
         type: "analysis",
+        requestId: ++analysisRequest,
         query: search.query(),
         levels: state.currentLevels(),
         serverId: state.selectedServer || void 0,
         sessionId: state.selectedSession || void 0
       });
     }
+    function refreshAnalysisSoon() {
+      if (analysisRefresh) return;
+      analysisRefresh = setTimeout(
+        () => {
+          analysisRefresh = void 0;
+          if (views.active() !== "analysis") return;
+          if (analysisPending || analysis.busy()) analysisStale = true;
+          else requestAnalysis(true);
+        },
+        Math.max(0, analysisLoadedAt + ANALYSIS_REFRESH_MS - Date.now())
+      );
+    }
+    scope.track(() => clearTimeout(analysisRefresh));
     function openView(tab) {
       if (tab === "analysis") {
         views.show("analysis");
@@ -10072,6 +10231,7 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
       if (previous === "metrics") metricList.hide();
       if (previous === "compare") compareView.hide();
       if (previous === "aiCalls") aiCalls.hide();
+      if (previous === "traces") traceList.hide();
       if (previous === "doctor") elements.doctor.hidden = true;
       if (view !== "logs") inspector.close("event");
       if (view !== "traces") inspector.close("trace");

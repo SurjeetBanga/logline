@@ -51,7 +51,7 @@ export interface SnapshotSources {
     status(): { state: 'off' | 'waiting' | 'capturing' | 'attention'; detail: string; active: number; failed: number };
   };
   otlp?: { status(): ReceiverStatus };
-  spans?: { traceCount: number; genAiCount?: number; genAiRevision?: number };
+  spans?: { traceCount: number; revision?: number; genAiCount?: number; genAiRevision?: number };
   metrics?: { size: number; revision: number };
   /** Saved connections, listed as sources before they have runs. */
   connections?: ConnectionView[];
@@ -209,6 +209,7 @@ export function buildSnapshot(
     captureStatus: terminalCapture?.status(),
     otlp: otlp?.status(),
     traceCount: spans?.traceCount ?? 0,
+    ...(spans?.revision ? { tracesRevision: spans.revision } : {}),
     ...(metrics?.size ? { metrics: { series: metrics.size, revision: metrics.revision } } : {}),
     ...(spans?.genAiCount ? { aiCalls: { calls: spans.genAiCount, revision: spans.genAiRevision ?? 0 } } : {}),
     ...(doctor ? { doctor } : {}),

@@ -35,6 +35,9 @@ export function createAnalysis(elements: Elements, state: ViewerState, actions?:
   });
   let formatterKey: string | undefined;
   let cachedFormatter: Intl.DateTimeFormat | null | undefined;
+  /** A time window is being dragged out or is waiting to be shown in Logs; drawing again would discard it. */
+  let dragging = false;
+  let windowSelected = false;
 
   function svgEl(tag: string, attrs: Record<string, string | number> = {}) {
     const el = document.createElementNS(SVG_NS, tag);
@@ -286,10 +289,12 @@ export function createAnalysis(elements: Elements, state: ViewerState, actions?:
       if (event.button !== 0) return;
       start = bucketAt(event);
       dragged = false;
+      dragging = true;
       // The release then reaches the chart even past its edge, ending the drag there.
       svg.setPointerCapture?.(event.pointerId);
     });
     scope.listen(svg, 'pointercancel', () => {
+      dragging = false;
       if (start === undefined) return;
       start = undefined;
       if (dragged && bar.hidden) outline.setAttribute('visibility', 'hidden');
@@ -301,6 +306,7 @@ export function createAnalysis(elements: Elements, state: ViewerState, actions?:
       if (dragged) show(start, here);
     });
     scope.listen(svg, 'pointerup', (event) => {
+      dragging = false;
       if (start === undefined) return;
       const first = start;
       start = undefined;
@@ -320,11 +326,13 @@ export function createAnalysis(elements: Elements, state: ViewerState, actions?:
       clear.type = 'button';
       clear.textContent = 'Clear';
       scope.listen(clear, 'click', () => {
+        windowSelected = false;
         bar.hidden = true;
         outline.setAttribute('visibility', 'hidden');
       });
       bar.replaceChildren(text, showLogs, clear);
       bar.hidden = false;
+      windowSelected = true;
     });
     // A drag ends with a click on the bar it ended on, which must not filter to that one bar.
     scope.listen(
@@ -696,7 +704,22 @@ export function createAnalysis(elements: Elements, state: ViewerState, actions?:
       patterns.append(groupRow(item, total, patternMax, { level: item.level }));
     if (!analysis.patterns?.length) patterns.append(empty('No data in this range.'));
     content.append(patterns);
-    elements.analysisContent.replaceChildren(content);
+    // Drawing again as logs arrive keeps the reader's place: the scroll position and the control holding focus.
+    const view = elements.analysisContent;
+    const scrollTop = view.scrollTop;
+    const focused = document.activeElement as HTMLElement | null;
+    const held = focused && view.contains(focused) ? { ...focused.dataset } : undefined;
+    view.replaceChildren(content);
+    dragging = false;
+    windowSelected = false;
+    view.scrollTop = scrollTop;
+    const key = held?.term !== undefined ? 'term' : held?.source !== undefined ? 'source' : undefined;
+    if (key)
+      [...view.querySelectorAll<HTMLElement>(`[data-${key}]`)]
+        .find((element) => element.dataset[key] === held![key])
+        ?.focus();
   }
-  return { renderAnalysis };
+  /** Whether drawing again now would discard a time window the reader is choosing. */
+  const busy = () => dragging || windowSelected;
+  return { renderAnalysis, busy };
 }

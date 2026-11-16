@@ -56,7 +56,7 @@ export type ViewRequest =
       doctorRevision?: number;
       have?: HeldRows;
     } & PageOptions)
-  | ({ type: 'analysis'; sessionId?: string; from?: number; to?: number } & Filter)
+  | ({ type: 'analysis'; sessionId?: string; from?: number; to?: number; requestId?: number } & Filter)
   | ({ type: 'export' | 'exportForAI' } & Filter)
   | ({ type: 'copyFiltered' } & Filter)
   | ({ type: 'saveSearch'; name?: string } & Filter)
@@ -244,6 +244,8 @@ export interface Snapshot extends Stats {
   otlp?: ReceiverStatus;
   /** Traces with spans currently retained. */
   traceCount?: number;
+  /** Changes whenever a span arrives or the retained spans are cleared. */
+  tracesRevision?: number;
   /** OpenTelemetry metric series retained, and a revision that changes with every new data point. */
   metrics?: { series: number; revision: number };
   /** Retained GenAI spans (model calls, tool executions, agent runs), and a revision that changes with spans. */
@@ -334,7 +336,9 @@ export type HostMessage =
     } & DetailLinks)
   | { type: 'searches'; searches: { saved: SavedSearch[] }; saved?: SavedSearch }
   | { type: 'autocomplete'; input: string; serverId?: string; fields: string[]; values: SuggestedValue[] }
-  | { type: 'analysis'; analysis: AnalysisResult }
+  | { type: 'analysis'; analysis: AnalysisResult; requestId?: number }
+  /** A view's request failed on the host; `traceId` names the trace a waterfall asked for. */
+  | { type: 'viewError'; view: 'analysis' | 'traces' | 'trace'; requestId?: number; traceId?: string; message: string }
   | { type: 'trace'; trace: TraceView }
   | { type: 'traces'; traces: TraceSummary[] }
   | { type: 'aiCalls'; aiCalls: GenAiSummary }
@@ -415,7 +419,7 @@ export function parseViewRequest(value: unknown): ViewRequest | undefined {
         have: heldRows(msg.have),
       };
     case 'analysis':
-      return { type: msg.type, ...filter, from: number('from'), to: number('to') };
+      return { type: msg.type, ...filter, from: number('from'), to: number('to'), requestId: index('requestId') };
     case 'export':
     case 'exportForAI':
     case 'copyFiltered':

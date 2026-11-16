@@ -1074,9 +1074,15 @@ export class LogsController {
   }
   /** Recent traces from spans and from logs that carry a trace id. */
   traceList(): TraceSummary[] {
-    const events = this.store.reversePage({ query: 'exists:traceId' }, 5000).events;
-    return summarizeTraces(this.spans.entries(), events);
+    // An open list asks again as spans and logs arrive, so an unchanged one is answered from the last answer.
+    const basis = `${this.spans.revision}:${this.ingestion.sequence}:${this.state.generation}`;
+    if (this.traceListCache?.basis !== basis) {
+      const events = this.store.reversePage({ query: 'exists:traceId' }, 5000).events;
+      this.traceListCache = { basis, traces: summarizeTraces(this.spans.entries(), events) };
+    }
+    return this.traceListCache.traces;
   }
+  private traceListCache?: { basis: string; traces: TraceSummary[] };
   /** Semantic convention findings in received spans and metrics, recomputed only when either changes. */
   telemetryFindings(): { findings: TelemetryFinding[]; version: number } {
     const basis = `${this.spans.revision}:${this.metrics.revision}`;

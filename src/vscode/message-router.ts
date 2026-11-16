@@ -129,6 +129,8 @@ interface MessageServices {
   >;
   compare?(request: CompareRequest): CompareView;
 }
+const errorText = (error: unknown) => (error instanceof Error ? error.message : String(error));
+
 export async function handleMessage(
   services: MessageServices,
   send: (message: HostMessage) => void,
@@ -150,7 +152,7 @@ export async function handleMessage(
         send({
           type: 'snapshotError',
           requestId: msg.requestId,
-          message: error instanceof Error ? error.message : String(error),
+          message: errorText(error),
         });
       }
       return;
@@ -164,10 +166,18 @@ export async function handleMessage(
       await services.openLogSite(msg.id);
       return;
     case 'trace':
-      send({ type: 'trace', trace: services.traceView(msg.traceId) });
+      try {
+        send({ type: 'trace', trace: services.traceView(msg.traceId) });
+      } catch (error) {
+        send({ type: 'viewError', view: 'trace', traceId: msg.traceId.toLowerCase(), message: errorText(error) });
+      }
       return;
     case 'traces':
-      send({ type: 'traces', traces: services.traceList() });
+      try {
+        send({ type: 'traces', traces: services.traceList() });
+      } catch (error) {
+        send({ type: 'viewError', view: 'traces', message: errorText(error) });
+      }
       return;
     case 'metrics':
       send({ type: 'metrics', metrics: services.metricList() });
@@ -222,7 +232,11 @@ export async function handleMessage(
       });
       return;
     case 'analysis':
-      send({ type: 'analysis', analysis: store.analysis(msg) });
+      try {
+        send({ type: 'analysis', analysis: store.analysis(msg), requestId: msg.requestId });
+      } catch (error) {
+        send({ type: 'viewError', view: 'analysis', requestId: msg.requestId, message: errorText(error) });
+      }
       return;
     case 'export':
       await transfer.exportLogs(msg);
