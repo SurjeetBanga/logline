@@ -15,7 +15,16 @@ import { localUrls } from '../core/browser-events';
 import { MetricStore, type MetricSeriesView } from '../core/metrics';
 import { createRedactor } from '../core/redaction';
 import { telemetryFindings, type TelemetryFinding } from '../core/telemetry-findings';
-import { buildTrace, SpanStore, summarizeTraces, traceLogs, type TraceSummary, type TraceView } from '../core/traces';
+import {
+  buildTrace,
+  spanDetail,
+  SpanStore,
+  summarizeTraces,
+  traceLogs,
+  type SpanDetail,
+  type TraceSummary,
+  type TraceView,
+} from '../core/traces';
 import { OtelIntegration } from './otel-integration';
 import { BrowserCapture } from '../capture/browser-capture';
 import type { BrowserLauncher } from './browser';
@@ -105,6 +114,8 @@ export const SHARE_ON_START_KEY = 'logline.shareOnStart.v1';
 /** Composition root for services used by commands, tasks and the Logs view. */
 // A trend line is 100 units wide; more points than this only make the message bigger.
 const METRIC_TREND_POINTS = 60;
+/** How many traces the Traces tab lists, newest first. */
+const TRACE_LIST_LIMIT = 200;
 
 export class LogsController {
   readonly config = new Configuration();
@@ -461,10 +472,13 @@ export class LogsController {
         openLogSite: (id) => this.openLogSite(id),
         traceView: (traceId) => this.traceView(traceId),
         traceList: () => this.traceList(),
+        traceTotal: () => this.traceTotal(),
         metricList: () => this.metricList(),
         aiCallList: () => this.aiCallList(),
         aiCallDetail: (traceId, spanId) => this.aiCallDetail(traceId, spanId),
         copyAiCall: (traceId, spanId) => this.copyAiCall(traceId, spanId),
+        spanDetail: (traceId, spanId) => this.spanDetail(traceId, spanId),
+        copySpan: (traceId, spanId, whole) => this.copySpan(traceId, spanId, whole),
         toggleOtlp: (enabled) => this.toggleOtlp(enabled),
         breakOnEvent: (id) => this.breakOnEvent(id),
         breakOnQuery: (query, levels) => this.breakOnQuery(query, levels),
@@ -1069,14 +1083,34 @@ export class LogsController {
   traceView(traceId: string): TraceView {
     const id = traceId.toLowerCase();
     const spans = this.spans.trace(id);
-    const read = this.store.reversePage({ query: `traceId:${JSON.stringify(id)}` }, 500);
-    return buildTrace(id, spans, traceLogs(read.events, id, spans.length > 0));
+    const hasSpans = spans.length > 0;
+    // Span rows shown in Logs carry the trace id too, and are not wanted when the spans are drawn; leaving them
+    // out of the query keeps them from using up the 500 logs read. `kind:/^span$/` matches only that exact value.
+    const query = `traceId:${JSON.stringify(id)}${hasSpans ? ' -kind:/^span$/' : ''}`;
+    const read = this.store.reversePage({ query }, 500);
+    return {
+      ...buildTrace(id, spans, traceLogs(read.events, id, hasSpans)),
+      ...(read.hasMore ? { logsLimited: true as const } : {}),
+    };
   }
   /** Recent traces from spans and from logs that carry a trace id. */
   traceList(): TraceSummary[] {
-    const events = this.store.reversePage({ query: 'exists:traceId' }, 5000).events;
-    return summarizeTraces(this.spans.entries(), events);
+    // An open list asks again as spans and logs arrive, so an unchanged one is answered from the last answer.
+    const basis = `${this.spans.revision}:${this.ingestion.sequence}:${this.state.generation}`;
+    if (this.traceListCache?.basis !== basis) {
+      // summarizeTraces skips span rows whether or not their spans are retained, so they only take room here.
+      const events = this.store.reversePage({ query: 'exists:traceId -kind:/^span$/' }, 5000).events;
+      const all = summarizeTraces(this.spans.entries(), events, Infinity);
+      this.traceListCache = { basis, traces: all.slice(0, TRACE_LIST_LIMIT), total: all.length };
+    }
+    return this.traceListCache.traces;
   }
+  /** How many traces there are to list, of which `traceList` holds the newest. */
+  traceTotal(): number {
+    this.traceList();
+    return this.traceListCache!.total;
+  }
+  private traceListCache?: { basis: string; traces: TraceSummary[]; total: number };
   /** Semantic convention findings in received spans and metrics, recomputed only when either changes. */
   telemetryFindings(): { findings: TelemetryFinding[]; version: number } {
     const basis = `${this.spans.revision}:${this.metrics.revision}`;
@@ -1124,6 +1158,26 @@ export class LogsController {
     }
     await vscode.env.clipboard.writeText(genAiMarkdown(redactor.value(detail) as GenAiCallDetail));
     void vscode.window.showInformationMessage('Copied the AI call as Markdown.');
+  }
+  /** One span of a trace in full: every attribute and event kept. */
+  spanDetail(traceId: string, spanId: string): SpanDetail | undefined {
+    return spanDetail(this.spans.trace(traceId.toLowerCase()), spanId.toLowerCase());
+  }
+  /** Copy a trace's id, a span's id, or the whole span as JSON, redacted like exports. */
+  async copySpan(traceId: string, spanId?: string, whole = false): Promise<void> {
+    if (!spanId || !whole) {
+      await vscode.env.clipboard.writeText((spanId ?? traceId).toLowerCase());
+      void vscode.window.showInformationMessage(spanId ? 'Copied the span id.' : 'Copied the trace id.');
+      return;
+    }
+    const detail = this.spanDetail(traceId, spanId);
+    if (!detail) {
+      void vscode.window.showWarningMessage('That span is no longer retained.');
+      return;
+    }
+    const redactor = createRedactor(this.transfer.redactionOptions());
+    await vscode.env.clipboard.writeText(JSON.stringify(redactor.value(detail), null, 2));
+    void vscode.window.showInformationMessage('Copied the span as JSON.');
   }
   /** Recent OpenTelemetry metric series, most recently updated first, with enough points for a trend line. */
   metricList(): MetricSeriesView[] {

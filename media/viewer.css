@@ -288,6 +288,71 @@
     outline: 1px solid var(--vscode-focusBorder, #007fd4);
   }
 }
+/* A span row opens its details beneath it. */
+.trace-span {
+  cursor: pointer;
+}
+.trace-span:hover {
+  background: var(--vscode-list-hoverBackground, rgba(90, 93, 94, 0.31));
+}
+.trace-span:focus-visible {
+  outline: 1px solid var(--vscode-focusBorder, #007fd4);
+  outline-offset: -1px;
+}
+.trace-span.selected {
+  background: var(--vscode-list-inactiveSelectionBackground, rgba(90, 93, 94, 0.45));
+}
+.trace-table .trace-detail-cell {
+  padding: 6px 12px 10px;
+  border-bottom: 1px solid var(--vscode-panel-border, #444);
+  background: var(--vscode-editorWidget-background, rgba(128, 128, 128, 0.08));
+  white-space: normal;
+  overflow-wrap: anywhere;
+  user-select: text;
+}
+.trace-detail-cell p {
+  margin: 0 0 4px;
+}
+.trace-detail-facts,
+.trace-detail-note {
+  color: var(--vscode-descriptionForeground, #aaa);
+}
+.trace-detail-error {
+  color: var(--vscode-errorForeground, #f48771);
+}
+.trace-detail-cell h4 {
+  margin: 8px 0 2px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--vscode-descriptionForeground, #aaa);
+}
+.trace-detail-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin: 4px 0;
+}
+.trace-detail-actions button {
+  padding: 2px 8px;
+  font-size: 12px;
+  /* In the narrowest inspector a label wraps instead of widening the waterfall. */
+  max-width: 100%;
+  white-space: normal;
+  text-align: left;
+}
+.trace-detail-event {
+  margin-top: 6px;
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: var(--vscode-editor-font-size, 13px);
+}
+/* The fields list is made for the inspector's own padding; here the cell supplies it. */
+.trace-detail-cell .event-fields {
+  margin: 0 -12px;
+}
+.trace-detail-cell .event-field-value {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
 .trace-name,
 .trace-service {
   overflow: hidden;
@@ -2272,7 +2337,6 @@ select {
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
   gap: 12px;
 }
-/* Error groups beside latency: what failed, and when it got slow. */
 /* Each chart and breakdown sits on a quiet card, like the summary tiles. */
 .analysis-content .chart-section {
   padding: 8px 12px 10px;
@@ -2316,7 +2380,7 @@ select {
   text-align: left;
   white-space: nowrap;
 }
-.bar-row:hover,
+.bar-row:not(.static):hover,
 .group-row:not(.static):hover {
   background: var(--vscode-list-hoverBackground, rgba(255, 255, 255, 0.06));
 }
@@ -2325,6 +2389,7 @@ select {
   outline: 1px solid var(--vscode-focusBorder, #007fd4);
   outline-offset: -1px;
 }
+.bar-row.static,
 .group-row.static {
   cursor: default;
 }
@@ -2926,6 +2991,10 @@ td.time {
   margin: 0 0 6px;
   white-space: normal;
 }
+/* The waterfall narrows with the inspector instead of keeping a table's least width and scrolling sideways. */
+#traceView .trace-table {
+  min-width: 0;
+}
 /* In a narrow inspector the waterfall keeps the operation, its bar, and its duration. */
 @container (max-width: 520px) {
   #traceView .trace-table th:nth-child(1) {
@@ -3165,14 +3234,19 @@ body[data-empty='true'] .empty-actions {
   text-align: right;
   font-variant-numeric: tabular-nums;
 }
-.link-button {
+.link-button,
+.show-more {
   padding: 0;
   border: 0;
   background: transparent;
   color: var(--vscode-textLink-foreground, #3794ff);
 }
-.link-button:hover {
+.link-button:hover,
+.show-more:hover {
   text-decoration: underline;
+}
+.show-more {
+  margin-top: 8px;
 }
 .status-bar .pagination button {
   padding: 1px 8px;
@@ -3587,22 +3661,6 @@ td[data-column]:focus-visible {
   fill: none;
   stroke: var(--vscode-charts-blue, #3794ff);
   stroke-width: 1.5;
-}
-.traces-filter {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  margin-right: 10px;
-  color: var(--vscode-descriptionForeground, #aaa);
-  font-size: 12px;
-}
-.traces-filter input[type='checkbox'] {
-  margin: 0;
-  width: auto;
-  height: auto;
-  padding: 0;
-  border: none;
-  background: none;
 }
 .traces-table th:nth-child(1) {
   width: 104px;

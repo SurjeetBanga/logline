@@ -3,7 +3,7 @@ import test from 'node:test';
 import { anyValue, isEntrySpan, logLine, nanosToMs, normalizeId, readLogs, readSpans, spanLine } from './otlp';
 import { decodeLogsRequest, decodeTraceRequest, ProtoError } from './otlp-proto';
 import type { LogEvent } from './types';
-import { buildTrace, requestOperation, selfTimeMs, SpanStore, summarizeTraces } from './traces';
+import { buildTrace, requestOperation, selfTimeMs, spanDetail, SpanStore, summarizeTraces } from './traces';
 import { parseLogLine } from './log-event';
 import { extractExceptions } from './exceptions';
 import { getField } from './query';
@@ -287,6 +287,32 @@ test('builds a depth-first waterfall with the critical path and orphan roots', (
   assert.deepEqual([logsOnly.durationMs, logsOnly.logs.map((log) => log.offsetMs)], [30, [0, 30]]);
 });
 
+test('logs of spans left out of the rows are flagged, and logs of other spans are not', () => {
+  const pad = (id: string) => id.padEnd(16, '0');
+  const spans = [span('a', undefined, 1000, 1100), span('b', 'a', 1010, 1050), span('c', 'a', 1060, 1090)];
+  const logs = [
+    { id: 1, level: 'info', message: 'in a', spanId: pad('a') },
+    { id: 2, level: 'info', message: 'in c, left out', spanId: pad('c') },
+    { id: 3, level: 'info', message: 'unknown span', spanId: pad('z') },
+    { id: 4, level: 'info', message: 'no span' },
+  ];
+  const view = buildTrace(TRACE, spans, logs, 2);
+  assert.equal(view.omitted, 1);
+  assert.deepEqual(
+    view.logs.map((log) => [log.id, log.spanOmitted]),
+    [
+      [1, undefined],
+      [2, true],
+      [3, undefined],
+      [4, undefined],
+    ],
+  );
+  assert.ok(
+    buildTrace(TRACE, spans, logs).logs.every((log) => log.spanOmitted === undefined),
+    'with every span shown, none is left out',
+  );
+});
+
 test('self time leaves out time covered by children, counting overlaps once', () => {
   const parent = span('a', undefined, 0, 100);
   assert.equal(selfTimeMs(parent, []), 100);
@@ -294,6 +320,52 @@ test('self time leaves out time covered by children, counting overlaps once', ()
   assert.equal(selfTimeMs(parent, [span('b', 'a', 10, 40), span('c', 'a', 20, 50), span('d', 'a', 90, 130)]), 50);
   assert.equal(selfTimeMs(parent, [span('b', 'a', -10, 200)]), 0);
   assert.equal(selfTimeMs(parent, [span('b', 'a', 150, 160)]), 100, 'children outside the span cover none of it');
+});
+
+test('span details keep every attribute and event, less GenAI content', () => {
+  const attributes = Object.fromEntries(Array.from({ length: 40 }, (_, index) => [`attr.${index}`, index]));
+  const root = span('a', undefined, 1000, 1100, {
+    kind: 3,
+    scope: 'my-lib',
+    status: { code: 2, message: 'boom' },
+    attributes: {
+      ...attributes,
+      'gen_ai.prompt': 'secret prompt',
+      'gen_ai.completion.0.content': 'secret answer',
+      'gen_ai.request.model': 'm1',
+    },
+    events: [
+      { timeMs: 1025.5, name: 'retry', attributes: { attempt: 2, 'gen_ai.output.messages': 'hidden' } },
+      { timeMs: 1000, name: 'start', attributes: {} },
+    ],
+  });
+  const child = span('b', 'a', 1020, 1060);
+  const other = span('c', 'a', 1040, 1080);
+  const detail = spanDetail([root, child, other], root.spanId)!;
+  assert.deepEqual(
+    [detail.traceId, detail.spanId, detail.name, detail.service, detail.kind, detail.scope],
+    [TRACE, root.spanId, 'op a', 'svc', 'client', 'my-lib'],
+  );
+  assert.equal(detail.parentSpanId, undefined);
+  assert.equal(Object.keys(detail.attributes).length, 41, 'all 40 attributes and the model, not the row’s 24');
+  assert.equal(detail.attributes['attr.39'], 39);
+  assert.equal(detail.attributes['gen_ai.request.model'], 'm1');
+  assert.equal('gen_ai.prompt' in detail.attributes, false);
+  assert.equal('gen_ai.completion.0.content' in detail.attributes, false);
+  assert.deepEqual(detail.events, [
+    { offsetMs: 25.5, name: 'retry', attributes: { attempt: 2 } },
+    { offsetMs: 0, name: 'start', attributes: {} },
+  ]);
+  assert.deepEqual([detail.error, detail.statusMessage, detail.durationMs, detail.startMs], [true, 'boom', 100, 1000]);
+  assert.equal(detail.selfMs, 40, 'time covered by the two children, which overlap, is left out');
+  const nested = spanDetail([root, child], child.spanId)!;
+  assert.equal(nested.parentSpanId, root.spanId);
+  assert.deepEqual(
+    [nested.error, nested.statusMessage, nested.scope, nested.selfMs],
+    [false, undefined, undefined, 40],
+  );
+  assert.equal(spanDetail([root, child], 'f'.repeat(16)), undefined);
+  assert.equal(spanDetail([], root.spanId), undefined);
 });
 
 test('trace hotspots rank operations by the time they spent themselves', () => {

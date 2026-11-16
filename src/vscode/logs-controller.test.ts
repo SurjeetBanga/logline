@@ -1,16 +1,19 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { spanLine } from '../core/otlp';
 import { withVscode } from '../test/vscode-mock';
 
 const notices: string[] = [];
 let buttons: string[] = [];
 const settings: { key: string; value: unknown; target?: unknown }[] = [];
 const commands: string[] = [];
+const copied: string[] = [];
 let pick: (items: { runId: string }[]) => unknown = () => undefined;
 const mock = {
   ConfigurationTarget: { Global: 1, Workspace: 2 },
   commands: { executeCommand: async (id: string) => void commands.push(id) },
   extensions: { getExtension: () => undefined },
+  env: { clipboard: { writeText: async (text: string) => void copied.push(text) } },
   workspace: {
     get workspaceFolders() {
       return host.folders;
@@ -55,6 +58,7 @@ const { LogsController } = withVscode(mock, () => require('./logs-controller') a
 
 function setup(t: { after(fn: () => Promise<void>): void }) {
   notices.length = 0;
+  copied.length = 0;
   settings.length = 0;
   host.values.clear();
   host.workspaceValues.clear();
@@ -137,6 +141,146 @@ test('traces, metrics, and telemetry findings read the window stores, and findin
   assert.deepEqual(controller.metricList(), []);
   const findings = controller.telemetryFindings();
   assert.equal(controller.telemetryFindings(), findings, 'unchanged stores reuse the last result');
+});
+
+const spanOf = (spanId: string, extra: Record<string, unknown> = {}) => ({
+  traceId: '4bf92f3577b34da6a3ce929d0e0e4736',
+  spanId,
+  name: `op ${spanId}`,
+  kind: 2,
+  startMs: 1000,
+  endMs: 1050,
+  service: 'api',
+  events: [],
+  status: { code: 0 },
+  attributes: {},
+  ...extra,
+});
+
+test('the trace list is answered from the last answer until a span or a log arrives', async (t) => {
+  const controller = setup(t);
+  const traceId = '4bf92f3577b34da6a3ce929d0e0e4736';
+  const first = controller.traceList();
+  assert.equal(controller.traceList(), first, 'nothing new, the same list');
+  controller.spans.add(spanOf('1111111111111111'));
+  const withSpan = controller.traceList();
+  assert.notEqual(withSpan, first);
+  assert.deepEqual(
+    withSpan.map((trace) => [trace.traceId, trace.spans]),
+    [[traceId, 1]],
+  );
+  assert.equal(controller.traceList(), withSpan);
+  controller.ingestion.accept(`{"msg":"handled","trace_id":"${traceId}"}`, 'stdout', {
+    serverId: 'web',
+    server: 'web',
+    sessionId: 'r',
+  });
+  const withLog = controller.traceList();
+  assert.notEqual(withLog, withSpan, 'a log is new too');
+  assert.equal(withLog[0].logs, 1);
+  controller.clear();
+  assert.deepEqual(controller.traceList(), [], 'clearing makes a new list');
+});
+
+test('span rows shown in Logs do not use up the logs a trace or the trace list reads', async (t) => {
+  const controller = setup(t);
+  const traceId = '4bf92f3577b34da6a3ce929d0e0e4736';
+  const logOnly = '00000000000000000000000000000abc';
+  const accept = (line: string) =>
+    controller.ingestion.accept(line, 'stdout', { serverId: 'web', server: 'web', sessionId: 'r' });
+  for (let index = 0; index < 5; index++) accept(`{"msg":"log ${index}","trace_id":"${traceId}"}`);
+  accept(`{"msg":"alone","trace_id":"${logOnly}"}`);
+  // Newer than every log, and more of them than either read takes.
+  for (let index = 0; index < 1100; index++) {
+    const spanId = index.toString(16).padStart(16, '0');
+    const span = spanOf(spanId);
+    accept(spanLine(span));
+    if (index < 3) controller.spans.add(span);
+  }
+  const view = controller.traceView(traceId);
+  assert.deepEqual(
+    view.logs.map((log) => log.message),
+    ['log 0', 'log 1', 'log 2', 'log 3', 'log 4'],
+    'every log is read, and no span row stands in for one',
+  );
+  assert.equal(view.logsLimited, undefined);
+  assert.ok(
+    controller.traceList().some((trace) => trace.traceId === logOnly),
+    'a trace known from its logs is still listed',
+  );
+  assert.equal(controller.traceList().find((trace) => trace.traceId === traceId)?.logs, 5);
+});
+
+test('the trace list reads traces from more than a thousand logs, and counts those past the newest 200', async (t) => {
+  const controller = setup(t);
+  // Oldest first: the first trace is known only from a log 1,500 lines back.
+  for (let index = 0; index < 1500; index++)
+    controller.ingestion.accept(
+      `{"msg":"log ${index}","trace_id":"${index.toString(16).padStart(32, '0')}"}`,
+      'stdout',
+      { serverId: 'web', server: 'web', sessionId: 'r' },
+    );
+  assert.equal(controller.traceList().length, 200, 'the list holds the newest');
+  assert.equal(controller.traceTotal(), 1500, 'and every trace is counted, the oldest log included');
+});
+
+test('a trace with no retained spans still shows its span rows', async (t) => {
+  const controller = setup(t);
+  const traceId = '4bf92f3577b34da6a3ce929d0e0e4736';
+  controller.ingestion.accept(spanLine(spanOf('1111111111111111')), 'stdout', {
+    serverId: 'web',
+    server: 'web',
+    sessionId: 'r',
+  });
+  assert.equal(controller.traceView(traceId).logs.length, 1);
+});
+
+test('a trace says when it has more logs than the 500 it reads', async (t) => {
+  const controller = setup(t);
+  const traceId = '4bf92f3577b34da6a3ce929d0e0e4736';
+  const accept = (index: number) =>
+    controller.ingestion.accept(`{"msg":"log ${index}","trace_id":"${traceId}"}`, 'stdout', {
+      serverId: 'web',
+      server: 'web',
+      sessionId: 'r',
+    });
+  for (let index = 0; index < 500; index++) accept(index);
+  assert.equal(controller.traceView(traceId).logsLimited, undefined, 'exactly 500 is not cut');
+  accept(500);
+  const view = controller.traceView(traceId);
+  assert.equal(view.logs.length, 500);
+  assert.equal(view.logsLimited, true);
+  assert.equal(view.logs.at(-1)?.message, 'log 500', 'the newest are kept');
+});
+
+test('a span is read in full by either case of its ids, and copied as an id or as redacted JSON', async (t) => {
+  const controller = setup(t);
+  const traceId = '4bf92f3577b34da6a3ce929d0e0e4736';
+  // Built at runtime: secret-shaped literals are refused by push protection.
+  const token = ['Bearer', 'x'.repeat(24)].join(' ');
+  controller.spans.add(
+    spanOf('aaaaaaaaaaaaaaaa', { attributes: { 'http.route': '/x', authorization: token }, scope: 'lib' }),
+  );
+  const detail = controller.spanDetail(traceId.toUpperCase(), 'AAAAAAAAAAAAAAAA')!;
+  assert.deepEqual([detail.name, detail.scope, detail.attributes['http.route']], ['op aaaaaaaaaaaaaaaa', 'lib', '/x']);
+  assert.equal(controller.spanDetail(traceId, 'bbbbbbbbbbbbbbbb'), undefined);
+
+  await controller.copySpan(traceId.toUpperCase());
+  await controller.copySpan(traceId, 'AAAAAAAAAAAAAAAA');
+  assert.deepEqual(copied, [traceId, 'aaaaaaaaaaaaaaaa']);
+  assert.deepEqual(notices, ['Copied the trace id.', 'Copied the span id.']);
+
+  await controller.copySpan(traceId, 'aaaaaaaaaaaaaaaa', true);
+  const json = JSON.parse(copied.at(-1)!);
+  assert.equal(json.spanId, 'aaaaaaaaaaaaaaaa');
+  assert.equal(json.attributes['http.route'], '/x');
+  assert.doesNotMatch(copied.at(-1)!, /x{24}/, 'the secret is redacted like an export');
+  assert.equal(notices.at(-1), 'Copied the span as JSON.');
+
+  const before = copied.length;
+  await controller.copySpan(traceId, 'bbbbbbbbbbbbbbbb', true);
+  assert.equal(copied.length, before, 'a span that is gone copies nothing');
+  assert.equal(notices.at(-1), 'That span is no longer retained.');
 });
 
 test('terminal capture is switched in the workspace settings and takes effect at once', async (t) => {

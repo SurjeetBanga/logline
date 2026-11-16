@@ -9,6 +9,7 @@ import { formatDuration } from './trace';
 
 /** Slower than this is a slow request, for the rail's filter. */
 const SLOW_MS = 1000;
+const REFRESH_MS = 5000;
 
 /**
  * The Traces tab: recent requests across services, from OpenTelemetry
@@ -36,12 +37,64 @@ export function createTraceList(
   let errorsOnly = false;
   let slowOnly = false;
   let opened: string | undefined;
+  /** What the retained spans and logs were when the host last described them; a change means the list is behind. */
+  let basis: string | undefined;
+  let pending = false;
+  let failed = false;
+  /** Whether the rows on screen were drawn from `traces`. */
+  let drawn = false;
+  let loadedAt = -Infinity;
+  let refresh: ReturnType<typeof setTimeout> | undefined;
+  /** Every trace the host had to list; more than the list holds means it is the newest of them. */
+  let total = 0;
+
+  function load() {
+    if (pending) return;
+    pending = true;
+    loadedAt = Date.now();
+    api.postMessage({ type: 'traces' });
+  }
+
+  // Spans arrive in bursts, so a shown list refreshes at most once per interval.
+  function refreshSoon() {
+    if (refresh) return;
+    refresh = setTimeout(
+      () => {
+        refresh = undefined;
+        if (actions.visible()) load();
+      },
+      Math.max(0, loadedAt + REFRESH_MS - Date.now()),
+    );
+  }
 
   function show() {
+    drawn = false;
     elements.tracesStatus.textContent = 'Loading…';
     elements.tracesRows.replaceChildren();
     actions.reveal();
-    api.postMessage({ type: 'traces' });
+    load();
+  }
+
+  /** Stops refreshing once another view is shown. */
+  function hide() {
+    clearTimeout(refresh);
+    refresh = undefined;
+  }
+
+  scope.track(hide);
+
+  /** Follows the retained spans and logs: a shown list loads again once they change. */
+  function update(next: string) {
+    const changed = basis !== undefined && next !== basis;
+    basis = next;
+    if (changed && actions.visible()) refreshSoon();
+  }
+
+  /** The host could not list the traces: say so in place of a list that would never load. */
+  function fail(message: string) {
+    pending = false;
+    failed = true;
+    if (actions.visible()) elements.tracesStatus.textContent = `Could not load traces: ${message}`;
   }
 
   scope.listen(elements.tracesStartReceiver, 'click', () => actions.startReceiver());
@@ -122,15 +175,21 @@ export function createTraceList(
 
   // The receiver can start or stop while the list is shown.
   function receiverChanged() {
-    if (actions.visible()) render();
+    if (actions.visible() && !failed) render();
   }
 
-  function receive(list: TraceSummary[]) {
+  function receive(list: TraceSummary[], count = list.length) {
+    pending = false;
+    // Most refreshes find the list as it was; leaving the rows alone keeps focus and scroll steady.
+    const unchanged = !failed && drawn && count === total && JSON.stringify(list) === JSON.stringify(traces);
+    failed = false;
     traces = list;
-    if (actions.visible()) render();
+    total = count;
+    if (actions.visible() && !unchanged) render();
   }
 
   function render() {
+    drawn = true;
     actions.rail?.('Services', railItems());
     const shown = traces.filter(
       (trace) =>
@@ -152,11 +211,17 @@ export function createTraceList(
     }
     const failed = traces.filter((trace) => trace.errors).length;
     elements.tracesStatus.textContent =
-      `${traces.length.toLocaleString()} recent ${traces.length === 1 ? 'trace' : 'traces'} · ${failed.toLocaleString()} with errors` +
+      (total > traces.length
+        ? `Newest ${traces.length.toLocaleString()} of ${total.toLocaleString()} traces`
+        : `${traces.length.toLocaleString()} recent ${traces.length === 1 ? 'trace' : 'traces'}`) +
+      ` · ${failed.toLocaleString()} with errors` +
       (withSpans < traces.length ? ` · ${(traces.length - withSpans).toLocaleString()} from logs only` : '') +
       (shown.length < traces.length ? ` · ${shown.length.toLocaleString()} shown` : '') +
       ' · Choose one to see its waterfall';
     const longest = Math.max(1, ...shown.map((trace) => trace.durationMs));
+    // A refresh replaces the rows, so the one holding focus is found again afterwards.
+    const focused = (document.activeElement as HTMLElement | null)?.closest<HTMLElement>('.traces-row');
+    const focusedId = focused && elements.tracesRows.contains(focused) ? focused.dataset.traceId : undefined;
     elements.tracesRows.replaceChildren(
       ...shown.map((trace) => {
         const row = document.createElement('tr');
@@ -222,7 +287,11 @@ export function createTraceList(
         return row;
       }),
     );
+    if (focusedId)
+      [...elements.tracesRows.querySelectorAll<HTMLElement>('.traces-row')]
+        .find((row) => row.dataset.traceId === focusedId)
+        ?.focus();
   }
 
-  return { show, receive, receiverChanged, mark, closed };
+  return { show, hide, update, fail, receive, receiverChanged, mark, closed };
 }

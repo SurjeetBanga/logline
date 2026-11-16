@@ -16,7 +16,7 @@ import {
 import type { LogEvent } from '../core/types';
 import type { GenAiCallDetail, GenAiSummary } from '../core/gen-ai';
 import type { MetricSeriesView } from '../core/metrics';
-import type { TraceSummary, TraceView } from '../core/traces';
+import type { SpanDetail, TraceSummary, TraceView } from '../core/traces';
 import type { SavedSearches } from '../storage/saved-searches';
 import type { LogTransfer } from './log-transfer';
 import { runAboutAction } from './about';
@@ -52,6 +52,7 @@ const PANEL_REQUESTS: Partial<Record<ViewRequest['type'], PanelAction>> = {
   metricQuery: 'metric_query',
   metricWatch: 'metric_watch',
   copyAiCall: 'copy_ai_call',
+  copySpan: 'copy_span',
   toggleOtlp: 'toggle_otlp',
 };
 
@@ -95,10 +96,14 @@ interface MessageServices {
   openLogSite(id: number): Promise<void>;
   traceView(traceId: string): TraceView;
   traceList(): TraceSummary[];
+  /** How many traces there are, when the list holds only the newest of them. */
+  traceTotal?(): number;
   metricList(): MetricSeriesView[];
   aiCallList(): GenAiSummary;
   aiCallDetail(traceId: string, spanId: string): GenAiCallDetail | undefined;
   copyAiCall(traceId: string, spanId: string): Promise<void>;
+  spanDetail(traceId: string, spanId: string): SpanDetail | undefined;
+  copySpan(traceId: string, spanId?: string, whole?: boolean): Promise<void>;
   toggleOtlp(enabled: boolean): Promise<void>;
   breakOnEvent(id: number): Promise<void>;
   breakOnQuery(query: string, levels: string[]): Promise<void>;
@@ -129,6 +134,8 @@ interface MessageServices {
   >;
   compare?(request: CompareRequest): CompareView;
 }
+const errorText = (error: unknown) => (error instanceof Error ? error.message : String(error));
+
 export async function handleMessage(
   services: MessageServices,
   send: (message: HostMessage) => void,
@@ -150,7 +157,7 @@ export async function handleMessage(
         send({
           type: 'snapshotError',
           requestId: msg.requestId,
-          message: error instanceof Error ? error.message : String(error),
+          message: errorText(error),
         });
       }
       return;
@@ -164,10 +171,18 @@ export async function handleMessage(
       await services.openLogSite(msg.id);
       return;
     case 'trace':
-      send({ type: 'trace', trace: services.traceView(msg.traceId) });
+      try {
+        send({ type: 'trace', trace: services.traceView(msg.traceId) });
+      } catch (error) {
+        send({ type: 'viewError', view: 'trace', traceId: msg.traceId.toLowerCase(), message: errorText(error) });
+      }
       return;
     case 'traces':
-      send({ type: 'traces', traces: services.traceList() });
+      try {
+        send({ type: 'traces', traces: services.traceList(), total: services.traceTotal?.() });
+      } catch (error) {
+        send({ type: 'viewError', view: 'traces', message: errorText(error) });
+      }
       return;
     case 'metrics':
       send({ type: 'metrics', metrics: services.metricList() });
@@ -185,6 +200,18 @@ export async function handleMessage(
       return;
     case 'copyAiCall':
       await services.copyAiCall(msg.traceId, msg.spanId);
+      return;
+    case 'span': {
+      const ids = { traceId: msg.traceId.toLowerCase(), spanId: msg.spanId.toLowerCase() };
+      try {
+        send({ type: 'span', ...ids, detail: services.spanDetail(ids.traceId, ids.spanId) });
+      } catch (error) {
+        send({ type: 'viewError', view: 'span', ...ids, message: errorText(error) });
+      }
+      return;
+    }
+    case 'copySpan':
+      await services.copySpan(msg.traceId, msg.spanId, msg.whole);
       return;
     case 'toggleOtlp':
       await services.toggleOtlp(msg.enabled);
@@ -222,7 +249,11 @@ export async function handleMessage(
       });
       return;
     case 'analysis':
-      send({ type: 'analysis', analysis: store.analysis(msg) });
+      try {
+        send({ type: 'analysis', analysis: store.analysis(msg), requestId: msg.requestId });
+      } catch (error) {
+        send({ type: 'viewError', view: 'analysis', requestId: msg.requestId, message: errorText(error) });
+      }
       return;
     case 'export':
       await transfer.exportLogs(msg);

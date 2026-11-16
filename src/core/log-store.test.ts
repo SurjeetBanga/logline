@@ -129,6 +129,16 @@ test('search, level filtering, history pages and frozen boundaries', () => {
   assert.equal(store.page({ before: 100 }).events.at(-1)!.id, 100);
 });
 
+test('reversePage reads as many as a caller asks for, up to five thousand', () => {
+  const store = new LogStore(10000, 64 * 1024 * 1024);
+  for (let id = 1; id <= 6000; id++) store.add({ id, level: 'info', message: `event ${id}` });
+  assert.equal(store.reversePage({}, 2000).events.length, 2000);
+  const most = store.reversePage({}, 9000);
+  assert.equal(most.events.length, 5000);
+  assert.equal(most.events.at(-1)!.id, 1001);
+  assert.equal(most.hasMore, true);
+});
+
 test('reversePage returns newest matches without materializing the full result set', () => {
   const store = new LogStore(1000, 10 * 1024 * 1024);
   for (let id = 1; id <= 500; id++)

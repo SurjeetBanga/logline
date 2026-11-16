@@ -208,6 +208,7 @@ export function getElements() {
     traceHotspots: element<HTMLElement>('traceHotspots'),
     traceHotspotList: element<HTMLOListElement>('traceHotspotList'),
     traceFilter: element<HTMLButtonElement>('traceFilter'),
+    traceCopyId: element<HTMLButtonElement>('traceCopyId'),
     breakOnLogs: element<HTMLButtonElement>('breakOnLogs'),
     saveSearchDialog: element<HTMLDialogElement>('saveSearchDialog'),
     feedbackDialog: element<HTMLDialogElement>('feedbackDialog'),

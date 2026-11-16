@@ -99,6 +99,7 @@ export function createViewer(api: WebviewApi) {
     },
     (title, items) => tabRail.set('connection', title, items),
   );
+  const ANALYSIS_REFRESH_MS = 5000;
   const formatTimestamp = createTimestampFormatter(state);
   const analysis = createAnalysis(
     elements,
@@ -107,6 +108,7 @@ export function createViewer(api: WebviewApi) {
       drill: (term) => {
         const choice = addFilterTerm(search.query(), term);
         if (choice.query === undefined) {
+          analysisStatus = 'note';
           elements.analysisStatus.textContent = choice.reason;
           return;
         }
@@ -274,6 +276,16 @@ export function createViewer(api: WebviewApi) {
     () => doctor.revision(),
   );
   let visibleSources: Snapshot['servers'] = [];
+  /** What the line above Analyze says: a note, such as why a filter was not added, stays until the next request. */
+  let analysisStatus: 'loading' | 'ready' | 'note' | 'error' = 'loading';
+  let analysisRequest = 0;
+  let analysisPending = false;
+  let analysisLoadedAt = -Infinity;
+  let analysisRefresh: ReturnType<typeof setTimeout> | undefined;
+  /** A refresh was skipped, so the next snapshot asks again even with no newer logs. */
+  let analysisStale = false;
+  /** The retained logs the last snapshot described, to tell when Analyze and Traces are behind. */
+  let retainedBasis: string | undefined;
   /** The line above Analyze: what it covers, with the source by name once the snapshot has named it. */
   function analysisContext(): void {
     const filter = search.query();
@@ -354,7 +366,11 @@ export function createViewer(api: WebviewApi) {
       return;
     }
     if (data.type === 'traces') {
-      traceList.receive(data.traces);
+      traceList.receive(data.traces, data.total);
+      return;
+    }
+    if (data.type === 'span') {
+      traceView.receiveSpan(data);
       return;
     }
     if (data.type === 'metrics') {
@@ -407,8 +423,26 @@ export function createViewer(api: WebviewApi) {
       return;
     }
     if (data.type === 'analysis') {
-      analysisContext();
+      // Only the latest request's answer is shown; an older one arriving late is for a filter no longer chosen.
+      if (data.requestId !== undefined && data.requestId !== analysisRequest) return;
+      analysisPending = false;
+      // A background refresh leaves a note, such as why a filter was not added, in place.
+      if (analysisStatus !== 'note') {
+        analysisStatus = 'ready';
+        analysisContext();
+      }
       analysis.renderAnalysis(data.analysis);
+      return;
+    }
+    if (data.type === 'viewError') {
+      if (data.view === 'traces') traceList.fail(data.message);
+      else if (data.view === 'trace') traceView.fail(data.traceId, data.message);
+      else if (data.view === 'span') traceView.failSpan(data.traceId, data.spanId, data.message);
+      else if (data.requestId === undefined || data.requestId === analysisRequest) {
+        analysisPending = false;
+        analysisStatus = 'error';
+        elements.analysisStatus.textContent = `Could not analyze these logs: ${data.message}`;
+      }
       return;
     }
     if (data.type === 'searches') {
@@ -482,6 +516,19 @@ export function createViewer(api: WebviewApi) {
     metricQuery.update(data.connections);
     metricList.setConnections(data.connections);
     aiCalls.update(data.aiCalls, otlpRunning);
+    // Analyze and Traces follow the retained logs and spans: a view left open catches up as they arrive.
+    const logsBasis = `${data.generation}:${data.newest}`;
+    const tracesBasis = `${logsBasis}:${data.tracesRevision ?? 0}`;
+    traceList.update(tracesBasis);
+    traceView.update(tracesBasis);
+    if (
+      views.active() === 'analysis' &&
+      ((retainedBasis !== undefined && retainedBasis !== logsBasis) || analysisStale)
+    ) {
+      analysisStale = false;
+      refreshAnalysisSoon();
+    }
+    retainedBasis = logsBasis;
     views.ensureVisible();
     elements.traces.title = data.traceCount
       ? `${numberFormat.format(data.traceCount)} traces received from OpenTelemetry. Show requests across services.`
@@ -576,7 +623,7 @@ export function createViewer(api: WebviewApi) {
     let selectionChanged = false;
     if (data.servers) {
       visibleSources = data.servers;
-      if (elements.analysisStatus.textContent) analysisContext();
+      if (analysisStatus === 'ready') analysisContext();
       const selectedServer = data.servers.some((server) => server.id === state.selectedServer)
         ? state.selectedServer
         : '';
@@ -1250,16 +1297,41 @@ export function createViewer(api: WebviewApi) {
   scope.listen(elements.changedOnly, 'click', () => {
     search.setQuery(withChangedScope(search.query(), !hasChangedScope(search.query())), true);
   });
-  function requestAnalysis() {
-    elements.analysisStatus.textContent = 'Loading analysis…';
+  /**
+   * Asks the host to analyze the current filter. In the background, as logs arrive, what is
+   * shown stays until the answer replaces it.
+   */
+  function requestAnalysis(background = false) {
+    if (!background) {
+      analysisStatus = 'loading';
+      elements.analysisStatus.textContent = 'Loading analysis…';
+    }
+    analysisPending = true;
+    analysisLoadedAt = Date.now();
     api.postMessage({
       type: 'analysis',
+      requestId: ++analysisRequest,
       query: search.query(),
       levels: state.currentLevels(),
       serverId: state.selectedServer || undefined,
       sessionId: state.selectedSession || undefined,
     });
   }
+  /** Logs arrived or were cleared while Analyze is shown: analyze again, at most once per interval. */
+  function refreshAnalysisSoon() {
+    if (analysisRefresh) return;
+    analysisRefresh = setTimeout(
+      () => {
+        analysisRefresh = undefined;
+        if (views.active() !== 'analysis') return;
+        // An answer still on its way, or a time window being chosen, is not interrupted; the next arrival asks again.
+        if (analysisPending || analysis.busy()) analysisStale = true;
+        else requestAnalysis(true);
+      },
+      Math.max(0, analysisLoadedAt + ANALYSIS_REFRESH_MS - Date.now()),
+    );
+  }
+  scope.track(() => clearTimeout(analysisRefresh));
 
   /** Opens a view from its tab, loading what it shows. */
   function openView(tab: TabName) {
@@ -1295,6 +1367,7 @@ export function createViewer(api: WebviewApi) {
     if (previous === 'metrics') metricList.hide();
     if (previous === 'compare') compareView.hide();
     if (previous === 'aiCalls') aiCalls.hide();
+    if (previous === 'traces') traceList.hide();
     if (previous === 'doctor') elements.doctor.hidden = true;
     // A selection belongs to its list; another tab has nothing to show beside it.
     if (view !== 'logs') inspector.close('event');

@@ -736,14 +736,6 @@ export class AgentLogAccess {
     this.assertShare(shareId);
     const id = traceId.toLowerCase();
     const sources = this.sources();
-    const read = this.readMerged(
-      { shareId, query: `traceId:${JSON.stringify(id)}` },
-      sources,
-      undefined,
-      this.nextId(),
-      this.nextId(),
-      200,
-    );
     const spans = (this.spans?.trace(id) ?? [])
       .filter((span) => this.sharedSpan(span))
       .map((span) => ({
@@ -760,6 +752,16 @@ export class AgentLogAccess {
           message: span.status.message === undefined ? undefined : this.redactor.text(span.status.message),
         },
       }));
+    // Span rows shown in Logs carry the trace id too, and are left out when the spans are returned; leaving them
+    // out of the query keeps them from using up the 200 logs read. `kind:/^span$/` matches only that exact value.
+    const read = this.readMerged(
+      { shareId, query: `traceId:${JSON.stringify(id)}${spans.length ? ' -kind:/^span$/' : ''}` },
+      sources,
+      undefined,
+      this.nextId(),
+      this.nextId(),
+      200,
+    );
     const logs = traceLogs(read.events, id, spans.length > 0, (event) =>
       this.redactor.text(event.message ?? '').slice(0, 1024),
     ).map((log) => (log.server === undefined ? log : { ...log, server: this.redactor.text(log.server) }));

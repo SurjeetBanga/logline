@@ -84,6 +84,14 @@ class Element {
     const siblings = this.parent?.children ?? [];
     return siblings[siblings.indexOf(this) + 1] ?? null;
   }
+  replaceWith(...nodes: Element[]) {
+    const parent = this.parent;
+    if (!parent) return;
+    const index = parent.children.indexOf(this);
+    parent.children.splice(index, 1, ...nodes);
+    for (const node of nodes) node.parent = parent;
+    this.parent = undefined;
+  }
   removeChild(child: Element) {
     this.children = this.children.filter((item) => item !== child);
     if (child.parent === this) child.parent = undefined;
@@ -3501,7 +3509,7 @@ test('the trace waterfall renders in the inspector with logs, and opens their co
   assert.equal(rows[1].children[0].children[0].textContent, '⚠ op b');
   assert.equal(rows[1].children[2].children[0].children[0].style.left, '20%');
   assert.equal(rows[1].children[2].children[0].children[0].style.width, '80%');
-  assert.match(rows[1].children[0].attributes.title ?? (rows[1].children[0] as any).title, /Error: timeout/);
+  assert.equal(rows[1].children[0].title, "op b (server). Show this span's attributes and events.");
   assert.deepEqual(
     [rows[0].children[4].textContent, rows[1].children[4].textContent],
     ['40 ms', '15 ms'],
@@ -3519,9 +3527,23 @@ test('the trace waterfall renders in the inspector with logs, and opens their co
   assert.equal(hotspots[1].className, 'trace-hotspot trace-hotspot-error');
   assert.equal(hotspots[1].children[1].children[0].style.width, '37.5%');
   get('traceHotspotList').listeners.get('click')!({ target: { closest: () => hotspots[1] } });
-  assert.equal(rows[1].className, 'trace-span trace-error trace-flash');
-  assert.equal(rows[1].scrollIntoViewCalls.length, 1);
-  const log = rows[2].children[0].children[0];
+  // The hotspot opens the span it leads to, so the waterfall is drawn again with its details under it.
+  const opened = get('traceRows').children;
+  assert.deepEqual(
+    opened.map((row) => row.className),
+    [
+      'trace-span trace-critical',
+      'trace-span trace-error selected trace-flash',
+      'trace-detail',
+      'trace-log',
+      'trace-section',
+      'trace-log',
+    ],
+  );
+  assert.equal(opened[1].scrollIntoViewCalls.length, 1);
+  assert.deepEqual(JSON.parse(JSON.stringify(messages.at(-1))), { type: 'span', traceId: 'abc123', spanId: 'b' });
+  assert.match(opened[2].querySelector('.trace-detail-error')!.textContent, /^Error: timeout$/);
+  const log = opened[3].children[0].children[0];
   get('traceRows').listeners.get('click')!({
     target: { closest: (selector: string) => (selector === '.trace-log-button' ? log : undefined) },
   });
@@ -6125,4 +6147,611 @@ test('the inspector shows one thing: leaving a tab closes its selection, and ano
   assert.equal(get('inspectorBody').children[0], get('aiCallView'));
   assert.equal(get('traceRows').children.length, 0, 'the trace is forgotten');
   assert.deepEqual(sent(messages).at(-1), { type: 'aiCall', traceId: 't1', spanId: 's3' });
+});
+
+/** The panel's clock and timers, for views that refresh at most once per interval. */
+function clock(runtime: ReturnType<typeof viewer>['runtime'], timers: Map<number, () => void>) {
+  const scope = runtime as Record<string, any>;
+  let now = 1_000_000;
+  scope.fakeNow = () => now;
+  runInContext('Date.now = () => globalThis.fakeNow()', runtime);
+  const delays: number[] = [];
+  const schedule = scope.setTimeout as (callback: () => void, delay?: number) => number;
+  scope.setTimeout = (callback: () => void, delay?: number) => {
+    delays.push(delay ?? 0);
+    return schedule(callback, delay);
+  };
+  return {
+    delays,
+    advance: (ms: number) => {
+      now += ms;
+    },
+    /** Timers started by `act`, run at once. */
+    fireNew(act: () => void) {
+      const before = new Set(timers.keys());
+      act();
+      const started = [...timers.keys()].filter((id) => !before.has(id));
+      for (const id of started) {
+        const callback = timers.get(id);
+        timers.delete(id);
+        callback?.();
+      }
+      return started.length;
+    },
+  };
+}
+
+const emptyAnalysis = {
+  rate: [],
+  errors: [],
+  latency: [],
+  statusCodes: [],
+  patterns: [],
+  errorGroups: [],
+  range: {},
+  summary: { events: 1, errors: 0, sources: 1, outside: 0 },
+};
+const analysisRequests = (messages: Record<string, any>[]) => messages.filter((message) => message.type === 'analysis');
+
+test('Analyze shows only the answer to its latest request', () => {
+  const { get, app, receive, messages } = viewer();
+  get('analyze').listeners.get('click')!();
+  app.search.setQuery('status:500', true);
+  const [first, second] = analysisRequests(messages).slice(-2);
+  assert.equal(second.requestId, first.requestId + 1);
+  assert.equal(second.query, 'status:500');
+  receive({ type: 'analysis', requestId: first.requestId, analysis: emptyAnalysis });
+  assert.equal(get('analysisStatus').textContent, 'Loading analysis…', 'the answer to the older filter is ignored');
+  receive({ type: 'analysis', requestId: second.requestId, analysis: emptyAnalysis });
+  assert.match(get('analysisStatus').textContent, /^Logs matching status:500/);
+});
+
+test('Analyze asks again as logs arrive, at most every five seconds, and only while it is shown', () => {
+  const { get, app, receive, messages, runtime, timers } = viewer({ server: '', query: '', levels: undefined });
+  const time = clock(runtime, timers);
+  const snapshot = (newest: number) => () => receive({ ...railSnapshot, newest });
+  get('analyze').listeners.get('click')!();
+  const requests = () => analysisRequests(messages);
+  const first = requests().at(-1)!;
+  receive({ type: 'analysis', requestId: first.requestId, analysis: emptyAnalysis });
+  const status = get('analysisStatus').textContent;
+  assert.equal(time.fireNew(snapshot(100)), 0, 'the same logs, nothing to ask');
+  assert.equal(requests().length, 1);
+
+  assert.equal(time.fireNew(snapshot(101)), 1);
+  assert.equal(time.delays.at(-1), 5000, 'asked for just now, so it waits the interval out');
+  assert.equal(requests().length, 2);
+  assert.equal(requests().at(-1)!.requestId, first.requestId + 1);
+  assert.equal(get('analysisStatus').textContent, status, 'a background request leaves the status alone');
+
+  // An answer still on its way is not interrupted; the next snapshot asks again, even with no newer logs.
+  assert.equal(time.fireNew(snapshot(102)), 1);
+  assert.equal(requests().length, 2);
+  receive({ type: 'analysis', requestId: requests().at(-1)!.requestId, analysis: emptyAnalysis });
+  assert.equal(time.fireNew(snapshot(102)), 1);
+  assert.equal(requests().length, 3);
+
+  // Once the interval has passed, it asks at once.
+  receive({ type: 'analysis', requestId: requests().at(-1)!.requestId, analysis: emptyAnalysis });
+  time.advance(6000);
+  time.fireNew(snapshot(103));
+  assert.equal(time.delays.at(-1), 0);
+  assert.equal(requests().length, 4);
+  receive({ type: 'analysis', requestId: requests().at(-1)!.requestId, analysis: emptyAnalysis });
+
+  // Another view does not refresh Analyze, and leaving it cancels what was waiting.
+  const count = requests().length;
+  get('logsTab').listeners.get('click')!();
+  assert.equal(time.fireNew(snapshot(104)), 0);
+  get('analyze').listeners.get('click')!();
+  receive({ type: 'analysis', requestId: requests().at(-1)!.requestId, analysis: emptyAnalysis });
+  const waiting = requests().length;
+  assert.equal(waiting, count + 1);
+  time.advance(6000);
+  const before = new Set(timers.keys());
+  receive({ ...railSnapshot, newest: 105 });
+  get('logsTab').listeners.get('click')!();
+  for (const id of [...timers.keys()].filter((id) => !before.has(id))) timers.get(id)!();
+  assert.equal(requests().length, waiting, 'a refresh that comes due after leaving Analyze asks nothing');
+  assert.equal(app.views.active(), 'logs');
+});
+
+test('Analyze does not refresh while a time window is being chosen on its chart', () => {
+  const { get, receive, messages, runtime, timers } = viewer();
+  const time = clock(runtime, timers);
+  const from = Date.parse('2026-10-04T12:00:00Z');
+  get('analyze').listeners.get('click')!();
+  receive({
+    type: 'analysis',
+    requestId: analysisRequests(messages).at(-1)!.requestId,
+    analysis: {
+      ...emptyAnalysis,
+      rate: Array.from({ length: 4 }, (_, bucket) => ({ bucket, count: 10, anomalous: false })),
+      errors: Array.from({ length: 4 }, (_, bucket) => ({ bucket, count: 0, anomalous: false })),
+      warnings: Array.from({ length: 4 }, (_, bucket) => ({ bucket, count: 1 })),
+      range: { from, to: from + 4 * 60000 },
+      summary: { events: 40, errors: 0, sources: 1, outside: 0 },
+    },
+  });
+  const count = () => analysisRequests(messages).length;
+  const svg = get('analysisContent').querySelectorAll('.volume-chart')[0];
+  svg.listeners.get('pointerdown')!({ button: 0, clientX: 40 });
+  time.advance(6000);
+  time.fireNew(() => receive({ ...railSnapshot, newest: 101 }));
+  assert.equal(count(), 1, 'a window being dragged is not redrawn under the pointer');
+  svg.listeners.get('pointermove')!({ clientX: 110 });
+  svg.listeners.get('pointerup')!({ clientX: 110 });
+  time.fireNew(() => receive({ ...railSnapshot, newest: 102 }));
+  assert.equal(count(), 1, 'nor is a window that is chosen');
+});
+
+test('a failed analysis says so, and neither a snapshot nor an old failure replaces that', () => {
+  const { get, receive, messages } = viewer();
+  get('analyze').listeners.get('click')!();
+  const request = analysisRequests(messages).at(-1)!.requestId;
+  receive({ ...railSnapshot });
+  assert.equal(get('analysisStatus').textContent, 'Loading analysis…', 'a snapshot leaves the loading note');
+  receive({ type: 'viewError', view: 'analysis', requestId: request - 1, message: 'old' });
+  assert.equal(get('analysisStatus').textContent, 'Loading analysis…', 'a failure of an older request is ignored');
+  receive({ type: 'viewError', view: 'analysis', requestId: request, message: 'out of memory' });
+  assert.equal(get('analysisStatus').textContent, 'Could not analyze these logs: out of memory');
+  receive({ ...railSnapshot, generation: 2 });
+  assert.equal(get('analysisStatus').textContent, 'Could not analyze these logs: out of memory');
+  receive({ type: 'analysis', requestId: request, analysis: emptyAnalysis });
+  assert.match(get('analysisStatus').textContent, /^Logs matching timeout/, 'the next answer replaces the error');
+});
+
+test('the Traces list loads again when spans arrive, keeps its rows when nothing changed, and reports a failure', () => {
+  const { get, receive, messages, runtime, timers } = viewer();
+  const time = clock(runtime, timers);
+  const trace = (traceId: string, errors = 0) => ({
+    traceId,
+    name: `GET /${traceId}`,
+    service: 'api',
+    services: ['api'],
+    startMs: 1000,
+    durationMs: 10,
+    spans: 1,
+    logs: 0,
+    errors,
+  });
+  const requests = () => messages.filter((message) => message.type === 'traces').length;
+  get('traces').listeners.get('click')!();
+  receive({ type: 'traces', traces: [trace('f1'), trace('f2')] });
+  const rows = get('tracesRows').children;
+  const spans = (tracesRevision: number) => () => receive({ ...railSnapshot, tracesRevision });
+  assert.equal(time.fireNew(spans(0)), 0, 'nothing changed');
+  assert.equal(time.fireNew(spans(1)), 1);
+  assert.equal(time.delays.at(-1), 5000);
+  assert.equal(requests(), 2, 'a changed revision asks for the list again');
+  receive({ type: 'traces', traces: [trace('f1'), trace('f2')] });
+  assert.equal(get('tracesRows').children, rows, 'an unchanged list is not drawn again');
+
+  // The row holding focus keeps it through a redraw.
+  get('tracesRows').children[1].focus();
+  time.fireNew(spans(2));
+  receive({ type: 'traces', traces: [trace('f1'), trace('f2', 1)] });
+  assert.notEqual(get('tracesRows').children, rows);
+  assert.equal(get('tracesRows').children[1].dataset.traceId, 'f2');
+  assert.equal(get('tracesRows').children[1].focusCalls.length, 1);
+
+  time.fireNew(spans(3));
+  receive({ type: 'viewError', view: 'traces', message: 'store unavailable' });
+  assert.equal(get('tracesStatus').textContent, 'Could not load traces: store unavailable');
+  receive({ type: 'traces', traces: [trace('f1'), trace('f2', 1)] });
+  assert.match(get('tracesStatus').textContent, /^2 recent traces/, 'the next answer replaces the failure');
+
+  // Another view does not refresh the list.
+  get('logsTab').listeners.get('click')!();
+  assert.equal(time.fireNew(spans(4)), 0);
+});
+
+const waterfallSpan = (spanId: string, depth: number, extra: Record<string, unknown> = {}) => ({
+  spanId,
+  name: `op ${spanId}`,
+  service: 'api',
+  kind: 'server',
+  offsetMs: depth * 10,
+  durationMs: 40,
+  selfMs: 30,
+  depth,
+  error: false,
+  critical: depth === 0,
+  attributes: {},
+  events: [],
+  ...extra,
+});
+const waterfall = (extra: Record<string, unknown> = {}) => ({
+  traceId: 'abc123',
+  durationMs: 50,
+  services: ['api'],
+  errors: 0,
+  omitted: 0,
+  hotspots: [],
+  spans: [waterfallSpan('a', 0), waterfallSpan('b', 1), waterfallSpan('c', 1)],
+  logs: [],
+  ...extra,
+});
+const spanTarget = (row: Element) => ({
+  target: { closest: (selector: string) => (selector === '.trace-span' ? row : undefined) },
+});
+const spanKey = (key: string, row: Element) => {
+  const event = { key, target: row, prevented: false, preventDefault: () => (event.prevented = true) };
+  return event;
+};
+const spanReply = (spanId: string, extra: Record<string, unknown> = {}) => ({
+  type: 'span',
+  traceId: 'abc123',
+  spanId,
+  detail: {
+    traceId: 'abc123',
+    spanId,
+    parentSpanId: 'a',
+    name: `op ${spanId}`,
+    service: 'api',
+    kind: 'server',
+    scope: 'http-lib',
+    startMs: 0,
+    durationMs: 40,
+    selfMs: 30,
+    error: false,
+    attributes: { 'http.route': '/x', retries: 2, 'db.statement': 'x'.repeat(200) },
+    events: [
+      { offsetMs: 25, name: 'retry', attributes: { attempt: 2 } },
+      { offsetMs: 30, name: 'done', attributes: {} },
+    ],
+    ...extra,
+  },
+});
+const detailOf = (get: (id: string) => Element) =>
+  get('traceRows').children.find((row) => row.className === 'trace-detail')!;
+
+test('a span row opens its details on a click, with every attribute and event from the host', () => {
+  const { get, app, receive, messages } = viewer();
+  app.traceView.show('abc123');
+  receive({ type: 'trace', trace: waterfall() });
+  const rows = () => get('traceRows').children;
+  assert.deepEqual(
+    rows().map((row) => [row.dataset.spanId, row.tabIndex, row.attributes['aria-expanded']]),
+    [
+      ['a', 0, 'false'],
+      ['b', -1, 'false'],
+      ['c', -1, 'false'],
+    ],
+    'the first span is the one tab stop',
+  );
+  get('traceRows').listeners.get('click')!(spanTarget(rows()[1]));
+  assert.deepEqual(JSON.parse(JSON.stringify(messages.at(-1))), { type: 'span', traceId: 'abc123', spanId: 'b' });
+  assert.deepEqual(
+    rows().map((row) => [row.dataset.spanId ?? row.className, row.tabIndex, row.attributes['aria-expanded']]),
+    [
+      ['a', -1, 'false'],
+      ['b', 0, 'true'],
+      ['trace-detail', -1, undefined],
+      ['c', -1, 'false'],
+    ],
+    'the open span is the tab stop, with its details directly under it',
+  );
+  assert.equal(rows()[1].focusCalls.length, 1, 'focus stays on the row that was opened');
+  assert.equal(detailOf(get).querySelector('.trace-detail-note')!.textContent, 'Loading…');
+  assert.deepEqual(
+    detailOf(get)
+      .querySelector('.trace-detail-actions')!
+      .children.map((button) => [button.dataset.spanAction, button.textContent]),
+    [
+      ['logs', 'Show this span’s logs'],
+      ['copyId', 'Copy span ID'],
+      ['copy', 'Copy span'],
+    ],
+  );
+
+  // Replies for another span or trace are not for this one.
+  receive(spanReply('c'));
+  receive({ ...spanReply('b'), traceId: 'other' });
+  assert.equal(detailOf(get).querySelector('.trace-detail-note')!.textContent, 'Loading…');
+  receive(spanReply('b'));
+  const content = detailOf(get).children[0];
+  assert.match(
+    content.querySelector('.trace-detail-facts')!.textContent,
+    /^api · server · 40 ms, 30 ms of it its own · starts at \+10 ms · http-lib$/,
+  );
+  assert.deepEqual(
+    content.children.map((child) => child.textContent || child.className),
+    [
+      content.children[0].textContent,
+      'trace-detail-actions',
+      'Attributes',
+      '',
+      'Events · 2',
+      '+25 ms · retry',
+      '',
+      '+30 ms · done',
+    ].map((text, index) => (index === 3 || index === 6 ? content.children[index].className : text)),
+  );
+  const names = (list: Element) => list.querySelectorAll('.event-field-name').map((name) => name.textContent);
+  const lists = content.querySelectorAll('.event-fields');
+  assert.deepEqual(names(lists[0]), ['span id', 'parent span id', 'http.route', 'retries', 'db.statement']);
+  assert.equal(lists[0].attributes['aria-label'], 'Span attributes');
+  assert.equal(
+    lists[0].querySelectorAll('.event-field-value')[4].textContent,
+    'x'.repeat(200),
+    'a long value is kept whole',
+  );
+  assert.equal(lists[1].attributes['aria-label'], 'Attributes of retry');
+  assert.equal(lists.length, 2, 'an event with no attributes has no list');
+  assert.equal(content.querySelectorAll('.field-filter').length, 0, 'span details offer no log filters');
+
+  // Selecting text inside the details does not close them.
+  get('traceRows').listeners.get('click')!({
+    target: { closest: (selector: string) => (selector === '.trace-detail' ? content : undefined) },
+  });
+  assert.ok(detailOf(get));
+});
+
+test('a span that is gone or fails to load says so in its details', () => {
+  const { get, app, receive } = viewer();
+  app.traceView.show('abc123');
+  receive({ type: 'trace', trace: waterfall() });
+  get('traceRows').listeners.get('click')!(spanTarget(get('traceRows').children[1]));
+  receive({ type: 'span', traceId: 'abc123', spanId: 'b' });
+  assert.equal(detailOf(get).querySelector('.trace-detail-note')!.textContent, 'This span is no longer retained.');
+  assert.equal(detailOf(get).querySelectorAll('.event-fields').length, 0);
+  assert.equal(detailOf(get).querySelector('.trace-detail-actions')!.children.length, 3, 'its actions stay');
+  get('traceRows').listeners.get('click')!(spanTarget(get('traceRows').children[3]));
+  receive({ type: 'viewError', view: 'span', traceId: 'abc123', spanId: 'b', message: 'old' });
+  assert.equal(detailOf(get).querySelector('.trace-detail-note')!.textContent, 'Loading…', 'for another span');
+  receive({ type: 'viewError', view: 'span', traceId: 'abc123', spanId: 'c', message: 'store closed' });
+  assert.equal(
+    detailOf(get).querySelector('.trace-detail-note')!.textContent,
+    'Could not load this span: store closed',
+  );
+  assert.equal(get('traceRows').children.filter((row) => row.className === 'trace-detail').length, 1);
+});
+
+test('span rows work from the keyboard: arrows move the tab stop, Enter and Space open and close', () => {
+  const { get, app, receive, messages } = viewer();
+  app.traceView.show('abc123');
+  receive({ type: 'trace', trace: waterfall() });
+  const rows = () => get('traceRows').children;
+  const press = (key: string, row: Element) => {
+    const event = spanKey(key, row);
+    get('traceRows').listeners.get('keydown')!(event);
+    return event;
+  };
+  const [a, b, c] = rows();
+  assert.equal(press('ArrowUp', a).prevented, false, 'nothing above the first');
+  assert.equal(press('ArrowDown', a).prevented, true);
+  assert.deepEqual([a.tabIndex, b.tabIndex, c.tabIndex], [-1, 0, -1]);
+  assert.equal(b.focusCalls.length, 1);
+  press('End', b);
+  assert.deepEqual([a.tabIndex, b.tabIndex, c.tabIndex], [-1, -1, 0]);
+  assert.equal(press('ArrowDown', c).prevented, false, 'nothing below the last');
+  press('ArrowUp', c);
+  assert.equal(b.focusCalls.length, 2);
+  press('Home', b);
+  assert.equal(a.focusCalls.length, 1);
+  assert.equal(press('x', a).prevented, false);
+
+  const open = press('Enter', a);
+  assert.equal(open.prevented, true);
+  assert.deepEqual(JSON.parse(JSON.stringify(messages.at(-1))), { type: 'span', traceId: 'abc123', spanId: 'a' });
+  assert.equal(rows()[0].attributes['aria-expanded'], 'true');
+  assert.equal(rows()[0].focusCalls.length, 1, 'the redrawn row keeps focus');
+  assert.equal(rows()[1].className, 'trace-detail');
+  const messageCount = messages.length;
+  press('Enter', rows()[0]);
+  assert.equal(rows()[0].attributes['aria-expanded'], 'false');
+  assert.equal(
+    rows().some((row) => row.className === 'trace-detail'),
+    false,
+  );
+  assert.ok(rows()[0].focusCalls.length >= 1, 'closing returns focus to the row');
+  assert.equal(messages.length, messageCount, 'closing asks the host for nothing');
+  press(' ', rows()[1]);
+  assert.equal(rows()[1].attributes['aria-expanded'], 'true');
+  // A key pressed on a button inside the details is not a row's.
+  const inner = spanKey('Enter', { classList: { contains: () => false } } as unknown as Element);
+  get('traceRows').listeners.get('keydown')!(inner);
+  assert.equal(inner.prevented, false);
+});
+
+test('a span’s buttons show its logs or copy its ids and JSON, and the trace has Copy trace ID', () => {
+  const { get, app, receive, messages } = viewer();
+  app.traceView.show('ABC123');
+  receive({ type: 'trace', trace: waterfall() });
+  get('traceRows').listeners.get('click')!(spanTarget(get('traceRows').children[1]));
+  receive(spanReply('b'));
+  const button = (action: string) =>
+    detailOf(get)
+      .querySelector('.trace-detail-actions')!
+      .children.find((child) => child.dataset.spanAction === action)!;
+  const press = (action: string) =>
+    get('traceRows').listeners.get('click')!({
+      target: { closest: (selector: string) => (selector === '[data-span-action]' ? button(action) : undefined) },
+    });
+  press('copyId');
+  assert.deepEqual(JSON.parse(JSON.stringify(messages.at(-1))), {
+    type: 'copySpan',
+    traceId: 'abc123',
+    spanId: 'b',
+    whole: false,
+  });
+  press('copy');
+  assert.deepEqual(JSON.parse(JSON.stringify(messages.at(-1))), {
+    type: 'copySpan',
+    traceId: 'abc123',
+    spanId: 'b',
+    whole: true,
+  });
+  assert.ok(detailOf(get), 'copying leaves the details open');
+  get('traceCopyId').listeners.get('click')!();
+  assert.deepEqual(JSON.parse(JSON.stringify(messages.at(-1))), { type: 'copySpan', traceId: 'abc123' });
+  press('logs');
+  assert.equal(app.views.active(), 'logs');
+  assert.equal(app.search.query(), 'traceId:abc123 spanId:b');
+});
+
+test('an open waterfall loads again as spans arrive, keeps the open span, and reports a failure', () => {
+  const { get, app, receive, messages, runtime, timers } = viewer();
+  const time = clock(runtime, timers);
+  const requests = () => messages.filter((message) => message.type === 'trace').length;
+  app.traceView.show('abc123');
+  receive({ type: 'trace', trace: waterfall() });
+  get('traceRows').listeners.get('click')!(spanTarget(get('traceRows').children[1]));
+  receive(spanReply('b'));
+  const rows = get('traceRows').children;
+  const revision = (tracesRevision: number) => () => receive({ ...railSnapshot, tracesRevision });
+  assert.equal(time.fireNew(revision(0)), 0);
+  assert.equal(requests(), 1);
+  assert.ok(time.fireNew(revision(1)) >= 1, 'the open list and the waterfall both follow');
+  assert.equal(requests(), 2, 'a changed revision asks for the trace again');
+  receive({ type: 'trace', trace: waterfall() });
+  assert.equal(get('traceRows').children, rows, 'an unchanged trace is not drawn again');
+  assert.ok(detailOf(get).querySelector('.event-fields'), 'its open span keeps what it showed');
+
+  time.fireNew(revision(2));
+  receive({
+    type: 'trace',
+    trace: waterfall({ spans: [...waterfall().spans, waterfallSpan('d', 2)], durationMs: 60 }),
+  });
+  assert.deepEqual(
+    get('traceRows').children.map((row) => row.dataset.spanId ?? row.className),
+    ['a', 'b', 'trace-detail', 'c', 'd'],
+  );
+  assert.equal(get('traceRows').children[1].attributes['aria-expanded'], 'true');
+  // A span that has left the store takes its details with it.
+  time.fireNew(revision(3));
+  receive({ type: 'trace', trace: waterfall({ spans: [waterfallSpan('a', 0), waterfallSpan('c', 1)], omitted: 1 }) });
+  assert.deepEqual(
+    get('traceRows').children.map((row) => row.dataset.spanId ?? row.className),
+    ['a', 'c'],
+  );
+  receive({ type: 'viewError', view: 'trace', traceId: 'other', message: 'not this one' });
+  assert.match(get('traceStatus').textContent, /spans/);
+  receive({ type: 'viewError', view: 'trace', traceId: 'abc123', message: 'store closed' });
+  assert.equal(get('traceStatus').textContent, 'Could not load this trace: store closed');
+});
+
+const errorGroupsOf = (count: number) =>
+  Array.from({ length: count }, (_, index) => ({
+    key: `g${index}`,
+    message: `failure ${index}`,
+    count: count - index,
+    sampleIds: [],
+    trend: [],
+    query: `message:"failure ${index}"`,
+  }));
+
+test('a status code that is not three digits is a plain row, not a button that does nothing', () => {
+  const { get, receive, messages } = viewer();
+  get('analyze').listeners.get('click')!();
+  receive({
+    type: 'analysis',
+    requestId: analysisRequests(messages).at(-1)!.requestId,
+    analysis: {
+      ...emptyAnalysis,
+      statusCodes: [
+        { code: '404', count: 3 },
+        { code: 'ERR', count: 2 },
+      ],
+    },
+  });
+  const [coded, other] = get('analysisContent').querySelectorAll('.bar-row');
+  assert.equal(coded.className, 'bar-row');
+  assert.equal(coded.dataset.term, 'status:404');
+  assert.match(coded.title, /Click to show/);
+  assert.equal(other.className, 'bar-row static');
+  assert.equal(other.dataset.term, undefined);
+  assert.doesNotMatch(other.title, /Click/);
+});
+
+test('Analyze lists 20 error groups with Show all N, and keeps showing all as it refreshes', () => {
+  const { get, receive, messages } = viewer();
+  get('analyze').listeners.get('click')!();
+  const answer = (groups: number) =>
+    receive({
+      type: 'analysis',
+      requestId: analysisRequests(messages).at(-1)!.requestId,
+      analysis: { ...emptyAnalysis, errorGroups: errorGroupsOf(groups) },
+    });
+  const groupRows = () => get('analysisContent').querySelectorAll('.group-row');
+  const showAll = () => get('analysisContent').querySelectorAll('.show-more')[0];
+  answer(25);
+  assert.equal(groupRows().length, 20);
+  assert.equal(showAll().textContent, 'Show all 25');
+  assert.equal(showAll().dataset.term, undefined, 'it is not a way into the logs');
+  assert.equal(showAll().dataset.source, undefined);
+  showAll().listeners.get('click')!();
+  assert.equal(groupRows().length, 25);
+  assert.equal(showAll(), undefined, 'the button removes itself');
+  // A later answer keeps showing all of them.
+  answer(26);
+  assert.equal(groupRows().length, 26);
+  assert.equal(showAll(), undefined);
+  // Once 20 or fewer remain, the choice is forgotten.
+  answer(5);
+  assert.equal(groupRows().length, 5);
+  answer(30);
+  assert.equal(groupRows().length, 20);
+  assert.equal(showAll().textContent, 'Show all 30');
+});
+
+test('a waterfall lists logs of spans it leaves out under their own heading', () => {
+  const { get, app, receive } = viewer();
+  app.traceView.show('abc123');
+  receive({
+    type: 'trace',
+    trace: waterfall({
+      omitted: 1,
+      logs: [
+        { id: 1, level: 'info', message: 'from a span left out', offsetMs: 5, spanId: 'zz', spanOmitted: true },
+        { id: 2, level: 'info', message: 'no span', offsetMs: 6 },
+        { id: 3, level: 'info', message: 'from a span shown', offsetMs: 7, spanId: 'b' },
+      ],
+    }),
+  });
+  const rows = get('traceRows').children;
+  assert.deepEqual(
+    rows.map((row) => row.dataset.spanId ?? row.className),
+    ['a', 'b', 'trace-log', 'c', 'trace-section', 'trace-log', 'trace-section', 'trace-log'],
+  );
+  assert.equal(rows[4].children[0].textContent, 'Logs of spans not shown');
+  assert.equal(rows[6].children[0].textContent, 'Logs not linked to a received span');
+});
+
+test('a waterfall says when it read only the newest logs of its trace', () => {
+  const { get, app, receive } = viewer();
+  app.traceView.show('abc123');
+  const logs = [{ id: 1, level: 'info', message: 'one', offsetMs: 1 }];
+  receive({ type: 'trace', trace: waterfall({ logs, omitted: 1 }) });
+  assert.doesNotMatch(get('traceStatus').textContent, /logs shown/);
+  receive({ type: 'trace', trace: waterfall({ logs, omitted: 1, logsLimited: true }) });
+  assert.match(get('traceStatus').textContent, /spans shown · Newest 1 logs shown$/);
+  receive({ type: 'trace', trace: waterfall({ spans: [], logs, logsLimited: true }) });
+  assert.match(get('traceStatus').textContent, /No spans were received for it\. Newest 1 logs shown\.$/);
+});
+
+test('the Traces list says when it holds the newest 200 of more traces', () => {
+  const { get, receive } = viewer();
+  const trace = (index: number) => ({
+    traceId: `t${index}`,
+    name: `GET /${index}`,
+    service: 'api',
+    services: ['api'],
+    startMs: 1000,
+    durationMs: 10,
+    spans: 1,
+    logs: 0,
+    errors: 0,
+  });
+  get('traces').listeners.get('click')!();
+  const list = Array.from({ length: 200 }, (_, index) => trace(index));
+  receive({ type: 'traces', traces: list, total: 300 });
+  assert.match(get('tracesStatus').textContent, /^Newest 200 of 300 traces · 0 with errors/);
+  receive({ type: 'traces', traces: list, total: 350 });
+  assert.match(get('tracesStatus').textContent, /^Newest 200 of 350 traces/, 'the count follows');
+  receive({ type: 'traces', traces: list, total: 200 });
+  assert.match(get('tracesStatus').textContent, /^200 recent traces/, 'nothing is cut once the count matches');
+  receive({ type: 'traces', traces: [trace(1), trace(2)] });
+  assert.match(get('tracesStatus').textContent, /^2 recent traces/, 'a short list is not cut');
 });

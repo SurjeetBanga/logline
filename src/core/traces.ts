@@ -141,6 +141,58 @@ export interface TraceRow {
   };
 }
 
+/** Everything kept about one span, for the details under its row in the waterfall. */
+export interface SpanDetail {
+  traceId: string;
+  spanId: string;
+  parentSpanId?: string;
+  name: string;
+  service: string;
+  kind: string;
+  /** The instrumentation library that made the span. */
+  scope?: string;
+  startMs: number;
+  durationMs: number;
+  /** Time not covered by any child span. */
+  selfMs: number;
+  error: boolean;
+  statusMessage?: string;
+  /** Every attribute kept, less prompts and responses, which the AI calls view shows. */
+  attributes: Record<string, AttrValue>;
+  /** Events with their attributes; `offsetMs` is from the start of the span. */
+  events: { offsetMs: number; name: string; attributes: Record<string, AttrValue> }[];
+}
+
+const withoutGenAiContent = (attributes: Record<string, AttrValue>) =>
+  Object.fromEntries(Object.entries(attributes).filter(([key]) => !isGenAiContentKey(key)));
+
+/** One span of a trace in full, or nothing once it is no longer retained. */
+export function spanDetail(spans: readonly Span[], spanId: string): SpanDetail | undefined {
+  const span = spans.find((candidate) => candidate.spanId === spanId);
+  if (!span) return undefined;
+  const children = spans.filter((candidate) => candidate.parentSpanId === spanId && candidate !== span);
+  return {
+    traceId: span.traceId,
+    spanId: span.spanId,
+    ...(span.parentSpanId ? { parentSpanId: span.parentSpanId } : {}),
+    name: span.name,
+    service: span.service,
+    kind: SPAN_KINDS[span.kind] ?? 'unspecified',
+    ...(span.scope ? { scope: span.scope } : {}),
+    startMs: span.startMs,
+    durationMs: spanDurationMs(span),
+    selfMs: selfTimeMs(span, children),
+    error: span.status.code === 2,
+    ...(span.status.message ? { statusMessage: span.status.message } : {}),
+    attributes: withoutGenAiContent(span.attributes),
+    events: span.events.map((event) => ({
+      offsetMs: roundMs(event.timeMs - span.startMs),
+      name: event.name,
+      attributes: withoutGenAiContent(event.attributes),
+    })),
+  };
+}
+
 export interface TraceLogInput {
   id: number;
   level: string;
@@ -155,6 +207,8 @@ export interface TraceLog {
   message: string;
   offsetMs?: number;
   spanId?: string;
+  /** The log's span was received but is not among the rows, because the trace has more spans than the display limit. */
+  spanOmitted?: true;
   server?: string;
 }
 
@@ -181,6 +235,8 @@ export interface TraceView {
   /** Operations that spent the most time themselves, most first. */
   hotspots: TraceHotspot[];
   logs: TraceLog[];
+  /** More logs matched the trace than were read, so `logs` holds the newest of them. */
+  logsLimited?: true;
 }
 
 const MAX_ROW_ATTRIBUTES = 24;
@@ -337,6 +393,7 @@ export function buildTrace(
     for (const child of (children.get(span.spanId) ?? []).slice().reverse())
       stack.push({ span: child, depth: depth + 1 });
   }
+  const shownIds = new Set(rows.map((row) => row.spanId));
   return {
     traceId,
     startMs,
@@ -349,6 +406,8 @@ export function buildTrace(
     logs: logs.map(({ timeMs, ...log }) => ({
       ...log,
       offsetMs: timeMs === undefined || startMs === undefined ? undefined : timeMs - startMs,
+      // A log of a received span that the rows leave out is not unlinked; it says so.
+      ...(log.spanId && byId.has(log.spanId) && !shownIds.has(log.spanId) ? { spanOmitted: true as const } : {}),
     })),
   };
 }
@@ -462,7 +521,12 @@ export function summarizeTraces(
     let start = Infinity,
       end = -Infinity,
       errors = 0;
-    const ids = new Set(spans.map((span) => span.spanId));
+    const ids = new Set<string>();
+    const services = new Set<string>();
+    for (const span of spans) {
+      ids.add(span.spanId);
+      services.add(span.service);
+    }
     for (const span of spans) {
       if (span.startMs < start) start = span.startMs;
       if (span.endMs > end) end = span.endMs;
@@ -474,7 +538,7 @@ export function summarizeTraces(
       traceId,
       name: root?.name ?? spans[0].name,
       service: root?.service,
-      services: [...new Set(spans.map((span) => span.service))].sort(),
+      services: [...services].sort(),
       startMs: start,
       durationMs: Math.round((end - start) * 1000) / 1000,
       spans: spans.length,
@@ -488,7 +552,9 @@ export function summarizeTraces(
   >();
   for (const event of events) {
     const value = getField(event, 'traceId');
-    if (typeof value !== 'string' || !value || getField(event, 'kind') === 'span') continue;
+    // A span's own table row is written with `kind` at the top, so its fields are read directly: most
+    // logs have no `kind`, and looking for one under other names costs more than the rest of this loop.
+    if (typeof value !== 'string' || !value || event.fields?.kind === 'span') continue;
     const traceId = value.toLowerCase();
     const known = summaries.get(traceId);
     const failed = event.level === 'error' || event.level === 'fatal';

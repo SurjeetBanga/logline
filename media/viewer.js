@@ -61,6 +61,9 @@
     });
     let formatterKey;
     let cachedFormatter;
+    let dragging = false;
+    let windowSelected = false;
+    let allErrorGroups = false;
     function svgEl(tag, attrs = {}) {
       const el = document.createElementNS(SVG_NS, tag);
       for (const [key, value] of Object.entries(attrs)) el.setAttribute(key, String(value));
@@ -266,9 +269,11 @@
         if (event.button !== 0) return;
         start = bucketAt(event);
         dragged = false;
+        dragging = true;
         svg2.setPointerCapture?.(event.pointerId);
       });
       scope.listen(svg2, "pointercancel", () => {
+        dragging = false;
         if (start === void 0) return;
         start = void 0;
         if (dragged && bar.hidden) outline.setAttribute("visibility", "hidden");
@@ -280,6 +285,7 @@
         if (dragged) show(start, here);
       });
       scope.listen(svg2, "pointerup", (event) => {
+        dragging = false;
         if (start === void 0) return;
         const first = start;
         start = void 0;
@@ -299,11 +305,13 @@
         clear.type = "button";
         clear.textContent = "Clear";
         scope.listen(clear, "click", () => {
+          windowSelected = false;
           bar.hidden = true;
           outline.setAttribute("visibility", "hidden");
         });
         bar.replaceChildren(text2, showLogs, clear);
         bar.hidden = false;
+        windowSelected = true;
       });
       scope.listen(
         svg2,
@@ -477,12 +485,13 @@
       return tiles2;
     }
     function barRow(label, value, total, max, target, tone = "") {
-      const row = document.createElement("button");
-      row.type = "button";
-      row.className = "bar-row";
+      const interactive = target.source !== void 0 || !!target.term;
+      const row = document.createElement(interactive ? "button" : "div");
+      if (interactive) row.type = "button";
+      row.className = interactive ? "bar-row" : "bar-row static";
       if (target.source !== void 0) row.dataset.source = target.source;
       else if (target.term) row.dataset.term = target.term;
-      row.title = `${label}: ${count(value)} (${percent(value, total)}). Click to show these events.`;
+      row.title = `${label}: ${count(value)} (${percent(value, total)})${interactive ? ". Click to show these events." : ""}`;
       const name = document.createElement("span");
       name.className = "bar-label";
       name.textContent = label;
@@ -607,8 +616,21 @@
       );
       const errorTotal = errorGroups.reduce((sum, item) => sum + item.count, 0);
       const errorMax = Math.max(1, ...errorGroups.map((item) => item.count));
-      for (const item of errorGroups.slice(0, 20))
-        groups2.append(groupRow(item, errorTotal, errorMax, { detail: seen(item, analysis.range) }));
+      const shown2 = 20;
+      if (errorGroups.length <= shown2) allErrorGroups = false;
+      const errorRow = (item) => groupRow(item, errorTotal, errorMax, { detail: seen(item, analysis.range) });
+      for (const item of errorGroups.slice(0, allErrorGroups ? errorGroups.length : shown2)) groups2.append(errorRow(item));
+      if (errorGroups.length > shown2 && !allErrorGroups) {
+        const more = document.createElement("button");
+        more.type = "button";
+        more.className = "show-more";
+        more.textContent = `Show all ${count(errorGroups.length)}`;
+        more.addEventListener("click", () => {
+          allErrorGroups = true;
+          more.replaceWith(...errorGroups.slice(shown2).map(errorRow));
+        });
+        groups2.append(more);
+      }
       if (!errorGroups.length) groups2.append(empty("No errors in these logs."));
       content.append(groups2);
       const breakdowns = document.createElement("div");
@@ -621,9 +643,20 @@
         patterns.append(groupRow(item, total, patternMax, { level: item.level }));
       if (!analysis.patterns?.length) patterns.append(empty("No data in this range."));
       content.append(patterns);
-      elements.analysisContent.replaceChildren(content);
+      const view = elements.analysisContent;
+      const scrollTop = view.scrollTop;
+      const focused = document.activeElement;
+      const held = focused && view.contains(focused) ? { ...focused.dataset } : void 0;
+      view.replaceChildren(content);
+      dragging = false;
+      windowSelected = false;
+      view.scrollTop = scrollTop;
+      const key = held?.term !== void 0 ? "term" : held?.source !== void 0 ? "source" : void 0;
+      if (key)
+        [...view.querySelectorAll(`[data-${key}]`)].find((element2) => element2.dataset[key] === held[key])?.focus();
     }
-    return { renderAnalysis };
+    const busy = () => dragging || windowSelected;
+    return { renderAnalysis, busy };
   }
 
   // src/core/query-tokens.ts
@@ -1026,6 +1059,7 @@
       traceHotspots: element("traceHotspots"),
       traceHotspotList: element("traceHotspotList"),
       traceFilter: element("traceFilter"),
+      traceCopyId: element("traceCopyId"),
       breakOnLogs: element("breakOnLogs"),
       saveSearchDialog: element("saveSearchDialog"),
       feedbackDialog: element("feedbackDialog"),
@@ -1643,12 +1677,12 @@
     const entries = Object.entries(parsed);
     return entries.length ? entries : void 0;
   }
-  function renderEventFields(entries) {
+  function renderEventFields(entries, other) {
     if (!entries) return void 0;
     const list = document.createElement("div");
     list.className = "event-fields";
     list.setAttribute("role", "list");
-    list.setAttribute("aria-label", "Fields");
+    list.setAttribute("aria-label", other?.label ?? "Fields");
     for (const [name, value] of entries) {
       const row = document.createElement("div");
       row.className = "event-field";
@@ -1662,7 +1696,7 @@
       shown2.textContent = scalar ? String(value) : JSON.stringify(value);
       shown2.title = shown2.textContent;
       row.append(key, shown2);
-      if (scalar && value !== null && value !== "") {
+      if (!other && scalar && value !== null && value !== "") {
         const filters = document.createElement("span");
         filters.className = "event-field-filters";
         for (const exclude of [false, true]) {
@@ -1868,27 +1902,71 @@
     if (ms < 1e3) return `${Math.round(ms * 10) / 10} ms`;
     return `${(ms / 1e3).toFixed(2)} s`;
   }
+  var REFRESH_MS = 5e3;
   function createTraceView(elements, api, scope, actions) {
     let current;
+    let basis;
+    let pending = false;
+    let loadedAt = -Infinity;
+    let refresh;
+    let shown2;
+    let trace;
+    let selected;
+    let detail = "loading";
+    function load() {
+      if (!current) return;
+      pending = true;
+      loadedAt = Date.now();
+      api.postMessage({ type: "trace", traceId: current });
+    }
     function show(traceId) {
       current = traceId.toLowerCase();
+      shown2 = void 0;
+      trace = void 0;
+      selected = void 0;
       elements.traceStatus.textContent = "Loading\u2026";
       elements.traceRows.replaceChildren();
       elements.traceHotspots.hidden = true;
       actions.inspect(`Trace ${current.length > 12 ? `${current.slice(0, 8)}\u2026${current.slice(-4)}` : current}`, current);
-      api.postMessage({ type: "trace", traceId: current });
+      load();
     }
+    function update(next) {
+      const changed = basis !== void 0 && next !== basis;
+      basis = next;
+      if (!changed || !current || refresh) return;
+      refresh = setTimeout(
+        () => {
+          refresh = void 0;
+          if (actions.inspecting() && !pending) load();
+        },
+        Math.max(0, loadedAt + REFRESH_MS - Date.now())
+      );
+    }
+    function fail(traceId, message) {
+      if (!actions.inspecting() || traceId !== current) return;
+      pending = false;
+      shown2 = void 0;
+      elements.traceStatus.textContent = `Could not load this trace: ${message}`;
+    }
+    scope.track(() => clearTimeout(refresh));
     function hide() {
       current = void 0;
+      shown2 = void 0;
+      trace = void 0;
+      selected = void 0;
+      pending = false;
+      clearTimeout(refresh);
+      refresh = void 0;
       elements.traceRows.replaceChildren();
       elements.traceHotspotList.replaceChildren();
       elements.traceHotspots.hidden = true;
     }
     scope.listen(elements.traceHotspotList, "click", (event) => {
       const button = event.target.closest(".trace-hotspot");
-      const row = button && [...elements.traceRows.querySelectorAll(".trace-span")].find(
-        (row2) => row2.dataset.service === button.dataset.service && row2.dataset.name === button.dataset.name
-      );
+      const span2 = button && trace?.spans.find((span3) => span3.service === button.dataset.service && span3.name === button.dataset.name);
+      if (!span2) return;
+      if (selected !== span2.spanId) select(span2.spanId);
+      const row = spanRows().find((row2) => row2.dataset.spanId === span2.spanId);
       if (!row) return;
       row.scrollIntoView({ block: "center" });
       row.classList.remove("trace-flash");
@@ -1906,11 +1984,78 @@
         return;
       }
       const button = event.target.closest(".trace-log-button");
-      if (!button) return;
-      actions.showContext(Number(button.dataset.id));
+      if (button) {
+        actions.showContext(Number(button.dataset.id));
+        return;
+      }
+      const action = event.target.closest("[data-span-action]")?.dataset.spanAction;
+      if (action && current && selected) {
+        if (action === "logs") actions.applyQuery(`traceId:${current} spanId:${selected}`);
+        else api.postMessage({ type: "copySpan", traceId: current, spanId: selected, whole: action === "copy" });
+        return;
+      }
+      if (event.target.closest(".trace-detail")) return;
+      const row = event.target.closest(".trace-span");
+      if (row?.dataset.spanId) toggle(row.dataset.spanId);
     });
-    function receive(trace) {
-      if (!actions.inspecting() || trace.traceId !== current) return;
+    scope.listen(elements.traceCopyId, "click", () => {
+      if (current) api.postMessage({ type: "copySpan", traceId: current });
+    });
+    scope.listen(elements.traceRows, "keydown", (event) => {
+      const key = event.key;
+      const row = event.target;
+      if (!row.classList?.contains("trace-span")) return;
+      if (key === "Enter" || key === " ") {
+        event.preventDefault();
+        if (row.dataset.spanId) toggle(row.dataset.spanId);
+        return;
+      }
+      const rows = spanRows();
+      const index = rows.indexOf(row);
+      const next = key === "ArrowDown" ? rows[index + 1] : key === "ArrowUp" ? rows[index - 1] : key === "Home" ? rows[0] : key === "End" ? rows.at(-1) : void 0;
+      if (!next) return;
+      event.preventDefault();
+      row.tabIndex = -1;
+      next.tabIndex = 0;
+      next.focus();
+    });
+    const spanRows = () => [...elements.traceRows.querySelectorAll(".trace-span")];
+    function select(spanId) {
+      selected = spanId;
+      detail = "loading";
+      if (spanId && current) api.postMessage({ type: "span", traceId: current, spanId });
+      draw(spanId);
+    }
+    function toggle(spanId) {
+      const reopen = spanId !== selected;
+      select(reopen ? spanId : void 0);
+      if (!reopen)
+        spanRows().find((row) => row.dataset.spanId === spanId)?.focus();
+    }
+    function receiveSpan(message) {
+      if (!actions.inspecting() || message.traceId !== current || message.spanId !== selected) return;
+      detail = message.detail ?? "missing";
+      draw();
+    }
+    function failSpan(traceId, spanId, message) {
+      if (!actions.inspecting() || traceId !== current || spanId !== selected) return;
+      detail = { error: message };
+      draw();
+    }
+    function receive(next) {
+      if (!actions.inspecting() || next.traceId !== current) return;
+      pending = false;
+      const signature = `${next.traceId}:${next.spans.length}:${next.omitted}:${next.errors}:${next.durationMs}:${next.logs.length}:${next.logs.at(-1)?.id ?? ""}:${next.logsLimited ?? ""}`;
+      if (signature === shown2) return;
+      shown2 = signature;
+      trace = next;
+      if (selected && !next.spans.some((span2) => span2.spanId === selected)) selected = void 0;
+      draw();
+    }
+    function draw(focus) {
+      if (!trace) return;
+      const held = document.activeElement?.closest?.(".trace-span");
+      const focusId = focus ?? (held && elements.traceRows.contains(held) ? held.dataset.spanId : void 0);
       elements.traceStatus.textContent = summary(trace);
       const shownHotspots = trace.spans.length + trace.omitted > 1 ? trace.hotspots : [];
       const top = shownHotspots[0]?.selfMs ?? 0;
@@ -1919,45 +2064,62 @@
       const total = Math.max(trace.durationMs, 1e-3);
       const logsBySpan = /* @__PURE__ */ new Map();
       const unattached = [];
+      const omittedSpans = [];
       const spanIds = new Set(trace.spans.map((span2) => span2.spanId));
       for (const log of trace.logs) {
         if (log.spanId && spanIds.has(log.spanId))
           logsBySpan.set(log.spanId, [...logsBySpan.get(log.spanId) ?? [], log]);
+        else if (log.spanOmitted) omittedSpans.push(log);
         else unattached.push(log);
       }
       const rows = [];
+      const tabStop = selected ?? trace.spans[0]?.spanId;
       for (const span2 of trace.spans) {
-        rows.push(spanRow(span2, total));
+        const row = spanRow(span2, total);
+        row.tabIndex = span2.spanId === tabStop ? 0 : -1;
+        row.setAttribute("aria-expanded", String(span2.spanId === selected));
+        if (span2.spanId === selected) row.classList.add("selected");
+        rows.push(row);
+        if (span2.spanId === selected) rows.push(spanDetails(span2, detail));
         for (const log of logsBySpan.get(span2.spanId) ?? []) rows.push(logRow(log, total, span2.depth + 1));
       }
-      if (unattached.length) {
+      const section = (title, logs) => {
+        if (!logs.length) return;
         if (trace.spans.length) {
           const heading = document.createElement("tr");
           heading.className = "trace-section";
-          const label = cell("Logs not linked to a received span");
+          const label = cell(title);
           label.colSpan = 5;
           heading.append(label);
           rows.push(heading);
         }
-        for (const log of unattached) rows.push(logRow(log, total, 0));
-      }
+        for (const log of logs) rows.push(logRow(log, total, 0));
+      };
+      section("Logs of spans not shown", omittedSpans);
+      section("Logs not linked to a received span", unattached);
       elements.traceRows.replaceChildren(...rows);
+      if (focusId) rows.find((row) => row.dataset.spanId === focusId)?.focus();
     }
     return {
       show,
       hide,
+      update,
+      fail,
       receive,
+      receiveSpan,
+      failSpan,
       get open() {
         return actions.inspecting();
       }
     };
   }
   function summary(trace) {
+    const limited = trace.logsLimited ? ` \xB7 Newest ${trace.logs.length} logs shown` : "";
     if (!trace.spans.length && !trace.logs.length) {
       return "No spans or retained logs have this trace id. Start the OpenTelemetry receiver from the status icon, or Add logs in the Sources rail, to collect spans from instrumented apps.";
     }
     if (!trace.spans.length) {
-      return `${trace.logs.length} retained log${trace.logs.length === 1 ? "" : "s"} with this trace id over ${formatDuration(trace.durationMs)}. No spans were received for it.`;
+      return `${trace.logs.length} retained log${trace.logs.length === 1 ? "" : "s"} with this trace id over ${formatDuration(trace.durationMs)}. No spans were received for it.${trace.logsLimited ? ` Newest ${trace.logs.length} logs shown.` : ""}`;
     }
     const spans = trace.spans.length + trace.omitted;
     const parts = [
@@ -1967,7 +2129,7 @@
       trace.errors ? `${trace.errors} error${trace.errors === 1 ? "" : "s"}` : "no errors",
       `${trace.logs.length} log${trace.logs.length === 1 ? "" : "s"}`
     ];
-    return `${parts.join(" \xB7 ")} \xB7 Highlighted spans are the critical path${trace.omitted ? ` \xB7 First ${trace.spans.length} spans shown` : ""}`;
+    return `${parts.join(" \xB7 ")} \xB7 Highlighted spans are the critical path${trace.omitted ? ` \xB7 First ${trace.spans.length} spans shown` : ""}${limited}`;
   }
   function hotspotItem(hotspot, top) {
     const item = document.createElement("li");
@@ -2015,6 +2177,7 @@
     row.className = `trace-span${span2.error ? " trace-error" : ""}${span2.critical ? " trace-critical" : ""}`;
     row.dataset.service = span2.service;
     row.dataset.name = span2.name;
+    row.dataset.spanId = span2.spanId;
     const name = cell("", "trace-name");
     const label = document.createElement("span");
     label.className = "trace-indent";
@@ -2045,15 +2208,7 @@
       content.append(label, chip);
       name.replaceChildren(content);
     }
-    name.title = [
-      `${span2.name} (${span2.kind})`,
-      `Self time: ${formatDuration(span2.selfMs)} of ${formatDuration(span2.durationMs)}`,
-      span2.statusMessage ? `Error: ${span2.statusMessage}` : void 0,
-      ...Object.entries(span2.attributes).map(
-        ([key, value]) => `${key} = ${typeof value === "string" ? value : JSON.stringify(value)}`
-      ),
-      ...span2.events.map((event) => `event: ${event.name} at +${formatDuration(event.offsetMs)}`)
-    ].filter(Boolean).join("\n");
+    name.title = `${span2.name} (${span2.kind}). Show this span's attributes and events.`;
     const bar = timeline(span2.offsetMs, span2.durationMs, total, "trace-bar");
     bar.setAttribute("aria-label", `Starts at +${formatDuration(span2.offsetMs)}`);
     row.append(
@@ -2063,6 +2218,77 @@
       cell(formatDuration(span2.durationMs), "trace-duration"),
       cell(formatDuration(span2.selfMs), "trace-duration trace-self")
     );
+    return row;
+  }
+  function spanDetails(span2, detail) {
+    const row = document.createElement("tr");
+    row.className = "trace-detail";
+    const content = cell("", "trace-detail-cell");
+    content.colSpan = 5;
+    const paragraph = (text2, className) => {
+      const element2 = document.createElement("p");
+      element2.className = className;
+      element2.textContent = text2;
+      return element2;
+    };
+    const heading = (text2) => {
+      const element2 = document.createElement("h4");
+      element2.textContent = text2;
+      return element2;
+    };
+    const known = typeof detail === "object" && "spanId" in detail ? detail : void 0;
+    content.append(
+      paragraph(
+        [
+          span2.service,
+          span2.kind,
+          `${formatDuration(span2.durationMs)}, ${formatDuration(span2.selfMs)} of it its own`,
+          `starts at +${formatDuration(span2.offsetMs)}`,
+          known?.scope
+        ].filter(Boolean).join(" \xB7 "),
+        "trace-detail-facts"
+      )
+    );
+    if (span2.statusMessage) content.append(paragraph(`Error: ${span2.statusMessage}`, "trace-detail-error"));
+    const buttons = document.createElement("div");
+    buttons.className = "trace-detail-actions";
+    for (const [action, label, title] of [
+      ["logs", "Show this span\u2019s logs", "Show every retained event with this span id"],
+      ["copyId", "Copy span ID", "Copy this span\u2019s id to the clipboard"],
+      ["copy", "Copy span", "Copy this span as JSON, redacted like exports"]
+    ]) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.dataset.spanAction = action;
+      button.textContent = label;
+      button.title = title;
+      buttons.append(button);
+    }
+    content.append(buttons);
+    if (!known) {
+      content.append(
+        paragraph(
+          detail === "loading" ? "Loading\u2026" : detail === "missing" ? "This span is no longer retained." : `Could not load this span: ${detail.error}`,
+          "trace-detail-note"
+        )
+      );
+    } else {
+      const attributes = [
+        ["span id", known.spanId],
+        ...known.parentSpanId ? [["parent span id", known.parentSpanId]] : [],
+        ...Object.entries(known.attributes)
+      ];
+      content.append(heading("Attributes"), renderEventFields(attributes, { label: "Span attributes" }));
+      if (known.events.length) content.append(heading(`Events \xB7 ${known.events.length}`));
+      for (const event of known.events) {
+        content.append(
+          paragraph(`+${formatDuration(Math.max(0, event.offsetMs))} \xB7 ${event.name}`, "trace-detail-event")
+        );
+        const fields = Object.entries(event.attributes);
+        if (fields.length) content.append(renderEventFields(fields, { label: `Attributes of ${event.name}` }));
+      }
+    }
+    row.append(content);
     return row;
   }
   var tokenFormat = new Intl.NumberFormat(void 0, { notation: "compact", maximumFractionDigits: 1 });
@@ -2121,17 +2347,57 @@
 
   // src/webview/inspection/traces.ts
   var SLOW_MS = 1e3;
+  var REFRESH_MS2 = 5e3;
   function createTraceList(elements, api, scope, actions) {
     let traces = [];
     const hidden = /* @__PURE__ */ new Set();
     let errorsOnly = false;
     let slowOnly = false;
     let opened;
+    let basis;
+    let pending = false;
+    let failed = false;
+    let drawn = false;
+    let loadedAt = -Infinity;
+    let refresh;
+    let total = 0;
+    function load() {
+      if (pending) return;
+      pending = true;
+      loadedAt = Date.now();
+      api.postMessage({ type: "traces" });
+    }
+    function refreshSoon() {
+      if (refresh) return;
+      refresh = setTimeout(
+        () => {
+          refresh = void 0;
+          if (actions.visible()) load();
+        },
+        Math.max(0, loadedAt + REFRESH_MS2 - Date.now())
+      );
+    }
     function show() {
+      drawn = false;
       elements.tracesStatus.textContent = "Loading\u2026";
       elements.tracesRows.replaceChildren();
       actions.reveal();
-      api.postMessage({ type: "traces" });
+      load();
+    }
+    function hide() {
+      clearTimeout(refresh);
+      refresh = void 0;
+    }
+    scope.track(hide);
+    function update(next) {
+      const changed = basis !== void 0 && next !== basis;
+      basis = next;
+      if (changed && actions.visible()) refreshSoon();
+    }
+    function fail(message) {
+      pending = false;
+      failed = true;
+      if (actions.visible()) elements.tracesStatus.textContent = `Could not load traces: ${message}`;
     }
     scope.listen(elements.tracesStartReceiver, "click", () => actions.startReceiver());
     scope.listen(elements.tracesRows, "click", (event) => {
@@ -2200,13 +2466,18 @@
       ];
     }
     function receiverChanged() {
-      if (actions.visible()) render();
+      if (actions.visible() && !failed) render();
     }
-    function receive(list) {
+    function receive(list, count = list.length) {
+      pending = false;
+      const unchanged = !failed && drawn && count === total && JSON.stringify(list) === JSON.stringify(traces);
+      failed = false;
       traces = list;
-      if (actions.visible()) render();
+      total = count;
+      if (actions.visible() && !unchanged) render();
     }
     function render() {
+      drawn = true;
       actions.rail?.("Services", railItems());
       const shown2 = traces.filter(
         (trace) => (!errorsOnly || trace.errors) && (!slowOnly || trace.durationMs >= SLOW_MS) && // A trace through no listed service, such as one from logs alone, stays.
@@ -2220,9 +2491,11 @@
         elements.tracesRows.replaceChildren();
         return;
       }
-      const failed = traces.filter((trace) => trace.errors).length;
-      elements.tracesStatus.textContent = `${traces.length.toLocaleString()} recent ${traces.length === 1 ? "trace" : "traces"} \xB7 ${failed.toLocaleString()} with errors` + (withSpans < traces.length ? ` \xB7 ${(traces.length - withSpans).toLocaleString()} from logs only` : "") + (shown2.length < traces.length ? ` \xB7 ${shown2.length.toLocaleString()} shown` : "") + " \xB7 Choose one to see its waterfall";
+      const failed2 = traces.filter((trace) => trace.errors).length;
+      elements.tracesStatus.textContent = (total > traces.length ? `Newest ${traces.length.toLocaleString()} of ${total.toLocaleString()} traces` : `${traces.length.toLocaleString()} recent ${traces.length === 1 ? "trace" : "traces"}`) + ` \xB7 ${failed2.toLocaleString()} with errors` + (withSpans < traces.length ? ` \xB7 ${(traces.length - withSpans).toLocaleString()} from logs only` : "") + (shown2.length < traces.length ? ` \xB7 ${shown2.length.toLocaleString()} shown` : "") + " \xB7 Choose one to see its waterfall";
       const longest = Math.max(1, ...shown2.map((trace) => trace.durationMs));
+      const focused = document.activeElement?.closest(".traces-row");
+      const focusedId = focused && elements.tracesRows.contains(focused) ? focused.dataset.traceId : void 0;
       elements.tracesRows.replaceChildren(
         ...shown2.map((trace) => {
           const row = document.createElement("tr");
@@ -2284,8 +2557,10 @@ Trace ${trace.traceId}`;
           return row;
         })
       );
+      if (focusedId)
+        [...elements.tracesRows.querySelectorAll(".traces-row")].find((row) => row.dataset.traceId === focusedId)?.focus();
     }
-    return { show, receive, receiverChanged, mark, closed };
+    return { show, hide, update, fail, receive, receiverChanged, mark, closed };
   }
 
   // src/core/connection-types.ts
@@ -2417,7 +2692,7 @@ Trace ${trace.traceId}`;
   }
 
   // src/webview/inspection/metrics.ts
-  var REFRESH_MS = 5e3;
+  var REFRESH_MS3 = 5e3;
   var MEASURE_LABELS = {
     value: "",
     rate: "rate",
@@ -2511,7 +2786,7 @@ Trace ${trace.traceId}`;
           refresh = void 0;
           if (actions.visible()) load();
         },
-        Math.max(0, loadedAt + REFRESH_MS - Date.now())
+        Math.max(0, loadedAt + REFRESH_MS3 - Date.now())
       );
     }
     function show() {
@@ -2705,7 +2980,7 @@ Trace ${trace.traceId}`;
   }
 
   // src/webview/inspection/ai-calls.ts
-  var REFRESH_MS2 = 5e3;
+  var REFRESH_MS4 = 5e3;
   var OPEN_BELOW_CHARACTERS = 600;
   var KIND_GLYPHS = { model: "\u25C6", tool: "\u2699", agent: "\u25B8", other: "\xB7" };
   var CUT_SHORT = /* @__PURE__ */ new Set(["length", "max_tokens", "content_filter", "max_output_tokens"]);
@@ -2745,7 +3020,7 @@ Trace ${trace.traceId}`;
           refresh = void 0;
           if (actions.listVisible()) load();
         },
-        Math.max(0, loadedAt + REFRESH_MS2 - Date.now())
+        Math.max(0, loadedAt + REFRESH_MS4 - Date.now())
       );
     }
     function show() {
@@ -7563,7 +7838,7 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
     new: "var(--vscode-charts-orange, #d18616)",
     localOnly: "var(--vscode-charts-orange, #d18616)"
   };
-  var REFRESH_MS3 = 2e3;
+  var REFRESH_MS5 = 2e3;
   function createCompare(elements, api, scope, actions) {
     let status = "all";
     let changedOnly = false;
@@ -7631,7 +7906,7 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
       }
       if (latest !== newest) {
         newest = latest;
-        if (actions.visible() && view && !refresh) refresh = setTimeout(load, REFRESH_MS3);
+        if (actions.visible() && view && !refresh) refresh = setTimeout(load, REFRESH_MS5);
       }
     }
     function open(target = {}) {
@@ -9062,6 +9337,7 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
       },
       (title, items) => tabRail.set("connection", title, items)
     );
+    const ANALYSIS_REFRESH_MS = 5e3;
     const formatTimestamp = createTimestampFormatter(state);
     const analysis = createAnalysis(
       elements,
@@ -9070,6 +9346,7 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
         drill: (term) => {
           const choice = addFilterTerm(search.query(), term);
           if (choice.query === void 0) {
+            analysisStatus = "note";
             elements.analysisStatus.textContent = choice.reason;
             return;
           }
@@ -9235,6 +9512,13 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
       () => doctor.revision()
     );
     let visibleSources = [];
+    let analysisStatus = "loading";
+    let analysisRequest = 0;
+    let analysisPending = false;
+    let analysisLoadedAt = -Infinity;
+    let analysisRefresh;
+    let analysisStale = false;
+    let retainedBasis;
     function analysisContext() {
       const filter = search.query();
       const source = state.selectedServer ? visibleSources.find((server) => server.id === state.selectedServer)?.label ?? state.selectedServer : "";
@@ -9304,7 +9588,11 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
         return;
       }
       if (data.type === "traces") {
-        traceList.receive(data.traces);
+        traceList.receive(data.traces, data.total);
+        return;
+      }
+      if (data.type === "span") {
+        traceView.receiveSpan(data);
         return;
       }
       if (data.type === "metrics") {
@@ -9354,8 +9642,24 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
         return;
       }
       if (data.type === "analysis") {
-        analysisContext();
+        if (data.requestId !== void 0 && data.requestId !== analysisRequest) return;
+        analysisPending = false;
+        if (analysisStatus !== "note") {
+          analysisStatus = "ready";
+          analysisContext();
+        }
         analysis.renderAnalysis(data.analysis);
+        return;
+      }
+      if (data.type === "viewError") {
+        if (data.view === "traces") traceList.fail(data.message);
+        else if (data.view === "trace") traceView.fail(data.traceId, data.message);
+        else if (data.view === "span") traceView.failSpan(data.traceId, data.spanId, data.message);
+        else if (data.requestId === void 0 || data.requestId === analysisRequest) {
+          analysisPending = false;
+          analysisStatus = "error";
+          elements.analysisStatus.textContent = `Could not analyze these logs: ${data.message}`;
+        }
         return;
       }
       if (data.type === "searches") {
@@ -9412,6 +9716,15 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
       metricQuery.update(data.connections);
       metricList.setConnections(data.connections);
       aiCalls.update(data.aiCalls, otlpRunning);
+      const logsBasis = `${data.generation}:${data.newest}`;
+      const tracesBasis = `${logsBasis}:${data.tracesRevision ?? 0}`;
+      traceList.update(tracesBasis);
+      traceView.update(tracesBasis);
+      if (views.active() === "analysis" && (retainedBasis !== void 0 && retainedBasis !== logsBasis || analysisStale)) {
+        analysisStale = false;
+        refreshAnalysisSoon();
+      }
+      retainedBasis = logsBasis;
       views.ensureVisible();
       elements.traces.title = data.traceCount ? `${numberFormat.format(data.traceCount)} traces received from OpenTelemetry. Show requests across services.` : "Requests across services, from OpenTelemetry spans and logs with a trace id";
       if (data.generation < minimumSnapshotGeneration) {
@@ -9469,7 +9782,7 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
       let selectionChanged = false;
       if (data.servers) {
         visibleSources = data.servers;
-        if (elements.analysisStatus.textContent) analysisContext();
+        if (analysisStatus === "ready") analysisContext();
         const selectedServer = data.servers.some((server) => server.id === state.selectedServer) ? state.selectedServer : "";
         if (selectedServer !== state.selectedServer) {
           state.selectedServer = selectedServer;
@@ -10038,16 +10351,35 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
     scope.listen(elements.changedOnly, "click", () => {
       search.setQuery(withChangedScope(search.query(), !hasChangedScope(search.query())), true);
     });
-    function requestAnalysis() {
-      elements.analysisStatus.textContent = "Loading analysis\u2026";
+    function requestAnalysis(background = false) {
+      if (!background) {
+        analysisStatus = "loading";
+        elements.analysisStatus.textContent = "Loading analysis\u2026";
+      }
+      analysisPending = true;
+      analysisLoadedAt = Date.now();
       api.postMessage({
         type: "analysis",
+        requestId: ++analysisRequest,
         query: search.query(),
         levels: state.currentLevels(),
         serverId: state.selectedServer || void 0,
         sessionId: state.selectedSession || void 0
       });
     }
+    function refreshAnalysisSoon() {
+      if (analysisRefresh) return;
+      analysisRefresh = setTimeout(
+        () => {
+          analysisRefresh = void 0;
+          if (views.active() !== "analysis") return;
+          if (analysisPending || analysis.busy()) analysisStale = true;
+          else requestAnalysis(true);
+        },
+        Math.max(0, analysisLoadedAt + ANALYSIS_REFRESH_MS - Date.now())
+      );
+    }
+    scope.track(() => clearTimeout(analysisRefresh));
     function openView(tab) {
       if (tab === "analysis") {
         views.show("analysis");
@@ -10072,6 +10404,7 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
       if (previous === "metrics") metricList.hide();
       if (previous === "compare") compareView.hide();
       if (previous === "aiCalls") aiCalls.hide();
+      if (previous === "traces") traceList.hide();
       if (previous === "doctor") elements.doctor.hidden = true;
       if (view !== "logs") inspector.close("event");
       if (view !== "traces") inspector.close("trace");

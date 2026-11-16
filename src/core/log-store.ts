@@ -14,6 +14,8 @@ import { completionTarget } from './query-completion';
 export type { AnalysisResult, ErrorGroup, LogPattern } from './log-analysis';
 
 const PAGE_SIZE = 1000;
+/** The most a newest-first read returns: what the trace list and a production comparison read at once. */
+const MAX_REVERSE_PAGE = 5000;
 
 interface Slot {
   event: LogEvent;
@@ -770,7 +772,10 @@ export class LogStore {
     return { events, page, pages, matched, ...this.stats() };
   }
 
-  /** Read a bounded newest-first page without building a complete match array. */
+  /**
+   * Read a bounded newest-first page without building a complete match array.
+   * At most `MAX_REVERSE_PAGE` events are read, whatever is asked for.
+   */
   reversePage(
     { query = '', serverId, levels, before = Infinity, sessionId, sessionIds, from, to }: PageOptions = {},
     limit = 1000,
@@ -793,7 +798,7 @@ export class LogStore {
     });
     const events: LogEvent[] = [];
     let matched = 0;
-    const bounded = Math.max(1, Math.min(1000, Math.floor(limit)));
+    const bounded = Math.max(1, Math.min(MAX_REVERSE_PAGE, Math.floor(limit)));
     for (const event of this.iterateEventsReverse(serverId)) {
       if (!test(event)) continue;
       matched++;
