@@ -369,6 +369,10 @@ export function createViewer(api: WebviewApi) {
       traceList.receive(data.traces);
       return;
     }
+    if (data.type === 'span') {
+      traceView.receiveSpan(data);
+      return;
+    }
     if (data.type === 'metrics') {
       metricList.receive(data.metrics);
       return;
@@ -433,6 +437,7 @@ export function createViewer(api: WebviewApi) {
     if (data.type === 'viewError') {
       if (data.view === 'traces') traceList.fail(data.message);
       else if (data.view === 'trace') traceView.fail(data.traceId, data.message);
+      else if (data.view === 'span') traceView.failSpan(data.traceId, data.spanId, data.message);
       else if (data.requestId === undefined || data.requestId === analysisRequest) {
         analysisPending = false;
         analysisStatus = 'error';

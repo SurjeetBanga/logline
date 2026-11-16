@@ -16,7 +16,7 @@ import {
 import type { LogEvent } from '../core/types';
 import type { GenAiCallDetail, GenAiSummary } from '../core/gen-ai';
 import type { MetricSeriesView } from '../core/metrics';
-import type { TraceSummary, TraceView } from '../core/traces';
+import type { SpanDetail, TraceSummary, TraceView } from '../core/traces';
 import type { SavedSearches } from '../storage/saved-searches';
 import type { LogTransfer } from './log-transfer';
 import { runAboutAction } from './about';
@@ -52,6 +52,7 @@ const PANEL_REQUESTS: Partial<Record<ViewRequest['type'], PanelAction>> = {
   metricQuery: 'metric_query',
   metricWatch: 'metric_watch',
   copyAiCall: 'copy_ai_call',
+  copySpan: 'copy_span',
   toggleOtlp: 'toggle_otlp',
 };
 
@@ -99,6 +100,8 @@ interface MessageServices {
   aiCallList(): GenAiSummary;
   aiCallDetail(traceId: string, spanId: string): GenAiCallDetail | undefined;
   copyAiCall(traceId: string, spanId: string): Promise<void>;
+  spanDetail(traceId: string, spanId: string): SpanDetail | undefined;
+  copySpan(traceId: string, spanId?: string, whole?: boolean): Promise<void>;
   toggleOtlp(enabled: boolean): Promise<void>;
   breakOnEvent(id: number): Promise<void>;
   breakOnQuery(query: string, levels: string[]): Promise<void>;
@@ -195,6 +198,18 @@ export async function handleMessage(
       return;
     case 'copyAiCall':
       await services.copyAiCall(msg.traceId, msg.spanId);
+      return;
+    case 'span': {
+      const ids = { traceId: msg.traceId.toLowerCase(), spanId: msg.spanId.toLowerCase() };
+      try {
+        send({ type: 'span', ...ids, detail: services.spanDetail(ids.traceId, ids.spanId) });
+      } catch (error) {
+        send({ type: 'viewError', view: 'span', ...ids, message: errorText(error) });
+      }
+      return;
+    }
+    case 'copySpan':
+      await services.copySpan(msg.traceId, msg.spanId, msg.whole);
       return;
     case 'toggleOtlp':
       await services.toggleOtlp(msg.enabled);

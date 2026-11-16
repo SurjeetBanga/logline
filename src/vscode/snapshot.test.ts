@@ -50,6 +50,7 @@ function harness(maxRows = 5000) {
     store,
     add,
     snapshot,
+    sources,
     setLinksVersion: (value: string) => {
       linksVersion = value;
     },
@@ -153,4 +154,14 @@ test('saved connections are listed as sources before they have runs', () => {
       ['api', 'API', 'idle'],
     ],
   );
+});
+
+test('the snapshot carries the span revision so a trace view knows when to load again', () => {
+  const h = harness();
+  assert.equal('tracesRevision' in h.snapshot(), false, 'no spans, no revision');
+  const withSpans = (spans: SnapshotSources['spans']) => buildSnapshot({ type: 'snapshot' }, { ...h.sources(), spans });
+  assert.equal('tracesRevision' in withSpans({ traceCount: 0, revision: 0 }), false);
+  const first = withSpans({ traceCount: 2, revision: 5 });
+  assert.deepEqual([first.traceCount, first.tracesRevision], [2, 5]);
+  assert.equal(withSpans({ traceCount: 2, revision: 6 }).tracesRevision, 6);
 });

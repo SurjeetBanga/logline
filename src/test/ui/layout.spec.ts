@@ -1,4 +1,4 @@
-import { aiCallDetail, aiCalls, snapshot, traceDetail, traces } from './data';
+import { aiCallDetail, aiCalls, analysis, snapshot, spanDetail, traceDetail, traces } from './data';
 import { expect, test } from './panel';
 
 // Layout at each panel size (the projects in playwright.config.ts): the page itself must never scroll; only
@@ -220,6 +220,47 @@ test('a trace open in the inspector fits', async ({ openPanel }) => {
   await panel.fits('a trace open in the inspector');
   await page.locator('#inspectorClose').click();
   await panel.fits('the trace closed again');
+});
+
+test('a populated Analyze view fits', async ({ openPanel }) => {
+  const panel = await openPanel();
+  const { page } = panel;
+  await page.locator('#viewTabs [role=tab]', { hasText: 'Analyze' }).click();
+  await panel.post(analysis);
+  await expect(page.locator('#analysisContent .group-row').first(), 'the groups are drawn').toBeVisible();
+  await panel.fits('a populated Analyze view');
+  // The page never grows; the view scrolls inside itself, down to the last group.
+  await page.locator('#analysisContent .group-row').last().scrollIntoViewIfNeeded();
+  await panel.fits('Analyze scrolled to its end');
+});
+
+test('a trace with a span’s details open fits', async ({ openPanel }) => {
+  const panel = await openPanel();
+  const { page } = panel;
+  await page.locator('#viewTabs [role=tab]', { hasText: 'Traces' }).click();
+  await panel.post(traces);
+  await page.locator('#tracesRows tr').first().click();
+  await panel.post(traceDetail);
+  // The waterfall may scroll sideways in a narrow panel; opening a span must not make it scroll further.
+  const overflow = () =>
+    page.evaluate(() => {
+      const box = document.getElementById('inspectorBody')!;
+      return box.scrollWidth - box.clientWidth;
+    });
+  const before = await overflow();
+  await page.locator('#traceRows tr.trace-span[data-span-id="b"]').click();
+  await panel.post(spanDetail);
+  const details = page.locator('#traceRows tr.trace-detail');
+  await expect(details, 'the span’s details open under its row').toBeVisible();
+  await expect(details.locator('.event-field')).toHaveCount(16);
+  await panel.fits('a trace with a span open');
+  expect(
+    await overflow(),
+    'a long value wraps inside the details instead of widening the inspector',
+  ).toBeLessThanOrEqual(Math.max(before, 0) + 1);
+  await page.locator('#traceRows tr.trace-span[data-span-id="b"]').click();
+  await expect(details).toHaveCount(0);
+  await panel.fits('the span closed again');
 });
 
 test('an AI call open in the inspector fits', async ({ openPanel }) => {

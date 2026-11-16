@@ -141,6 +141,58 @@ export interface TraceRow {
   };
 }
 
+/** Everything kept about one span, for the details under its row in the waterfall. */
+export interface SpanDetail {
+  traceId: string;
+  spanId: string;
+  parentSpanId?: string;
+  name: string;
+  service: string;
+  kind: string;
+  /** The instrumentation library that made the span. */
+  scope?: string;
+  startMs: number;
+  durationMs: number;
+  /** Time not covered by any child span. */
+  selfMs: number;
+  error: boolean;
+  statusMessage?: string;
+  /** Every attribute kept, less prompts and responses, which the AI calls view shows. */
+  attributes: Record<string, AttrValue>;
+  /** Events with their attributes; `offsetMs` is from the start of the span. */
+  events: { offsetMs: number; name: string; attributes: Record<string, AttrValue> }[];
+}
+
+const withoutGenAiContent = (attributes: Record<string, AttrValue>) =>
+  Object.fromEntries(Object.entries(attributes).filter(([key]) => !isGenAiContentKey(key)));
+
+/** One span of a trace in full, or nothing once it is no longer retained. */
+export function spanDetail(spans: readonly Span[], spanId: string): SpanDetail | undefined {
+  const span = spans.find((candidate) => candidate.spanId === spanId);
+  if (!span) return undefined;
+  const children = spans.filter((candidate) => candidate.parentSpanId === spanId && candidate !== span);
+  return {
+    traceId: span.traceId,
+    spanId: span.spanId,
+    ...(span.parentSpanId ? { parentSpanId: span.parentSpanId } : {}),
+    name: span.name,
+    service: span.service,
+    kind: SPAN_KINDS[span.kind] ?? 'unspecified',
+    ...(span.scope ? { scope: span.scope } : {}),
+    startMs: span.startMs,
+    durationMs: spanDurationMs(span),
+    selfMs: selfTimeMs(span, children),
+    error: span.status.code === 2,
+    ...(span.status.message ? { statusMessage: span.status.message } : {}),
+    attributes: withoutGenAiContent(span.attributes),
+    events: span.events.map((event) => ({
+      offsetMs: roundMs(event.timeMs - span.startMs),
+      name: event.name,
+      attributes: withoutGenAiContent(event.attributes),
+    })),
+  };
+}
+
 export interface TraceLogInput {
   id: number;
   level: string;

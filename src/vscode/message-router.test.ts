@@ -447,3 +447,87 @@ test('the Update button reaches the update check', async () => {
   await handleMessage(target, () => {}, { type: 'installUpdate' });
   assert.equal(pressed, 1);
 });
+
+test('a view request that fails on the host answers with a view error, and analysis echoes its request id', async () => {
+  const base = services() as any;
+  const failing = {
+    ...base,
+    store: {
+      analysis: () => {
+        throw new Error('analysis broke');
+      },
+    },
+    traceList: () => {
+      throw new Error('list broke');
+    },
+    traceView: () => {
+      throw new Error('trace broke');
+    },
+    spanDetail: () => {
+      throw new Error('span broke');
+    },
+  };
+  const sent: unknown[] = [];
+  const send = (message: unknown) => sent.push(message);
+  await handleMessage(failing, send, { type: 'analysis', requestId: 4 });
+  await handleMessage(failing, send, { type: 'traces' });
+  await handleMessage(failing, send, { type: 'trace', traceId: 'ABC' });
+  await handleMessage(failing, send, { type: 'span', traceId: 'ABC', spanId: 'DEF' });
+  assert.deepEqual(sent, [
+    { type: 'viewError', view: 'analysis', requestId: 4, message: 'analysis broke' },
+    { type: 'viewError', view: 'traces', message: 'list broke' },
+    { type: 'viewError', view: 'trace', traceId: 'abc', message: 'trace broke' },
+    { type: 'viewError', view: 'span', traceId: 'abc', spanId: 'def', message: 'span broke' },
+  ]);
+  const answered: any[] = [];
+  await handleMessage(base, (message) => answered.push(message), { type: 'analysis', requestId: 9, query: 'failed' });
+  await handleMessage(base, (message) => answered.push(message), { type: 'analysis' });
+  assert.deepEqual(
+    answered.map((message) => [message.type, message.requestId]),
+    [
+      ['analysis', 9],
+      ['analysis', undefined],
+    ],
+  );
+});
+
+test('a span request reads the span, and copying one is routed and counted', async () => {
+  calls.length = 0;
+  const actions: string[] = [];
+  const detail = { traceId: 'abc', spanId: 'def', attributes: {}, events: [] };
+  const lookups: unknown[][] = [];
+  const target = {
+    ...(services() as any),
+    usage: { view() {}, record() {}, panelAction: (action: string) => actions.push(action), panelSize() {} },
+    spanDetail: (...args: unknown[]) => {
+      lookups.push(args);
+      return args[1] === 'def' ? detail : undefined;
+    },
+    copySpan: async (...args: unknown[]) => {
+      calls.push({ name: 'copySpan', value: args });
+    },
+  };
+  const sent: unknown[] = [];
+  const send = (message: unknown) => sent.push(message);
+  await handleMessage(target, send, { type: 'span', traceId: 'ABC', spanId: 'DEF' });
+  await handleMessage(target, send, { type: 'span', traceId: 'abc', spanId: 'gone' });
+  await handleMessage(target, send, { type: 'span', traceId: 'abc', spanId: '../x' });
+  assert.deepEqual(sent, [
+    { type: 'span', traceId: 'abc', spanId: 'def', detail },
+    { type: 'span', traceId: 'abc', spanId: 'gone', detail: undefined },
+  ]);
+  assert.deepEqual(lookups, [
+    ['abc', 'def'],
+    ['abc', 'gone'],
+  ]);
+  await handleMessage(target, send, { type: 'copySpan', traceId: 'abc' });
+  await handleMessage(target, send, { type: 'copySpan', traceId: 'abc', spanId: 'def', whole: true });
+  assert.deepEqual(
+    calls.filter((call) => call.name === 'copySpan').map((call) => call.value),
+    [
+      ['abc', undefined, undefined],
+      ['abc', 'def', true],
+    ],
+  );
+  assert.deepEqual(actions, ['copy_span', 'copy_span']);
+});

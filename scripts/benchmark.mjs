@@ -681,10 +681,14 @@ timed('agent-analyze', 'Agent analysis of the newest 10,000', async () => {
   const { shareId } = access.shareAll();
   return () => access.analyze({ shareId });
 });
-timed('traces', 'List traces from 50,000 events', async () => {
+timed('traces', 'List traces from 20,000 spans and 50,000 events', async () => {
   const { store } = await retained();
-  const { summarizeTraces } = await load('core/traces.js');
-  return () => summarizeTraces([], store.reversePage({ query: 'exists:traceId' }, 5000).events);
+  const { readSpans } = await load('core/otlp.js');
+  const { SpanStore, summarizeTraces } = await load('core/traces.js');
+  // The span store as the Traces list reads it: 20,000 spans in 1,250 traces.
+  const spans = new SpanStore();
+  for (const span of readSpans(spanRequest(20000, httpAttributes))) spans.add(span);
+  return () => summarizeTraces(spans.entries(), store.reversePage({ query: 'exists:traceId' }, 5000).events);
 });
 timed('snapshot', 'Live snapshot of the newest page', async () => {
   const { sources, buildSnapshot } = await snapshotSources();

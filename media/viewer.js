@@ -1044,6 +1044,7 @@
       traceHotspots: element("traceHotspots"),
       traceHotspotList: element("traceHotspotList"),
       traceFilter: element("traceFilter"),
+      traceCopyId: element("traceCopyId"),
       breakOnLogs: element("breakOnLogs"),
       saveSearchDialog: element("saveSearchDialog"),
       feedbackDialog: element("feedbackDialog"),
@@ -1661,12 +1662,12 @@
     const entries = Object.entries(parsed);
     return entries.length ? entries : void 0;
   }
-  function renderEventFields(entries) {
+  function renderEventFields(entries, other) {
     if (!entries) return void 0;
     const list = document.createElement("div");
     list.className = "event-fields";
     list.setAttribute("role", "list");
-    list.setAttribute("aria-label", "Fields");
+    list.setAttribute("aria-label", other?.label ?? "Fields");
     for (const [name, value] of entries) {
       const row = document.createElement("div");
       row.className = "event-field";
@@ -1680,7 +1681,7 @@
       shown2.textContent = scalar ? String(value) : JSON.stringify(value);
       shown2.title = shown2.textContent;
       row.append(key, shown2);
-      if (scalar && value !== null && value !== "") {
+      if (!other && scalar && value !== null && value !== "") {
         const filters = document.createElement("span");
         filters.className = "event-field-filters";
         for (const exclude of [false, true]) {
@@ -1894,6 +1895,9 @@
     let loadedAt = -Infinity;
     let refresh;
     let shown2;
+    let trace;
+    let selected;
+    let detail = "loading";
     function load() {
       if (!current) return;
       pending = true;
@@ -1903,6 +1907,8 @@
     function show(traceId) {
       current = traceId.toLowerCase();
       shown2 = void 0;
+      trace = void 0;
+      selected = void 0;
       elements.traceStatus.textContent = "Loading\u2026";
       elements.traceRows.replaceChildren();
       elements.traceHotspots.hidden = true;
@@ -1931,6 +1937,8 @@
     function hide() {
       current = void 0;
       shown2 = void 0;
+      trace = void 0;
+      selected = void 0;
       pending = false;
       clearTimeout(refresh);
       refresh = void 0;
@@ -1940,9 +1948,10 @@
     }
     scope.listen(elements.traceHotspotList, "click", (event) => {
       const button = event.target.closest(".trace-hotspot");
-      const row = button && [...elements.traceRows.querySelectorAll(".trace-span")].find(
-        (row2) => row2.dataset.service === button.dataset.service && row2.dataset.name === button.dataset.name
-      );
+      const span2 = button && trace?.spans.find((span3) => span3.service === button.dataset.service && span3.name === button.dataset.name);
+      if (!span2) return;
+      if (selected !== span2.spanId) select(span2.spanId);
+      const row = spanRows().find((row2) => row2.dataset.spanId === span2.spanId);
       if (!row) return;
       row.scrollIntoView({ block: "center" });
       row.classList.remove("trace-flash");
@@ -1960,15 +1969,78 @@
         return;
       }
       const button = event.target.closest(".trace-log-button");
-      if (!button) return;
-      actions.showContext(Number(button.dataset.id));
+      if (button) {
+        actions.showContext(Number(button.dataset.id));
+        return;
+      }
+      const action = event.target.closest("[data-span-action]")?.dataset.spanAction;
+      if (action && current && selected) {
+        if (action === "logs") actions.applyQuery(`traceId:${current} spanId:${selected}`);
+        else api.postMessage({ type: "copySpan", traceId: current, spanId: selected, whole: action === "copy" });
+        return;
+      }
+      if (event.target.closest(".trace-detail")) return;
+      const row = event.target.closest(".trace-span");
+      if (row?.dataset.spanId) toggle(row.dataset.spanId);
     });
-    function receive(trace) {
-      if (!actions.inspecting() || trace.traceId !== current) return;
+    scope.listen(elements.traceCopyId, "click", () => {
+      if (current) api.postMessage({ type: "copySpan", traceId: current });
+    });
+    scope.listen(elements.traceRows, "keydown", (event) => {
+      const key = event.key;
+      const row = event.target;
+      if (!row.classList?.contains("trace-span")) return;
+      if (key === "Enter" || key === " ") {
+        event.preventDefault();
+        if (row.dataset.spanId) toggle(row.dataset.spanId);
+        return;
+      }
+      const rows = spanRows();
+      const index = rows.indexOf(row);
+      const next = key === "ArrowDown" ? rows[index + 1] : key === "ArrowUp" ? rows[index - 1] : key === "Home" ? rows[0] : key === "End" ? rows.at(-1) : void 0;
+      if (!next) return;
+      event.preventDefault();
+      row.tabIndex = -1;
+      next.tabIndex = 0;
+      next.focus();
+    });
+    const spanRows = () => [...elements.traceRows.querySelectorAll(".trace-span")];
+    function select(spanId) {
+      selected = spanId;
+      detail = "loading";
+      if (spanId && current) api.postMessage({ type: "span", traceId: current, spanId });
+      draw(spanId);
+    }
+    function toggle(spanId) {
+      const reopen = spanId !== selected;
+      select(reopen ? spanId : void 0);
+      if (!reopen)
+        spanRows().find((row) => row.dataset.spanId === spanId)?.focus();
+    }
+    function receiveSpan(message) {
+      if (!actions.inspecting() || message.traceId !== current || message.spanId !== selected) return;
+      detail = message.detail ?? "missing";
+      draw();
+    }
+    function failSpan(traceId, spanId, message) {
+      if (!actions.inspecting() || traceId !== current || spanId !== selected) return;
+      detail = { error: message };
+      draw();
+    }
+    function receive(next) {
+      if (!actions.inspecting() || next.traceId !== current) return;
       pending = false;
-      const signature = `${trace.traceId}:${trace.spans.length}:${trace.omitted}:${trace.errors}:${trace.durationMs}:${trace.logs.length}:${trace.logs.at(-1)?.id ?? ""}`;
+      const signature = `${next.traceId}:${next.spans.length}:${next.omitted}:${next.errors}:${next.durationMs}:${next.logs.length}:${next.logs.at(-1)?.id ?? ""}`;
       if (signature === shown2) return;
       shown2 = signature;
+      trace = next;
+      if (selected && !next.spans.some((span2) => span2.spanId === selected)) selected = void 0;
+      draw();
+    }
+    function draw(focus) {
+      if (!trace) return;
+      const held = document.activeElement?.closest?.(".trace-span");
+      const focusId = focus ?? (held && elements.traceRows.contains(held) ? held.dataset.spanId : void 0);
       elements.traceStatus.textContent = summary(trace);
       const shownHotspots = trace.spans.length + trace.omitted > 1 ? trace.hotspots : [];
       const top = shownHotspots[0]?.selfMs ?? 0;
@@ -1984,8 +2056,14 @@
         else unattached.push(log);
       }
       const rows = [];
+      const tabStop = selected ?? trace.spans[0]?.spanId;
       for (const span2 of trace.spans) {
-        rows.push(spanRow(span2, total));
+        const row = spanRow(span2, total);
+        row.tabIndex = span2.spanId === tabStop ? 0 : -1;
+        row.setAttribute("aria-expanded", String(span2.spanId === selected));
+        if (span2.spanId === selected) row.classList.add("selected");
+        rows.push(row);
+        if (span2.spanId === selected) rows.push(spanDetails(span2, detail));
         for (const log of logsBySpan.get(span2.spanId) ?? []) rows.push(logRow(log, total, span2.depth + 1));
       }
       if (unattached.length) {
@@ -2000,6 +2078,7 @@
         for (const log of unattached) rows.push(logRow(log, total, 0));
       }
       elements.traceRows.replaceChildren(...rows);
+      if (focusId) rows.find((row) => row.dataset.spanId === focusId)?.focus();
     }
     return {
       show,
@@ -2007,6 +2086,8 @@
       update,
       fail,
       receive,
+      receiveSpan,
+      failSpan,
       get open() {
         return actions.inspecting();
       }
@@ -2075,6 +2156,7 @@
     row.className = `trace-span${span2.error ? " trace-error" : ""}${span2.critical ? " trace-critical" : ""}`;
     row.dataset.service = span2.service;
     row.dataset.name = span2.name;
+    row.dataset.spanId = span2.spanId;
     const name = cell("", "trace-name");
     const label = document.createElement("span");
     label.className = "trace-indent";
@@ -2105,15 +2187,7 @@
       content.append(label, chip);
       name.replaceChildren(content);
     }
-    name.title = [
-      `${span2.name} (${span2.kind})`,
-      `Self time: ${formatDuration(span2.selfMs)} of ${formatDuration(span2.durationMs)}`,
-      span2.statusMessage ? `Error: ${span2.statusMessage}` : void 0,
-      ...Object.entries(span2.attributes).map(
-        ([key, value]) => `${key} = ${typeof value === "string" ? value : JSON.stringify(value)}`
-      ),
-      ...span2.events.map((event) => `event: ${event.name} at +${formatDuration(event.offsetMs)}`)
-    ].filter(Boolean).join("\n");
+    name.title = `${span2.name} (${span2.kind}). Show this span's attributes and events.`;
     const bar = timeline(span2.offsetMs, span2.durationMs, total, "trace-bar");
     bar.setAttribute("aria-label", `Starts at +${formatDuration(span2.offsetMs)}`);
     row.append(
@@ -2123,6 +2197,77 @@
       cell(formatDuration(span2.durationMs), "trace-duration"),
       cell(formatDuration(span2.selfMs), "trace-duration trace-self")
     );
+    return row;
+  }
+  function spanDetails(span2, detail) {
+    const row = document.createElement("tr");
+    row.className = "trace-detail";
+    const content = cell("", "trace-detail-cell");
+    content.colSpan = 5;
+    const paragraph = (text2, className) => {
+      const element2 = document.createElement("p");
+      element2.className = className;
+      element2.textContent = text2;
+      return element2;
+    };
+    const heading = (text2) => {
+      const element2 = document.createElement("h4");
+      element2.textContent = text2;
+      return element2;
+    };
+    const known = typeof detail === "object" && "spanId" in detail ? detail : void 0;
+    content.append(
+      paragraph(
+        [
+          span2.service,
+          span2.kind,
+          `${formatDuration(span2.durationMs)}, ${formatDuration(span2.selfMs)} of it its own`,
+          `starts at +${formatDuration(span2.offsetMs)}`,
+          known?.scope
+        ].filter(Boolean).join(" \xB7 "),
+        "trace-detail-facts"
+      )
+    );
+    if (span2.statusMessage) content.append(paragraph(`Error: ${span2.statusMessage}`, "trace-detail-error"));
+    const buttons = document.createElement("div");
+    buttons.className = "trace-detail-actions";
+    for (const [action, label, title] of [
+      ["logs", "Show this span\u2019s logs", "Show every retained event with this span id"],
+      ["copyId", "Copy span ID", "Copy this span\u2019s id to the clipboard"],
+      ["copy", "Copy span", "Copy this span as JSON, redacted like exports"]
+    ]) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.dataset.spanAction = action;
+      button.textContent = label;
+      button.title = title;
+      buttons.append(button);
+    }
+    content.append(buttons);
+    if (!known) {
+      content.append(
+        paragraph(
+          detail === "loading" ? "Loading\u2026" : detail === "missing" ? "This span is no longer retained." : `Could not load this span: ${detail.error}`,
+          "trace-detail-note"
+        )
+      );
+    } else {
+      const attributes = [
+        ["span id", known.spanId],
+        ...known.parentSpanId ? [["parent span id", known.parentSpanId]] : [],
+        ...Object.entries(known.attributes)
+      ];
+      content.append(heading("Attributes"), renderEventFields(attributes, { label: "Span attributes" }));
+      if (known.events.length) content.append(heading(`Events \xB7 ${known.events.length}`));
+      for (const event of known.events) {
+        content.append(
+          paragraph(`+${formatDuration(Math.max(0, event.offsetMs))} \xB7 ${event.name}`, "trace-detail-event")
+        );
+        const fields = Object.entries(event.attributes);
+        if (fields.length) content.append(renderEventFields(fields, { label: `Attributes of ${event.name}` }));
+      }
+    }
+    row.append(content);
     return row;
   }
   var tokenFormat = new Intl.NumberFormat(void 0, { notation: "compact", maximumFractionDigits: 1 });
@@ -9423,6 +9568,10 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
         traceList.receive(data.traces);
         return;
       }
+      if (data.type === "span") {
+        traceView.receiveSpan(data);
+        return;
+      }
       if (data.type === "metrics") {
         metricList.receive(data.metrics);
         return;
@@ -9482,6 +9631,7 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
       if (data.type === "viewError") {
         if (data.view === "traces") traceList.fail(data.message);
         else if (data.view === "trace") traceView.fail(data.traceId, data.message);
+        else if (data.view === "span") traceView.failSpan(data.traceId, data.spanId, data.message);
         else if (data.requestId === void 0 || data.requestId === analysisRequest) {
           analysisPending = false;
           analysisStatus = "error";

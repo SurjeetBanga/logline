@@ -309,3 +309,45 @@ test('About dialog actions are a known button, and carry nothing else', () => {
     { type: 'aboutAction', action: 'copy' },
   );
 });
+
+test('span requests need a trace and a span id, and a copy asks for the whole span only with one', () => {
+  for (const value of [
+    { type: 'span', traceId: 'abc' },
+    { type: 'span', traceId: 'abc', spanId: '../x' },
+    { type: 'span', traceId: 1, spanId: 'b' },
+    { type: 'copySpan' },
+    { type: 'copySpan', traceId: '../x' },
+    { type: 'copySpan', traceId: 'abc', spanId: 'a b' },
+    { type: 'copySpan', traceId: 'abc', spanId: 'x'.repeat(129) },
+  ])
+    assert.equal(parseViewRequest(value), undefined, JSON.stringify(value));
+  assert.deepEqual(parseViewRequest({ type: 'span', traceId: 'abc', spanId: 'def', extra: 1 }), {
+    type: 'span',
+    traceId: 'abc',
+    spanId: 'def',
+  });
+  assert.deepEqual(parseViewRequest({ type: 'copySpan', traceId: 'abc' }), { type: 'copySpan', traceId: 'abc' });
+  assert.deepEqual(parseViewRequest({ type: 'copySpan', traceId: 'abc', whole: true }), {
+    type: 'copySpan',
+    traceId: 'abc',
+  });
+  assert.deepEqual(parseViewRequest({ type: 'copySpan', traceId: 'abc', spanId: 'def' }), {
+    type: 'copySpan',
+    traceId: 'abc',
+    spanId: 'def',
+  });
+  assert.deepEqual(parseViewRequest({ type: 'copySpan', traceId: 'abc', spanId: 'def', whole: true }), {
+    type: 'copySpan',
+    traceId: 'abc',
+    spanId: 'def',
+    whole: true,
+  });
+});
+
+test('an analysis request carries its request id only when it is a count', () => {
+  const requestId = (value: unknown) =>
+    (parseViewRequest({ type: 'analysis', requestId: value }) as { requestId?: number }).requestId;
+  assert.equal(requestId(3), 3);
+  assert.equal(requestId(-1), undefined);
+  assert.equal(requestId('3'), undefined);
+});

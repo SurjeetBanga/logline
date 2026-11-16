@@ -288,6 +288,67 @@
     outline: 1px solid var(--vscode-focusBorder, #007fd4);
   }
 }
+/* A span row opens its details beneath it. */
+.trace-span {
+  cursor: pointer;
+}
+.trace-span:hover {
+  background: var(--vscode-list-hoverBackground, rgba(90, 93, 94, 0.31));
+}
+.trace-span:focus-visible {
+  outline: 1px solid var(--vscode-focusBorder, #007fd4);
+  outline-offset: -1px;
+}
+.trace-span.selected {
+  background: var(--vscode-list-inactiveSelectionBackground, rgba(90, 93, 94, 0.45));
+}
+.trace-table .trace-detail-cell {
+  padding: 6px 12px 10px;
+  border-bottom: 1px solid var(--vscode-panel-border, #444);
+  background: var(--vscode-editorWidget-background, rgba(128, 128, 128, 0.08));
+  white-space: normal;
+  overflow-wrap: anywhere;
+  user-select: text;
+}
+.trace-detail-cell p {
+  margin: 0 0 4px;
+}
+.trace-detail-facts,
+.trace-detail-note {
+  color: var(--vscode-descriptionForeground, #aaa);
+}
+.trace-detail-error {
+  color: var(--vscode-errorForeground, #f48771);
+}
+.trace-detail-cell h4 {
+  margin: 8px 0 2px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--vscode-descriptionForeground, #aaa);
+}
+.trace-detail-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin: 4px 0;
+}
+.trace-detail-actions button {
+  padding: 2px 8px;
+  font-size: 12px;
+}
+.trace-detail-event {
+  margin-top: 6px;
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: var(--vscode-editor-font-size, 13px);
+}
+/* The fields list is made for the inspector's own padding; here the cell supplies it. */
+.trace-detail-cell .event-fields {
+  margin: 0 -12px;
+}
+.trace-detail-cell .event-field-value {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
 .trace-name,
 .trace-service {
   overflow: hidden;

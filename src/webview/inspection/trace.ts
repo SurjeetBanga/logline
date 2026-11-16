@@ -1,7 +1,7 @@
-import type { TraceHotspot, TraceLog, TraceRow, TraceView } from '../../core/traces';
+import type { SpanDetail, TraceHotspot, TraceLog, TraceRow, TraceView } from '../../core/traces';
 import type { Elements } from '../dom';
 import { cell } from '../dom';
-import { icon } from './details';
+import { icon, renderEventFields } from './details';
 import type { EventScope } from '../event-scope';
 import type { WebviewApi } from '../types';
 
@@ -36,6 +36,11 @@ export function createTraceView(
   let refresh: ReturnType<typeof setTimeout> | undefined;
   /** What the rows on screen were drawn from, so an unchanged trace is not drawn again. */
   let shown: string | undefined;
+  /** The trace on screen, drawn again when a span opens or closes. */
+  let trace: TraceView | undefined;
+  /** The span whose details show under its row, and what the host said of it: nothing yet, the span, or that it is gone. */
+  let selected: string | undefined;
+  let detail: SpanDetail | 'loading' | 'missing' | { error: string } = 'loading';
 
   function load() {
     if (!current) return;
@@ -47,6 +52,8 @@ export function createTraceView(
   function show(traceId: string) {
     current = traceId.toLowerCase();
     shown = undefined;
+    trace = undefined;
+    selected = undefined;
     elements.traceStatus.textContent = 'Loading…';
     elements.traceRows.replaceChildren();
     elements.traceHotspots.hidden = true;
@@ -82,6 +89,8 @@ export function createTraceView(
   function hide() {
     current = undefined;
     shown = undefined;
+    trace = undefined;
+    selected = undefined;
     pending = false;
     clearTimeout(refresh);
     refresh = undefined;
@@ -93,11 +102,13 @@ export function createTraceView(
   // A hotspot leads to the first span of its operation in the waterfall.
   scope.listen(elements.traceHotspotList, 'click', (event) => {
     const button = (event.target as HTMLElement).closest<HTMLElement>('.trace-hotspot');
-    const row =
+    const span =
       button &&
-      [...elements.traceRows.querySelectorAll<HTMLElement>('.trace-span')].find(
-        (row) => row.dataset.service === button.dataset.service && row.dataset.name === button.dataset.name,
-      );
+      trace?.spans.find((span) => span.service === button.dataset.service && span.name === button.dataset.name);
+    if (!span) return;
+    // The span opens too, so what took the time can be read where the hotspot leads.
+    if (selected !== span.spanId) select(span.spanId);
+    const row = spanRows().find((row) => row.dataset.spanId === span.spanId);
     if (!row) return;
     row.scrollIntoView({ block: 'center' });
     row.classList.remove('trace-flash');
@@ -115,17 +126,104 @@ export function createTraceView(
       return;
     }
     const button = (event.target as HTMLElement).closest<HTMLElement>('.trace-log-button');
-    if (!button) return;
-    actions.showContext(Number(button.dataset.id));
+    if (button) {
+      actions.showContext(Number(button.dataset.id));
+      return;
+    }
+    const action = (event.target as HTMLElement).closest<HTMLElement>('[data-span-action]')?.dataset.spanAction;
+    if (action && current && selected) {
+      if (action === 'logs') actions.applyQuery(`traceId:${current} spanId:${selected}`);
+      else api.postMessage({ type: 'copySpan', traceId: current, spanId: selected, whole: action === 'copy' });
+      return;
+    }
+    // Text in a span's details can be selected and copied without closing them.
+    if ((event.target as HTMLElement).closest('.trace-detail')) return;
+    const row = (event.target as HTMLElement).closest<HTMLElement>('.trace-span');
+    if (row?.dataset.spanId) toggle(row.dataset.spanId);
+  });
+  scope.listen(elements.traceCopyId, 'click', () => {
+    if (current) api.postMessage({ type: 'copySpan', traceId: current });
+  });
+  // One span row is a tab stop; the arrow keys move between them and Enter or Space opens one.
+  scope.listen(elements.traceRows, 'keydown', (event) => {
+    const key = (event as KeyboardEvent).key;
+    const row = event.target as HTMLElement;
+    if (!row.classList?.contains('trace-span')) return;
+    if (key === 'Enter' || key === ' ') {
+      event.preventDefault();
+      if (row.dataset.spanId) toggle(row.dataset.spanId);
+      return;
+    }
+    const rows = spanRows();
+    const index = rows.indexOf(row);
+    const next =
+      key === 'ArrowDown'
+        ? rows[index + 1]
+        : key === 'ArrowUp'
+          ? rows[index - 1]
+          : key === 'Home'
+            ? rows[0]
+            : key === 'End'
+              ? rows.at(-1)
+              : undefined;
+    if (!next) return;
+    event.preventDefault();
+    row.tabIndex = -1;
+    next.tabIndex = 0;
+    next.focus();
   });
 
-  function receive(trace: TraceView) {
-    if (!actions.inspecting() || trace.traceId !== current) return;
+  const spanRows = () => [...elements.traceRows.querySelectorAll<HTMLElement>('.trace-span')];
+
+  /** Opens a span's details under its row, asking the host for all of its attributes and events. */
+  function select(spanId: string | undefined) {
+    selected = spanId;
+    detail = 'loading';
+    if (spanId && current) api.postMessage({ type: 'span', traceId: current, spanId });
+    draw(spanId);
+  }
+
+  /** Opens a span, or closes the one that is open. */
+  function toggle(spanId: string) {
+    const reopen = spanId !== selected;
+    select(reopen ? spanId : undefined);
+    if (!reopen)
+      spanRows()
+        .find((row) => row.dataset.spanId === spanId)
+        ?.focus();
+  }
+
+  function receiveSpan(message: { traceId: string; spanId: string; detail?: SpanDetail }) {
+    if (!actions.inspecting() || message.traceId !== current || message.spanId !== selected) return;
+    detail = message.detail ?? 'missing';
+    draw();
+  }
+
+  /** The host could not read the span: say so where its details would be. */
+  function failSpan(traceId: string | undefined, spanId: string | undefined, message: string) {
+    if (!actions.inspecting() || traceId !== current || spanId !== selected) return;
+    detail = { error: message };
+    draw();
+  }
+
+  function receive(next: TraceView) {
+    if (!actions.inspecting() || next.traceId !== current) return;
     pending = false;
     // Most refreshes find the trace as it was; leaving the rows alone keeps tooltips, focus, and scroll steady.
-    const signature = `${trace.traceId}:${trace.spans.length}:${trace.omitted}:${trace.errors}:${trace.durationMs}:${trace.logs.length}:${trace.logs.at(-1)?.id ?? ''}`;
+    const signature = `${next.traceId}:${next.spans.length}:${next.omitted}:${next.errors}:${next.durationMs}:${next.logs.length}:${next.logs.at(-1)?.id ?? ''}`;
     if (signature === shown) return;
     shown = signature;
+    trace = next;
+    // A span that has left the trace, as the oldest do when the store is full, takes its details with it.
+    if (selected && !next.spans.some((span) => span.spanId === selected)) selected = undefined;
+    draw();
+  }
+
+  /** Draws the trace; `focus` names a span row to focus, and otherwise the row holding focus keeps it. */
+  function draw(focus?: string) {
+    if (!trace) return;
+    const held = (document.activeElement as HTMLElement | null)?.closest?.<HTMLElement>('.trace-span');
+    const focusId = focus ?? (held && elements.traceRows.contains(held) ? held.dataset.spanId : undefined);
     elements.traceStatus.textContent = summary(trace);
     // With one span, self time says nothing the waterfall does not.
     const shownHotspots = trace.spans.length + trace.omitted > 1 ? trace.hotspots : [];
@@ -142,8 +240,15 @@ export function createTraceView(
       else unattached.push(log);
     }
     const rows: HTMLTableRowElement[] = [];
+    // The open span is the tab stop, and otherwise the first.
+    const tabStop = selected ?? trace.spans[0]?.spanId;
     for (const span of trace.spans) {
-      rows.push(spanRow(span, total));
+      const row = spanRow(span, total);
+      row.tabIndex = span.spanId === tabStop ? 0 : -1;
+      row.setAttribute('aria-expanded', String(span.spanId === selected));
+      if (span.spanId === selected) row.classList.add('selected');
+      rows.push(row);
+      if (span.spanId === selected) rows.push(spanDetails(span, detail));
       for (const log of logsBySpan.get(span.spanId) ?? []) rows.push(logRow(log, total, span.depth + 1));
     }
     if (unattached.length) {
@@ -158,6 +263,7 @@ export function createTraceView(
       for (const log of unattached) rows.push(logRow(log, total, 0));
     }
     elements.traceRows.replaceChildren(...rows);
+    if (focusId) rows.find((row) => row.dataset.spanId === focusId)?.focus();
   }
 
   return {
@@ -166,6 +272,8 @@ export function createTraceView(
     update,
     fail,
     receive,
+    receiveSpan,
+    failSpan,
     get open() {
       return actions.inspecting();
     },
@@ -246,6 +354,7 @@ function spanRow(span: TraceRow, total: number): HTMLTableRowElement {
   row.className = `trace-span${span.error ? ' trace-error' : ''}${span.critical ? ' trace-critical' : ''}`;
   row.dataset.service = span.service;
   row.dataset.name = span.name;
+  row.dataset.spanId = span.spanId;
   const name = cell('', 'trace-name');
   const label = document.createElement('span');
   label.className = 'trace-indent';
@@ -279,17 +388,8 @@ function spanRow(span: TraceRow, total: number): HTMLTableRowElement {
     content.append(label, chip);
     name.replaceChildren(content);
   }
-  name.title = [
-    `${span.name} (${span.kind})`,
-    `Self time: ${formatDuration(span.selfMs)} of ${formatDuration(span.durationMs)}`,
-    span.statusMessage ? `Error: ${span.statusMessage}` : undefined,
-    ...Object.entries(span.attributes).map(
-      ([key, value]) => `${key} = ${typeof value === 'string' ? value : JSON.stringify(value)}`,
-    ),
-    ...span.events.map((event) => `event: ${event.name} at +${formatDuration(event.offsetMs)}`),
-  ]
-    .filter(Boolean)
-    .join('\n');
+  // The name is often cut to fit; the rest of the span is in its details, a click away.
+  name.title = `${span.name} (${span.kind}). Show this span's attributes and events.`;
   const bar = timeline(span.offsetMs, span.durationMs, total, 'trace-bar');
   bar.setAttribute('aria-label', `Starts at +${formatDuration(span.offsetMs)}`);
   row.append(
@@ -299,6 +399,88 @@ function spanRow(span: TraceRow, total: number): HTMLTableRowElement {
     cell(formatDuration(span.durationMs), 'trace-duration'),
     cell(formatDuration(span.selfMs), 'trace-duration trace-self'),
   );
+  return row;
+}
+
+/** A span's details, in a row under its own: what the waterfall has no room for. */
+function spanDetails(
+  span: TraceRow,
+  detail: SpanDetail | 'loading' | 'missing' | { error: string },
+): HTMLTableRowElement {
+  const row = document.createElement('tr');
+  row.className = 'trace-detail';
+  const content = cell('', 'trace-detail-cell');
+  content.colSpan = 5;
+  const paragraph = (text: string, className: string) => {
+    const element = document.createElement('p');
+    element.className = className;
+    element.textContent = text;
+    return element;
+  };
+  const heading = (text: string) => {
+    const element = document.createElement('h4');
+    element.textContent = text;
+    return element;
+  };
+  const known = typeof detail === 'object' && 'spanId' in detail ? detail : undefined;
+  content.append(
+    paragraph(
+      [
+        span.service,
+        span.kind,
+        `${formatDuration(span.durationMs)}, ${formatDuration(span.selfMs)} of it its own`,
+        `starts at +${formatDuration(span.offsetMs)}`,
+        known?.scope,
+      ]
+        .filter(Boolean)
+        .join(' · '),
+      'trace-detail-facts',
+    ),
+  );
+  if (span.statusMessage) content.append(paragraph(`Error: ${span.statusMessage}`, 'trace-detail-error'));
+  const buttons = document.createElement('div');
+  buttons.className = 'trace-detail-actions';
+  for (const [action, label, title] of [
+    ['logs', 'Show this span’s logs', 'Show every retained event with this span id'],
+    ['copyId', 'Copy span ID', 'Copy this span’s id to the clipboard'],
+    ['copy', 'Copy span', 'Copy this span as JSON, redacted like exports'],
+  ] as const) {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.dataset.spanAction = action;
+    button.textContent = label;
+    button.title = title;
+    buttons.append(button);
+  }
+  content.append(buttons);
+  if (!known) {
+    content.append(
+      paragraph(
+        detail === 'loading'
+          ? 'Loading…'
+          : detail === 'missing'
+            ? 'This span is no longer retained.'
+            : `Could not load this span: ${(detail as { error: string }).error}`,
+        'trace-detail-note',
+      ),
+    );
+  } else {
+    const attributes: [string, unknown][] = [
+      ['span id', known.spanId],
+      ...(known.parentSpanId ? ([['parent span id', known.parentSpanId]] as [string, unknown][]) : []),
+      ...Object.entries(known.attributes),
+    ];
+    content.append(heading('Attributes'), renderEventFields(attributes, { label: 'Span attributes' })!);
+    if (known.events.length) content.append(heading(`Events · ${known.events.length}`));
+    for (const event of known.events) {
+      content.append(
+        paragraph(`+${formatDuration(Math.max(0, event.offsetMs))} · ${event.name}`, 'trace-detail-event'),
+      );
+      const fields = Object.entries(event.attributes);
+      if (fields.length) content.append(renderEventFields(fields, { label: `Attributes of ${event.name}` })!);
+    }
+  }
+  row.append(content);
   return row;
 }
 

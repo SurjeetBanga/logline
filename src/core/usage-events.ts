@@ -118,6 +118,7 @@ export const PANEL_ACTIONS = [
   'metric_query',
   'metric_watch',
   'copy_ai_call',
+  'copy_span',
   'toggle_otlp',
 ] as const;
 export type PanelAction = (typeof PANEL_ACTIONS)[number];

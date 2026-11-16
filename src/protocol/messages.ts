@@ -9,7 +9,7 @@ import type { LogEvent } from '../core/types';
 import type { SavedSearch } from '../storage/saved-searches';
 import type { AgentShareStatus } from '../core/agent-types';
 import type { MetricSeriesView } from '../core/metrics';
-import type { TraceSummary, TraceView } from '../core/traces';
+import type { SpanDetail, TraceSummary, TraceView } from '../core/traces';
 import type { ReceiverStatus } from '../capture/otlp-receiver';
 import type { RemoteRunInfo } from '../capture/remote-source';
 import { RANGE_CHOICES, type ConnectionType } from '../core/connections';
@@ -85,6 +85,9 @@ export type ViewRequest =
   | { type: 'metrics' }
   | { type: 'aiCalls' }
   | { type: 'aiCall' | 'copyAiCall'; traceId: string; spanId: string }
+  | { type: 'span'; traceId: string; spanId: string }
+  /** Copies a trace's id, or with a span its id or, with `whole`, the span as JSON. */
+  | { type: 'copySpan'; traceId: string; spanId?: string; whole?: boolean }
   | { type: 'toggleOtlp'; enabled: boolean }
   | { type: 'exportContext'; ids: number[] }
   | { type: 'shareWithAgent'; sourceIds?: string[]; sessionIds?: string[]; anchor?: number; chooseRuns?: boolean }
@@ -338,9 +341,17 @@ export type HostMessage =
   | { type: 'autocomplete'; input: string; serverId?: string; fields: string[]; values: SuggestedValue[] }
   | { type: 'analysis'; analysis: AnalysisResult; requestId?: number }
   /** A view's request failed on the host; `traceId` names the trace a waterfall asked for. */
-  | { type: 'viewError'; view: 'analysis' | 'traces' | 'trace'; requestId?: number; traceId?: string; message: string }
+  | {
+      type: 'viewError';
+      view: 'analysis' | 'traces' | 'trace' | 'span';
+      requestId?: number;
+      traceId?: string;
+      spanId?: string;
+      message: string;
+    }
   | { type: 'trace'; trace: TraceView }
   | { type: 'traces'; traces: TraceSummary[] }
+  | { type: 'span'; traceId: string; spanId: string; detail?: SpanDetail }
   | { type: 'aiCalls'; aiCalls: GenAiSummary }
   | { type: 'aiCall'; traceId: string; spanId: string; detail?: GenAiCallDetail }
   | { type: 'metrics'; metrics: MetricSeriesView[] }
@@ -479,6 +490,15 @@ export function parseViewRequest(value: unknown): ViewRequest | undefined {
     }
     case 'aiCalls':
       return { type: msg.type };
+    case 'copySpan': {
+      const traceId = string('traceId'),
+        spanId = string('spanId');
+      const id = /^[A-Za-z0-9_-]{1,128}$/;
+      return traceId && id.test(traceId) && (spanId === undefined || id.test(spanId))
+        ? { type: msg.type, traceId, ...(spanId ? { spanId, ...(msg.whole === true ? { whole: true } : {}) } : {}) }
+        : undefined;
+    }
+    case 'span':
     case 'aiCall':
     case 'copyAiCall': {
       const traceId = string('traceId'),

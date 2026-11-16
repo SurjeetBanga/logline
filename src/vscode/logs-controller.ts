@@ -15,7 +15,16 @@ import { localUrls } from '../core/browser-events';
 import { MetricStore, type MetricSeriesView } from '../core/metrics';
 import { createRedactor } from '../core/redaction';
 import { telemetryFindings, type TelemetryFinding } from '../core/telemetry-findings';
-import { buildTrace, SpanStore, summarizeTraces, traceLogs, type TraceSummary, type TraceView } from '../core/traces';
+import {
+  buildTrace,
+  spanDetail,
+  SpanStore,
+  summarizeTraces,
+  traceLogs,
+  type SpanDetail,
+  type TraceSummary,
+  type TraceView,
+} from '../core/traces';
 import { OtelIntegration } from './otel-integration';
 import { BrowserCapture } from '../capture/browser-capture';
 import type { BrowserLauncher } from './browser';
@@ -465,6 +474,8 @@ export class LogsController {
         aiCallList: () => this.aiCallList(),
         aiCallDetail: (traceId, spanId) => this.aiCallDetail(traceId, spanId),
         copyAiCall: (traceId, spanId) => this.copyAiCall(traceId, spanId),
+        spanDetail: (traceId, spanId) => this.spanDetail(traceId, spanId),
+        copySpan: (traceId, spanId, whole) => this.copySpan(traceId, spanId, whole),
         toggleOtlp: (enabled) => this.toggleOtlp(enabled),
         breakOnEvent: (id) => this.breakOnEvent(id),
         breakOnQuery: (query, levels) => this.breakOnQuery(query, levels),
@@ -1130,6 +1141,26 @@ export class LogsController {
     }
     await vscode.env.clipboard.writeText(genAiMarkdown(redactor.value(detail) as GenAiCallDetail));
     void vscode.window.showInformationMessage('Copied the AI call as Markdown.');
+  }
+  /** One span of a trace in full: every attribute and event kept. */
+  spanDetail(traceId: string, spanId: string): SpanDetail | undefined {
+    return spanDetail(this.spans.trace(traceId.toLowerCase()), spanId.toLowerCase());
+  }
+  /** Copy a trace's id, a span's id, or the whole span as JSON, redacted like exports. */
+  async copySpan(traceId: string, spanId?: string, whole = false): Promise<void> {
+    if (!spanId || !whole) {
+      await vscode.env.clipboard.writeText((spanId ?? traceId).toLowerCase());
+      void vscode.window.showInformationMessage(spanId ? 'Copied the span id.' : 'Copied the trace id.');
+      return;
+    }
+    const detail = this.spanDetail(traceId, spanId);
+    if (!detail) {
+      void vscode.window.showWarningMessage('That span is no longer retained.');
+      return;
+    }
+    const redactor = createRedactor(this.transfer.redactionOptions());
+    await vscode.env.clipboard.writeText(JSON.stringify(redactor.value(detail), null, 2));
+    void vscode.window.showInformationMessage('Copied the span as JSON.');
   }
   /** Recent OpenTelemetry metric series, most recently updated first, with enough points for a trend line. */
   metricList(): MetricSeriesView[] {

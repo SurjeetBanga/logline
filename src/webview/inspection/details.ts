@@ -290,12 +290,16 @@ export function eventFieldEntries(text: string | undefined): [string, unknown][]
 }
 
 /** The fields list for entries from `eventFieldEntries`. */
-export function renderEventFields(entries: [string, unknown][] | undefined): HTMLElement | undefined {
+export function renderEventFields(
+  entries: [string, unknown][] | undefined,
+  /** A list of something other than an event's fields names itself and has no filter buttons. */
+  other?: { label: string },
+): HTMLElement | undefined {
   if (!entries) return undefined;
   const list = document.createElement('div');
   list.className = 'event-fields';
   list.setAttribute('role', 'list');
-  list.setAttribute('aria-label', 'Fields');
+  list.setAttribute('aria-label', other?.label ?? 'Fields');
   for (const [name, value] of entries) {
     const row = document.createElement('div');
     row.className = 'event-field';
@@ -310,7 +314,7 @@ export function renderEventFields(entries: [string, unknown][] | undefined): HTM
     shown.title = shown.textContent;
     row.append(key, shown);
     // A nested value has no single term to search for.
-    if (scalar && value !== null && value !== '') {
+    if (!other && scalar && value !== null && value !== '') {
       const filters = document.createElement('span');
       filters.className = 'event-field-filters';
       for (const exclude of [false, true]) {

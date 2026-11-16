@@ -1,4 +1,4 @@
-import { snapshot } from './data';
+import { snapshot, spanDetail, traceDetail, traces } from './data';
 import { expect, test, type Panel } from './panel';
 
 // What the Logs panel does with real pointer, keyboard, and focus, which the unit tests' fake DOM only
@@ -209,5 +209,49 @@ test.describe('menus', () => {
     await page.locator('#search').press('Enter');
     await page.locator('#moreActions').click();
     await expect(menu.locator('#copyResults')).toBeVisible();
+  });
+});
+
+test.describe('the trace waterfall', () => {
+  async function openWaterfall(panel: Panel) {
+    await panel.page.locator('#viewTabs [role=tab]', { hasText: 'Traces' }).click();
+    await panel.post(traces);
+    await panel.page.locator('#tracesRows tr').first().click();
+    await panel.post(traceDetail);
+    await expect(panel.page.locator('#traceRows tr.trace-span')).toHaveCount(6);
+  }
+  const spanRow = (panel: Panel, id: string) => panel.page.locator(`#traceRows tr.trace-span[data-span-id="${id}"]`);
+
+  test('span rows take the arrow keys, and Enter opens a span’s details and closes them with focus kept on the row', async ({
+    openPanel,
+  }) => {
+    const panel = await openPanel();
+    const { page } = panel;
+    await openWaterfall(panel);
+    await spanRow(panel, 'a').focus();
+    await expect(spanRow(panel, 'a')).toBeFocused();
+    await page.keyboard.press('ArrowDown');
+    await expect(spanRow(panel, 'b'), 'Down moves to the next span').toBeFocused();
+    await expect(spanRow(panel, 'b')).toHaveAttribute('tabindex', '0');
+    await expect(spanRow(panel, 'a')).toHaveAttribute('tabindex', '-1');
+    await page.keyboard.press('End');
+    await expect(spanRow(panel, 'f')).toBeFocused();
+    await page.keyboard.press('Home');
+    await page.keyboard.press('ArrowDown');
+    await expect(spanRow(panel, 'b')).toBeFocused();
+
+    await page.keyboard.press('Enter');
+    await panel.post(spanDetail);
+    await expect(spanRow(panel, 'b')).toHaveAttribute('aria-expanded', 'true');
+    await expect(page.locator('#traceRows tr.trace-detail'), 'the details open under the row').toBeVisible();
+    await expect(spanRow(panel, 'b'), 'focus stays on the row').toBeFocused();
+    expect((await panel.posted()).filter((message) => message.type === 'span')).toEqual([
+      { type: 'span', traceId: 'f1', spanId: 'b' },
+    ]);
+
+    await page.keyboard.press('Enter');
+    await expect(page.locator('#traceRows tr.trace-detail')).toHaveCount(0);
+    await expect(spanRow(panel, 'b')).toHaveAttribute('aria-expanded', 'false');
+    await expect(spanRow(panel, 'b'), 'closing keeps focus on the row').toBeFocused();
   });
 });
