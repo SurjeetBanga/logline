@@ -30,6 +30,20 @@ export interface BridgeRequest {
 }
 
 /**
+ * Whether an MCP server that an agent started found its window: said once,
+ * to that window, or to every window when it found none, so a window can tell
+ * the user why their agent cannot read the logs it shares. No tool runs.
+ */
+export interface BridgeHello {
+  client?: string;
+  matched: boolean;
+  /** `unexpanded`: the editor left `${workspaceFolder}` as it was, so the server knew no folder. */
+  reason: 'ok' | 'other_folder' | 'unexpanded';
+  /** The folder the server looked for, shown to the user and never counted. */
+  folder?: string;
+}
+
+/**
  * One line back: the tool's bounded JSON text, or why the call was refused.
  * `code` says what the agent can do about an error; without one the window
  * could not be reached.

@@ -266,6 +266,34 @@ test('a terminal is judged on shell integration once, after it has had time to b
   capture.dispose();
 });
 
+test('a terminal without shell integration is said, until it runs a command through it or closes', (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const plain = { creationOptions: { shellPath: 'C:/x/powershell.exe' } };
+  const integrated = { shellIntegration: {} };
+  const h = harness(true, 100000, [plain, integrated]);
+  const told: (string | undefined)[] = [];
+  h.capture.noIntegration = (shell) => told.push(shell);
+  assert.equal(h.capture.status().state, 'waiting');
+  t.mock.timers.tick(10_000);
+  assert.deepEqual(told, ['C:/x/powershell.exe'], 'only the terminal without it');
+  const status = h.capture.status();
+  assert.equal(status.state, 'attention');
+  assert.match(status.detail, /1 terminal has no shell integration.*Run Command/);
+  // Integration that comes up late shows itself with the terminal's first command.
+  h.start({ terminal: plain, execution: { commandLine: { value: 'npm test' }, read: () => undefined } });
+  assert.notEqual(h.capture.status().detail, status.detail);
+  closeListener!(plain);
+  assert.equal(h.capture.status().state, 'attention', 'the run it could not read still needs attention');
+
+  const other = harness(true, 100000, [{}]);
+  t.mock.timers.tick(10_000);
+  assert.equal(other.capture.status().state, 'attention');
+  closeListener!(vscodeMock.window.terminals[0]);
+  assert.equal(other.capture.status().state, 'waiting', 'a closed terminal no longer counts');
+  h.capture.dispose();
+  other.capture.dispose();
+});
+
 test('terminals are not judged while capture is off, and are once it is turned on', (t) => {
   t.mock.timers.enable({ apis: ['setTimeout'] });
   const { capture } = harness(false, 100000, [{}]);

@@ -1,12 +1,22 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { mkdtempSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
-import { createServer, type AddressInfo } from 'node:net';
+import { createConnection, createServer, type AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { agentLabel, type BridgeWindow } from '../protocol/agent-bridge';
-import { callWindow, createMcpServer, mcpTools, pickWindow, readWindows, workspaceArgument } from '../mcp/server';
+import {
+  callWindow,
+  createMcpServer,
+  mcpTools,
+  pickWindow,
+  readWindows,
+  sendHello,
+  workspaceArgument,
+  workspaceUnexpanded,
+} from '../mcp/server';
+import type { BridgeHello } from '../protocol/agent-bridge';
 import { AgentBridge, installMcpScript } from './agent-bridge';
 import { withVscode } from '../test/vscode-mock';
 
@@ -649,4 +659,128 @@ test('callWindow reads a reply split across chunks, ignoring anything after its 
   } finally {
     server.close();
   }
+});
+
+test('an editor that left its folder variable unexpanded is told apart from one that named no folder', () => {
+  assert.equal(workspaceUnexpanded(['node', 'mcp.js', '--workspace', '${workspaceFolder}'], {}), true);
+  assert.equal(
+    workspaceUnexpanded(['node', 'mcp.js', '--workspace', '${workspaceFolder}'], { LOGLINE_WORKSPACE: '/w' }),
+    false,
+  );
+  assert.equal(workspaceUnexpanded(['node', 'mcp.js', '--workspace', '/work/api'], {}), false);
+  assert.equal(workspaceUnexpanded(['node', 'mcp.js'], {}), false);
+});
+
+test('the MCP server tells its window an agent arrived, or every window why it found none, once', async () => {
+  const window = (pid: number, folders: string[]): BridgeWindow => ({
+    version: 1,
+    pid,
+    port: pid,
+    token: `t${pid}`,
+    folders,
+    name: folders[0] ?? '',
+  });
+  const api = window(1, ['/work/api']);
+  const web = window(2, ['/work/web']);
+  const run = async (
+    cwd: string,
+    windows: BridgeWindow[],
+    extra: { unexpanded?: boolean; workspace?: string } = {},
+  ) => {
+    const told: [number, BridgeHello][] = [];
+    const calls: number[] = [];
+    const server = createMcpServer({
+      tools: mcpTools([{ name: 'logline_search_logs' }]),
+      version: '1',
+      cwd,
+      windows: () => windows,
+      ...extra,
+      call: async (target) => {
+        calls.push(target.pid);
+        return { text: '{}' };
+      },
+      hello: async (target, hello) => void told.push([target.pid, hello]),
+    });
+    await server.handle({
+      jsonrpc: '2.0',
+      id: 1,
+      method: 'initialize',
+      params: { clientInfo: { name: 'cursor-vscode' } },
+    });
+    await server.handle({ jsonrpc: '2.0', method: 'notifications/initialized' });
+    const call = (await server.handle({
+      jsonrpc: '2.0',
+      id: 2,
+      method: 'tools/call',
+      params: { name: 'logline_search_logs', arguments: {} },
+    })) as { result: { isError?: boolean } };
+    return { told, calls, failed: Boolean(call.result.isError) };
+  };
+
+  const found = await run('/work/api/src', [api, web]);
+  assert.deepEqual(found.told, [[1, { client: 'cursor-vscode', matched: true, reason: 'ok' }]], 'once, to its window');
+  assert.deepEqual(found.calls, [1]);
+
+  const lost = await run('/elsewhere', [api, web]);
+  assert.deepEqual(
+    lost.told.map(([pid, hello]) => [pid, hello.matched, hello.reason, hello.folder]),
+    [
+      [1, false, 'other_folder', '/elsewhere'],
+      [2, false, 'other_folder', '/elsewhere'],
+    ],
+    'every window, once, even after a failed call',
+  );
+  assert.equal(lost.failed, true);
+
+  const unexpanded = await run('/', [api, web], { unexpanded: true });
+  assert.deepEqual(
+    unexpanded.told.map(([, hello]) => [hello.reason, hello.folder]),
+    [
+      ['unexpanded', undefined],
+      ['unexpanded', undefined],
+    ],
+  );
+
+  const only = await run('/', [api], { unexpanded: true });
+  assert.deepEqual(only.calls, [1], "an editor's own agent with one Logline window reads that window");
+  assert.deepEqual(only.told, [[1, { client: 'cursor-vscode', matched: true, reason: 'ok' }]]);
+  assert.equal((await run('/', [api])).calls.length, 0, 'but an agent started elsewhere still does not');
+
+  assert.deepEqual((await run('/work/api', [])).told, [], 'with no window, there is no one to tell');
+});
+
+test("a window hears an MCP server's greeting with its token only, and runs no tool for it", async () => {
+  const directory = join(temp(), 'agents');
+  const heard: BridgeHello[] = [];
+  let ran = 0;
+  const bridge = new AgentBridge({
+    run: async () => {
+      ran++;
+      return '{}';
+    },
+    folders: () => ['/work/api'],
+    name: () => 'api',
+    onHello: (hello) => heard.push(hello),
+    directory,
+    pid: process.pid,
+  });
+  await bridge.start();
+  const window = JSON.parse(readFileSync(join(directory, `${process.pid}.json`), 'utf8')) as BridgeWindow;
+  await sendHello(window, { client: 'claude-code', matched: false, reason: 'other_folder', folder: '/elsewhere' });
+  await sendHello({ ...window, token: 'wrong' }, { client: 'x', matched: true, reason: 'ok' });
+  const odd = await new Promise<string>((resolve) => {
+    const socket = createConnection(window.port, '127.0.0.1');
+    let data = '';
+    socket.on('connect', () => socket.write(`${JSON.stringify({ token: window.token, hello: { matched: 'yes' } })}\n`));
+    socket.on('data', (chunk) => (data += chunk));
+    socket.on('close', () => resolve(data));
+  });
+  assert.match(odd, /not understood/);
+  assert.deepEqual(heard, [{ client: 'claude-code', matched: false, reason: 'other_folder', folder: '/elsewhere' }]);
+  assert.equal(ran, 0);
+  await bridge.stop();
+  // A window that is gone does not hold the server up.
+  const started = Date.now();
+  await sendHello(window, { matched: true, reason: 'ok' }, 500);
+  assert.ok(Date.now() - started < 1000);
 });

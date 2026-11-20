@@ -35,6 +35,10 @@ export class TerminalCapture {
   checked?: (integrated: boolean, shell: string | undefined) => void;
   /** Told the command line of a command that started while capture was off, so capture can be offered. */
   uncaptured?: (commandLine: string) => void;
+  /** Told when a terminal did not bring up shell integration, so the user can learn why nothing is captured. */
+  noIntegration?: (shell: string | undefined) => void;
+  /** Open terminals judged without shell integration, until one runs a command through it or closes. */
+  private readonly unintegrated = new Set<object>();
   private readonly judged = new WeakSet<object>();
   private readonly checks = new Set<ReturnType<typeof setTimeout>>();
   private enabled = false;
@@ -91,6 +95,7 @@ export class TerminalCapture {
             this.ignoredSourceIds.delete(id);
           }
           this.ignored.delete(terminal as object);
+          this.unintegrated.delete(terminal as object);
           this.pruneStale();
           this.state.notify();
         }),
@@ -119,6 +124,14 @@ export class TerminalCapture {
       return {
         state: 'capturing',
         detail: `Capturing ${active} terminal command${active === 1 ? '' : 's'}`,
+        active,
+        failed,
+      };
+    const blind = [...this.unintegrated].filter((terminal) => !this.ignored.has(terminal)).length;
+    if (blind)
+      return {
+        state: 'attention',
+        detail: `${blind === 1 ? '1 terminal has' : `${blind} terminals have`} no shell integration, so ${blind === 1 ? 'its' : 'their'} commands cannot be captured. Use Run Command, or a shell with shell integration.`,
         active,
         failed,
       };
@@ -206,8 +219,13 @@ export class TerminalCapture {
     if (terminal.creationOptions?.pty) return;
     const check = setTimeout(() => {
       this.checks.delete(check);
-      if (this.enabled && !this.disposed && !terminal.exitStatus && !this.ignored.has(object))
-        this.checked?.(!!terminal.shellIntegration, terminal.state?.shell ?? terminal.creationOptions?.shellPath);
+      if (!this.enabled || this.disposed || terminal.exitStatus || this.ignored.has(object)) return;
+      const shell = terminal.state?.shell ?? terminal.creationOptions?.shellPath;
+      this.checked?.(!!terminal.shellIntegration, shell);
+      if (terminal.shellIntegration) return;
+      this.unintegrated.add(object);
+      this.state.notify();
+      this.noIntegration?.(shell);
     }, INTEGRATION_WAIT_MS);
     check.unref?.();
     this.checks.add(check);
@@ -216,6 +234,8 @@ export class TerminalCapture {
   private onStart(event: { terminal: TerminalLike; execution: ExecutionLike; shellIntegration?: unknown }): void {
     if (this.disposed || !event?.terminal || !event.execution) return;
     const terminal = event.terminal as object;
+    // A command reported through shell integration shows the terminal has it after all.
+    if (this.unintegrated.delete(terminal)) this.state.notify();
     if (!this.enabled) {
       // Nothing to offer for a terminal someone excluded, or one an extension writes itself, as a Logline task does.
       const known = this.terminalIds.get(terminal);

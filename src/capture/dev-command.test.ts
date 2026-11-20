@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { looksLikeDevServer } from './dev-command';
+import { looksLikeDevServer, looksLikeProgramRun } from './dev-command';
 
 test('commands that start a dev server, an app, or containers are recognized', () => {
   for (const command of [
@@ -85,5 +85,64 @@ test('a long or adversarial command line is answered at once', () => {
   ])
     assert.equal(looksLikeDevServer(command), false);
   assert.equal(looksLikeDevServer(`${'A=1 '.repeat(400)}npm run dev`), true);
+  assert.ok(performance.now() - started < 500, 'each answer takes time in proportion to the length');
+});
+
+test('the capture offer also recognizes programs and test suites, but not builds or shell commands', () => {
+  for (const command of [
+    'npm run dev',
+    'python app.py',
+    'python3 -u main.py --port 8000',
+    'py .\\scripts\\worker.py',
+    'python -m pytest tests',
+    'node scripts/seed.mjs',
+    'node --env-file=.env src/job.ts',
+    'deno run --allow-net main.ts',
+    'npm test',
+    'npm t',
+    'pnpm test:unit',
+    'yarn run test --watch',
+    'npx vitest',
+    'jest --runInBand',
+    'pytest -k login',
+    'uv run pytest',
+    'go test ./...',
+    'cargo test',
+    'dotnet test',
+    '.\\gradlew.bat test',
+    './mvnw -q test',
+    'bundle exec rspec',
+    'NODE_ENV=test npm test',
+  ])
+    assert.equal(looksLikeProgramRun(command), true, command);
+  for (const command of [
+    '',
+    'git status',
+    'npm install',
+    'npm run build',
+    'node --version',
+    'python --version',
+    'python',
+    'pip install -r requirements.txt',
+    'go build ./...',
+    'cargo build',
+    'dotnet build',
+    './gradlew build',
+    'cat app.py',
+    'echo npm test',
+  ])
+    assert.equal(looksLikeProgramRun(command), false, command);
+  assert.equal(looksLikeDevServer('python app.py'), false, 'the browser offer still waits for a server');
+});
+
+test('a long or adversarial command line is answered at once for the capture offer too', () => {
+  const started = performance.now();
+  for (const command of [
+    `python ${'-X '.repeat(400)}x`,
+    `node ${'--a=b '.repeat(300)}x`,
+    `./gradlew ${'a '.repeat(500)}build`,
+    `py ${'a'.repeat(1900)}`,
+  ])
+    assert.equal(looksLikeProgramRun(command), false, command.slice(0, 20));
   assert.ok(performance.now() - started < 500, 'each answer takes time in proportion to the length');
 });
