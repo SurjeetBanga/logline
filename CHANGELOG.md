@@ -12,6 +12,9 @@ All notable changes to Logline are documented in this file.
 
 ### Fixes
 
+- **A terminal that cannot be captured says so**: when a terminal's shell integration does not start, as in Command Prompt or in PowerShell with a restrictive execution policy, capture used to say it was on while nothing arrived. The capture status now counts those terminals, and Logline says it once a window with **Run Command**, which captures without shell integration, and **Learn More**.
+- **Capture is offered for more than dev servers**: running a program or tests in a terminal with capture off, such as `python app.py`, `node script.js`, `npm test`, `pytest`, `go test`, or `dotnet test`, now offers capture too. Builds and installs still do not.
+- **An agent that cannot reach your logs is said in the editor**: when Claude Code, Codex, Cursor, or another MCP client starts Logline's server in a folder no Logline window has open, each window says so once, with the agent and the folder, instead of the agent alone getting an error. An editor that does not fill in `${workspaceFolder}` for its agent now reaches the only window running Logline.
 - **Analyze** says **Could not analyze these logs** with the reason when analysis fails, instead of staying on **Loading analysis…**, and the Traces tab shows a failure to load the list or a trace. Changing filters quickly no longer lets an older answer replace a newer one.
 - **Analyze** shows the first 20 error groups with **Show all N** for the rest, which were not shown before. A status code that is not three digits is shown as plain text instead of a button that did nothing.
 - A trace's waterfall narrows with a narrow inspector instead of scrolling sideways.

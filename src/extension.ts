@@ -10,11 +10,13 @@ import { GuidePanel } from './vscode/guide-panel';
 import { GUIDE_SECTIONS, latestGuideRelease } from './vscode/guide-content';
 import { registerAgentTools, runAgentTool } from './vscode/agent-tools';
 import { AgentBridge, installMcpScript } from './vscode/agent-bridge';
+import { AgentReachNotice } from './vscode/agent-reach';
 import { copilotAvailable, refreshCopilot, refreshInstalledSkills } from './vscode/agent-setup';
 import { AgentOnboarding } from './vscode/agent-onboarding';
 import { BROWSER_OFFER_DELAYS_MS, BrowserLauncher, BrowserOffer } from './vscode/browser';
 import { CaptureOffer } from './vscode/capture-offer';
 import { looksLikeDevServer } from './capture/dev-command';
+import { IntegrationNotice } from './vscode/integration-notice';
 import { CodexUsageReader } from './capture/codex-usage-reader';
 import { AiUsageStatus } from './vscode/ai-usage-status';
 import { CaptureStatus } from './vscode/capture-status';
@@ -149,6 +151,7 @@ export function activate(context: vscode.ExtensionContext): { provider: LogsProv
   }
   // Claude Code, Codex, and other MCP clients reach shared logs through a local bridge.
   const agentController = controller;
+  const reachNotice = new AgentReachNotice();
   const bridge = (controller.agentBridge = new AgentBridge({
     run: (tool, input, token, client) =>
       runAgentTool(agentController.agentAccess, tool, input, token, { usage, client }),
@@ -157,6 +160,14 @@ export function activate(context: vscode.ExtensionContext): { provider: LogsProv
     onClient: (client) => {
       usage?.agentConnected(agentClient(client));
       agentController.notifications.notify();
+    },
+    onHello: (hello) => {
+      usage?.record('agent_handshake', {
+        client: agentClient(hello.client),
+        matched: hello.matched,
+        reason: hello.reason,
+      });
+      reachNotice.unreachable(hello);
     },
     grant: () => agentController.agentAccess.grant,
   }));
@@ -211,6 +222,14 @@ export function activate(context: vscode.ExtensionContext): { provider: LogsProv
     enable: (everywhere) => agentController.toggleTerminalCapture(true, everywhere),
     record: (step) => usage?.record('nudge', { kind: 'capture_offer', step }),
   });
+  // Capture that is on but cannot read a terminal says so, rather than staying silent.
+  if (context.extensionMode === (vscode.ExtensionMode?.Production ?? 1)) {
+    const integrationNotice = new IntegrationNotice({
+      global: context.globalState,
+      record: (step) => usage?.record('nudge', { kind: 'no_integration', step }),
+    });
+    agentController.terminalCapture.noIntegration = (shell) => void integrationNotice.noIntegration(shell);
+  }
   // Like the agent setup, capture is offered only where an answer lasts.
   if (context.extensionMode === (vscode.ExtensionMode?.Production ?? 1) && !vscode.env?.remoteName)
     agentController.terminalCapture.uncaptured = (commandLine) => void captureOffer.commandStarted(commandLine);

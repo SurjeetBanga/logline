@@ -9,6 +9,7 @@ import {
   isAlive,
   MAX_BRIDGE_REQUEST_BYTES,
   mcpScriptPath,
+  type BridgeHello,
   type BridgeRequest,
   type BridgeWindow,
 } from '../protocol/agent-bridge';
@@ -20,6 +21,8 @@ export interface AgentBridgeOptions {
   name(): string;
   /** Called when a client calls for the first time in a while, so the panel can show it. */
   onClient?(client: string): void;
+  /** Called when an MCP server an agent started says whether it found this window, or found none. */
+  onHello?(hello: BridgeHello): void;
   /** The current sharing grant; agents are shown as readers only of the grant they called under. */
   grant?(): string | undefined;
   directory?: string;
@@ -173,9 +176,9 @@ export class AgentBridge {
     const reply = (value: object) => {
       if (!socket.destroyed) socket.end(`${JSON.stringify(value)}\n`);
     };
-    let request: Partial<BridgeRequest>;
+    let request: Partial<BridgeRequest> & { hello?: unknown };
     try {
-      request = JSON.parse(line) as Partial<BridgeRequest>;
+      request = JSON.parse(line) as Partial<BridgeRequest> & { hello?: unknown };
     } catch {
       reply({ error: 'The request was not valid JSON.' });
       return;
@@ -184,6 +187,12 @@ export class AgentBridge {
       reply({
         error: 'This Logline window did not accept the token. Restart the agent so it reads the current window.',
       });
+      return;
+    }
+    if (request.hello !== undefined) {
+      const hello = readHello(request.hello);
+      if (hello) this.options.onHello?.(hello);
+      reply(hello ? { text: '{}' } : { error: 'The greeting was not understood.' });
       return;
     }
     if (typeof request.tool !== 'string') {
@@ -264,4 +273,18 @@ function refused(text: string): boolean {
   } catch {
     return false;
   }
+}
+
+/** A greeting from an MCP server, keeping only what it should say, or undefined when it says something else. */
+function readHello(value: unknown): BridgeHello | undefined {
+  if (!value || typeof value !== 'object') return undefined;
+  const { client, matched, reason, folder } = value as Record<string, unknown>;
+  if (typeof matched !== 'boolean' || (reason !== 'ok' && reason !== 'other_folder' && reason !== 'unexpanded'))
+    return undefined;
+  return {
+    matched,
+    reason,
+    ...(typeof client === 'string' && client ? { client: client.slice(0, 200) } : {}),
+    ...(typeof folder === 'string' && folder ? { folder: folder.slice(0, 1000) } : {}),
+  };
 }

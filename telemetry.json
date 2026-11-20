@@ -252,6 +252,25 @@
         "comment": "One of: claude-code, codex, cursor, copilot, other."
       }
     },
+    "surjeetbanga.logline/agent_handshake": {
+      "owner": "SurjeetBanga",
+      "comment": "An MCP server an agent started said whether it found this window; once for each server it starts.",
+      "client": {
+        "classification": "SystemMetaData",
+        "purpose": "FeatureInsight",
+        "comment": "One of: claude-code, codex, cursor, copilot, other."
+      },
+      "matched": {
+        "classification": "SystemMetaData",
+        "purpose": "FeatureInsight",
+        "comment": "Whether the server found this window."
+      },
+      "reason": {
+        "classification": "SystemMetaData",
+        "purpose": "FeatureInsight",
+        "comment": "Whether the server found this window, or why not. One of: ok, other_folder, unexpanded."
+      }
+    },
     "surjeetbanga.logline/agent_tool": {
       "owner": "SurjeetBanga",
       "comment": "An agent called a Logline tool; the tool, route, client kind, outcome, time, and result size bucket.",
@@ -727,7 +746,7 @@
       "kind": {
         "classification": "SystemMetaData",
         "purpose": "FeatureInsight",
-        "comment": "One of: errors, capture_offer, browser_offer."
+        "comment": "One of: errors, capture_offer, browser_offer, no_integration."
       },
       "step": {
         "classification": "SystemMetaData",

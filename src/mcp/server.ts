@@ -2,7 +2,13 @@ import { readdirSync, readFileSync } from 'node:fs';
 import { connect } from 'node:net';
 import { join, posix, win32 } from 'node:path';
 import { createInterface } from 'node:readline';
-import { BRIDGE_VERSION, isAlive, type BridgeResponse, type BridgeWindow } from '../protocol/agent-bridge';
+import {
+  BRIDGE_VERSION,
+  isAlive,
+  type BridgeHello,
+  type BridgeResponse,
+  type BridgeWindow,
+} from '../protocol/agent-bridge';
 import type { AgentWorkflow } from '../protocol/agent-workflows';
 
 /**
@@ -90,6 +96,12 @@ export function workspaceArgument(argv: readonly string[], env: NodeJS.ProcessEn
   const flag = argv.indexOf('--workspace');
   const value = flag >= 0 ? argv[flag + 1] : undefined;
   return (value && !/^\$\{.*\}$/.test(value) ? value : undefined) || env.LOGLINE_WORKSPACE || undefined;
+}
+
+/** Whether the editor started the server with `--workspace` but left its variable unexpanded, and nothing else names a folder. */
+export function workspaceUnexpanded(argv: readonly string[], env: NodeJS.ProcessEnv = process.env): boolean {
+  const flag = argv.indexOf('--workspace');
+  return flag >= 0 && /^\$\{.*\}$/.test(argv[flag + 1] ?? '') && !env.LOGLINE_WORKSPACE;
 }
 
 /** The window for a working directory: the one with the closest enclosing folder, or the only one when it has no folders. */
@@ -199,6 +211,27 @@ export function callWindow(
   });
 }
 
+/** Tell a window whether this server found it; best effort, and never waits long. */
+export function sendHello(window: BridgeWindow, hello: BridgeHello, timeoutMs = 2000): Promise<void> {
+  return new Promise((done) => {
+    const socket = connect({ host: '127.0.0.1', port: window.port });
+    const finish = () => {
+      clearTimeout(timer);
+      socket.destroy();
+      done();
+    };
+    const timer = setTimeout(finish, timeoutMs);
+    timer.unref?.();
+    socket.on('connect', () => socket.write(`${JSON.stringify({ token: window.token, hello })}\n`));
+    socket.on('data', finish);
+    socket.on('error', finish);
+    socket.on('close', finish);
+  });
+}
+
+/** Most windows told, when none was found, so a machine with many open does not get a flood. */
+const MAX_HELLO_WINDOWS = 8;
+
 /** Why a call stopped before the window answered: the timeout, or the agent cancelled it. */
 function stoppedResponse(timeout: AbortSignal, timeoutMs: number): BridgeResponse {
   return timeout.aborted
@@ -217,7 +250,11 @@ export interface McpServerOptions {
   windows(): BridgeWindow[];
   cwd: string;
   workspace?: string;
+  /** The editor left `--workspace ${workspaceFolder}` unexpanded. */
+  unexpanded?: boolean;
   call?: typeof callWindow;
+  /** Tells windows whether this server found one; without it, they are not told. */
+  hello?: (window: BridgeWindow, hello: BridgeHello) => Promise<void>;
 }
 
 type JsonRpcId = string | number;
@@ -234,6 +271,41 @@ export function createMcpServer(options: McpServerOptions) {
   const prompts = options.prompts ?? [];
   const running = new Map<JsonRpcId, AbortController>();
   let client: string | undefined;
+  let greeted = false;
+  let warned = false;
+
+  /**
+   * Say once to the window this server reads that an agent arrived, or, when it
+   * finds none, say once to every window why not: otherwise an agent that cannot
+   * reach the logs fails where the user never looks.
+   */
+  function announce(windows: BridgeWindow[], picked: { window?: BridgeWindow }): void {
+    const hello = options.hello;
+    if (!hello || !windows.length) return;
+    if (picked.window) {
+      if (greeted) return;
+      greeted = true;
+      void hello(picked.window, { client, matched: true, reason: 'ok' });
+      return;
+    }
+    if (warned) return;
+    warned = true;
+    const reason = options.unexpanded ? 'unexpanded' : 'other_folder';
+    const folder = options.workspace || options.cwd;
+    for (const window of windows.slice(0, MAX_HELLO_WINDOWS))
+      void hello(window, { client, matched: false, reason, ...(reason === 'other_folder' ? { folder } : {}) });
+  }
+
+  /** The window for this server, told whether it was found. */
+  function choose(): { window?: BridgeWindow; error?: string } {
+    const windows = options.windows();
+    let picked = pickWindow(windows, options.cwd, options.workspace);
+    // Only an editor's own agent passes `--workspace`; one that left it unexpanded runs in an editor window,
+    // and when a single window runs Logline, that is it. What it can read is still what was shared there.
+    if (!picked.window && options.unexpanded && windows.length === 1) picked = { window: windows[0] };
+    announce(windows, picked);
+    return picked;
+  }
 
   const result = (id: JsonRpcId, value: unknown) => ({ jsonrpc: '2.0', id, result: value });
   const failure = (id: JsonRpcId | null, code: number, message: string) => ({
@@ -248,6 +320,11 @@ export function createMcpServer(options: McpServerOptions) {
     const { id, method, params = {} } = message as JsonRpcMessage;
     if (method === 'notifications/cancelled') {
       running.get(params.requestId as JsonRpcId)?.abort();
+      return undefined;
+    }
+    // The client is ready once it says so: the window it reaches can say an agent connected.
+    if (method === 'notifications/initialized') {
+      choose();
       return undefined;
     }
     if (id === undefined || id === null) return undefined; // other notifications need no reply
@@ -290,7 +367,7 @@ export function createMcpServer(options: McpServerOptions) {
         const name = params.name;
         if (typeof name !== 'string' || !options.tools.some((tool) => tool.name === name))
           return failure(id, -32602, `Unknown tool: ${String(name)}`);
-        const picked = pickWindow(options.windows(), options.cwd, options.workspace);
+        const picked = choose();
         if (!picked.window)
           return result(id, {
             content: [{ type: 'text', text: JSON.stringify({ error: 'NOT_CONNECTED', message: picked.error }) }],

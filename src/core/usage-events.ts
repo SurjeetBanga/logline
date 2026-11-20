@@ -140,7 +140,7 @@ export const AGENT_ONBOARDING_STEPS = [
 ] as const;
 export type AgentOnboardingStep = (typeof AGENT_ONBOARDING_STEPS)[number];
 /** A notification Logline raised on its own: errors caught while the panel was hidden, or an offer to capture a dev server. */
-export const NUDGE_KINDS = ['errors', 'capture_offer', 'browser_offer'] as const;
+export const NUDGE_KINDS = ['errors', 'capture_offer', 'browser_offer', 'no_integration'] as const;
 export type NudgeKind = (typeof NUDGE_KINDS)[number];
 export const NUDGE_STEPS = ['shown', 'accepted', 'never', 'dismissed'] as const;
 export type NudgeStep = (typeof NUDGE_STEPS)[number];
@@ -223,6 +223,11 @@ export const USAGE_EVENTS: Record<string, Record<string, Rule>> = {
   nudge: { kind: oneOf(...NUDGE_KINDS), step: oneOf(...NUDGE_STEPS) },
   entry: { from: oneOf(...ENTRY_POINTS) },
   agent_connected: { client: oneOf(...AGENT_CLIENTS) },
+  agent_handshake: {
+    client: oneOf(...AGENT_CLIENTS),
+    matched: BOOL,
+    reason: oneOf('ok', 'other_folder', 'unexpanded'),
+  },
   agent_tool: {
     tool: oneOf(...AGENT_TOOLS),
     via: oneOf('copilot', 'mcp'),
