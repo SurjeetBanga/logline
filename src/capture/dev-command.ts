@@ -57,3 +57,30 @@ export function looksLikeDevServer(commandLine: string): boolean {
   const command = withoutEnvironment(commandLine);
   return PATTERNS.some((pattern) => pattern.test(command));
 }
+
+/** Runs of a program or a test suite, whose output is worth searching even though nothing stays up. */
+const RUN_PATTERNS: RegExp[] = [
+  /^(?:python[\d.]*|py)\s+(?:-[\w.]+\s+)*[^\s-]\S*\.pyw?\b/,
+  /^(?:python[\d.]*|py)\s+-m\s+(?:pytest|unittest)\b/,
+  /^(?:node|bun|deno)\s+(?:run\s+)?(?:--[\w=:.-]+\s+)*[^\s-]\S*\.[cm]?[jt]sx?\b/,
+  /^(?:npm|pnpm|yarn|bun)\s+(?:run\s+)?test(?::[\w.-]+)?(?:\s|$)/,
+  /^npm\s+t(?:\s|$)/,
+  /^(?:npx\s+|pnpm\s+(?:exec|dlx)\s+|yarn\s+dlx\s+|bunx\s+)?(?:jest|vitest|mocha|playwright\s+test)(?:\s|$)/,
+  /^(?:pytest|py\.test|rspec|bundle\s+exec\s+rspec)(?:\s|$)/,
+  /^(?:poetry|uv|pipenv|hatch)\s+run\s+(?:pytest|python)\b/,
+  /^(?:go|cargo|dotnet|mix|deno)\s+test\b/,
+  /^php\s+artisan\s+test\b/,
+  /^(?:\.[\\/])?(?:mvnw?|gradlew?)(?:\.cmd|\.bat)?\s+(?:\S+\s+)*?(?:test|check|run|bootRun)\b/,
+];
+
+/**
+ * Whether a terminal command runs something whose output is worth capturing:
+ * a dev server, or a program or test suite. Builds, installs, and shell
+ * commands are not; a miss only means no offer.
+ */
+export function looksLikeProgramRun(commandLine: string): boolean {
+  if (commandLine.length > MAX_COMMAND) return false;
+  if (looksLikeDevServer(commandLine)) return true;
+  const command = withoutEnvironment(commandLine);
+  return RUN_PATTERNS.some((pattern) => pattern.test(command));
+}

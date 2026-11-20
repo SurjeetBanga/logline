@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { looksLikeDevServer } from '../capture/dev-command';
+import { looksLikeProgramRun } from '../capture/dev-command';
 import type { NudgeStep } from '../core/usage-events';
 import { OfferMemory } from './offer-memory';
 
@@ -23,7 +23,7 @@ const EVERYWHERE = 'Capture Everywhere';
 const NOT_NOW = 'Not Now';
 
 /**
- * Offers terminal capture when a dev server starts in a terminal with capture
+ * Offers terminal capture when a dev server, a program, or a test suite starts in a terminal with capture
  * off: once per workspace, and in a few workspaces at most.
  */
 export class CaptureOffer {
@@ -46,7 +46,7 @@ export class CaptureOffer {
   async commandStarted(commandLine: string): Promise<boolean> {
     const { record } = this.options;
     const { memory } = this;
-    if (this.asking || this.unsaved || !looksLikeDevServer(commandLine) || !memory.allowed()) return false;
+    if (this.asking || this.unsaved || !looksLikeProgramRun(commandLine) || !memory.allowed()) return false;
     this.asking = true;
     try {
       await memory.askedHere();
