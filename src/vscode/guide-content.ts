@@ -17,6 +17,27 @@ export interface GuideRelease {
 
 export const GUIDE_RELEASES: GuideRelease[] = [
   {
+    version: '1.22.0',
+    date: '2026-11-23',
+    highlights: [
+      {
+        title: 'Every span’s details in the waterfall',
+        text: 'Click a span in a trace’s waterfall to open its service, duration and self time, every attribute, and its events beneath it. Show this span’s logs filters Logs to it, and Traces and Analyze stay current as spans and logs arrive.',
+        section: 'traces',
+      },
+      {
+        title: 'Know when your agent cannot see your logs',
+        text: 'When Claude Code, Codex, Cursor, or another agent starts Logline in a folder no window has open, the window says so, naming the agent and the folder. An editor that does not fill in the agent’s folder now reaches the only window running Logline.',
+        section: 'share',
+      },
+      {
+        title: 'Capture that says why it cannot',
+        text: 'A terminal without shell integration, such as Command Prompt or a restricted PowerShell, is counted and explained, with Run Command to capture without it. Running a program or tests, such as python app.py or npm test, now offers capture too.',
+        section: 'capture',
+      },
+    ],
+  },
+  {
     version: '1.21.0',
     date: '2026-11-15',
     highlights: [
@@ -733,7 +754,7 @@ export const GUIDE_CARDS: GuideCard[] = [
     section: 'traces',
     title: 'Follow a request',
     where: ['Traces tab'],
-    text: 'Recent requests, then every span across services as a waterfall in the inspector beside the list, with the logs that share its trace id. Where the time went ranks the slowest work.',
+    text: 'Recent requests, then every span across services as a waterfall in the inspector beside the list, with the logs that share its trace id. Click a span for its attributes, events, and logs. Where the time went ranks the slowest work.',
     target: 'traces',
     docs: 'opentelemetry-and-traces',
   },
