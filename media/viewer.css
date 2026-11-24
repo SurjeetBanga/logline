@@ -592,11 +592,17 @@ body > header {
   margin-right: 14px;
 }
 /* In a short or narrow panel the connection's controls wrap onto many lines. They scroll within
-   themselves, rather than pushing the table out of the panel and scrolling the page. */
+   themselves, up to half the view, rather than pushing the table out of the panel and scrolling the page. */
 .workspace-main > .connection-bar {
   flex-shrink: 1;
   min-height: 0;
+  max-height: 50%;
   overflow-y: auto;
+}
+/* The list takes the height left over. Sized from its rows instead, a long list would be thousands of
+   pixels tall, and shrinking it to fit would squeeze the connection's controls above it to nothing. */
+.workspace-main > .content-split {
+  flex-basis: 0;
 }
 /* A short panel keeps its height for the rows; the tip about using them waits for a taller one. */
 @media (max-height: 360px) {

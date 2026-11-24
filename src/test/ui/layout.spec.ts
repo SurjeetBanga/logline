@@ -120,6 +120,21 @@ test('what a Datadog search found is read in full', async ({ openPanel }) => {
   }));
   expect(needs, `the result needs ${needs}px and shows ${shown}px`).toBeLessThanOrEqual(shown);
   await panel.fits('Datadog connection selected');
+
+  // A full page of fetched rows makes the table far taller than the panel. The table gives up that
+  // height, not the connection's controls: they keep at least the height of the Run button.
+  await panel.post({
+    ...snapshot,
+    servers: [{ id: 'remote:dd', label: 'Datadog prod', status: 'stopped', activeSessions: 0, configured: true }],
+    connections: [datadog],
+    newest: 1000,
+    matched: 1000,
+    events: Array.from({ length: 1000 }, (_, index) => ({ ...snapshot.events[0], id: 1000 - index })),
+  });
+  const bar = await panel.page.locator('#connectionBar').boundingBox();
+  const run = await panel.page.locator('#connectionRun').boundingBox();
+  expect(bar && run && bar.height >= run.height, `the bar is ${bar?.height}px tall`).toBe(true);
+  await panel.fits('Datadog connection with many rows');
 });
 
 test('a log event open in the inspector fits', async ({ openPanel }) => {
