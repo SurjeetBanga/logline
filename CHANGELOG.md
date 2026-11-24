@@ -2,6 +2,12 @@
 
 All notable changes to Logline are documented in this file.
 
+## Unreleased
+
+### Fixes
+
+- A connection's controls (**Range**, **Run**, **Tail**, and the rest) keep their height above a long list of fetched logs, instead of being squeezed into a thin strip.
+
 ## 1.22.0 — 2026-11-23
 
 ### Changes
