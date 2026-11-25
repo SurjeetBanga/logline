@@ -2,6 +2,16 @@
 
 All notable changes to Logline are documented in this file.
 
+## Unreleased
+
+### Changes
+
+- **Search the Service list**: a connection's **Service** list is now a box you type in to find a service among the suggestions, instead of scrolling a long list. Press Enter to choose what you typed, clear it and press Enter for any service, or press Escape to keep the one chosen.
+
+### Fixes
+
+- With **Datadog syntax** on, a `service:` filter left in the search box naming another service no longer hides every log a run fetches: **Run**, **Tail**, and choosing a service remove it. When a filter hides every log fetched, the table says how many were fetched and that the filter hides them, rather than *No matching rows*.
+
 ## 1.22.2 — 2026-11-24
 
 ### Fixes

@@ -895,6 +895,7 @@
       connectionSyntax: element("connectionSyntax"),
       connectionNative: element("connectionNative"),
       connectionService: element("connectionService"),
+      connectionServices: element("connectionServices"),
       connectionServiceLabel: element("connectionServiceLabel"),
       compare: element("compare"),
       compareView: element("compareView"),
@@ -4319,6 +4320,7 @@ Span ${call.spanId}`
   var SERVICES_TTL_MS = 5 * 6e4;
   var SERVICES_RETRY_MS = 3e4;
   var SERVICE_TERM = /^@?service:/i;
+  var PLAIN_SERVICE = /^[^\s()*?]+$/;
   function serviceOf(text2) {
     const term = queryTokens(text2).find((token) => SERVICE_TERM.test(token));
     if (!term) return "";
@@ -4342,6 +4344,7 @@ Span ${call.spanId}`
     let services;
     let servicesAsked = "";
     let listed = [];
+    let choosing = false;
     let statement = "";
     const numbers = new Intl.NumberFormat();
     const selected = () => connections.find((connection) => connection.sourceId === state.selectedServer);
@@ -4445,33 +4448,51 @@ ${answer.range}`;
       if (key !== servicesAsked) return;
       servicesAsked = "";
       services = { key, until: Date.now() + (answer.error ? SERVICES_RETRY_MS : SERVICES_TTL_MS) };
-      const select = elements.connectionService;
-      const any = document.createElement("option");
-      any.value = "";
-      any.textContent = "Any service";
       const options = answer.services.map(({ name, count }) => {
         const option = document.createElement("option");
         option.value = name;
-        option.textContent = count === void 0 ? name : `${name} \xB7 ${numbers.format(count)}`;
+        if (count !== void 0) option.textContent = `${name} \xB7 ${numbers.format(count)} logs`;
         return option;
       });
-      select.replaceChildren(any, ...options);
+      elements.connectionServices.replaceChildren(...options);
       listed = answer.services.map((service) => service.name);
-      select.title = answer.error ? `Could not list services: ${answer.error}` : answer.services.some((service) => service.count === void 0) ? "Search or tail one service's logs" : "Search or tail one service's logs; services are listed by how many logs they had in the range";
+      const how = "type to find one, or clear it and press Enter for any service";
+      elements.connectionService.title = answer.error ? `Could not list services: ${answer.error}` : answer.services.some((service) => service.count === void 0) ? `Search or tail one service's logs; ${how}` : `Search or tail one service's logs, listed by how many logs they had in the range; ${how}`;
       const connection = selected();
       if (connection) showService(connection);
     }
+    const currentService = (connection) => serviceOf(native(connection) ? state.nativeOf(connection.type).query : query());
     function showService(connection) {
-      const service = serviceOf(native(connection) ? state.nativeOf(connection.type).query : query());
-      const select = elements.connectionService;
-      if (service && !listed.includes(service)) {
-        const option = document.createElement("option");
-        option.value = service;
-        option.textContent = service;
-        select.append(option);
-        listed.push(service);
+      if (choosing) return;
+      const input = elements.connectionService;
+      const service = currentService(connection);
+      if (input.value !== service) input.value = service;
+    }
+    function resolveService(value) {
+      const typed = value.trim();
+      const lower = typed.toLowerCase();
+      return listed.find((name) => name.toLowerCase() === lower) ?? typed;
+    }
+    function alignFilter(connection) {
+      if (!native(connection)) return;
+      const sent = serviceOf(state.nativeOf(connection.type).query);
+      const shown2 = serviceOf(query());
+      if (PLAIN_SERVICE.test(sent) && PLAIN_SERVICE.test(shown2) && sent !== shown2) setQuery(withService(query(), ""));
+    }
+    function chooseService(service) {
+      const connection = selected();
+      if (!connection) return;
+      const input = elements.connectionService;
+      if (service !== currentService(connection)) {
+        if (native(connection)) {
+          state.setNative(connection.type, { query: withService(state.nativeOf(connection.type).query, service) });
+          saveState();
+          alignFilter(connection);
+          render();
+        } else setQuery(withService(query(), service));
       }
-      select.value = service;
+      input.value = currentService(connection);
+      input.placeholder = input.value || "Any service";
     }
     function requestPreview(connection = selected()) {
       if (!connection?.mapped) return;
@@ -4512,6 +4533,7 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
       const connection = selected();
       if (!connection) return false;
       if (connection.mapped && !applyPending()) return true;
+      alignFilter(connection);
       if (connection.mapped)
         api.postMessage({
           type: "connectionFetch",
@@ -4527,15 +4549,36 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
       saveState();
       render();
     });
-    scope.listen(elements.connectionService, "change", () => {
+    scope.listen(elements.connectionService, "focus", () => {
       const connection = selected();
       if (!connection) return;
-      const service = elements.connectionService.value;
-      if (native(connection)) {
-        state.setNative(connection.type, { query: withService(state.nativeOf(connection.type).query, service) });
-        saveState();
-        render();
-      } else setQuery(withService(query(), service));
+      choosing = true;
+      const input = elements.connectionService;
+      input.placeholder = currentService(connection) || "Any service";
+      input.value = "";
+    });
+    scope.listen(elements.connectionService, "blur", () => {
+      const connection = selected();
+      choosing = false;
+      elements.connectionService.placeholder = "Any service";
+      if (connection) showService(connection);
+    });
+    scope.listen(elements.connectionService, "change", () => {
+      const lower = elements.connectionService.value.trim().toLowerCase();
+      const name = lower && listed.find((listedName) => listedName.toLowerCase() === lower);
+      if (name) chooseService(name);
+    });
+    scope.listen(elements.connectionService, "keydown", (event) => {
+      const key = event.key;
+      if (key === "Enter") {
+        event.preventDefault();
+        chooseService(resolveService(elements.connectionService.value));
+      } else if (key === "Escape") {
+        event.preventDefault();
+        const connection = selected();
+        if (connection) elements.connectionService.value = currentService(connection);
+        elements.connectionService.blur();
+      }
     });
     scope.listen(elements.connectionSyntax, "click", () => {
       const connection = selected();
@@ -4560,13 +4603,14 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
     scope.listen(elements.connectionRun, "click", () => run());
     scope.listen(elements.connectionTail, "click", () => {
       const connection = selected();
-      if (connection && applyPending())
-        api.postMessage({
-          type: "connectionTail",
-          connectionId: connection.id,
-          ...search(connection),
-          enabled: !connection.tailing || retargets(connection)
-        });
+      if (!connection || !applyPending()) return;
+      alignFilter(connection);
+      api.postMessage({
+        type: "connectionTail",
+        connectionId: connection.id,
+        ...search(connection),
+        enabled: !connection.tailing || retargets(connection)
+      });
     });
     scope.listen(elements.connectionCompare, "click", () => {
       const connection = selected();
@@ -4604,7 +4648,12 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
       emptyText() {
         const connection = selected();
         if (!connection) return void 0;
-        if (connection.last) return "No matching rows. Change the filter or the range and press Run.";
+        const last = connection.last;
+        const filter = query().trim();
+        const hiddenByFilter = native(connection) && (!state.selectedSession || state.selectedSession === last?.sessionId);
+        if (last && last.kept > 0 && filter && !last.running && hiddenByFilter)
+          return `${numbers.format(last.kept)} ${noun2(connection, last.kept)} fetched, but none match the filter ${filter}. Clear or change the filter to see them.`;
+        if (last) return "No matching rows. Change the filter or the range and press Run.";
         return connection.mapped ? `Choose a range and press Run to fetch ${connection.sql ? "rows" : "logs"} from ${connection.label}.` : `Use ${connection.language === "mongo" ? "Run query" : "Run SQL"} to query ${connection.label}.`;
       }
     };

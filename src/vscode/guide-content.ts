@@ -570,7 +570,7 @@ export const GUIDE_CARDS: GuideCard[] = [
     section: 'connections',
     title: 'Choose a Datadog service',
     where: ['Connection controls', 'Service'],
-    text: 'Lists the services that logged in the range, by how many logs. Choosing one sets the service: term of the filter, so Run and Tail follow that service.',
+    text: 'Suggests the services that logged in the range, by how many logs; type to find one. Choosing one sets the service: term of the filter, so Run and Tail follow that service.',
     target: 'connectionService',
     fallback: 'sourceRail',
   },

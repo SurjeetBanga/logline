@@ -21,6 +21,7 @@ type Elements = Pick<
   | 'connectionSyntax'
   | 'connectionNative'
   | 'connectionService'
+  | 'connectionServices'
   | 'connectionServiceLabel'
 >;
 type Preview = Extract<HostMessage, { type: 'connectionPreview' }>;
@@ -31,6 +32,8 @@ const PREVIEW_DELAY_MS = 250;
 const SERVICES_TTL_MS = 5 * 60000;
 const SERVICES_RETRY_MS = 30000;
 const SERVICE_TERM = /^@?service:/i;
+// One service named outright, rather than a wildcard or a group such as (a OR b).
+const PLAIN_SERVICE = /^[^\s()*?]+$/;
 
 /** The `service:` value of a query, without quotes, or '' when it has none. */
 export function serviceOf(text: string): string {
@@ -80,6 +83,8 @@ export function createConnectionBar(
   let servicesAsked = '';
   /** The services the list shows. */
   let listed: string[] = [];
+  /** Whether the service box has focus, so a refresh leaves what is being typed alone. */
+  let choosing = false;
   /** The search in the store's own syntax that the filter became, from the last preview. */
   let statement = '';
   const numbers = new Intl.NumberFormat();
@@ -225,39 +230,70 @@ export function createConnectionBar(
     if (key !== servicesAsked) return;
     servicesAsked = '';
     services = { key, until: Date.now() + (answer.error ? SERVICES_RETRY_MS : SERVICES_TTL_MS) };
-    const select = elements.connectionService;
-    const any = document.createElement('option');
-    any.value = '';
-    any.textContent = 'Any service';
     const options = answer.services.map(({ name, count }) => {
       const option = document.createElement('option');
       option.value = name;
-      option.textContent = count === undefined ? name : `${name} · ${numbers.format(count)}`;
+      if (count !== undefined) option.textContent = `${name} · ${numbers.format(count)} logs`;
       return option;
     });
-    select.replaceChildren(any, ...options);
+    elements.connectionServices.replaceChildren(...options);
     listed = answer.services.map((service) => service.name);
-    select.title = answer.error
+    const how = 'type to find one, or clear it and press Enter for any service';
+    elements.connectionService.title = answer.error
       ? `Could not list services: ${answer.error}`
       : answer.services.some((service) => service.count === undefined)
-        ? "Search or tail one service's logs"
-        : "Search or tail one service's logs; services are listed by how many logs they had in the range";
+        ? `Search or tail one service's logs; ${how}`
+        : `Search or tail one service's logs, listed by how many logs they had in the range; ${how}`;
     const connection = selected();
     if (connection) showService(connection);
   }
 
-  /** Show the service the query names in the list; one the list lacks is added, so it still shows. */
+  /** The service the search names: the one in the store's query while that is sent, else the filter's. */
+  const currentService = (connection: ConnectionView) =>
+    serviceOf(native(connection) ? state.nativeOf(connection.type).query : query());
+
+  /** Show the service the query names, unless someone is typing in the box. */
   function showService(connection: ConnectionView): void {
-    const service = serviceOf(native(connection) ? state.nativeOf(connection.type).query : query());
-    const select = elements.connectionService;
-    if (service && !listed.includes(service)) {
-      const option = document.createElement('option');
-      option.value = service;
-      option.textContent = service;
-      select.append(option);
-      listed.push(service);
+    if (choosing) return;
+    const input = elements.connectionService;
+    const service = currentService(connection);
+    if (input.value !== service) input.value = service;
+  }
+
+  /** The service a typed value names: a listed one in any letter case, else the text as typed. */
+  function resolveService(value: string): string {
+    const typed = value.trim();
+    const lower = typed.toLowerCase();
+    return listed.find((name) => name.toLowerCase() === lower) ?? typed;
+  }
+
+  /**
+   * While the store's query is sent, the filter only narrows what is shown, so a
+   * `service:` left in it from before hides every row of another service. Drop it.
+   */
+  function alignFilter(connection: ConnectionView): void {
+    if (!native(connection)) return;
+    const sent = serviceOf(state.nativeOf(connection.type).query);
+    const shown = serviceOf(query());
+    // A wildcard or a group on either side may still match, so only two different plain names conflict.
+    if (PLAIN_SERVICE.test(sent) && PLAIN_SERVICE.test(shown) && sent !== shown) setQuery(withService(query(), ''));
+  }
+
+  function chooseService(service: string): void {
+    const connection = selected();
+    if (!connection) return;
+    // The box may keep focus, so `choosing` stays set until it is left, and later typing is not overwritten.
+    const input = elements.connectionService;
+    if (service !== currentService(connection)) {
+      if (native(connection)) {
+        state.setNative(connection.type, { query: withService(state.nativeOf(connection.type).query, service) });
+        saveState();
+        alignFilter(connection);
+        render();
+      } else setQuery(withService(query(), service));
     }
-    select.value = service;
+    input.value = currentService(connection);
+    input.placeholder = input.value || 'Any service';
   }
 
   function requestPreview(connection = selected()): void {
@@ -302,6 +338,7 @@ export function createConnectionBar(
     if (!connection) return false;
     // A filter typed without pressing Enter is part of what Run searches, rather than silently left out.
     if (connection.mapped && !applyPending()) return true;
+    alignFilter(connection);
     if (connection.mapped)
       api.postMessage({
         type: 'connectionFetch',
@@ -318,15 +355,41 @@ export function createConnectionBar(
     saveState();
     render();
   });
-  scope.listen(elements.connectionService, 'change', () => {
+  // The box empties on focus so the whole list shows and typing searches it; the service stays as its placeholder.
+  scope.listen(elements.connectionService, 'focus', () => {
     const connection = selected();
     if (!connection) return;
-    const service = elements.connectionService.value;
-    if (native(connection)) {
-      state.setNative(connection.type, { query: withService(state.nativeOf(connection.type).query, service) });
-      saveState();
-      render();
-    } else setQuery(withService(query(), service));
+    choosing = true;
+    const input = elements.connectionService;
+    input.placeholder = currentService(connection) || 'Any service';
+    input.value = '';
+  });
+  scope.listen(elements.connectionService, 'blur', () => {
+    const connection = selected();
+    choosing = false;
+    elements.connectionService.placeholder = 'Any service';
+    if (connection) showService(connection);
+  });
+  // Picking a suggestion, or typing a listed name in full, chooses that service; part of a name, as when
+  // Run is clicked while searching the list, is left alone. Enter chooses a name that is not listed.
+  scope.listen(elements.connectionService, 'change', () => {
+    const lower = elements.connectionService.value.trim().toLowerCase();
+    const name = lower && listed.find((listedName) => listedName.toLowerCase() === lower);
+    if (name) chooseService(name);
+  });
+  scope.listen(elements.connectionService, 'keydown', (event) => {
+    const key = (event as KeyboardEvent).key;
+    if (key === 'Enter') {
+      // Enter in an empty box chooses any service.
+      event.preventDefault();
+      chooseService(resolveService(elements.connectionService.value));
+    } else if (key === 'Escape') {
+      event.preventDefault();
+      // Put the service back first: leaving the box fires a change for whatever was typed.
+      const connection = selected();
+      if (connection) elements.connectionService.value = currentService(connection);
+      elements.connectionService.blur();
+    }
   });
   scope.listen(elements.connectionSyntax, 'click', () => {
     const connection = selected();
@@ -352,13 +415,14 @@ export function createConnectionBar(
   scope.listen(elements.connectionRun, 'click', () => run());
   scope.listen(elements.connectionTail, 'click', () => {
     const connection = selected();
-    if (connection && applyPending())
-      api.postMessage({
-        type: 'connectionTail',
-        connectionId: connection.id,
-        ...search(connection),
-        enabled: !connection.tailing || retargets(connection),
-      });
+    if (!connection || !applyPending()) return;
+    alignFilter(connection);
+    api.postMessage({
+      type: 'connectionTail',
+      connectionId: connection.id,
+      ...search(connection),
+      enabled: !connection.tailing || retargets(connection),
+    });
   });
   scope.listen(elements.connectionCompare, 'click', () => {
     const connection = selected();
@@ -397,7 +461,15 @@ export function createConnectionBar(
     emptyText(): string | undefined {
       const connection = selected();
       if (!connection) return undefined;
-      if (connection.last) return 'No matching rows. Change the filter or the range and press Run.';
+      const last = connection.last;
+      const filter = query().trim();
+      // While the store's query is sent the filter only narrows what is shown, so rows fetched by the run
+      // on show but none in the table are hidden by the filter: say so, rather than suggest there were none.
+      const hiddenByFilter =
+        native(connection) && (!state.selectedSession || state.selectedSession === last?.sessionId);
+      if (last && last.kept > 0 && filter && !last.running && hiddenByFilter)
+        return `${numbers.format(last.kept)} ${noun(connection, last.kept)} fetched, but none match the filter ${filter}. Clear or change the filter to see them.`;
+      if (last) return 'No matching rows. Change the filter or the range and press Run.';
       return connection.mapped
         ? `Choose a range and press Run to fetch ${connection.sql ? 'rows' : 'logs'} from ${connection.label}.`
         : `Use ${connection.language === 'mongo' ? 'Run query' : 'Run SQL'} to query ${connection.label}.`;

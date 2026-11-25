@@ -42,6 +42,8 @@ class Element {
   height = 30;
   width = 140;
   focusCalls: unknown[] = [];
+  blurCalls = 0;
+  placeholder = '';
   scrollIntoViewCalls: unknown[] = [];
   onFocus?: (options?: { preventScroll?: boolean }) => void;
   get firstChild() {
@@ -182,6 +184,9 @@ class Element {
   focus(options?: { preventScroll?: boolean }) {
     this.focusCalls.push(options);
     this.onFocus?.(options);
+  }
+  blur() {
+    this.blurCalls++;
   }
   scrollIntoView(options?: unknown) {
     this.scrollIntoViewCalls.push(options);
@@ -4406,6 +4411,7 @@ test('a selected connection shows its range, Run, Tail and Run SQL, with the SQL
   assert.equal(get('connectionTail').textContent, 'Tail this filter');
   snapshot({ connections: [{ ...connection, last: { ...last, kind: 'tail', running: false, kept: 3 } }] });
   assert.equal(get('connectionResult').textContent, 'Tail of all logs stopped · 3 rows');
+  // The filter was what Run searched, so the rows it kept match it: something else hides them.
   assert.equal(get('empty').textContent, 'No matching rows. Change the filter or the range and press Run.');
   // A search just run is selected with its source, so earlier runs' rows do not mix in.
   const run = {
@@ -4946,25 +4952,64 @@ test('a Datadog connection lists its services to choose one, and can send a quer
       { name: 'payments api', count: 4 },
     ],
   });
-  const options = get('connectionService').children;
+  const options = get('connectionServices').children;
   assert.deepEqual(
     options.map((option) => [option.value, option.textContent]),
     [
-      ['', 'Any service'],
-      ['checkout', 'checkout · 1,200'],
-      ['payments api', 'payments api · 4'],
+      ['checkout', 'checkout · 1,200 logs'],
+      ['payments api', 'payments api · 4 logs'],
     ],
   );
-  // Choosing a service puts it in the filter, in place of any other; Any service takes it out.
-  get('connectionService').value = 'payments api';
-  get('connectionService').listeners.get('change')!();
+  const service = get('connectionService');
+  const key = (name: string) => service.listeners.get('keydown')!({ key: name, preventDefault() {} });
+  // Focus empties the box so the whole list shows and typing searches it.
+  service.listeners.get('focus')!();
+  assert.equal(service.value, '');
+  assert.equal(service.placeholder, 'Any service');
+  // Choosing a service puts it in the filter, in place of any other; a name typed in any case finds it.
+  service.value = 'payments api';
+  service.listeners.get('change')!();
   assert.equal(get('search').value, 'level:error service:"payments api"');
-  get('connectionService').value = 'checkout';
-  get('connectionService').listeners.get('change')!();
+  service.listeners.get('blur')!();
+  assert.equal(service.value, 'payments api', 'the box shows the service chosen');
+  service.listeners.get('focus')!();
+  assert.equal(service.placeholder, 'payments api', 'the service chosen stays visible while searching');
+  service.value = 'CHECKOUT';
+  key('Enter');
   assert.equal(get('search').value, 'level:error service:checkout');
-  get('connectionService').value = '';
-  get('connectionService').listeners.get('change')!();
+  // Leaving the box without choosing keeps the service.
+  service.listeners.get('focus')!();
+  service.value = 'chec';
+  key('Escape');
+  // Leaving the box fires a change for what it holds before blur.
+  service.listeners.get('change')!();
+  service.listeners.get('blur')!();
+  assert.equal(service.value, 'checkout');
+  assert.equal(get('search').value, 'level:error service:checkout');
+  // Part of a name, left as Run is clicked, chooses nothing.
+  service.listeners.get('focus')!();
+  service.value = 'pay';
+  service.listeners.get('change')!();
+  service.listeners.get('blur')!();
+  assert.equal(get('search').value, 'level:error service:checkout');
+  // A service chosen with Enter keeps the box for more typing, which a refresh leaves alone.
+  service.listeners.get('focus')!();
+  service.value = 'payments api';
+  key('Enter');
+  assert.equal(get('search').value, 'level:error service:"payments api"');
+  service.value = 'che';
+  snapshot();
+  assert.equal(service.value, 'che', 'typing after a choice is not overwritten');
+  service.value = 'checkout';
+  key('Enter');
+  service.listeners.get('blur')!();
+  assert.equal(get('search').value, 'level:error service:checkout');
+  // Enter in an empty box chooses any service.
+  service.listeners.get('focus')!();
+  key('Enter');
+  service.listeners.get('blur')!();
   assert.equal(get('search').value, 'level:error');
+  assert.equal(service.value, '');
   // Datadog syntax starts from what the filter became, and Run and Tail send it as typed.
   [...timers.values()].at(-1)!();
   const preview = plain(messages.filter((message) => message.type === 'connectionPreview').at(-1));
@@ -4979,6 +5024,9 @@ test('a Datadog connection lists its services to choose one, and can send a quer
     datadog: { query: 'service:checkout @http.status_code:>=500', on: true },
   });
   assert.equal(get('connectionService').value, 'checkout', 'the list shows the service the Datadog query names');
+  // A service left in the filter would hide every row of the one the Datadog query asks for, so Run drops it.
+  get('search').value = 'service:billing';
+  get('search').listeners.get('keydown')!({ key: 'Enter', preventDefault() {} });
   get('connectionRun').listeners.get('click')!();
   assert.deepEqual(plain(messages.at(-1)), {
     type: 'connectionFetch',
@@ -5013,6 +5061,61 @@ test('a Datadog connection lists its services to choose one, and can send a quer
   get('connectionSyntax').listeners.get('click')!();
   assert.equal(get('connectionNative').hidden, true);
   assert.equal(get('connectionTail').textContent, 'Stop tail');
+});
+
+test('with Datadog syntax on, an empty table counts the logs a run fetched that the filter hides', () => {
+  const { get, receive, messages } = viewer({ server: 'conn:dd', query: 'level:error' });
+  const connection = {
+    id: 'dd',
+    sourceId: 'conn:dd',
+    type: 'datadog',
+    label: 'Datadog · prod',
+    mapped: true,
+    sql: false,
+    agents: false,
+    tailing: false,
+  };
+  const snapshot = (extra: Record<string, unknown> = {}) =>
+    receive({
+      type: 'snapshot',
+      generation: 1,
+      newest: 100,
+      status: 'Ready',
+      command: '',
+      running: false,
+      total: 0,
+      retained: 0,
+      discarded: 0,
+      bytes: 0,
+      maxBytes: 1,
+      truncated: 0,
+      events: [],
+      columns: [],
+      page: 0,
+      pages: 1,
+      matched: 0,
+      servers: [{ id: 'conn:dd', label: 'Datadog · prod', status: 'idle', activeSessions: 0 }],
+      sessions: [],
+      connections: [connection],
+      ...extra,
+    });
+  const last = { sessionId: 's', kind: 'fetch', running: false, fetched: 5, kept: 5, local: [], at: 0, query: '' };
+  snapshot({ connections: [{ ...connection, last }] });
+  // The filter was what Run searched, so the rows it kept match it: something else hides them.
+  assert.equal(get('empty').textContent, 'No matching rows. Change the filter or the range and press Run.');
+  get('connectionSyntax').listeners.get('click')!();
+  snapshot({ connections: [{ ...connection, last }] });
+  assert.equal(
+    get('empty').textContent,
+    '5 logs fetched, but none match the filter level:error. Clear or change the filter to see them.',
+  );
+  // A wildcard may match the service the Datadog query names, so Run keeps it.
+  get('connectionNative').value = 'service:checkout';
+  get('connectionNative').listeners.get('input')!();
+  get('search').value = 'service:check*';
+  get('search').listeners.get('keydown')!({ key: 'Enter', preventDefault() {} });
+  get('connectionRun').listeners.get('click')!();
+  assert.equal(JSON.parse(JSON.stringify(messages.at(-1))).query, 'level:error service:check*');
 });
 
 test('About Logline is a dialog in the panel with the version, links, and a copy of the details', () => {
