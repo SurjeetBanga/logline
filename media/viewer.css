@@ -1670,7 +1670,11 @@ select {
   display: none;
 }
 #connectionService {
-  max-width: 220px;
+  box-sizing: border-box;
+  width: 220px;
+  max-width: 100%;
+  height: 26px;
+  padding: 2px 6px;
 }
 #connectionRun:not(:disabled) {
   color: var(--vscode-button-foreground, #fff);

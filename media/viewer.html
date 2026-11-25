@@ -828,10 +828,16 @@
             >
             <label id="connectionServiceLabel" class="connection-range" hidden
               >Service
-              <select id="connectionService" title="Search or tail one service's logs">
-                <option value="">Any service</option>
-              </select></label
-            >
+              <input
+                id="connectionService"
+                type="search"
+                list="connectionServices"
+                placeholder="Any service"
+                autocomplete="off"
+                spellcheck="false"
+                maxlength="256"
+                title="Search or tail one service's logs" /><datalist id="connectionServices"></datalist
+            ></label>
             <button id="connectionRun" type="button">Run</button>
             <button id="connectionTail" type="button" aria-pressed="false">Tail</button>
             <button id="connectionSql" type="button" title="Run a read-only SELECT you type">Run SQL…</button>
