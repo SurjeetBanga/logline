@@ -10,7 +10,7 @@ All notable changes to Logline are documented in this file.
 
 ### Fixes
 
-- With **Datadog syntax** on, a `service:` filter left in the search box for another service no longer hides every log a run fetches: **Run**, **Tail**, and choosing a service remove it. When a filter hides every log fetched, the table says how many were fetched and that the filter hides them, rather than *No matching rows*.
+- With **Datadog syntax** on, a `service:` filter left in the search box naming another service no longer hides every log a run fetches: **Run**, **Tail**, and choosing a service remove it. When a filter hides every log fetched, the table says how many were fetched and that the filter hides them, rather than *No matching rows*.
 
 ## 1.22.2 — 2026-11-24
 

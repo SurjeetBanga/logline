@@ -4320,6 +4320,7 @@ Span ${call.spanId}`
   var SERVICES_TTL_MS = 5 * 6e4;
   var SERVICES_RETRY_MS = 3e4;
   var SERVICE_TERM = /^@?service:/i;
+  var PLAIN_SERVICE = /^[^\s()*?]+$/;
   function serviceOf(text2) {
     const term = queryTokens(text2).find((token) => SERVICE_TERM.test(token));
     if (!term) return "";
@@ -4450,7 +4451,7 @@ ${answer.range}`;
       const options = answer.services.map(({ name, count }) => {
         const option = document.createElement("option");
         option.value = name;
-        option.textContent = count === void 0 ? name : `${numbers.format(count)} logs`;
+        if (count !== void 0) option.textContent = `${name} \xB7 ${numbers.format(count)} logs`;
         return option;
       });
       elements.connectionServices.replaceChildren(...options);
@@ -4476,24 +4477,22 @@ ${answer.range}`;
       if (!native(connection)) return;
       const sent = serviceOf(state.nativeOf(connection.type).query);
       const shown2 = serviceOf(query());
-      if (sent && shown2 && sent !== shown2) setQuery(withService(query(), ""));
+      if (PLAIN_SERVICE.test(sent) && PLAIN_SERVICE.test(shown2) && sent !== shown2) setQuery(withService(query(), ""));
     }
     function chooseService(service) {
       const connection = selected();
       if (!connection) return;
-      choosing = false;
-      elements.connectionService.placeholder = "Any service";
-      if (service === currentService(connection)) {
-        showService(connection);
-        return;
+      const input = elements.connectionService;
+      if (service !== currentService(connection)) {
+        if (native(connection)) {
+          state.setNative(connection.type, { query: withService(state.nativeOf(connection.type).query, service) });
+          saveState();
+          alignFilter(connection);
+          render();
+        } else setQuery(withService(query(), service));
       }
-      if (native(connection)) {
-        state.setNative(connection.type, { query: withService(state.nativeOf(connection.type).query, service) });
-        saveState();
-        alignFilter(connection);
-        render();
-      } else setQuery(withService(query(), service));
-      showService(connection);
+      input.value = currentService(connection);
+      input.placeholder = input.value || "Any service";
     }
     function requestPreview(connection = selected()) {
       if (!connection?.mapped) return;
@@ -4565,8 +4564,9 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
       if (connection) showService(connection);
     });
     scope.listen(elements.connectionService, "change", () => {
-      const value = elements.connectionService.value;
-      if (value.trim()) chooseService(resolveService(value));
+      const lower = elements.connectionService.value.trim().toLowerCase();
+      const name = lower && listed.find((listedName) => listedName.toLowerCase() === lower);
+      if (name) chooseService(name);
     });
     scope.listen(elements.connectionService, "keydown", (event) => {
       const key = event.key;
@@ -4575,6 +4575,8 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
         chooseService(resolveService(elements.connectionService.value));
       } else if (key === "Escape") {
         event.preventDefault();
+        const connection = selected();
+        if (connection) elements.connectionService.value = currentService(connection);
         elements.connectionService.blur();
       }
     });
@@ -4648,7 +4650,8 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
         if (!connection) return void 0;
         const last = connection.last;
         const filter = query().trim();
-        if (last && last.kept > 0 && filter && !last.running)
+        const hiddenByFilter = native(connection) && (!state.selectedSession || state.selectedSession === last?.sessionId);
+        if (last && last.kept > 0 && filter && !last.running && hiddenByFilter)
           return `${numbers.format(last.kept)} ${noun2(connection, last.kept)} fetched, but none match the filter ${filter}. Clear or change the filter to see them.`;
         if (last) return "No matching rows. Change the filter or the range and press Run.";
         return connection.mapped ? `Choose a range and press Run to fetch ${connection.sql ? "rows" : "logs"} from ${connection.label}.` : `Use ${connection.language === "mongo" ? "Run query" : "Run SQL"} to query ${connection.label}.`;

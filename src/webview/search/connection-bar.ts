@@ -32,6 +32,8 @@ const PREVIEW_DELAY_MS = 250;
 const SERVICES_TTL_MS = 5 * 60000;
 const SERVICES_RETRY_MS = 30000;
 const SERVICE_TERM = /^@?service:/i;
+// One service named outright, rather than a wildcard or a group such as (a OR b).
+const PLAIN_SERVICE = /^[^\s()*?]+$/;
 
 /** The `service:` value of a query, without quotes, or '' when it has none. */
 export function serviceOf(text: string): string {
@@ -231,7 +233,7 @@ export function createConnectionBar(
     const options = answer.services.map(({ name, count }) => {
       const option = document.createElement('option');
       option.value = name;
-      option.textContent = count === undefined ? name : `${numbers.format(count)} logs`;
+      if (count !== undefined) option.textContent = `${name} · ${numbers.format(count)} logs`;
       return option;
     });
     elements.connectionServices.replaceChildren(...options);
@@ -273,25 +275,25 @@ export function createConnectionBar(
     if (!native(connection)) return;
     const sent = serviceOf(state.nativeOf(connection.type).query);
     const shown = serviceOf(query());
-    if (sent && shown && sent !== shown) setQuery(withService(query(), ''));
+    // A wildcard or a group on either side may still match, so only two different plain names conflict.
+    if (PLAIN_SERVICE.test(sent) && PLAIN_SERVICE.test(shown) && sent !== shown) setQuery(withService(query(), ''));
   }
 
   function chooseService(service: string): void {
     const connection = selected();
     if (!connection) return;
-    choosing = false;
-    elements.connectionService.placeholder = 'Any service';
-    if (service === currentService(connection)) {
-      showService(connection);
-      return;
+    // The box may keep focus, so `choosing` stays set until it is left, and later typing is not overwritten.
+    const input = elements.connectionService;
+    if (service !== currentService(connection)) {
+      if (native(connection)) {
+        state.setNative(connection.type, { query: withService(state.nativeOf(connection.type).query, service) });
+        saveState();
+        alignFilter(connection);
+        render();
+      } else setQuery(withService(query(), service));
     }
-    if (native(connection)) {
-      state.setNative(connection.type, { query: withService(state.nativeOf(connection.type).query, service) });
-      saveState();
-      alignFilter(connection);
-      render();
-    } else setQuery(withService(query(), service));
-    showService(connection);
+    input.value = currentService(connection);
+    input.placeholder = input.value || 'Any service';
   }
 
   function requestPreview(connection = selected()): void {
@@ -368,10 +370,12 @@ export function createConnectionBar(
     elements.connectionService.placeholder = 'Any service';
     if (connection) showService(connection);
   });
-  // Picking a suggestion, or typing a name and leaving the box, chooses that service.
+  // Picking a suggestion, or typing a listed name in full, chooses that service; part of a name, as when
+  // Run is clicked while searching the list, is left alone. Enter chooses a name that is not listed.
   scope.listen(elements.connectionService, 'change', () => {
-    const value = elements.connectionService.value;
-    if (value.trim()) chooseService(resolveService(value));
+    const lower = elements.connectionService.value.trim().toLowerCase();
+    const name = lower && listed.find((listedName) => listedName.toLowerCase() === lower);
+    if (name) chooseService(name);
   });
   scope.listen(elements.connectionService, 'keydown', (event) => {
     const key = (event as KeyboardEvent).key;
@@ -381,6 +385,9 @@ export function createConnectionBar(
       chooseService(resolveService(elements.connectionService.value));
     } else if (key === 'Escape') {
       event.preventDefault();
+      // Put the service back first: leaving the box fires a change for whatever was typed.
+      const connection = selected();
+      if (connection) elements.connectionService.value = currentService(connection);
       elements.connectionService.blur();
     }
   });
@@ -456,8 +463,11 @@ export function createConnectionBar(
       if (!connection) return undefined;
       const last = connection.last;
       const filter = query().trim();
-      // Rows were fetched, but the filter hides them all: say so, rather than suggest there were none.
-      if (last && last.kept > 0 && filter && !last.running)
+      // While the store's query is sent the filter only narrows what is shown, so rows fetched by the run
+      // on show but none in the table are hidden by the filter: say so, rather than suggest there were none.
+      const hiddenByFilter =
+        native(connection) && (!state.selectedSession || state.selectedSession === last?.sessionId);
+      if (last && last.kept > 0 && filter && !last.running && hiddenByFilter)
         return `${numbers.format(last.kept)} ${noun(connection, last.kept)} fetched, but none match the filter ${filter}. Clear or change the filter to see them.`;
       if (last) return 'No matching rows. Change the filter or the range and press Run.';
       return connection.mapped
