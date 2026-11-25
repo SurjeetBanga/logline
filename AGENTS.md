@@ -8,7 +8,7 @@ A VS Code extension that captures logs from terminals, debug sessions, tasks, fi
 - `npm run format`: format with Prettier.
 - `npm test`: unit tests only. `npm run coverage` also enforces the coverage minimums in `scripts/test.mjs`; add tests rather than lowering them.
 - `npm run perf:compare -- --base <dir>`: compares performance with another build; CI fails a pull request whose hot paths are more than 15% slower than its base or than the baseline in `.github/performance-baseline`, or whose payloads or retained memory grow by more than 5%. Add a case to `scripts/benchmark.mjs` for a new hot path.
-- `npm run test:layout`: the Logs panel in headless Chromium with `@playwright/test` (`src/test/ui`, `playwright.config.ts`): its layout at three panel sizes, failing when the page itself scrolls, and its keyboard, pointer, and focus behaviour. Run it after changing `media/viewer.css`, the panel's markup, or how `src/webview` handles input. A failure keeps a trace in `test-results/`. Needs `npx playwright install chromium` once.
+- `npm run test:layout`: the Logs panel in headless Chromium with `@playwright/test` (`src/test/ui`, `playwright.config.ts`): its layout at three panel sizes, failing when the page itself scrolls, and its keyboard, pointer, and focus behaviour. Run it after changing `media/viewer.css`, the panel's markup, or how `src/webview` handles input. A failure keeps a trace in `test-results/`. Needs `npx playwright install chromium` once. Where that download is blocked but a Chromium is installed, run `npx playwright test -c <config>` with a config outside the repository that spreads `playwright.config.ts` and sets `use.launchOptions.executablePath` to that Chromium.
 - `npm run test:browser`: browser capture against a real headless Chromium; run it after changing `src/capture/browser-capture.ts` or `src/core/browser-events.ts`. Uses the same Chromium as `test:layout`, or an installed browser.
 - `npm run smoke`: the extension in a real VS Code; needs a desktop VS Code, or `VSCODE_VERSION=stable` to download one.
 
@@ -19,6 +19,22 @@ A VS Code extension that captures logs from terminals, debug sessions, tasks, fi
 - After changing `src/webview/`, run `npm run compile` and commit the regenerated `media/viewer.js`.
 - Describe user-facing changes under `## Unreleased` in `CHANGELOG.md`, and update `docs/usage.md` when behavior or settings change.
 - Describe features on their own terms in docs, changelogs, commits, and pull requests; do not say they were borrowed from another product.
+
+## Releases
+
+Follow "Releases" in [CONTRIBUTING.md](CONTRIBUTING.md). In a cloud session:
+
+- Open the release pull request from `release/<version>`; pushing that branch works.
+- Merge it once CI is green, then check that `origin/main` is its merge commit.
+- Pushing a tag is refused (HTTP 403), so do not retry it. Give the maintainer the merge commit's short hash and these commands for a Codespace terminal:
+
+  ```sh
+  git fetch origin
+  git tag v<version> <merge-commit>
+  git push origin v<version>
+  ```
+
+- Once they have pushed the tag and approved the `release` environment, check that the tag points at the merge commit, the Release run succeeded, and the GitHub release has `logline-<version>.vsix` attached.
 
 ## Commits and pull requests
 

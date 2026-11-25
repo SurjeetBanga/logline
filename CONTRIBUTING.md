@@ -76,11 +76,13 @@ By contributing, you agree that your contributions are licensed under the [MIT L
 
 ## Releases
 
-To release, open a pull request that sets the new version in `package.json` (`npm version <version> --no-git-tag-version`), renames `## Unreleased` in `CHANGELOG.md` to `## <version> — <date>`, and updates the guide's cards and the release highlights in `src/vscode/guide-content.ts` (keep their section IDs aligned with the guide). When the panel looks different, run `npm run screenshots` to refresh the README's images in `media/readme/`. Merge it last, after every other pull request for the release, so the commit the tag points to is the release's own merge. After it merges, tag the merge commit and push the tag:
+To release, open a pull request from a branch named `release/<version>` (the Release run is titled after its merge commit, "Merge pull request #N from SurjeetBanga/release/<version>") that sets the new version in `package.json` (`npm version <version> --no-git-tag-version`), renames `## Unreleased` in `CHANGELOG.md` to `## <version> — <date>`, and updates the guide's cards and the release highlights in `src/vscode/guide-content.ts` (keep their section IDs aligned with the guide); a patch release only sets the version and dates the changelog, without guide highlights. When the panel looks different, run `npm run screenshots` to refresh the README's images in `media/readme/`. Merge it last, after every other pull request for the release, so the commit the tag points to is the release's own merge. After it merges, tag the merge commit and push the tag:
 
 ```sh
 git tag v<version> origin/main
 git push origin v<version>
 ```
+
+The tag needs the `v`: the workflow runs only for `v*` tags. Do not create the GitHub release yourself, since the workflow creates it and fails if one exists. To tag from the web instead, use **Draft a new release** with tag `v<version>` and target `main`, publish it, and delete that release (keeping the tag) before approving the run.
 
 The Release workflow checks the tag against `package.json` and `CHANGELOG.md`, finds the CI run that tested the commit when it reached main (and stops when that run failed or its VSIX expired after 14 days: rerun CI on main for the commit, then push the tag again), audits the dependencies again, checks the VSIX's build provenance, and waits for approval in the `release` environment. It then publishes the VSIX that CI built and tested to the VS Code Marketplace and Open VSX, and creates the GitHub release with that version's changelog and the VSIX attached. Nothing is published from a laptop.
