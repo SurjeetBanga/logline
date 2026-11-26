@@ -60,7 +60,7 @@ class SourceBreakpoint {
 const stack = (line: number) =>
   `TypeError: boom\n    at charge (/srv/app/src/lib/payments.ts:${line}:20)\n    at x (/srv/app/node_modules/a/b.js:1:1)`;
 
-function harness(mode = 'inline') {
+function harness(mode = 'inline', source = '') {
   const commands = new Map<string, (...args: unknown[]) => unknown>();
   const collection = new Map<string, Diagnostic[]>();
   const decorations: { range: Range; renderOptions: { after: { contentText: string } } }[][] = [];
@@ -114,6 +114,7 @@ function harness(mode = 'inline') {
     workspace: {
       workspaceFolders: [{ uri: Uri.file('/w') }],
       fs: {
+        readFile: async () => new TextEncoder().encode(source),
         stat: async () => {
           throw new Error('not at this path');
         },
@@ -155,7 +156,27 @@ function harness(mode = 'inline') {
       ),
       timestampMs: 1000,
     });
+  const addCi = (id: number, fields: Record<string, unknown> = {}) =>
+    store.add({
+      ...parseLogLine(
+        JSON.stringify({
+          level: 'error',
+          message: '✕ cart › adds items',
+          kind: 'test-failure',
+          test: 'cart › adds items',
+          file: 'out/lib/payments.js',
+          run: 7,
+          job: 'build',
+          ...fields,
+        }),
+        'stdout',
+        id,
+        new Date(0),
+      ),
+      timestampMs: 1000,
+    });
   return {
+    addCi,
     errors,
     commands,
     collection,
@@ -241,4 +262,51 @@ test('off marks nothing', async () => {
   await h.errors.refresh(2000);
   assert.equal(h.collection.size, 0);
   h.errors.dispose();
+});
+
+test('a test that failed in CI marks its source file at the test, and Investigate carries where it failed', async () => {
+  const h = harness(
+    'inline',
+    ["describe('cart', () => {", "  it('removes items', () => {})", "  it('adds items', () => {})"].join('\n'),
+  );
+  h.addCi(1);
+  await h.errors.refresh(6000);
+  const [diagnostic] = h.collection.get('file:///w/src/lib/payments.ts')!;
+  assert.equal(diagnostic.range.start.line, 2);
+  assert.equal(diagnostic.message, '✕ cart › adds items · failed in CI #7 · build · 5s ago');
+  const actions = h.errors.provideCodeActions(
+    h.document as never,
+    diagnostic.range as never,
+    { diagnostics: [diagnostic] } as never,
+  );
+  const argument = actions[1].command!.arguments![0] as { ci?: string; location?: string };
+  assert.equal(argument.ci, 'CI #7 · build');
+  assert.equal(argument.location, '/w/src/lib/payments.ts:3');
+  h.errors.dispose();
+});
+
+test('a test is found by its own name in any quote, and line 0 when it is not found or unreadable', async () => {
+  const readers = { text: '' as string | Error };
+  const mock = {
+    Uri,
+    workspace: {
+      fs: {
+        readFile: async () => {
+          if (readers.text instanceof Error) throw readers.text;
+          return new TextEncoder().encode(readers.text);
+        },
+      },
+    },
+  };
+  delete require.cache[require.resolve('./runtime-errors')];
+  const { testLine } = withVscode(mock, () => require('./runtime-errors') as typeof import('./runtime-errors'));
+  const uri = Uri.file('/w/a.test.ts') as never;
+  readers.text = 'x\n  test(\'a\', () => {})\r\n  test("b c", () => {})\n  test(`d`, () => {})';
+  assert.equal(await testLine(uri, 'a'), 1);
+  assert.equal(await testLine(uri, 'suite › b c'), 2);
+  assert.equal(await testLine(uri, 'suite › inner › d'), 3);
+  assert.equal(await testLine(uri, 'missing'), 0);
+  assert.equal(await testLine(uri, ' › '), 0);
+  readers.text = new Error('gone');
+  assert.equal(await testLine(uri, 'a'), 0);
 });

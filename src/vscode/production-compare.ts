@@ -1,6 +1,12 @@
 import type { SessionRegistry } from '../capture/session-registry';
 import type { LogStore } from '../core/log-store';
-import { compareSignatures, differingFields, summarizeComparison } from '../core/signature-compare';
+import {
+  compareSignatures,
+  compareTestFailures,
+  differingFields,
+  hasTestFailures,
+  summarizeComparison,
+} from '../core/signature-compare';
 import type { LogEvent } from '../core/types';
 import type { CompareRequest, CompareSample, CompareView } from '../protocol/messages';
 
@@ -83,12 +89,11 @@ export class ProductionCompare {
     const runs = this.localRuns(request.localServerId, allowed);
     const local = runs.map((run) => this.events(request.localServerId, run.id));
     const changeScope = this.store.changeScope;
-    const rows = compareSignatures(
-      baseline,
-      local,
-      changeScope ? (event) => changeScope.matches(event) : undefined,
-      ROWS,
-    );
+    // A CI run's failed tests are matched by test, as a local run prints them its own way.
+    const tests = hasTestFailures(baseline);
+    const rows = tests
+      ? compareTestFailures(baseline, local, ROWS)
+      : compareSignatures(baseline, local, changeScope ? (event) => changeScope.matches(event) : undefined, ROWS);
     const record = request.baselineSessionId ? this.registry.records.get(request.baselineSessionId) : undefined;
     const label = this.store.serverLabel(request.baselineServerId) ?? request.baselineServerId;
     return {
@@ -108,7 +113,7 @@ export class ProductionCompare {
         const mine = row.localSample !== undefined ? this.store.find(row.localSample) : undefined;
         return { ...row, samples: { baseline: sample(prod, mine), local: sample(mine, prod) } };
       }),
-      summary: summarizeComparison(rows),
+      summary: summarizeComparison(rows, tests ? 'ci' : 'production'),
     };
   }
 

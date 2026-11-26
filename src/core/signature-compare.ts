@@ -3,6 +3,7 @@
 // whether a fix makes it go away. Errors are matched by their message with
 // ids, numbers, and paths masked, because file paths and line numbers differ
 // between machines and move when the code is fixed.
+import { testFailures } from './ci-log';
 import { groupErrors, normalizeMessage, patternText, type ErrorGroup } from './log-analysis';
 import type { LogEvent } from './types';
 
@@ -122,15 +123,16 @@ function shortLocation(location: string): string {
 }
 
 /** What the comparison means in a sentence, for a notification after a local run. */
-export function summarizeComparison(rows: SignatureRow[]): string {
+export function summarizeComparison(rows: SignatureRow[], baseline: 'production' | 'ci' = 'production'): string {
+  const noun = baseline === 'ci' ? 'CI test failure' : 'production error';
   const count = (status: SignatureStatus) => rows.filter((row) => row.status === status).length;
   const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
   const parts: string[] = [];
   const fixed = count('fixed');
   const reproduced = count('reproduced');
   const fresh = rows.filter((row) => row.status === 'new');
-  if (fixed) parts.push(`${plural(fixed, 'production error')} fixed locally`);
-  if (reproduced) parts.push(`${plural(reproduced, 'production error')} reproduced`);
+  if (fixed) parts.push(`${plural(fixed, noun)} fixed locally`);
+  if (reproduced) parts.push(`${plural(reproduced, noun)} reproduced`);
   if (fresh.length) {
     const changed = fresh.filter((row) => row.changed).length;
     const errors = plural(fresh.length, 'new local error');
@@ -145,8 +147,12 @@ export function summarizeComparison(rows: SignatureRow[]): string {
   }
   if (parts.length) return parts.join(' · ');
   return rows.some((row) => row.baseline > 0)
-    ? 'None of the production errors occurred in the newest run.'
-    : 'No errors in production or the newest run.';
+    ? baseline === 'ci'
+      ? 'None of the tests that failed in CI failed in the newest run.'
+      : 'None of the production errors occurred in the newest run.'
+    : baseline === 'ci'
+      ? 'No failed tests in CI or the newest run.'
+      : 'No errors in production or the newest run.';
 }
 
 /** Fields whose values differ between two events, for highlighting them side by side. */
@@ -157,4 +163,100 @@ export function differingFields(a: LogEvent, b: LogEvent): string[] {
   return [...names].filter(
     (name) => !(Object.hasOwn(left, name) && Object.hasOwn(right, name) && String(left[name]) === String(right[name])),
   );
+}
+
+/** The tests a run's output says failed, each with the event that said so. */
+function failedTests(events: LogEvent[]): Map<string, { count: number; id: number; location?: string }> {
+  const failed = new Map<string, { count: number; id: number; location?: string }>();
+  // Events that are failures already, such as a CI job's, name their test.
+  const lines: string[] = [];
+  const ids: number[] = [];
+  for (const event of events) {
+    const test = event.fields?.kind === 'test-failure' ? event.fields.test : undefined;
+    if (typeof test === 'string') {
+      const file = event.fields?.file;
+      const line = event.fields?.line;
+      const entry = failed.get(test);
+      if (entry) entry.count++;
+      else
+        failed.set(test, {
+          count: 1,
+          id: event.id,
+          ...(typeof file === 'string' ? { location: `${file}${typeof line === 'number' ? `:${line}` : ''}` } : {}),
+        });
+      continue;
+    }
+    // A CI job's own lines are already its failures; anything else is a runner's output, read the same way.
+    if (event.fields?.kind === 'ci') continue;
+    for (const line of String(event.message ?? event.raw ?? '').split('\n')) {
+      lines.push(line);
+      ids.push(event.id);
+    }
+  }
+  for (const failure of testFailures(lines)) {
+    const entry = failed.get(failure.test);
+    if (entry) entry.count++;
+    else
+      failed.set(failure.test, {
+        count: 1,
+        id: ids[failure.index],
+        ...(failure.file ? { location: `${failure.file}${failure.line ? `:${failure.line}` : ''}` } : {}),
+      });
+  }
+  return failed;
+}
+
+/** Whether a baseline is a CI run's failed tests, which are compared by test rather than by error message. */
+export function hasTestFailures(events: readonly LogEvent[]): boolean {
+  return events.some((event) => event.fields?.kind === 'test-failure');
+}
+
+/**
+ * The tests that failed in CI lined up with local runs, oldest first, by the
+ * test's name: a test is reproduced when the newest local run fails it, fixed
+ * when an earlier one did and the newest does not, and not seen when no local
+ * run fails it. Tests that fail only locally are listed too.
+ */
+export function compareTestFailures(baseline: LogEvent[], runs: LogEvent[][], limit = 100): SignatureRow[] {
+  const ci = failedTests(baseline);
+  const local = runs.map(failedTests);
+  const tests = new Set([...ci.keys(), ...local.flatMap((run) => [...run.keys()])]);
+  const rows: SignatureRow[] = [];
+  for (const test of tests) {
+    const prod = ci.get(test);
+    const counts = local.map((run) => run.get(test)?.count ?? 0);
+    const latest = counts.at(-1) ?? 0;
+    const earlier = counts.slice(0, -1).some((count) => count > 0);
+    const status: SignatureStatus = prod
+      ? latest
+        ? 'reproduced'
+        : earlier
+          ? 'fixed'
+          : 'notSeen'
+      : latest && !earlier && runs.length > 1
+        ? 'new'
+        : 'localOnly';
+    const mine = [...local]
+      .reverse()
+      .find((run) => run.has(test))
+      ?.get(test);
+    const location = mine?.location ?? prod?.location;
+    rows.push({
+      signature: test,
+      message: `✕ ${test}`,
+      pattern: `✕ ${test}`,
+      ...(location ? { location: shortLocation(location) } : {}),
+      baseline: prod?.count ?? 0,
+      runs: counts,
+      status,
+      ...(prod ? { baselineSample: prod.id } : {}),
+      ...(mine ? { localSample: mine.id } : {}),
+      query: `kind:test-failure test:${JSON.stringify(test)}`,
+    });
+  }
+  return rows
+    .sort(
+      (a, b) => ORDER[a.status] - ORDER[b.status] || b.baseline - a.baseline || a.signature.localeCompare(b.signature),
+    )
+    .slice(0, limit);
 }

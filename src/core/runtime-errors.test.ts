@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { parseLogLine } from './log-event';
-import { appFrames, RuntimeErrorTracker, runtimeErrorText } from './runtime-errors';
+import { appFrames, RuntimeErrorTracker, runtimeErrorText, testFailureFrames } from './runtime-errors';
 import type { LogEvent } from './types';
 
 const json = (id: number, value: object): LogEvent => ({
@@ -78,4 +78,71 @@ test('the marked line says the error, how often, and how long ago', () => {
     "TypeError: Cannot read properties of undefined (reading 'card') · 2× · 5s ago",
   );
   assert.equal(runtimeErrorText(tracker.list()[0], 7000, 12), 'TypeError: … · 2× · 5s ago');
+});
+
+const ciFailure = (id: number, fields: Record<string, unknown> = {}) =>
+  json(id, {
+    level: 'error',
+    msg: '✕ cart › adds items',
+    kind: 'test-failure',
+    test: 'cart › adds items',
+    file: 'src/cart.test.ts',
+    line: 12,
+    run: 1,
+    job: 'build',
+    ...fields,
+  });
+
+test('a failed CI test is placed by its file, with a compiled file mapped to its source at line 0', () => {
+  const found = testFailureFrames(ciFailure(1));
+  assert.deepEqual(found, {
+    message: '✕ cart › adds items',
+    frames: [{ file: 'src/cart.test.ts', line: 12, column: 0 }],
+    test: 'cart › adds items',
+    ci: 'CI #1 · build',
+  });
+  assert.equal(testFailureFrames(ciFailure(2, { line: undefined }))?.frames[0].line, 0);
+  for (const file of [
+    'out-tests/capture/x.test.js',
+    'out/capture/x.test.js',
+    'dist/capture/x.test.cjs',
+    'build/capture/x.test.mjs',
+    'lib/capture/x.test.js',
+  ])
+    assert.deepEqual(
+      testFailureFrames(ciFailure(3, { file }))?.frames.map((frame) => `${frame.file}:${frame.line}`),
+      ['ts', 'tsx', 'mts', 'js'].map((extension) => `src/capture/x.test.${extension}:0`),
+      file,
+    );
+  assert.equal(testFailureFrames(ciFailure(4, { run: undefined, job: undefined }))?.ci, 'CI');
+  assert.equal(testFailureFrames(ciFailure(5, { kind: 'ci' })), undefined);
+  assert.equal(testFailureFrames(ciFailure(6, { test: 7 })), undefined);
+  assert.equal(testFailureFrames(ciFailure(7, { file: undefined })), undefined);
+});
+
+test('the same failed test in two CI runs is one error, with the newest run and a search for it', () => {
+  const tracker = new RuntimeErrorTracker();
+  tracker.process([ciFailure(1), ciFailure(2, { run: 2, job: 'test' }), failure(3)]);
+  const errors = tracker.list();
+  assert.equal(errors.length, 2);
+  const ci = errors.find((error) => error.test)!;
+  assert.deepEqual(
+    [ci.count, ci.ci, ci.test, ci.query, ci.message, ci.lastId],
+    [2, 'CI #2 · test', 'cart › adds items', 'kind:test-failure test:"cart › adds items"', '✕ cart › adds items', 2],
+  );
+  const ordinary = errors.find((error) => !error.test)!;
+  assert.deepEqual([ordinary.count, ordinary.ci], [1, undefined]);
+  tracker.process([ciFailure(4, { test: 'cart › removes items' })]);
+  assert.equal(tracker.list().length, 3, 'another test is another error');
+});
+
+test('a CI failure says where it failed, and how often only when more than once', () => {
+  const tracker = new RuntimeErrorTracker();
+  tracker.process([ciFailure(1)]);
+  assert.equal(runtimeErrorText(tracker.list()[0], 6000), '✕ cart › adds items · failed in CI #1 · build · 5s ago');
+  tracker.process([ciFailure(2)]);
+  assert.equal(
+    runtimeErrorText(tracker.list()[0], 6000),
+    '✕ cart › adds items · failed in CI #1 · build · 2× · 4s ago',
+  );
 });

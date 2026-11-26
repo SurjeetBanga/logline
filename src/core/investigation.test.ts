@@ -169,3 +169,20 @@ test('without a source there is nothing to watch', () => {
   const { check } = watcher([event(11, 'new', 'error', 'Error: boom')], 1, { message: 'Error: boom', eventId: 1 });
   assert.equal(check([run('new', 2000, 'running')]), undefined);
 });
+
+test('a test that failed in CI says where, and asks for a local run and what the next CI run should show', () => {
+  const context = { shareId: 'share-1', runs: ['run-1'] };
+  const prompt = investigationPrompt(
+    { ...target, ci: 'CI #4812 · build (ubuntu-latest)', message: '✕ cart › adds items' },
+    context,
+  );
+  assert.ok(!prompt.includes('\n'));
+  assert.match(prompt, /^Investigate this test that failed in CI with the Logline tools: /);
+  assert.match(prompt, /\(failed in CI #4812 · build \(ubuntu-latest\), 14 times, at src\/lib\/payments\.ts:40\)/);
+  assert.match(prompt, /run the test locally, confirm it passes/);
+  assert.match(prompt, /what the next CI run should show/);
+  assert.doesNotMatch(prompt, /wait for fresh logs/);
+  const plain = investigationPrompt(target, context);
+  assert.doesNotMatch(plain, /CI/);
+  assert.match(plain, /^Investigate this error with/);
+});
