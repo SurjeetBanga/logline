@@ -1,6 +1,7 @@
 import type { LogEvent } from './types';
 import { queryTokens } from './query-tokens';
 import { RE2 } from 're2-wasm';
+import { planRegex, type RegexPlan } from './regex-plan';
 
 // Names that mean the same thing across logging libraries. A field filter tries
 // the name exactly as typed first and only then the rest of its group, so
@@ -61,6 +62,8 @@ export interface Token {
   value: string;
   regex?: RE2 | null;
   regexError?: string;
+  /** Native expressions that answer `regex` faster: see regex-plan.ts. */
+  regexPlan?: RegexPlan;
   /** Case-insensitive matcher for a free-text term, compiled once at parse time. */
   search?: RegExp;
   /** Whether the value is shaped like a range or comparison, so ordinary terms skip the numeric coercion. */
@@ -109,6 +112,32 @@ export function parseQuery(input = ''): ParsedQuery {
   return groups.filter((group) => group.length);
 }
 
+interface CompiledRegex {
+  regex: RE2 | null;
+  error?: string;
+  plan?: RegexPlan;
+}
+// Each refresh and keystroke parses its search again, and RE2 takes about a millisecond to compile a pattern,
+// so the last few patterns are kept compiled. Their lastIndex is reset before each use.
+const compiledRegexes = new Map<string, CompiledRegex>();
+const COMPILED_REGEXES = 32;
+
+function compileRegex(source: string, flags: string): CompiledRegex {
+  const key = `${flags}/${source}`;
+  let compiled = compiledRegexes.get(key);
+  if (compiled) compiledRegexes.delete(key);
+  else {
+    try {
+      compiled = { regex: new RE2(source, flags), plan: planRegex(source, flags) };
+    } catch {
+      compiled = { regex: null, error: 'Unsupported or invalid regular expression syntax.' };
+    }
+  }
+  compiledRegexes.set(key, compiled);
+  if (compiledRegexes.size > COMPILED_REGEXES) compiledRegexes.delete(compiledRegexes.keys().next().value!);
+  return compiled;
+}
+
 /** One term of a search, as `parseQuery` reads it. */
 export function parseToken(token: string): Token {
   let negate = token.startsWith('-');
@@ -139,18 +168,17 @@ export function parseToken(token: string): Token {
   // flags that RE2 lacks (d, v) are still reported as unsupported.
   const regexMatch = quoted ? null : value.match(/^\/(.+)\/([dgimsuvy]*)$/);
   let regexError: string | undefined;
+  let regexPlan: RegexPlan | undefined;
   if (regexMatch) {
     const unsupported = [...new Set(regexMatch[2].split('').filter((flag) => !'gimsuy'.includes(flag)))];
     if (unsupported.length)
       regexError = `Unsupported regular expression flag${unsupported.length === 1 ? '' : 's'}: ${unsupported.join(', ')}`;
-    try {
-      if (!regexError) {
-        const flags = regexMatch[2].includes('u') ? regexMatch[2] : `${regexMatch[2]}u`;
-        regex = new RE2(regexMatch[1], flags);
-      } else regex = null;
-    } catch {
-      regex = null;
-      regexError = 'Unsupported or invalid regular expression syntax.';
+    if (regexError) regex = null;
+    else {
+      const compiled = compileRegex(regexMatch[1], regexMatch[2].includes('u') ? regexMatch[2] : `${regexMatch[2]}u`);
+      regex = compiled.regex;
+      regexError = compiled.error;
+      regexPlan = compiled.plan;
     }
   }
   // Regex syntax and input are case-sensitive unless the expression uses /i.
@@ -214,6 +242,7 @@ export function parseToken(token: string): Token {
     value,
     regex,
     regexError,
+    regexPlan,
     search,
     compare,
     numericComparison,
@@ -289,9 +318,16 @@ export function matchesQuery(
       const numeric = token.compare && actual !== '' ? Number(actual) : NaN;
       const isNumeric = Number.isFinite(numeric);
       if (token.regex !== undefined) {
-        // Global and sticky expressions carry a cursor between calls.
-        if (token.regex) token.regex.lastIndex = 0;
-        matched = token.regex ? token.regex.test(actual) : false;
+        const plan = token.regexPlan;
+        if (!token.regex) matched = false;
+        else if (plan?.native) matched = plan.native.test(actual);
+        // Text without what every match contains cannot match, and costs no call into RE2.
+        else if (plan?.prefilter && !plan.prefilter.test(actual)) matched = false;
+        else {
+          // Global and sticky expressions carry a cursor between calls.
+          token.regex.lastIndex = 0;
+          matched = token.regex.test(actual);
+        }
       } else if (token.field && isNumeric && token.numericComparison) {
         const { operator, target } = token.numericComparison;
         matched =

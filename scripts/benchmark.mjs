@@ -75,6 +75,8 @@ function time(operation) {
 // when a case gets much slower or faster to run (not to measure): time `--only <case>` against `--only heap`.
 const WEIGHTS = {
   usage: 11,
+  'regex-literal': 9,
+  'regex-native': 6,
   analysis: 5,
   'elastic-logs': 4,
   'gcp-logs': 4,
@@ -630,6 +632,35 @@ timed('query', 'Evaluate a search over 50,000 events', async () => {
     let matched = 0;
     for (const event of events) if (matchesQuery(event, parsed)) matched++;
     return matched;
+  };
+});
+// Regular expressions run on RE2, whose every call costs microseconds; a search uses native expressions where
+// they give RE2's answers (src/core/regex-plan.ts).
+const regexSearch = (pattern) => async () => {
+  const { store } = await retained();
+  const { parseQuery, matchesQuery } = await load('core/query.js');
+  const parsed = parseQuery(pattern);
+  const events = store.all();
+  return () => {
+    let matched = 0;
+    for (const event of events) if (matchesQuery(event, parsed)) matched++;
+    return matched;
+  };
+};
+timed(
+  'regex-native',
+  'Evaluate a regular expression of bounded length over 50,000 events',
+  regexSearch('/request\\s4\\d{3}\\b/'),
+);
+timed(
+  'regex-literal',
+  'Evaluate a regular expression with text every match contains over 50,000 events',
+  regexSearch('/"status":5\\d+/'),
+);
+timed('regex-parse', 'Parse a search with a regular expression three times, as a refresh does', async () => {
+  const { parseQuery } = await load('core/query.js');
+  return () => {
+    for (let i = 0; i < 3; i++) parseQuery('level:error /retry.?(after|in)\\s\\d+/');
   };
 });
 timed('suggest', 'Autocomplete four keystrokes of a field value', async () => {
