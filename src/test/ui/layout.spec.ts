@@ -28,6 +28,14 @@ test("the panel runs edge to edge, without VS Code's padding at its sides", asyn
   expect(edges.rail, 'the Sources rail starts at the left edge').toBe(0);
 });
 
+test("the page arrows show at their full size, not squeezed by the status bar's padding", async ({ openPanel }) => {
+  const { page } = await openPanel();
+  for (const id of ['newer', 'older']) {
+    const icon = await page.locator(`#${id} svg`).boundingBox();
+    expect(icon?.width, `the ${id} page arrow`).toBe(14);
+  }
+});
+
 test('the Update button fits beside the actions', async ({ openPanel }) => {
   const panel = await openPanel();
   const { page } = panel;

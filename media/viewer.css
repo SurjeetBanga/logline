@@ -861,11 +861,11 @@ body > header {
   overflow: hidden;
   text-overflow: ellipsis;
   border-color: transparent;
-  background: var(--vscode-button-background, #0e639c);
-  color: var(--vscode-button-foreground, #fff);
+  background: var(--vscode-button-secondaryBackground, #3a3d41);
+  color: var(--vscode-button-secondaryForeground, #fff);
 }
 .rail-empty-add:hover {
-  background: var(--vscode-button-hoverBackground, #1177bb);
+  background: var(--vscode-button-secondaryHoverBackground, #45494e);
 }
 /* The rail's right edge drags to resize it; the line shows while pointed at or dragged. */
 .rail-resizer {
@@ -2845,6 +2845,11 @@ td {
 .event-row.level-fatal > td:first-child {
   box-shadow: inset 3px 0 0 var(--vscode-errorForeground, #f48771);
 }
+/* A faint tint lets errors stand out from the list at a glance; hover and selection still show over it. */
+.event-row.level-error:not(.selected):not(:hover),
+.event-row.level-fatal:not(.selected):not(:hover) {
+  background: color-mix(in srgb, var(--vscode-errorForeground, #f48771) 7%, transparent);
+}
 .event-row.level-warn > td:first-child {
   box-shadow: inset 3px 0 0 var(--vscode-charts-yellow, #e2c08d);
 }
@@ -2885,8 +2890,10 @@ td.time {
   font-weight: 600;
   text-transform: uppercase;
 }
+/* The most common level stays quiet, so warnings and errors are what catches the eye. */
 .level.info {
-  color: var(--vscode-charts-blue, #75beff);
+  font-weight: normal;
+  color: var(--vscode-foreground, #d4d4d4);
 }
 .level.warn {
   color: var(--vscode-charts-yellow, #e2c08d);
@@ -3080,7 +3087,7 @@ td.time {
 /* In a narrow inspector the waterfall keeps the operation, its bar, and its duration. */
 @container (max-width: 520px) {
   #traceView .trace-table th:nth-child(1) {
-    width: 44%;
+    width: 50%;
   }
   /* Collapsed rather than hidden, so rows spanning every column keep the table's column count. */
   #traceView .trace-table th:nth-child(2),
@@ -3092,8 +3099,9 @@ td.time {
     overflow: hidden;
     font-size: 0;
   }
+  /* As wide as in a wide inspector, so its "Duration" heading is not cut off. */
   #traceView .trace-table th:nth-child(4) {
-    width: 72px;
+    width: 96px;
   }
   #traceView .trace-hotspot {
     grid-template-columns: minmax(0, 1fr) 96px;
@@ -3329,9 +3337,6 @@ body[data-empty='true'] .empty-actions {
 }
 .show-more {
   margin-top: 8px;
-}
-.status-bar .pagination button {
-  padding: 1px 8px;
 }
 /* Terminal capture, as a status bar item: quiet until hovered, its icon colored while on. */
 .status-toggle {
