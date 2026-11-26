@@ -97,7 +97,7 @@
       "kind": {
         "classification": "SystemMetaData",
         "purpose": "FeatureInsight",
-        "comment": "One of: terminal, debug, task, file, compose, command, otlp, import, connection, browser."
+        "comment": "One of: terminal, debug, task, file, compose, command, otlp, import, connection, browser, agent."
       },
       "auto": {
         "classification": "SystemMetaData",

@@ -70,6 +70,7 @@ export const CAPTURE_KINDS = [
   'import',
   'connection',
   'browser',
+  'agent',
 ] as const;
 export const AGENT_TOOLS = [
   'logline_list_shared_sources',
