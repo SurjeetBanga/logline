@@ -4578,6 +4578,10 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
       saveState();
       render();
     });
+    const unchanged = () => {
+      const connection = selected();
+      return !connection || elements.connectionService.value === currentService(connection);
+    };
     scope.listen(elements.connectionService, "focus", () => {
       const connection = selected();
       if (!connection || choosing) return;
@@ -4590,15 +4594,13 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
     scope.listen(elements.connectionService, "blur", () => {
       if (document.activeElement === elements.connectionService) return;
       const connection = selected();
+      const cleared = edited && !elements.connectionService.value.trim() && !unchanged();
       choosing = false;
       edited = false;
       elements.connectionService.placeholder = "Any service";
+      if (cleared) chooseService("");
       if (connection) showService(connection);
     });
-    const unchanged = () => {
-      const connection = selected();
-      return !connection || elements.connectionService.value === currentService(connection);
-    };
     scope.listen(elements.connectionService, "input", (event) => {
       edited = true;
       if (event.inputType !== "insertReplacementText" || unchanged()) return;
@@ -4606,12 +4608,8 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
       if (listed.includes(name)) chooseService(name);
     });
     scope.listen(elements.connectionService, "change", () => {
-      if (unchanged()) return;
       const value = elements.connectionService.value.trim();
-      if (!value) {
-        if (edited) chooseService("");
-        return;
-      }
+      if (!value || unchanged()) return;
       const name = resolveService(value);
       if (listed.includes(name)) chooseService(name);
     });

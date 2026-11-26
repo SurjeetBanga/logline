@@ -397,6 +397,11 @@ export function createConnectionBar(
     saveState();
     render();
   });
+  /** Whether the box holds the service chosen already, as Escape leaves it. */
+  const unchanged = () => {
+    const connection = selected();
+    return !connection || elements.connectionService.value === currentService(connection);
+  };
   // The box empties on focus so the whole list shows and typing searches it; the service stays as its placeholder.
   scope.listen(elements.connectionService, 'focus', () => {
     const connection = selected();
@@ -412,16 +417,14 @@ export function createConnectionBar(
     // The window losing focus blurs the box but leaves it focused within the page: keep what is typed.
     if (document.activeElement === elements.connectionService) return;
     const connection = selected();
+    // A box cleared by hand and left chooses any service. No change fires for it: focus emptied the box already.
+    const cleared = edited && !elements.connectionService.value.trim() && !unchanged();
     choosing = false;
     edited = false;
     elements.connectionService.placeholder = 'Any service';
+    if (cleared) chooseService('');
     if (connection) showService(connection);
   });
-  /** Whether the box holds the service chosen already, as Escape leaves it. */
-  const unchanged = () => {
-    const connection = selected();
-    return !connection || elements.connectionService.value === currentService(connection);
-  };
   scope.listen(elements.connectionService, 'input', (event) => {
     edited = true;
     // A suggestion picked from the list replaces the text, after any Enter that picked it chose what was typed.
@@ -430,14 +433,10 @@ export function createConnectionBar(
     if (listed.includes(name)) chooseService(name);
   });
   // Picking a suggestion, or typing a listed name in full, chooses that service; part of a name, as when
-  // Run is clicked while searching the list, is left alone. A box cleared and left chooses any service.
+  // Run is clicked while searching the list, is left alone.
   scope.listen(elements.connectionService, 'change', () => {
-    if (unchanged()) return;
     const value = elements.connectionService.value.trim();
-    if (!value) {
-      if (edited) chooseService('');
-      return;
-    }
+    if (!value || unchanged()) return;
     const name = resolveService(value);
     if (listed.includes(name)) chooseService(name);
   });

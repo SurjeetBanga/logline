@@ -5043,7 +5043,7 @@ test('a Datadog connection lists its services to choose one, and can send a quer
   service.listeners.get('input')!({ inputType: 'insertText' });
   service.value = '';
   service.listeners.get('input')!({ inputType: 'deleteContentBackward' });
-  service.listeners.get('change')!();
+  // Chromium fires no change here: the box was empty when focused.
   service.listeners.get('blur')!();
   assert.equal(get('search').value, 'level:error');
   assert.equal(service.value, '');
