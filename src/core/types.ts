@@ -40,7 +40,8 @@ export interface LogEvent {
   attachedTo?: number;
 }
 
-export type SourceKind = 'process' | 'task' | 'terminal' | 'import' | 'file' | 'debug' | 'otel' | 'remote' | 'browser';
+export type SourceKind =
+  'process' | 'task' | 'terminal' | 'import' | 'file' | 'debug' | 'otel' | 'remote' | 'browser' | 'agent';
 export type SessionStatus = 'running' | 'stopping' | 'exited' | 'failed';
 
 export interface SessionSummary {
@@ -75,4 +76,6 @@ export interface SessionSummary {
   captureReason?: string;
   command?: string;
   cwd?: string;
+  /** A short summary shown under the run's name, such as an agent session's tool calls and tokens. */
+  detail?: string;
 }

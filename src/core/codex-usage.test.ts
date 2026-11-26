@@ -223,3 +223,39 @@ test('the hover has a row for Codex and the app, the levels, and Codex usage whi
     /\[Settings\]\(command:workbench\.action\.openSettings/,
   );
 });
+
+test('Claude Code tokens join the status text and the hover', () => {
+  const claude = { tokens: 125_000, cachedShare: 0.8 };
+  const limits = [limit('5h', 38)];
+  // With no limit the tokens stand in at every level, named when both agents have some.
+  assert.equal(aiUsageText({ tokens: 0, limits: [] }, NO_APP, 'min', claude), '$(logline-mark) 125k tok');
+  assert.equal(aiUsageText({ tokens: 0, limits: [] }, NO_APP, 'medium', claude), '$(logline-mark) Claude 125k tok');
+  assert.equal(
+    aiUsageText({ tokens: 65_000, limits: [] }, NO_APP, 'medium', claude),
+    '$(logline-mark) Codex 65k tok  Claude 125k tok',
+  );
+  assert.equal(aiUsageText({ tokens: 65_000, limits: [] }, NO_APP, 'min', claude), '$(logline-mark) 65k tok  125k tok');
+  // With a limit, only the highest level adds tokens.
+  assert.doesNotMatch(aiUsageText({ tokens: 0, limits }, NO_APP, 'medium', claude), /tok/);
+  assert.match(aiUsageText({ tokens: 0, limits }, NO_APP, 'max', claude), /Codex 38%  Claude 125k tok$/);
+  assert.equal(aiUsageText({ tokens: 0, limits: [] }, NO_APP, 'max', { tokens: 0, cachedShare: 0 }), '$(logline-mark)');
+
+  const options = { detail: 'medium' as const, codex: true, now: NOON, locale: 'en-US' };
+  const tip = aiUsageTooltip({ tokens: 0, limits: [] }, NO_APP, { ...options, claude: true, claudeUsage: claude });
+  assert.match(tip, /\| \| Claude Code \| 80% from cache \| 125k tok \|/);
+  assert.doesNotMatch(tip, /Turn on/);
+  assert.match(
+    tip,
+    /\[Open Logs\]\(command:logline\.logs\.focus\) · \[Agent sessions\]\(command:logline\.showAgentSessions\) · \[Settings\]/,
+  );
+  const offer = aiUsageTooltip({ tokens: 0, limits: [] }, NO_APP, { ...options, codex: false, claude: false });
+  assert.match(
+    offer,
+    /Turn on \[Codex usage\]\(command:logline\.enableCodexUsage\) · \[Claude Code usage\]\(command:logline\.enableClaudeUsage\)/,
+  );
+  const claudeOnly = aiUsageTooltip({ tokens: 0, limits: [] }, NO_APP, { ...options, claude: false });
+  assert.match(claudeOnly, /Turn on \[Claude Code usage\]\(command:logline\.enableClaudeUsage\)  \n/);
+  assert.doesNotMatch(claudeOnly, /Codex usage\]/);
+  // Without the claude option the hover is as it was.
+  assert.doesNotMatch(aiUsageTooltip({ tokens: 0, limits: [] }, NO_APP, options), /Agent sessions|Claude Code/);
+});

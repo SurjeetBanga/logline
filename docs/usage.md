@@ -125,6 +125,20 @@ Logline offers the agents available, with the one you chose last first; when onl
 
 Afterwards Logline watches the error's source. It says **Still failing**, with **Show Error** and **Investigate Again**, when the error happens again in a run started after the handoff, or after you save a source file while a run keeps going. It says **Fixed locally**, with how many other errors were logged, only after you save a source file: when a run started after the save finishes without the error, or when a running one logs 50 events after the save without it. An error from the inspector without a search of its own is matched by its first line with ids, numbers, and paths masked.
 
+### Agent sessions
+
+Claude Code and Codex keep a transcript of each session on your machine. With `logline.agentSessions.enabled` on, Logline reads them and shows what the agents did beside your app's logs. It is off by default: **Logline: Show Agent Sessions**, or the **Agent sessions** link in the AI usage hover, asks first, turns it on, and opens the Logs panel.
+
+Logline reads Claude Code's transcripts under `~/.claude/projects` and Codex's under `~/.codex/sessions` (or `CODEX_HOME`), for sessions that worked in an open workspace folder or a subfolder of it and were written to in the last day, the 20 newest for each agent. Each agent is a source in the rail, **Claude Code** or **Codex**, with the agent's icon, and each session is a run named by its title or first prompt. A session whose file stops growing for 10 minutes is shown as ended.
+
+Each prompt, tool call, and reply is a log line with the fields `kind:agent`, `agent` (`claude-code` or `codex`), `action` (`prompt`, `tool`, or `reply`), `session`, and `model`. A tool call also has `tool`, `command`, `file`, `exitCode`, `durationMs`, and `output`, the end of what a failed call printed. A tool call is reported when its result arrives, at the time it was called, with level `error` when it failed or exited with a non-zero code. Try `kind:agent level:error`, `agent:claude-code tool:Bash exitCode:>0`, or `kind:agent durationMs:>10000`.
+
+An agent event opened in the inspector has actions beside **Surrounding logs**. **Logs during this call**, on a tool call, shows your app's logs from every source except the agents, from a second before the call started to a second after it ended, using the search `-kind:agent @timestamp:[… TO …]`. **Open transcript** opens the session's transcript file in the editor while Logline is reading it. **Run in terminal**, on a tool call with a command, pastes the command into a new terminal named `Agent command`, in the folder the agent worked in, without running it.
+
+In the source rail, each session's run shows its tool calls, failed calls, and tokens under its name, such as `42 tools · 3 failed · 186k tok`, with its start time.
+
+Removing the source stops reading its sessions. Everything is read on your machine, and nothing leaves it unless you share it with an agent, where it is redacted like any logs.
+
 ## Import and export
 
 Choose a source in the rail, and one of its runs to narrow it to one command. Completed terminal runs remain selectable while their events are retained, while empty completed terminal metadata is removed automatically. Use **More actions → Export logs…** to save the current source, run, search, and level filters as JSON Lines, JSON, CSV, or **AI context (Markdown)**, with redaction enabled by default. The AI context option and **Copy filtered results** include the latest 1,000 matching events in capture order. **Sources → Add logs → Import logs…** (or **Logline: Import Logs**) loads JSON, JSONL, CSV, and plain-text log files into a separate `Imported · filename` source for offline searching. A CSV exported by Logline replays its `raw` payloads; imported events receive new IDs, an import stream, and a new session. Other CSV rows use their header names as fields, or replay a nonempty `raw` cell when present.
@@ -429,11 +443,13 @@ Set `shell: true` when the command is a shell line containing pipes, redirects, 
 
 An item on the right of the VS Code status bar starts with the Logline icon, then shows a small pie and a percentage for how much of Codex's plan limit is used, taking its fullest limit window, such as `Codex 38%`. It takes the editor's warning background when a limit is at 80% or more, and its error background when a limit is reached. Before Codex usage is turned on, it shows the Logline icon alone, or with the LLM call count of the app you are debugging once there are some. The icon is always there, and clicking it opens the Logs panel. `logline.aiUsage.enabled` turns it off.
 
-`logline.aiUsage.detail` sets how much it says: `min` shows the pie and percentage, `medium` (the default) names Codex beside them, and `max` adds today's Codex tokens. The hover has **Min**, **Medium**, and **Max** links, and **Logline: Set AI Usage Detail in the Status Bar** asks.
+`logline.aiUsage.detail` sets how much it says: `min` shows the pie and percentage, `medium` (the default) names Codex beside them, and `max` adds today's tokens. The hover has **Min**, **Medium**, and **Max** links, and **Logline: Set AI Usage Detail in the Status Bar** asks.
 
 The hover shows each Codex limit window with a bar, its percentage, and when the fullest resets, and today's Codex tokens. A **This app** row has the LLM calls and tokens of the app you are debugging, from the OpenTelemetry GenAI spans Logline already receives, the same data as the **AI calls** tab.
 
 **Logline: Show Codex Usage** (`logline.aiUsage.codex`), off by default and offered in the hover, reads the session files Codex keeps under `~/.codex` (or `CODEX_HOME`), whether Codex runs in a terminal or in the editor. Codex records its plan limits there with every reply, so the pie is as fresh as your last Codex reply; a limit window that has reset is no longer shown. Tokens are counted since local midnight. Everything is read on your machine and nothing that is read is sent anywhere.
+
+**Logline: Show Claude Code Usage** (`logline.aiUsage.claude`), also off by default and offered in the hover, reads the session files Claude Code keeps under `~/.claude/projects` and adds its tokens of today across all projects, with the share read from the prompt cache in the hover. Claude Code does not record its plan limits there, so there is no Claude percentage: Codex's fullest limit still leads the item. With no Codex limit, or at `max` detail, the item shows text such as `Claude 1.4M tok`; at `min` the name is left out. The hover's **Turn on** line offers Codex usage and Claude Code usage, and its last line has an **Agent sessions** link, which shows [agent sessions](#agent-sessions) in the Logs panel.
 
 ## Status and troubleshooting
 
@@ -497,8 +513,10 @@ Settings are grouped the same way in the Settings editor (**More actions → Set
 | `logline.refreshIntervalMs` | `500` | Minimum time between Logs panel updates. The panel refreshes as soon as new data arrives rather than on a fixed poll, so this only caps how often that happens during a heavy burst of log lines. |
 | `logline.statusBar.enabled` | `true` | Show how many logs and errors Logline has captured in the status bar at the bottom of the window, once there are some. |
 | `logline.aiUsage.enabled` | `true` | Show AI usage in the status bar. See [AI usage in the status bar](#ai-usage-in-the-status-bar). |
-| `logline.aiUsage.detail` | `medium` | How much the AI usage item says: `min` (Codex's fullest limit), `medium` (the same, named), or `max` (adds today's Codex tokens). |
+| `logline.aiUsage.detail` | `medium` | How much the AI usage item says: `min` (Codex's fullest limit), `medium` (the same, named), or `max` (adds today's tokens). |
 | `logline.aiUsage.codex` | `false` | Read the session files Codex keeps under `~/.codex` for the plan limits it records and today's tokens. |
+| `logline.aiUsage.claude` | `false` | Read the session files Claude Code keeps under `~/.claude/projects` for today's tokens and the share read from the prompt cache. |
+| `logline.agentSessions.enabled` | `false` | Show the sessions of Claude Code and Codex that worked in this workspace as logs. See [Agent sessions](#agent-sessions). |
 
 ### Memory and disk
 

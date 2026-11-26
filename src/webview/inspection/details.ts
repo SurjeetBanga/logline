@@ -1,3 +1,4 @@
+import type { LogEvent } from '../../core/types';
 import type { ExceptionBlock } from '../../core/exceptions';
 import type { DetailLinks } from '../../protocol/messages';
 import { DOCTOR_ACTION_TITLES, doctorButton } from './doctor';
@@ -8,6 +9,7 @@ const ICONS: Record<string, IconPart[]> = {
   context: [['path', { d: 'M4 3.5h8M2 8h12M4 12.5h8' }]],
   trace: [['path', { d: 'M2 3.5h6M5 8h7M9 12.5h5' }]],
   code: [['path', { d: 'M5.5 4.5 2 8l3.5 3.5M10.5 4.5 14 8l-3.5 3.5' }]],
+  terminal: [['path', { d: 'M2.5 4l3.5 3.5L2.5 11M8 12h5.5' }]],
   breakpoint: [['circle', { cx: '8', cy: '8', r: '4', fill: 'currentColor', stroke: 'none' }]],
   copy: [
     ['rect', { x: '5.5', y: '5.5', width: '8', height: '8.5', rx: '1' }],
@@ -106,6 +108,46 @@ export function eventAction(
     button.setAttribute('aria-disabled', 'true');
   }
   return button;
+}
+
+/** An agent's tool call: the app's logs while it ran, the session's transcript, and its command in a terminal. */
+export function agentCallActions(id: number, event: Pick<LogEvent, 'fields'> | undefined): HTMLButtonElement[] {
+  const fields = event?.fields;
+  if (fields?.kind !== 'agent') return [];
+  const action = (call: string, iconName: IconName, label: string, title: string) => {
+    const button = eventAction('agent-call-button', iconName, label, title);
+    button.dataset.id = String(id);
+    button.dataset.call = call;
+    return button;
+  };
+  const buttons: HTMLButtonElement[] = [];
+  if (fields.action === 'tool')
+    buttons.push(
+      action(
+        'logs',
+        'context',
+        'Logs during this call',
+        "Show your app's logs from the time this call ran, from every source",
+      ),
+    );
+  buttons.push(
+    action(
+      'transcript',
+      'code',
+      'Open transcript',
+      "Open the session's transcript, the file the agent keeps on this machine",
+    ),
+  );
+  if (typeof fields.command === 'string' && fields.command)
+    buttons.push(
+      action(
+        'terminal',
+        'terminal',
+        'Run in terminal',
+        'Paste this command in a new terminal, in the folder the agent worked in, without running it',
+      ),
+    );
+  return buttons;
 }
 
 function attachment(label: string, message: string, id: number, action: string, title: string): HTMLElement {

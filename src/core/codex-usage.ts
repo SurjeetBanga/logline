@@ -1,3 +1,4 @@
+import type { ClaudeUsage } from './claude-usage';
 import { summarizeGenAiCalls, type GenAiCall } from './gen-ai';
 
 /** How much the status bar says: Codex's fullest limit, with its name, or with today's tokens too. */
@@ -153,17 +154,28 @@ const fullest = (limits: readonly CodexLimit[]) =>
   );
 const callsText = (calls: number) => `${shortCount(calls)} call${calls === 1 ? '' : 's'}`;
 
+const NO_CLAUDE: ClaudeUsage = { tokens: 0, cachedShare: 0 };
+
 /**
  * The status bar text: the Logline mark, then a pie and percentage for Codex's
- * fullest limit. With nothing to say it is the mark alone, which still opens the Logs panel.
+ * fullest limit, and Claude Code's tokens, which have no limit to show. With
+ * nothing to say it is the mark alone, which still opens the Logs panel.
  */
-export function aiUsageText(usage: CodexUsage, app: AppUsage, detail: AiUsageDetail): string {
+export function aiUsageText(
+  usage: CodexUsage,
+  app: AppUsage,
+  detail: AiUsageDetail,
+  claude: ClaudeUsage = NO_CLAUDE,
+): string {
   const limit = fullest(usage.limits);
   const parts: string[] = [];
   if (limit)
     parts.push(`${pieIcon(limit.usedPercent)} ${detail === 'min' ? '' : 'Codex '}${percentText(limit.usedPercent)}`);
   // With no limit to show, the tokens stand in for it at every level.
-  if (usage.tokens && (detail === 'max' || !limit)) parts.push(`${shortCount(usage.tokens)} tok`);
+  const showClaude = claude.tokens > 0 && (detail === 'max' || !limit);
+  if (usage.tokens && (detail === 'max' || !limit))
+    parts.push(`${showClaude && detail !== 'min' ? 'Codex ' : ''}${shortCount(usage.tokens)} tok`);
+  if (showClaude) parts.push(`${detail === 'min' ? '' : 'Claude '}${shortCount(claude.tokens)} tok`);
   if (!parts.length && app.calls) parts.push(callsText(app.calls));
   return parts.length ? `$(logline-mark) ${parts.join('  ')}` : '$(logline-mark)';
 }
@@ -178,6 +190,10 @@ export interface AiUsageTooltipOptions {
   detail: AiUsageDetail;
   /** Whether Codex's session files are read; when not, reading them is offered. */
   codex: boolean;
+  /** Whether Claude Code's session files are read for its tokens; when not, reading them is offered. */
+  claude?: boolean;
+  /** Claude Code's tokens of today, while they are read. */
+  claudeUsage?: ClaudeUsage;
   now: number;
   locale?: string;
   timeZone?: string;
@@ -238,19 +254,26 @@ export function aiUsageTooltip(usage: CodexUsage, app: AppUsage, options: AiUsag
       `| ${top ? pieIcon(top.usedPercent) : ''} | Codex | ${windows.join(' · ')} | ${usage.tokens ? `${shortCount(usage.tokens)} tok` : ''} |`,
     );
   }
+  const claude = options.claudeUsage;
+  if (claude?.tokens)
+    rows.push(
+      `| | Claude Code | ${Math.round(claude.cachedShare * 100)}% from cache | ${shortCount(claude.tokens)} tok |`,
+    );
   if (app.calls) rows.push(`| | This app | ${callsText(app.calls)} | ${shortCount(app.tokens)} tok |`);
   const lines = [`$(logline-mark) **Logline AI usage** &nbsp;&nbsp; Show ${levels}`];
   if (rows.length) lines.push(['| | | | |', '|:--|:--|:--|--:|', ...rows].join('\n'));
-  if (!options.codex)
-    lines.push(
-      'Turn on [Codex usage](command:logline.enableCodexUsage)  \nRead on this machine only. Nothing is sent.',
-    );
+  const offers = [
+    ...(options.codex ? [] : ['[Codex usage](command:logline.enableCodexUsage)']),
+    ...(options.claude === false ? ['[Claude Code usage](command:logline.enableClaudeUsage)'] : []),
+  ];
+  if (offers.length) lines.push(`Turn on ${offers.join(' · ')}  \nRead on this machine only. Nothing is sent.`);
   const newest = Math.max(0, ...usage.limits.map((limit) => limit.asOf));
   lines.push(
     [
       ...(usage.tokens ? ['Today'] : []),
       ...(newest ? [`limits as of ${agoText(now - newest)}`] : []),
       '[Open Logs](command:logline.logs.focus)',
+      ...(options.claude === undefined ? [] : ['[Agent sessions](command:logline.showAgentSessions)']),
       `[Settings](command:workbench.action.openSettings?${encodeURIComponent(JSON.stringify('logline.aiUsage'))})`,
     ].join(' · '),
   );

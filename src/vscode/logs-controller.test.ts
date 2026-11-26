@@ -9,7 +9,10 @@ const settings: { key: string; value: unknown; target?: unknown }[] = [];
 const commands: string[] = [];
 const copied: string[] = [];
 let pick: (items: { runId: string }[]) => unknown = () => undefined;
+const terminals: { options: unknown; shown: boolean; sent: unknown[][] }[] = [];
+const opened: unknown[] = [];
 const mock = {
+  Uri: { file: (path: string) => ({ fsPath: path }) },
   ConfigurationTarget: { Global: 1, Workspace: 2 },
   commands: { executeCommand: async (id: string) => void commands.push(id) },
   extensions: { getExtension: () => undefined },
@@ -34,6 +37,20 @@ const mock = {
     }),
   },
   window: {
+    createTerminal: (options: unknown) => {
+      const terminal = {
+        options,
+        shown: false,
+        sent: [] as unknown[][],
+        show() {
+          terminal.shown = true;
+        },
+        sendText: (...args: unknown[]) => void terminal.sent.push(args),
+      };
+      terminals.push(terminal);
+      return terminal;
+    },
+    showTextDocument: async (...args: unknown[]) => void opened.push(args),
     showInformationMessage: async (message: string, ...actions: unknown[]) => {
       notices.push(message);
       buttons = actions.filter((action): action is string => typeof action === 'string');
@@ -54,7 +71,10 @@ const host = {
   workspaceValues: new Set<string>(),
   configChanged: undefined as ((event: { affectsConfiguration(key: string): boolean }) => void) | undefined,
 };
-const { LogsController } = withVscode(mock, () => require('./logs-controller') as typeof import('./logs-controller'));
+const { LogsController, agentCallQuery } = withVscode(
+  mock,
+  () => require('./logs-controller') as typeof import('./logs-controller'),
+);
 
 function setup(t: { after(fn: () => Promise<void>): void }) {
   notices.length = 0;
@@ -765,4 +785,74 @@ test('capture chosen for every workspace holds in a workspace whose own setting 
   assert.equal(controller.terminalCapture.isEnabled, true);
   host.configChanged!({ affectsConfiguration: () => true });
   assert.equal(controller.terminalCapture.isEnabled, true, 'the window keeps the yes it was given');
+});
+
+test('an agent call is searched around by every source but the agents, a second either side', () => {
+  const start = Date.parse('2026-11-15T10:00:00.000Z');
+  assert.equal(
+    agentCallQuery({ level: 'info', id: 1, message: 'm', timestampMs: start, fields: { durationMs: 2000 } }),
+    '-kind:agent @timestamp:[2026-11-15T09:59:59.000Z TO 2026-11-15T10:00:03.000Z]',
+  );
+  assert.equal(
+    agentCallQuery({ level: 'info', id: 1, message: 'm', timestampMs: start }),
+    '-kind:agent @timestamp:[2026-11-15T09:59:59.000Z TO 2026-11-15T10:00:01.000Z]',
+  );
+  assert.equal(agentCallQuery({ level: 'info', id: 1, message: 'm' }), undefined);
+});
+
+test('an agent call opens the logs around it, the transcript, or its command in a terminal', async (t) => {
+  const controller = setup(t);
+  terminals.length = 0;
+  opened.length = 0;
+  const shown: unknown[][] = [];
+  controller.showSource = async (...args: unknown[]) => void shown.push(args);
+  const start = Date.parse('2026-11-15T10:00:00.000Z');
+  controller.registry.records.set('s1', { id: 's1', serverId: 'agent:claude-code', cwd: '/work/shop' } as never);
+  controller.store.add({
+    level: 'info',
+    id: 1,
+    serverId: 'agent:claude-code',
+    sessionId: 's1',
+    message: 'Bash',
+    timestampMs: start,
+    fields: { kind: 'agent', action: 'tool', command: 'npm test', durationMs: 1000 },
+  });
+  controller.store.add({ level: 'info', id: 2, serverId: 'api', message: 'not an agent' });
+  controller.store.add({
+    level: 'info',
+    id: 3,
+    serverId: 'agent:claude-code',
+    sessionId: 's1',
+    message: 'no time',
+    fields: { kind: 'agent', action: 'tool' },
+  });
+
+  await controller.agentCall(1, 'logs');
+  assert.deepEqual(shown, [
+    ['', undefined, '-kind:agent @timestamp:[2026-11-15T09:59:59.000Z TO 2026-11-15T10:00:02.000Z]'],
+  ]);
+
+  await controller.agentCall(1, 'terminal');
+  assert.equal(terminals.length, 1);
+  assert.deepEqual(terminals[0].options, { name: 'Agent command', cwd: '/work/shop' });
+  assert.equal(terminals[0].shown, true);
+  assert.deepEqual(terminals[0].sent, [['npm test', false]]);
+
+  await controller.agentCall(1, 'transcript');
+  assert.equal(opened.length, 0, 'no followed transcript, nothing opened');
+  assert.match(notices.at(-1)!, /transcript is no longer being read/);
+
+  await controller.agentCall(3, 'logs');
+  assert.match(notices.at(-1)!, /no time/);
+  await controller.agentCall(3, 'terminal');
+  assert.equal(terminals.length, 1, 'no command, no terminal');
+
+  await controller.agentCall(2, 'logs');
+  assert.match(notices.at(-1)!, /no longer available/);
+  await controller.agentCall(99, 'terminal');
+  assert.match(notices.at(-1)!, /no longer available/);
+
+  (controller.agentSessions as { transcriptOf: (id: string) => string | undefined }).transcriptOf = () => '/x/s.jsonl';
+  await controller.agentCall(1, 'transcript');
+  assert.deepEqual(opened, [[{ fsPath: '/x/s.jsonl' }, { preview: true }]]);
 });
