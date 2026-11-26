@@ -312,6 +312,21 @@ test.describe('the Service list', () => {
     await expect(box).toBeFocused();
     await expect(box).toHaveValue('checkout');
     await expect(page.locator('#search')).toHaveValue('level:error service:checkout');
+
+    // A filter typed but not entered goes with the service; one that is not valid stays in the box.
+    const search = page.locator('#search');
+    await search.click();
+    await search.fill('env:prod');
+    await box.click();
+    await options.filter({ hasText: 'payments api' }).click();
+    await expect(page.locator('#searchChips')).toContainText('env:prod');
+    await search.click();
+    await search.fill('"unclosed');
+    await box.click();
+    await options.filter({ hasText: 'checkout' }).click();
+    await expect(box).toHaveValue('checkout');
+    await expect(search).toHaveValue('"unclosed');
+    await expect(page.locator('#searchChips')).toContainText('checkout');
   });
 });
 
@@ -357,6 +372,30 @@ test.describe('the search suggestions', () => {
     await expect(page.locator('#searchChips')).toContainText('appname');
     await expect(list).toBeHidden();
   });
+
+  test('keep the highlighted one when they are refreshed, and stay closed when the answer comes after the box is left', async ({
+    openPanel,
+  }) => {
+    const panel = await openPanel();
+    const { page } = panel;
+    const box = page.locator('#search');
+    const list = page.locator('#fieldSuggestions');
+    const reply = { type: 'autocomplete', input: 'app', values: [] };
+
+    await box.click();
+    await box.pressSequentially('app');
+    await panel.post({ ...reply, fields: ['appname', 'status'] });
+    await box.press('ArrowDown');
+    await box.press('ArrowDown');
+    await expect(box).toHaveAttribute('aria-activedescendant', 'search-1');
+    await panel.post({ ...reply, fields: ['apptype', 'appname', 'status'] });
+    await expect(box, 'the same suggestion stays highlighted').toHaveAttribute('aria-activedescendant', 'search-2');
+
+    await page.locator('#logs').click();
+    await expect(list).toBeHidden();
+    await panel.post({ ...reply, fields: ['appname'] });
+    await expect(list).toBeHidden();
+  });
 });
 
 test.describe('the metric name suggestions', () => {
@@ -398,5 +437,11 @@ test.describe('the metric name suggestions', () => {
     await expect(box).toHaveValue('avg:trace.http.request.hits');
     await expect(list).toBeHidden();
     expect((await panel.posted()).some((message) => message.type === 'metricQuery')).toBe(false);
+
+    // Enter with none highlighted runs the query and closes the list.
+    await box.fill('avg:trace');
+    await expect(options).toHaveCount(2);
+    await box.press('Enter');
+    await expect(list).toBeHidden();
   });
 });

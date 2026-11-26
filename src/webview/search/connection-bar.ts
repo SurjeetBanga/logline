@@ -40,20 +40,39 @@ const ANY_SERVICE_TERM = /^[-!(]*@?service:/i;
 // A boolean operator, or a group, makes which services a query searches more than one name.
 const BOOLEAN = /^(?:OR|NOT)$|^[-!]?\(|\)$/i;
 
-/** The query's terms, with a group such as `service:(a OR b)` kept as one term. */
+/** How far a term opens groups, or closes them when negative, leaving out parentheses inside quotes. */
+function groupDepth(token: string): number {
+  let depth = 0;
+  let quoted = false;
+  let escaped = false;
+  for (const char of token) {
+    if (escaped) escaped = false;
+    else if (char === '\\') escaped = true;
+    else if (char === '"') quoted = !quoted;
+    else if (!quoted) depth += char === '(' ? 1 : char === ')' ? -1 : 0;
+  }
+  return depth;
+}
+
+/**
+ * The query's terms, with a group such as `service:(a OR b)` kept as one term. A group that is never closed is
+ * left as separate terms, so the terms after it are not taken for part of it.
+ */
 function serviceTokens(text: string): string[] {
   const tokens: string[] = [];
+  let group: string[] = [];
   let depth = 0;
   for (const token of queryTokens(text)) {
-    if (depth > 0) tokens[tokens.length - 1] += ` ${token}`;
-    else if (SERVICE_TERM.test(token) && token.slice(token.indexOf(':') + 1).startsWith('(')) tokens.push(token);
+    if (depth > 0) group.push(token);
+    else if (SERVICE_TERM.test(token) && token.slice(token.indexOf(':') + 1).startsWith('(')) group = [token];
     else {
       tokens.push(token);
       continue;
     }
-    for (const char of token.startsWith('"') ? '' : token) depth += char === '(' ? 1 : char === ')' ? -1 : 0;
-    depth = Math.max(depth, 0);
+    depth = Math.max(depth + groupDepth(token), 0);
+    if (depth === 0) tokens.push(group.join(' '));
   }
+  if (depth > 0) tokens.push(...group);
   return tokens;
 }
 
@@ -110,8 +129,8 @@ export function createConnectionBar(
   saveState: () => void,
   /** Compare a run of the connection with local runs. */
   compare: (baselineServerId: string, baselineSessionId: string) => void,
-  /** Replace the filter, such as with a service chosen in the list. */
-  setQuery: (query: string) => void,
+  /** Replace the filter, such as with a service chosen in the list, keeping what is typed in the box when asked. */
+  setQuery: (query: string, keepDraft?: boolean) => void,
   /** Apply a filter typed but not yet entered; false when it is not valid. */
   applyPending: () => boolean = () => true,
 ) {
@@ -338,14 +357,14 @@ export function createConnectionBar(
    * While the store's query is sent, the filter only narrows what is shown, so a
    * `service:` left in it from before hides every row of another service. Drop it.
    */
-  function alignFilter(connection: ConnectionView): void {
+  function alignFilter(connection: ConnectionView, keepDraft = false): void {
     if (!native(connection)) return;
     const sent = soleService(state.nativeOf(connection.type).query);
     const shown = soleService(query());
     // The filter matches a value anywhere in the field, ignoring case, so only a name the sent one lacks conflicts.
     // With OR, NOT, a wildcard, or a group on either side the filter may still match, and is left alone.
     if (sent !== undefined && shown !== undefined && !sent.toLowerCase().includes(shown.toLowerCase()))
-      setQuery(withService(query(), ''));
+      setQuery(withService(query(), ''), keepDraft);
   }
 
   function chooseService(service: string): void {
@@ -356,12 +375,15 @@ export function createConnectionBar(
     edited = false;
     closeList();
     if (service !== currentService(connection)) {
+      // A filter typed but not yet entered is applied first, so changing the filter does not throw it away. One that
+      // is not valid stays in the box, saying why, and the service is chosen all the same.
+      const keepDraft = !applyPending();
       if (native(connection)) {
         state.setNative(connection.type, { query: withService(state.nativeOf(connection.type).query, service) });
         saveState();
-        alignFilter(connection);
+        alignFilter(connection, keepDraft);
         render();
-      } else if (applyPending()) setQuery(withService(query(), service));
+      } else setQuery(withService(query(), service), keepDraft);
     }
     input.value = currentService(connection);
     input.placeholder = input.value || 'Any service';

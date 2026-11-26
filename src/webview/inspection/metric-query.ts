@@ -323,7 +323,11 @@ export function createMetricQuery(
   scope.listen(elements.metricInput, 'keydown', (event) => {
     // With a name highlighted, Enter picks it rather than running the query.
     if (suggestions.keydown(event as KeyboardEvent)) return;
-    if ((event as KeyboardEvent).key === 'Enter') run();
+    if ((event as KeyboardEvent).key !== 'Enter') return;
+    // The names listed would otherwise stay over the chart while the box keeps focus.
+    clearTimeout(suggestTimer);
+    suggestions.hide();
+    run();
   });
   scope.listen(elements.metricInput, 'input', () => {
     updateWatch();
