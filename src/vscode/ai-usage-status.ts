@@ -10,6 +10,7 @@ import {
   type AppUsage,
   type CodexUsage,
 } from '../core/codex-usage';
+import { NO_CLAUDE_USAGE, type ClaudeUsage } from '../core/claude-usage';
 import type { GenAiCall } from '../core/gen-ai';
 import type { Settings } from '../core/settings';
 
@@ -20,6 +21,8 @@ const PRIORITY = 1;
 const COMMANDS = [
   'logline.setAiUsageDetail',
   'logline.enableCodexUsage',
+  'logline.enableClaudeUsage',
+  'logline.showAgentSessions',
   'logline.logs.focus',
   'workbench.action.openSettings',
 ];
@@ -29,6 +32,10 @@ export interface AiUsageSources {
   /** The GenAI calls Logline retains: the same array until a call arrives or leaves. */
   calls(): readonly GenAiCall[];
   reader: { poll(): Promise<CodexUsage> };
+  /** Claude Code's tokens of today. */
+  claudeReader?: { poll(): Promise<ClaudeUsage> };
+  /** Show the agent sessions captured in the Logs panel. */
+  showAgentSessions?: () => void;
   now?: () => number;
 }
 
@@ -41,6 +48,7 @@ export class AiUsageStatus implements vscode.Disposable {
   private readonly disposables: vscode.Disposable[] = [];
   private readonly timer: ReturnType<typeof setInterval>;
   private usage: CodexUsage = NO_CODEX_USAGE;
+  private claudeUsage: ClaudeUsage = NO_CLAUDE_USAGE;
   private reading?: Promise<void>;
   private app?: { calls: readonly GenAiCall[]; usage: AppUsage };
   /** What the item shows, so a poll that changes nothing leaves it alone instead of redrawing it. */
@@ -57,8 +65,11 @@ export class AiUsageStatus implements vscode.Disposable {
     register('logline.showAiUsage', () => vscode.commands.executeCommand('logline.logs.focus'));
     register('logline.setAiUsageDetail', (detail?: unknown) => this.setDetail(detail));
     register('logline.enableCodexUsage', () => this.enableCodex());
+    register('logline.enableClaudeUsage', () => this.enableClaude());
+    register('logline.showAgentSessions', () => this.showAgentSessions());
     const changed = vscode.workspace.onDidChangeConfiguration?.((event) => {
-      if (event.affectsConfiguration('logline.aiUsage')) void this.refresh();
+      if (event.affectsConfiguration('logline.aiUsage') || event.affectsConfiguration('logline.agentSessions'))
+        void this.refresh();
     });
     if (changed) this.disposables.push(changed);
     this.timer = setInterval(() => void this.refresh(), AI_USAGE_POLL_MS);
@@ -70,6 +81,10 @@ export class AiUsageStatus implements vscode.Disposable {
     return this.sources.config.get('aiUsage.codex', false);
   }
 
+  private get claude(): boolean {
+    return this.sources.config.get('aiUsage.claude', false);
+  }
+
   /** Read usage again and show it. A read still under way is waited for, not repeated. */
   refresh(): Promise<void> {
     this.reading ??= this.read().finally(() => (this.reading = undefined));
@@ -77,10 +92,18 @@ export class AiUsageStatus implements vscode.Disposable {
   }
 
   private async read(): Promise<void> {
-    if (!this.sources.config.get('aiUsage.enabled', true) || !this.codex) this.usage = NO_CODEX_USAGE;
+    const enabled = this.sources.config.get('aiUsage.enabled', true);
+    if (!enabled || !this.codex) this.usage = NO_CODEX_USAGE;
     else
       try {
         this.usage = await this.sources.reader.poll();
+      } catch {
+        /* keep what was read last */
+      }
+    if (!enabled || !this.claude || !this.sources.claudeReader) this.claudeUsage = NO_CLAUDE_USAGE;
+    else
+      try {
+        this.claudeUsage = await this.sources.claudeReader.poll();
       } catch {
         /* keep what was read last */
       }
@@ -93,7 +116,7 @@ export class AiUsageStatus implements vscode.Disposable {
     if (this.app?.calls !== calls) this.app = { calls, usage: appUsage(calls) };
     const detail = this.sources.config.get<AiUsageDetail>('aiUsage.detail', 'medium');
     const text = this.sources.config.get('aiUsage.enabled', true)
-      ? aiUsageText(this.usage, this.app.usage, detail)
+      ? aiUsageText(this.usage, this.app.usage, detail, this.claudeUsage)
       : '';
     if (!text) {
       if (this.shown !== undefined) this.item.hide();
@@ -103,6 +126,7 @@ export class AiUsageStatus implements vscode.Disposable {
     const tooltip = aiUsageTooltip(this.usage, this.app.usage, {
       detail,
       codex: this.codex,
+      ...(this.sources.claudeReader ? { claude: this.claude, claudeUsage: this.claudeUsage } : {}),
       now: (this.sources.now ?? Date.now)(),
     });
     const severity = aiUsageSeverity(this.usage);
@@ -150,6 +174,37 @@ export class AiUsageStatus implements vscode.Disposable {
       'Show Usage',
     );
     if (choice === 'Show Usage') await this.update('aiUsage.codex', true);
+  }
+
+  async enableClaude(): Promise<void> {
+    const choice = await vscode.window.showInformationMessage(
+      'Show Claude Code usage?',
+      {
+        modal: true,
+        detail:
+          'Logline reads the session files Claude Code keeps under ~/.claude/projects for the tokens of today. Claude Code does not record its plan limits there, so there is no percentage to show. Nothing is sent anywhere.',
+      },
+      'Show Usage',
+    );
+    if (choice === 'Show Usage') await this.update('aiUsage.claude', true);
+  }
+
+  /** Open the agent sessions in the Logs panel, turning their capture on first if the person agrees. */
+  async showAgentSessions(): Promise<void> {
+    if (!this.sources.config.get('agentSessions.enabled', false)) {
+      const choice = await vscode.window.showInformationMessage(
+        'Show agent sessions as logs?',
+        {
+          modal: true,
+          detail:
+            "Logline reads the transcripts Claude Code and Codex keep on this machine, for sessions in this workspace from the last day, and shows each prompt, tool call, and reply beside your app's logs. Nothing is sent anywhere unless you share it with an agent.",
+        },
+        'Show Sessions',
+      );
+      if (choice !== 'Show Sessions') return;
+      await this.update('agentSessions.enabled', true);
+    }
+    this.sources.showAgentSessions?.();
   }
 
   dispose(): void {

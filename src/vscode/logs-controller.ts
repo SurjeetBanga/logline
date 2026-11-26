@@ -27,6 +27,7 @@ import {
 } from '../core/traces';
 import { OtelIntegration } from './otel-integration';
 import { BrowserCapture } from '../capture/browser-capture';
+import { AgentSessionCapture } from '../capture/agent-sessions';
 import type { BrowserLauncher } from './browser';
 import { FileFollower } from '../capture/file-follower';
 import { RemoteSource } from '../capture/remote-source';
@@ -147,6 +148,7 @@ export class LogsController {
   readonly files = new FileFollower(this.config, this.registry, this.ingestion, this.state);
   /** The browser Logline opened, whose console and requests are captured. */
   readonly browser = new BrowserCapture(this.config, this.registry, this.ingestion, this.state);
+  readonly agentSessions = new AgentSessionCapture(this.config, this.registry, this.ingestion, this.state);
   /** Opens that browser; set where the extension's storage folder is known. */
   browserLauncher?: BrowserLauncher;
   /** Hears each run as it starts, after usage has counted it. */
@@ -287,6 +289,7 @@ export class LogsController {
       context.environmentVariableCollection,
     );
     this.runner.environment = (server, env) => this.otel.processEnvironment(server, env);
+    this.agentSessions.folders = () => (vscode.workspace.workspaceFolders ?? []).map((folder) => folder.uri.fsPath);
     this.searches = new SavedSearches(context.globalState);
     const workspaceApi = vscode.workspace as typeof vscode.workspace & {
       onDidChangeWorkspaceFolders?: typeof vscode.workspace.onDidChangeWorkspaceFolders;
@@ -1301,6 +1304,7 @@ export class LogsController {
       this.tasks.stopSessionById(sessionId);
       this.files.stopSessionById(sessionId);
       this.browser.stopSessionById(sessionId);
+      this.agentSessions.stopSessionById(sessionId);
       this.debug.stopSessionById(sessionId);
       this.remote.stopSessionById(sessionId);
       return;
@@ -1311,6 +1315,7 @@ export class LogsController {
       this.runner.stopServer(serverId);
       this.files.stopServer(serverId);
       this.browser.stopServer(serverId);
+      this.agentSessions.stopServer(serverId);
       this.debug.stopServer(serverId);
       this.remote.stopServer(serverId);
     } else {
@@ -1386,6 +1391,7 @@ export class LogsController {
     await this.otel.dispose();
     await this.files.dispose();
     await this.browser.dispose();
+    this.agentSessions.dispose();
     await this.remote.dispose();
     await this.remoteMetrics.dispose();
     this.connections.dispose();

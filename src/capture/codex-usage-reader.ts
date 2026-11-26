@@ -1,5 +1,6 @@
 import { promises as fs } from 'node:fs';
 import { join } from 'node:path';
+import { JsonlTail, listFolder as list } from './jsonl-tail';
 import { CodexUsageTally, readCodexLine, startOfDay, type CodexUsage } from '../core/codex-usage';
 
 export interface CodexUsageReaderOptions {
@@ -15,22 +16,6 @@ export const CODEX_SCAN_MS = 60_000;
  * second, so the first poll shows the whole day instead of a total that climbs over several polls.
  */
 export const CODEX_POLL_BYTES = 256 * 1024 * 1024;
-const CHUNK = 1024 * 1024;
-
-interface Followed {
-  offset: number;
-  /** The start of a line whose end has not been written yet. */
-  partial: Buffer;
-}
-
-async function list(directory: string): Promise<string[]> {
-  try {
-    return await fs.readdir(directory);
-  } catch {
-    return [];
-  }
-}
-
 /**
  * Reads what Codex records about its own usage: the session files it keeps
  * under the user's home folder. It reads only what was appended since the
@@ -38,7 +23,7 @@ async function list(directory: string): Promise<string[]> {
  */
 export class CodexUsageReader {
   private readonly tally = new CodexUsageTally();
-  private readonly files = new Map<string, Followed>();
+  private readonly files = new Map<string, JsonlTail>();
   private scanned = -Infinity;
   private seeded = false;
 
@@ -51,9 +36,11 @@ export class CodexUsageReader {
       await this.scan(startOfDay(now));
     }
     let budget = CODEX_POLL_BYTES;
-    for (const [file, followed] of this.files) {
+    for (const [file, tail] of this.files) {
       if (budget <= 0) break;
-      budget -= await this.follow(file, followed, budget, now);
+      budget -= await tail.read(budget, (line) => {
+        for (const record of readCodexLine(line)) this.tally.add(record, file, now);
+      });
     }
     return this.tally.totals(now);
   }
@@ -81,7 +68,7 @@ export class CodexUsageReader {
           continue;
         }
         current.add(file);
-        if (!this.files.has(file)) this.files.set(file, { offset: 0, partial: Buffer.alloc(0) });
+        if (!this.files.has(file)) this.files.set(file, new JsonlTail(file));
       }
     }
     this.seeded = true;
@@ -90,40 +77,5 @@ export class CodexUsageReader {
       this.files.delete(file);
       this.tally.forget(file);
     }
-  }
-
-  /** Read what was appended to a file, up to `budget` bytes; returns how many were read. */
-  private async follow(file: string, followed: Followed, budget: number, now: number): Promise<number> {
-    let handle: fs.FileHandle | undefined;
-    let read = 0;
-    try {
-      handle = await fs.open(file, 'r');
-      const { size } = await handle.stat();
-      // A file that shrank was rewritten: what follows is new.
-      if (size < followed.offset) Object.assign(followed, { offset: 0, partial: Buffer.alloc(0) });
-      const buffer = Buffer.allocUnsafe(Math.min(CHUNK, Math.max(0, size - followed.offset)));
-      while (followed.offset < size && read < budget) {
-        const { bytesRead } = await handle.read(
-          buffer,
-          0,
-          Math.min(buffer.length, size - followed.offset),
-          followed.offset,
-        );
-        if (!bytesRead) break;
-        followed.offset += bytesRead;
-        read += bytesRead;
-        const data = Buffer.concat([followed.partial, buffer.subarray(0, bytesRead)]);
-        const end = data.lastIndexOf(0x0a);
-        followed.partial = Buffer.from(data.subarray(end + 1));
-        if (end < 0) continue;
-        for (const line of data.toString('utf8', 0, end).split('\n'))
-          for (const record of readCodexLine(line)) this.tally.add(record, file, now);
-      }
-    } catch {
-      /* removed or unreadable: the next scan drops it */
-    } finally {
-      await handle?.close().catch(() => undefined);
-    }
-    return read;
   }
 }

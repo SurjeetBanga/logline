@@ -24,6 +24,7 @@ Run your app the way you already do: in a terminal, with F5, as a task, in Docke
 - **The browser too**: open your app from Logline, and its console, uncaught errors, and network requests land in the same timeline as the server's logs.
 - **Search like you think**: `level:error service:api`, `status:5xx`, `durationMs:>200`, `last:15m`, or `changed:true` for logs from code you changed since the last commit.
 - **Read any format**: JSON, logfmt, plain text, Pino, Winston, Log4j2, and ECS, with stack traces kept together.
+- **Agent sessions too**: what Claude Code and Codex did in your workspace, each prompt, tool call, and reply, shows beside your app's logs.
 - **Back to the code**: every log statement shows live hit counts, errors, and p95 durations above it, and **Break here** stops the debugger the next time it logs.
 
 ## Find the problem

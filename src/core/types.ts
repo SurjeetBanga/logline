@@ -40,7 +40,8 @@ export interface LogEvent {
   attachedTo?: number;
 }
 
-export type SourceKind = 'process' | 'task' | 'terminal' | 'import' | 'file' | 'debug' | 'otel' | 'remote' | 'browser';
+export type SourceKind =
+  'process' | 'task' | 'terminal' | 'import' | 'file' | 'debug' | 'otel' | 'remote' | 'browser' | 'agent';
 export type SessionStatus = 'running' | 'stopping' | 'exited' | 'failed';
 
 export interface SessionSummary {
