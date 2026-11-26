@@ -1217,7 +1217,8 @@
                     "cloudwatch",
                     "loki",
                     "elasticsearch",
-                    "gcp"
+                    "gcp",
+                    "github-actions"
                   ]
                 },
                 "path": {
@@ -1296,6 +1297,14 @@
                 "serviceField": {
                   "type": "string",
                   "description": "Cloud Logging: the field of a log entry that names its service. resource.labels.service_name when left out."
+                },
+                "repository": {
+                  "type": "string",
+                  "description": "GitHub Actions: the repository as owner/name, such as octo-org/shop. Signs in with the GitHub account VS Code is signed in to."
+                },
+                "branch": {
+                  "type": "string",
+                  "description": "GitHub Actions: the branch whose runs are read. The branch checked out in the workspace when left out."
                 },
                 "logs": {
                   "type": "object",

@@ -4,7 +4,16 @@
 import { CONNECTION_KINDS } from './connection-types';
 
 export type ConnectionType =
-  'sqlite' | 'postgres' | 'mysql' | 'mongodb' | 'datadog' | 'cloudwatch' | 'loki' | 'elasticsearch' | 'gcp';
+  | 'sqlite'
+  | 'postgres'
+  | 'mysql'
+  | 'mongodb'
+  | 'datadog'
+  | 'cloudwatch'
+  | 'loki'
+  | 'elasticsearch'
+  | 'gcp'
+  | 'github-actions';
 /** How a timestamp column stores time; `native` is a database date/time type. */
 export type TimeEncoding = 'iso' | 'epoch_s' | 'epoch_ms' | 'native';
 
@@ -117,7 +126,30 @@ export interface GcpConnection extends BaseConnection {
   /** A Cloud Logging API in place of Google's, on this machine, for tests. */
   endpoint?: string;
 }
+/** The CI runs of a GitHub repository, read with the GitHub account VS Code is signed in to. */
+export interface GitHubActionsConnection extends BaseConnection {
+  type: 'github-actions';
+  /** `owner/name`. */
+  repository: string;
+  /** The branch whose runs are read; the checked-out branch when left out. */
+  branch?: string;
+  /** A GitHub API in place of github.com's, such as GitHub Enterprise Server's `https://github.example.com/api/v3`, or one on this machine for tests. */
+  endpoint?: string;
+}
+/** `owner/name`, as GitHub allows them. */
+export function isGitHubRepository(value: string): boolean {
+  return (
+    /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})\/[A-Za-z0-9._-]{1,100}$/.test(value) &&
+    !value.endsWith('/.') &&
+    !value.endsWith('/..')
+  );
+}
+/** A branch name Git allows, closely enough to refuse a typo that could never match. */
+export function isGitBranch(value: string): boolean {
+  return value.length <= 255 && !/(?:^[-/.]|\.\.|[\s~^:?*[\\]|\/$|\.lock$|@\{)/.test(value);
+}
 export type ConnectionConfig =
+  | GitHubActionsConnection
   | GcpConnection
   | ElasticConnection
   | SqliteConnection
@@ -247,7 +279,10 @@ export function connectionLabel(connection: Pick<ConnectionConfig, 'type' | 'lab
  * points a connection elsewhere never receives them.
  */
 export function secretKey(
-  connection: Exclude<ConnectionConfig, SqliteConnection | CloudWatchConnection | GcpConnection>,
+  connection: Exclude<
+    ConnectionConfig,
+    SqliteConnection | CloudWatchConnection | GcpConnection | GitHubActionsConnection
+  >,
 ): string {
   if (connection.type === 'elasticsearch')
     return `logline.connection.elasticsearch:${apiUrl(connection.url) ?? connection.url}/${encodeURIComponent(connection.user ?? '')}`;
@@ -431,6 +466,19 @@ export function normalizeConnections(value: unknown): ConnectionConfig[] {
           ...(tenant ? { tenant } : {}),
           ...(user ? { user } : {}),
           ...(selector && isLokiSelector(selector) ? { selector } : {}),
+        };
+    } else if (item.type === 'github-actions') {
+      const repository = text(item.repository, 140);
+      const branch = text(item.branch, 255);
+      const endpoint = typeof item.endpoint === 'string' ? apiUrl(item.endpoint.trim()) : undefined;
+      if (repository && isGitHubRepository(repository))
+        connection = {
+          id,
+          label,
+          type: 'github-actions',
+          repository,
+          ...(branch && isGitBranch(branch) ? { branch } : {}),
+          ...(endpoint ? { endpoint } : {}),
         };
     } else if (item.type === 'cloudwatch') {
       const region = text(item.region, 32);

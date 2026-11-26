@@ -531,3 +531,39 @@ test('a password holding @ moves out of the URL whole', () => {
   assert.equal(mongo?.password, secret);
   assert.equal(withoutPassword(`postgres://dev:${secret}@db.local:5432/orders`), 'postgres://dev@db.local:5432/orders');
 });
+
+test('github-actions drafts accept repository URLs and check the branch', () => {
+  const draft = emptyDraft('github-actions');
+  for (const repository of ['octo/shop', 'https://github.com/octo/shop.git', 'git@github.com:octo/shop.git']) {
+    const result = readDraft({ ...draft, repository });
+    assert.deepEqual(result.errors, {}, repository);
+    assert.deepEqual(result.connection, {
+      id: 'draft',
+      label: 'draft',
+      type: 'github-actions',
+      repository: 'octo/shop',
+    });
+  }
+  assert.ok(readDraft(draft).errors.repository);
+  assert.ok(readDraft({ ...draft, repository: 'shop' }).errors.repository);
+  assert.ok(readDraft({ ...draft, repository: 'octo/shop', branch: 'a..b' }).errors.branch);
+  assert.equal(readDraft({ ...draft, repository: 'octo/shop', branch: 'a..b' }).connection, undefined);
+});
+
+test('github-actions drafts round-trip, are labelled by repository name, and keep an endpoint', () => {
+  const connection: ConnectionConfig = {
+    id: 'ci',
+    label: 'ci',
+    type: 'github-actions',
+    repository: 'octo/shop',
+    branch: 'main',
+  };
+  const draft = draftFromConnection(connection);
+  assert.equal(draft.repository, 'octo/shop');
+  assert.equal(draft.branch, 'main');
+  assert.deepEqual(readDraft(draft).connection, { ...connection, id: 'draft', label: 'draft' });
+  assert.equal(suggestedLabel(draft), 'shop');
+  const next = readDraft(draft).connection!;
+  const before = { ...connection, endpoint: 'http://127.0.0.1:1' } as ConnectionConfig;
+  assert.deepEqual(keepUnmodeled(next, before), { ...next, endpoint: 'http://127.0.0.1:1' });
+});

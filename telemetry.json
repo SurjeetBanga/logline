@@ -124,7 +124,7 @@
       "type": {
         "classification": "SystemMetaData",
         "purpose": "FeatureInsight",
-        "comment": "One of: sqlite, postgres, mysql, mongodb, datadog, cloudwatch, loki, elasticsearch, gcp."
+        "comment": "One of: sqlite, postgres, mysql, mongodb, datadog, cloudwatch, loki, github-actions, elasticsearch, gcp."
       },
       "auth": {
         "classification": "SystemMetaData",
@@ -138,7 +138,7 @@
       "type": {
         "classification": "SystemMetaData",
         "purpose": "FeatureInsight",
-        "comment": "One of: sqlite, postgres, mysql, mongodb, datadog, cloudwatch, loki, elasticsearch, gcp."
+        "comment": "One of: sqlite, postgres, mysql, mongodb, datadog, cloudwatch, loki, github-actions, elasticsearch, gcp."
       },
       "ok": {
         "classification": "SystemMetaData",
@@ -162,7 +162,7 @@
       "type": {
         "classification": "SystemMetaData",
         "purpose": "FeatureInsight",
-        "comment": "One of: sqlite, postgres, mysql, mongodb, datadog, cloudwatch, loki, elasticsearch, gcp."
+        "comment": "One of: sqlite, postgres, mysql, mongodb, datadog, cloudwatch, loki, github-actions, elasticsearch, gcp."
       }
     },
     "surjeetbanga.logline/connection_sql_run": {
@@ -171,7 +171,7 @@
       "type": {
         "classification": "SystemMetaData",
         "purpose": "FeatureInsight",
-        "comment": "One of: sqlite, postgres, mysql, mongodb, datadog, cloudwatch, loki, elasticsearch, gcp."
+        "comment": "One of: sqlite, postgres, mysql, mongodb, datadog, cloudwatch, loki, github-actions, elasticsearch, gcp."
       },
       "ok": {
         "classification": "SystemMetaData",
@@ -185,7 +185,7 @@
       "type": {
         "classification": "SystemMetaData",
         "purpose": "FeatureInsight",
-        "comment": "One of: sqlite, postgres, mysql, mongodb, datadog, cloudwatch, loki, elasticsearch, gcp."
+        "comment": "One of: sqlite, postgres, mysql, mongodb, datadog, cloudwatch, loki, github-actions, elasticsearch, gcp."
       },
       "ok": {
         "classification": "SystemMetaData",
@@ -199,7 +199,7 @@
       "type": {
         "classification": "SystemMetaData",
         "purpose": "FeatureInsight",
-        "comment": "One of: sqlite, postgres, mysql, mongodb, datadog, cloudwatch, loki, elasticsearch, gcp."
+        "comment": "One of: sqlite, postgres, mysql, mongodb, datadog, cloudwatch, loki, github-actions, elasticsearch, gcp."
       }
     },
     "surjeetbanga.logline/shared_with_agent": {
@@ -595,6 +595,11 @@
         "comment": "A count, bucketed (0, 1-9, 10-99, ...)."
       },
       "conn_loki": {
+        "classification": "SystemMetaData",
+        "purpose": "FeatureInsight",
+        "comment": "A count, bucketed (0, 1-9, 10-99, ...)."
+      },
+      "conn_github-actions": {
         "classification": "SystemMetaData",
         "purpose": "FeatureInsight",
         "comment": "A count, bucketed (0, 1-9, 10-99, ...)."
