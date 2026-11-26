@@ -220,4 +220,8 @@ test('shellQuote and promptCommand quote a prompt for each shell', () => {
   assert.equal(shellQuote('say "hi"', 'cmd'), '"say ""hi"""');
   assert.equal(promptCommand('claude', 'Fix it', 'posix'), "claude 'Fix it'");
   assert.equal(promptCommand('claude', "a 'b'", 'powershell', 'C:\\x\\claude.exe'), "& 'C:\\x\\claude.exe' 'a ''b'''");
+  // Windows shells get no double quotes to split the prompt at, and Command Prompt no %NAME% to expand.
+  assert.equal(promptCommand('claude', 'Cannot read "id"', 'powershell'), "claude 'Cannot read ''id'''");
+  assert.equal(promptCommand('codex', 'at 100% "%PATH%"', 'cmd'), `codex "at 100 percent ' percentPATH percent'"`);
+  assert.equal(promptCommand('claude', 'say "hi" 100%', 'posix'), `claude 'say "hi" 100%'`);
 });

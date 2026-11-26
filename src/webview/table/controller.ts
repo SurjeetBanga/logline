@@ -641,6 +641,7 @@ export function createTable(
       findings: data.findings,
       crash: data.crash,
       attachedTo: data.attachedTo,
+      error: data.error,
     };
     return true;
   }

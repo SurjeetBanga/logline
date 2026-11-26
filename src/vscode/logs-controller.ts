@@ -68,6 +68,8 @@ const AUTOMATIC_KEYS = /^logline\.(?:usage\.|rating$|feedbackPrompt$|update$)/;
 import { AgentAccessError, AgentLogAccess } from './agent-access';
 import { ChangedLines, ChangeScope } from '../core/changed-lines';
 import { eventLocation, LogSiteIndex, LogSiteTracker } from '../core/log-sites';
+import { errorLine } from '../core/investigation';
+import { isErrorEvent, normalizeMessage, templateQuery } from '../core/log-analysis';
 import { getField } from '../core/query';
 import { extractExceptions } from '../core/exceptions';
 import type { LogEvent, SessionSummary } from '../core/types';
@@ -127,7 +129,7 @@ export class LogsController {
     this.lens?.schedule();
     this.doctor?.schedule();
     this.runtimeErrors?.schedule();
-    this.investigator?.check();
+    this.investigator?.schedule();
   });
   readonly store = new LogStore(this.config.get('maxEvents', 50000), this.config.get('maxMemoryMb', 100) * 1024 * 1024);
   readonly registry = new SessionRegistry();
@@ -646,6 +648,7 @@ export class LogsController {
       ...(findings?.length ? { findings } : {}),
       ...(crash ? { crash: { id: crash.id, message: crash.message ?? '', exceptions: extractExceptions(crash) } } : {}),
       ...(error ? { attachedTo: { id: error.id, message: error.message ?? '' } } : {}),
+      ...(isErrorEvent(event) ? { error: true } : {}),
     };
   }
   /**
@@ -1236,12 +1239,13 @@ export class LogsController {
   async investigateEvent(id: number, query?: string): Promise<void> {
     const event = this.store.find(id);
     if (!event || !this.investigator) return;
-    const message = (event.message ?? event.raw ?? '').split('\n').find((line) => line.trim()) ?? '';
+    const message = errorLine(event);
     const site = this.lens?.enabled ? this.logSites.match(event)?.site : undefined;
     await this.investigator.investigate({
-      message: message.trim(),
+      message,
       eventId: id,
-      query,
+      // The same search Analyze gives the error's group, so its later occurrences are found though their ids differ.
+      query: query ?? templateQuery(normalizeMessage(message)),
       location: site ? `${site.file}:${site.line}` : undefined,
       serverId: event.serverId,
     });

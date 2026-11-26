@@ -198,7 +198,8 @@ function numericField(event: LogEvent, names: readonly string[]): number | undef
   return undefined;
 }
 
-function isErrorEvent(event: LogEvent, status?: number): boolean {
+/** An event Analyze counts as an error: logged at error or fatal, or with an HTTP status of 500 or more. */
+export function isErrorEvent(event: LogEvent, status?: number): boolean {
   if (['error', 'fatal'].includes(String(event.level).toLowerCase())) return true;
   status ??= numericField(event, STATUS_FIELDS);
   return status !== undefined && status >= 500;
