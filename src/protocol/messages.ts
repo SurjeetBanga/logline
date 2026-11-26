@@ -93,6 +93,8 @@ export type ViewRequest =
   | { type: 'shareWithAgent'; sourceIds?: string[]; sessionIds?: string[]; anchor?: number; chooseRuns?: boolean }
   | { type: 'stopSharing' }
   | { type: 'askCopilot'; anchor?: number }
+  /** Hand the error an event shows to an agent; `query` finds the error's other events. */
+  | { type: 'investigate'; id: number; query?: string }
   | { type: 'shareEvent'; id: number }
   | { type: 'toggleTerminalCapture'; enabled: boolean }
   | { type: 'showGuide'; section?: 'guide' | 'whatsNew' }
@@ -551,6 +553,12 @@ export function parseViewRequest(value: unknown): ViewRequest | undefined {
         : undefined;
     case 'askCopilot':
       return { type: msg.type, anchor: index('anchor') };
+    case 'investigate': {
+      const id = index('id');
+      if (id === undefined) return undefined;
+      const query = typeof msg.query === 'string' && msg.query.length <= 2000 ? msg.query : undefined;
+      return query ? { type: msg.type, id, query } : { type: msg.type, id };
+    }
     case 'shareEvent': {
       const id = index('id');
       return id === undefined ? undefined : { type: msg.type, id };

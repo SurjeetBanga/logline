@@ -95,6 +95,11 @@ export function createInspection(
       api.postMessage({ type: 'breakOnEvent', id: Number(breakpoint.dataset.id) });
       return true;
     }
+    const investigate = (event.target as HTMLElement).closest<HTMLElement>('.investigate-button');
+    if (investigate) {
+      api.postMessage({ type: 'investigate', id: Number(investigate.dataset.id) });
+      return true;
+    }
     const share = (event.target as HTMLElement).closest<HTMLElement>('.share-source-button');
     if (share) {
       api.postMessage({ type: 'shareEvent', id: Number(share.dataset.id) });

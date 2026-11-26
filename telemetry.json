@@ -243,6 +243,24 @@
       "owner": "SurjeetBanga",
       "comment": "Ask Copilot was used."
     },
+    "surjeetbanga.logline/investigate": {
+      "owner": "SurjeetBanga",
+      "comment": "An error was handed to an agent with Investigate.",
+      "agent": {
+        "classification": "SystemMetaData",
+        "purpose": "FeatureInsight",
+        "comment": "One of: copilot, claude, codex, copy."
+      }
+    },
+    "surjeetbanga.logline/investigate_outcome": {
+      "owner": "SurjeetBanga",
+      "comment": "What the runs after an investigation showed.",
+      "fixed": {
+        "classification": "SystemMetaData",
+        "purpose": "FeatureInsight",
+        "comment": "true when the error stopped, false when it happened again."
+      }
+    },
     "surjeetbanga.logline/agent_connected": {
       "owner": "SurjeetBanga",
       "comment": "An agent called Logline for the first time in a while; which kind of client.",

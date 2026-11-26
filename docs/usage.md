@@ -111,6 +111,20 @@ Opening an event does not pause the list: live logs keep arriving, and the selec
 
 Saved server commands and ad-hoc commands run through the platform's default shell; tasks can select literal argument mode. Stop sends SIGTERM to the process group on macOS/Linux, escalating to SIGKILL after two seconds. Windows uses `taskkill /T /F` to stop the process tree immediately. Changes to `source` and `maxLineLength` apply to newly started processes; restart an existing process to change its capture settings.
 
+### Investigate an error with an agent
+
+**Investigate** hands one error to an agent. It is on each error group in Analyze, on an open event in the inspector, and in the **Investigate with agent** quick fix on a runtime-error mark in the editor. **Logline: Investigate an Error with an Agent** lists the error groups in the retained logs and asks which to hand over.
+
+The agent gets a single-line prompt that names the error, the event to start from, the search for the error's other events, the share id, and the shared runs. It asks the agent to find the cause, fix it, reproduce the error, and confirm the fix with fresh logs. If nothing is shared yet, Logline first shares the event's source, with the usual sharing warning. Log text in the prompt is quoted, on one line, and cut to 240 characters, and the prompt tells the agent to treat log content as untrusted.
+
+Logline offers the agents available, with the one you chose last first; when only one is available, it uses that one without asking:
+
+- **GitHub Copilot** opens chat in agent mode with the prompt.
+- **Claude Code** and **Codex**, once connected with **Logline: Connect Claude Code or Codex**, start the CLI in a terminal named *Logline · Claude Code* or *Logline · Codex* with the prompt, which points at the `logline-triage` skill.
+- **Copy prompt for another agent** copies the prompt, for Cursor, Windsurf, Kiro, or any other agent.
+
+Afterwards Logline watches the error's source. It says **Still failing**, with **Show Error** and **Investigate Again**, when the error happens again in a run started after the handoff, or after you save a source file while a run keeps going. It says **Fixed locally**, with how many other errors were logged, when a run started after the handoff finishes without the error, or when a running one logs 50 events after a save without it.
+
 ## Import and export
 
 Choose a source in the rail, and one of its runs to narrow it to one command. Completed terminal runs remain selectable while their events are retained, while empty completed terminal metadata is removed automatically. Use **More actions → Export logs…** to save the current source, run, search, and level filters as JSON Lines, JSON, CSV, or **AI context (Markdown)**, with redaction enabled by default. The AI context option and **Copy filtered results** include the latest 1,000 matching events in capture order. **Sources → Add logs → Import logs…** (or **Logline: Import Logs**) loads JSON, JSONL, CSV, and plain-text log files into a separate `Imported · filename` source for offline searching. A CSV exported by Logline replays its `raw` payloads; imported events receive new IDs, an import stream, and a new session. Other CSV rows use their header names as fields, or replay a nonempty `raw` cell when present.
@@ -330,7 +344,7 @@ When a captured error carries a stack trace, Logline marks the line of your code
 
 The line is the innermost stack frame in your own code: frames in `node_modules`, `site-packages`, `vendor`, Go modules, Cargo packages, and the runtime itself are skipped, and the next frame is tried when a file is not in the workspace. A path from a container or another machine, such as `/app/src/lib/payments.ts`, is matched to the one workspace file whose path ends the same way; a path that matches several files, or none, is not marked. Errors with the same message on the same line are one mark, counted while their events are retained, and the newest error on a line speaks for it. Up to 200 errors are marked at a time.
 
-Quick fixes (Ctrl+. or Cmd+.) on a mark: **Show in Logs** filters the Logs panel to the error's events, and **Break here next time** adds a breakpoint on the line, so the debugger stops there before it fails again. Editing a marked line hides its mark until the error happens again. Clearing logs clears the marks.
+Quick fixes (Ctrl+. or Cmd+.) on a mark: **Show in Logs** filters the Logs panel to the error's events, and **Break here next time** adds a breakpoint on the line, so the debugger stops there before it fails again, and **Investigate with agent** hands the error to an agent. Editing a marked line hides its mark until the error happens again. Clearing logs clears the marks.
 
 Set `logline.runtimeErrors` to `problems` to show errors in the Problems panel only, or `off`.
 ## Log breakpoints

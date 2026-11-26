@@ -9,6 +9,8 @@ export interface AnalysisActions {
   drill(term: string): void;
   /** Select one source exactly, as the source picker does. */
   selectSource(id: string): void;
+  /** Hand an error group to an agent, starting from one of its events. */
+  investigate?(id: number, query?: string): void;
 }
 
 /**
@@ -20,6 +22,11 @@ export function createAnalysis(elements: Elements, state: ViewerState, actions?:
   const numberFormat = new Intl.NumberFormat();
   const count = (value: number) => numberFormat.format(value);
   scope?.listen(elements.analysisContent, 'click', (event) => {
+    const investigate = (event.target as Element).closest?.<HTMLElement>('.group-investigate');
+    if (investigate?.classList.contains('group-investigate')) {
+      actions?.investigate?.(Number(investigate.dataset.id), investigate.dataset.query || undefined);
+      return;
+    }
     const target = (event.target as Element).closest?.<HTMLElement | SVGElement>('[data-term], [data-source]');
     if (!target || !actions) return;
     if (target.dataset.source !== undefined) actions.selectSource(target.dataset.source);
@@ -695,7 +702,25 @@ export function createAnalysis(elements: Elements, state: ViewerState, actions?:
     const errorMax = Math.max(1, ...errorGroups.map((item) => item.count));
     const shown = 20;
     if (errorGroups.length <= shown) allErrorGroups = false;
-    const errorRow = (item: ErrorGroup) => groupRow(item, errorTotal, errorMax, { detail: seen(item, analysis.range) });
+    const errorRow = (item: ErrorGroup) => {
+      const row = groupRow(item, errorTotal, errorMax, { detail: seen(item, analysis.range) });
+      const sample = item.sampleIds[item.sampleIds.length - 1];
+      if (sample === undefined || !actions?.investigate) return row;
+      // The row is itself a button, so Investigate sits beside it rather than in it.
+      const entry = document.createElement('div');
+      entry.className = 'group-item';
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'group-investigate';
+      button.textContent = 'Investigate';
+      button.title =
+        'Hand this error to an agent, such as Copilot, Claude Code, or Codex, and check whether its fix works';
+      button.setAttribute('aria-label', `Investigate ${item.message} with an agent`);
+      button.dataset.id = String(sample);
+      if (item.query) button.dataset.query = item.query;
+      entry.append(row, button);
+      return entry;
+    };
     for (const item of errorGroups.slice(0, allErrorGroups ? errorGroups.length : shown)) groups.append(errorRow(item));
     if (errorGroups.length > shown && !allErrorGroups) {
       const more = document.createElement('button');

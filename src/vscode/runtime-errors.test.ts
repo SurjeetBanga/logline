@@ -193,11 +193,18 @@ test('the line that raised an error is marked in the Problems panel and after th
   );
   assert.deepEqual(
     actions.map((action) => action.title),
-    ['Show in Logs', 'Break here next time'],
+    ['Show in Logs', 'Investigate with agent', 'Break here next time'],
   );
   await h.commands.get('logline.showRuntimeError')!(actions[0].command!.arguments![0]);
   assert.equal(h.queries.length, 1);
-  h.commands.get('logline.breakOnRuntimeError')!(actions[1].command!.arguments![0]);
+  assert.deepEqual(actions[1].command!.arguments![0], {
+    message: 'TypeError: boom',
+    eventId: 2,
+    query: (actions[1].command!.arguments![0] as { query?: string }).query,
+    count: 2,
+    location: '/w/src/lib/payments.ts:40',
+  });
+  h.commands.get('logline.breakOnRuntimeError')!(actions[2].command!.arguments![0]);
   assert.equal(h.breakpoints[0].location.range.line, 39);
   h.errors.dispose();
 });

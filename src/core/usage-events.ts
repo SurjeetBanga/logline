@@ -212,6 +212,8 @@ export const USAGE_EVENTS: Record<string, Record<string, Rule>> = {
   sharing_stopped: { duration: DURATION, by: oneOf('user', 'closed') },
   exported_for_ai: {},
   ask_copilot: {},
+  investigate: { agent: oneOf('copilot', 'claude', 'codex', 'copy') },
+  investigate_outcome: { fixed: BOOL },
   agent_setup: {
     agent: oneOf('host', 'claude', 'codex', 'other', 'none'),
     outcome: oneOf('added', 'copied', 'terminal', 'failed', 'cancelled', 'unavailable'),

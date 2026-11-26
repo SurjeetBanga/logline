@@ -82,6 +82,7 @@ import type {
 import type { LogBreakpoints } from './log-breakpoints';
 import { doctorMode, type LogDoctor } from './log-doctor';
 import type { RuntimeErrors } from './runtime-errors';
+import type { Investigator } from './investigate';
 import { SensitiveScanner, type SourceSensitive } from '../core/log-findings';
 import type { GitChanges } from './git-changes';
 import type { LogLens } from './log-lens';
@@ -126,6 +127,7 @@ export class LogsController {
     this.lens?.schedule();
     this.doctor?.schedule();
     this.runtimeErrors?.schedule();
+    this.investigator?.check();
   });
   readonly store = new LogStore(this.config.get('maxEvents', 50000), this.config.get('maxMemoryMb', 100) * 1024 * 1024);
   readonly registry = new SessionRegistry();
@@ -200,6 +202,8 @@ export class LogsController {
   doctor?: LogDoctor;
   /** Marks the lines that raised captured errors. */
   runtimeErrors?: RuntimeErrors;
+  /** Hands errors to agents and watches for their fix. */
+  investigator?: Investigator;
   /** Carries tool calls from Claude Code, Codex, and other MCP clients; attached at activation. */
   agentBridge?: AgentBridge;
   private pendingQuery?: string;
@@ -471,6 +475,7 @@ export class LogsController {
           this.shareWithAgent(sourceIds, anchor, sessionIds, chooseRuns),
         stopSharing: () => this.stopSharing(),
         askCopilot: (anchor) => this.askCopilot(anchor),
+        investigate: (id, query) => this.investigateEvent(id, query),
         toggleTerminalCapture: async (enabled) => void (await this.toggleTerminalCapture(enabled)),
         detailLinks: (event) => this.detailLinks(event),
         openLogSite: (id) => this.openLogSite(id),
@@ -1226,6 +1231,20 @@ export class LogsController {
   private setCapture(enabled: boolean): void {
     this.terminalCapture.setEnabled(enabled, this.captureSetting() !== enabled);
     this.notifications.send({ type: 'update' });
+  }
+  /** Investigate the error an event shows, from the Logs panel. */
+  async investigateEvent(id: number, query?: string): Promise<void> {
+    const event = this.store.find(id);
+    if (!event || !this.investigator) return;
+    const message = (event.message ?? event.raw ?? '').split('\n').find((line) => line.trim()) ?? '';
+    const site = this.lens?.enabled ? this.logSites.match(event)?.site : undefined;
+    await this.investigator.investigate({
+      message: message.trim(),
+      eventId: id,
+      query,
+      location: site ? `${site.file}:${site.line}` : undefined,
+      serverId: event.serverId,
+    });
   }
   async askCopilot(anchor?: number): Promise<boolean> {
     const status = this.agentAccess.status();

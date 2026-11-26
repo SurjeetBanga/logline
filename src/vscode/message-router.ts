@@ -91,6 +91,7 @@ interface MessageServices {
   shareWithAgent(sourceIds?: string[], anchor?: number, sessionIds?: string[], chooseRuns?: boolean): Promise<void>;
   stopSharing(): void;
   askCopilot(anchor?: number): Promise<boolean>;
+  investigate?(id: number, query?: string): Promise<void>;
   toggleTerminalCapture(enabled: boolean): Promise<void>;
   detailLinks(event: LogEvent): DetailLinks;
   openLogSite(id: number): Promise<void>;
@@ -291,6 +292,9 @@ export async function handleMessage(
       return;
     case 'askCopilot':
       await services.askCopilot(msg.anchor);
+      return;
+    case 'investigate':
+      await services.investigate?.(msg.id, msg.query);
       return;
     case 'shareEvent': {
       const event = store.find(msg.id);

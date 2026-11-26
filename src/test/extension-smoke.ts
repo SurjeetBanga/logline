@@ -35,6 +35,7 @@ export async function run(): Promise<void> {
       'shareSpecificRuns',
       'stopSharing',
       'askCopilot',
+      'investigate',
       'startOtlpReceiver',
       'stopOtlpReceiver',
       'showTrace',
