@@ -9,7 +9,13 @@ import { getElements, setLabel } from './dom';
 import { createTooltips } from './tooltip';
 import { EventScope } from './event-scope';
 import { createInspection } from './inspection/context';
-import { buildEventDetails, eventAction, eventFieldEntries, renderEventFields } from './inspection/details';
+import {
+  agentCallActions,
+  buildEventDetails,
+  eventAction,
+  eventFieldEntries,
+  renderEventFields,
+} from './inspection/details';
 import { createInspector, type InspectorContent } from './inspector';
 import { createTraceView } from './inspection/trace';
 import { createTraceList } from './inspection/traces';
@@ -486,8 +492,8 @@ export function createViewer(api: WebviewApi) {
     // A source and run chosen from the editor, such as a connection just added or a search just run. This
     // snapshot's rows and columns belong to the previous selection, so the next one is rendered instead.
     if (
-      data.applySource &&
-      data.servers?.some((server) => server.id === data.applySource) &&
+      data.applySource !== undefined &&
+      (data.applySource === '' || data.servers?.some((server) => server.id === data.applySource)) &&
       (data.applySource !== state.selectedServer || (data.applyRun ?? '') !== state.selectedSession)
     ) {
       views.show('logs');
@@ -1053,13 +1059,14 @@ export function createViewer(api: WebviewApi) {
       'Show the logs just before and after this event from the same run',
     );
     context.dataset.id = String(id);
+    const leading = [context, ...agentCallActions(id, event)];
     const body: Node[] = [
       buildEventDetails(
         id,
         state.selectedDetailText,
         state.selectedExceptions,
         state.selectedLinks,
-        [context],
+        leading,
         renderEventFields(selectedFields()),
       ),
     ];

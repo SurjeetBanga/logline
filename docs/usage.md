@@ -133,6 +133,10 @@ Logline reads Claude Code's transcripts under `~/.claude/projects` and Codex's u
 
 Each prompt, tool call, and reply is a log line with the fields `kind:agent`, `agent` (`claude-code` or `codex`), `action` (`prompt`, `tool`, or `reply`), `session`, and `model`. A tool call also has `tool`, `command`, `file`, `exitCode`, `durationMs`, and `output`, the end of what a failed call printed. A tool call is reported when its result arrives, at the time it was called, with level `error` when it failed or exited with a non-zero code. Try `kind:agent level:error`, `agent:claude-code tool:Bash exitCode:>0`, or `kind:agent durationMs:>10000`.
 
+An agent event opened in the inspector has actions beside **Surrounding logs**. **Logs during this call**, on a tool call, shows your app's logs from every source except the agents, from a second before the call started to a second after it ended, using the search `-kind:agent @timestamp:[… TO …]`. **Open transcript** opens the session's transcript file in the editor while Logline is reading it. **Run in terminal**, on a tool call with a command, pastes the command into a new terminal named `Agent command`, in the folder the agent worked in, without running it.
+
+In the source rail, each session's run shows its tool calls, failed calls, and tokens under its name, such as `42 tools · 3 failed · 186k tok`, with its start time.
+
 Removing the source stops reading its sessions. Everything is read on your machine, and nothing leaves it unless you share it with an agent, where it is redacted like any logs.
 
 ## Import and export

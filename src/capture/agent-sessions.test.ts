@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { test } from 'node:test';
 import { claudeProjectDir } from '../core/agent-session';
 import { LogStore } from '../core/log-store';
-import { AGENT_IDLE_MS, AgentSessionCapture } from './agent-sessions';
+import { AGENT_IDLE_MS, AgentSessionCapture, sessionDetail } from './agent-sessions';
 import { Ingestion } from './ingestion';
 import { RuntimeState } from './runtime-state';
 import { SessionRegistry } from './session-registry';
@@ -290,4 +290,30 @@ test('sessions older than a day are not followed, and a session can be stopped b
   } finally {
     t.cleanup();
   }
+});
+
+test('a run says what it did, and the transcript it came from is known while it is followed', async () => {
+  const t = setup(true);
+  try {
+    const file = t.claudeFile();
+    writeFileSync(file, t.jsonl(...claudeSession(t.folder)));
+    await t.capture.poll();
+    const [run] = [...t.registry.records.values()];
+    assert.equal(run.detail, '1 tool · 1 failed · 30 tok');
+    assert.equal(t.capture.transcriptOf(run.id), file);
+    assert.equal(t.capture.transcriptOf('other'), undefined);
+  } finally {
+    t.cleanup();
+  }
+});
+
+test('a session detail counts tools, failures, and tokens, leaving out what is zero', () => {
+  const info = (toolCalls: number, failedCalls: number, input: number, output = 0, cached = 0) => ({
+    toolCalls,
+    failedCalls,
+    tokens: { input, output, cached },
+  });
+  assert.equal(sessionDetail(info(3, 1, 1000, 100, 100)), '3 tools · 1 failed · 1.2k tok');
+  assert.equal(sessionDetail(info(1, 0, 5)), '1 tool · 5 tok');
+  assert.equal(sessionDetail(info(0, 0, 0)), '0 tools');
 });

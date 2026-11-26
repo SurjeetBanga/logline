@@ -348,7 +348,10 @@ export function createSourceRail(
     // and so do a connection's or an import's runs, which are named by what they fetched.
     const byTime =
       new Set(sessions.map(runName)).size <= 1 &&
-      !sessions.some((session) => session.sourceKind === 'remote' || session.sourceKind === 'import');
+      !sessions.some(
+        (session) =>
+          session.sourceKind === 'remote' || session.sourceKind === 'import' || session.sourceKind === 'agent',
+      );
     for (const session of sessions) {
       const wrapper = document.createElement('div');
       wrapper.className = 'run-option-row';
@@ -360,11 +363,12 @@ export function createSourceRail(
         : runButton(
             session.id,
             runName(session),
-            [started, stateText].filter(Boolean).join(' · '),
-            session.sourceKind === 'remote' || session.sourceKind === 'import',
+            [started, session.detail ?? stateText].filter(Boolean).join(' · '),
+            session.sourceKind === 'remote' || session.sourceKind === 'import' || session.sourceKind === 'agent',
           );
       button.title = [
         runName(session),
+        session.detail && `${session.detail} · ${stateText}`,
         session.cwd,
         session.captureStatus && `Capture: ${session.captureStatus}`,
         session.captureReason,
