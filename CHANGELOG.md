@@ -6,6 +6,7 @@ All notable changes to Logline are documented in this file.
 
 ### Changes
 
+- **Runtime errors in the editor**: the line of your code that raised a captured error is marked with the error, how many times it happened, and how long ago, after the line and in the Problems panel. Logline finds the line from the error's stack trace, skipping frames in dependencies and the runtime, including paths from containers and other machines. Its quick fixes show the error's events in the Logs panel or add a breakpoint on the line. Editing the line hides the mark until the error happens again. `logline.runtimeErrors` shows errors in the Problems panel only, or turns this off.
 - **Search the Service list**: a connection's **Service** list is now a box you type in to narrow the list of services under it, instead of scrolling a long list. Pick one with a click, or with Up and Down and Enter; press Enter to choose what you typed, clear it for any service, or press Escape to keep the one chosen.
 
 ### Performance

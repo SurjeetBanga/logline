@@ -39,6 +39,7 @@ const CHOICES: Record<string, string[]> = {
   containerPrefixes: ['auto', 'off'],
   logDoctor: ['off', 'security', 'all'],
   logLenses: ['off', 'codelens', 'codelens+gutter'],
+  runtimeErrors: ['inline', 'problems', 'off'],
   'otlp.showSpans': ['none', 'entry', 'all'],
 };
 

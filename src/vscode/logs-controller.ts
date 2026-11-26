@@ -81,6 +81,7 @@ import type {
 } from '../protocol/messages';
 import type { LogBreakpoints } from './log-breakpoints';
 import { doctorMode, type LogDoctor } from './log-doctor';
+import type { RuntimeErrors } from './runtime-errors';
 import { SensitiveScanner, type SourceSensitive } from '../core/log-findings';
 import type { GitChanges } from './git-changes';
 import type { LogLens } from './log-lens';
@@ -124,6 +125,7 @@ export class LogsController {
     this.notifications.notify();
     this.lens?.schedule();
     this.doctor?.schedule();
+    this.runtimeErrors?.schedule();
   });
   readonly store = new LogStore(this.config.get('maxEvents', 50000), this.config.get('maxMemoryMb', 100) * 1024 * 1024);
   readonly registry = new SessionRegistry();
@@ -196,6 +198,8 @@ export class LogsController {
   breakpoints?: LogBreakpoints;
   /** Diagnostics on log statements; attached at activation with log lenses. */
   doctor?: LogDoctor;
+  /** Marks the lines that raised captured errors. */
+  runtimeErrors?: RuntimeErrors;
   /** Carries tool calls from Claude Code, Codex, and other MCP clients; attached at activation. */
   agentBridge?: AgentBridge;
   private pendingQuery?: string;

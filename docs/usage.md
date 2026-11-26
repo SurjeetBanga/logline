@@ -312,6 +312,16 @@ Each captured event is attributed to a statement by the code location it reports
 
 Statements that produced retained events show a CodeLens such as **12 hits · 2 errors · last 3s ago**; click it to filter the Logs panel to those events. When a statement's events report how long something took, in `durationMs`, `duration`, `duration_ms`, or `responseTime` (the fields `durationMs:>200` searches), the lens shows it too: **1,204 hits · p50 12 ms · p95 180 ms**. Percentiles appear once there are at least 5 durations; before that the lens shows the value or the range. They cover the statement's latest 256 retained events that reported a non-negative number, and like the counts, they change as events are evicted. Hover over the statement to see its three most recent messages, how they were matched, and its p50, p95, p99, and maximum duration. With `logline.logLenses` set to `codelens+gutter`, statements that logged errors are also marked in the gutter and overview ruler. Counts cover the retained events and change as events arrive or are evicted; **Clear logs** resets them. Open events offer **Open code · file:line** to jump to the statement behind them, and **Logline: Show Log Statements That Have Not Logged** lists statements in the active file without retained events, which helps when a code path was never reached. Set `logline.logLenses` to `off` to stop indexing.
 
+## Runtime errors in the editor
+
+When a captured error carries a stack trace, Logline marks the line of your code that raised it. The mark appears after the line, such as **TypeError: Cannot read properties of undefined (reading 'card') · 14× · 2s ago**, and as an error in the Problems panel with the source **Logline runtime**. Stack traces are read the same way as in the inspector: JSON `err`, `error`, and `exception` fields, OpenTelemetry exception fields, and joined plain-text traces from Node, Java, Python, and other runtimes. Only events at `error` or `fatal` count.
+
+The line is the innermost stack frame in your own code: frames in `node_modules`, `site-packages`, `vendor`, Go modules, Cargo packages, and the runtime itself are skipped, and the next frame is tried when a file is not in the workspace. A path from a container or another machine, such as `/app/src/lib/payments.ts`, is matched to the one workspace file whose path ends the same way; a path that matches several files, or none, is not marked. Errors with the same message on the same line are one mark, counted while their events are retained, and the newest error on a line speaks for it. Up to 200 errors are marked at a time.
+
+Quick fixes (Ctrl+. or Cmd+.) on a mark: **Show in Logs** filters the Logs panel to the error's events, and **Break here next time** adds a breakpoint on the line, so the debugger stops there before it fails again. Editing a marked line hides its mark until the error happens again. Clearing logs clears the marks.
+
+Set `logline.runtimeErrors` to `problems` to show errors in the Problems panel only, or `off`.
+
 ## Log breakpoints
 
 Breakpoints usually stop on code. Log breakpoints stop on what the program logs, which is often how you notice a bug first.
@@ -503,6 +513,7 @@ Settings are grouped the same way in the Settings editor (**More actions → Set
 | `logline.logLenses` | `codelens` | `off`, `codelens`, or `codelens+gutter`: show activity for log statements in the editor. |
 | `logline.logLensMaxFiles` | `5000` | Workspace source files scanned for log statements; files that events report are indexed on demand beyond it. |
 | `logline.logDoctor` | `all` | `off`, `security` (secrets and personal data), or `all`: report problems with log statements in the Problems panel. |
+| `logline.runtimeErrors` | `inline` | `inline`, `problems`, or `off`: mark the line that raised each captured error, after the line and in the Problems panel. |
 
 ## Bounded retention
 
