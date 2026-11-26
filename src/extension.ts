@@ -24,6 +24,7 @@ import { registerDebugCapture } from './vscode/debug-capture';
 import { LogBreakpoints } from './vscode/log-breakpoints';
 import { LogDoctor } from './vscode/log-doctor';
 import { LogLens } from './vscode/log-lens';
+import { LogInserter } from './vscode/log-insert';
 import { GitChanges } from './vscode/git-changes';
 import { RatingPrompt } from './vscode/rating-prompt';
 import { Usage, usageEnvironment, usageVocabulary } from './vscode/usage';
@@ -131,6 +132,8 @@ export function activate(context: vscode.ExtensionContext): { provider: LogsProv
       context.subscriptions.push(controller.doctor);
     }
   }
+  // Insert Log edits documents; hosts without document events still capture logs.
+  if (typeof vscode.workspace?.onDidOpenTextDocument === 'function') context.subscriptions.push(new LogInserter(usage));
   // Changed lines come from the built-in git extension; without it, no code counts as changed.
   if (typeof vscode.extensions?.getExtension === 'function') {
     const logController = controller;

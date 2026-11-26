@@ -6,6 +6,7 @@ All notable changes to Logline are documented in this file.
 
 ### Changes
 
+- **Insert Log**: **Logline: Insert Log** (Ctrl+Alt+L, Cmd+Alt+L on macOS) adds a log line for the selected expression, or the name at the cursor, at each cursor, using the logging call the file already uses and a quiet level, with the value as a field where the logger supports it. Each inserted line ends in a `// logline` comment (`# logline` in Python and Ruby). Once an inserted line has logged, its CodeLens leads with the latest value, such as `order = {"id":42} · 3 hits · last 1s ago`. **Remove Inserted Logs in This File** and **Remove Inserted Logs in Workspace** delete the marked lines; the workspace command asks first, and a button in the Source Control view runs it while there are inserted lines to remove.
 - **Search the Service list**: a connection's **Service** list is now a box you type in to narrow the list of services under it, instead of scrolling a long list. Pick one with a click, or with Up and Down and Enter; press Enter to choose what you typed, clear it for any service, or press Escape to keep the one chosen.
 
 ### Performance

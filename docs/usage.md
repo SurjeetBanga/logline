@@ -312,6 +312,18 @@ Each captured event is attributed to a statement by the code location it reports
 
 Statements that produced retained events show a CodeLens such as **12 hits · 2 errors · last 3s ago**; click it to filter the Logs panel to those events. When a statement's events report how long something took, in `durationMs`, `duration`, `duration_ms`, or `responseTime` (the fields `durationMs:>200` searches), the lens shows it too: **1,204 hits · p50 12 ms · p95 180 ms**. Percentiles appear once there are at least 5 durations; before that the lens shows the value or the range. They cover the statement's latest 256 retained events that reported a non-negative number, and like the counts, they change as events are evicted. Hover over the statement to see its three most recent messages, how they were matched, and its p50, p95, p99, and maximum duration. With `logline.logLenses` set to `codelens+gutter`, statements that logged errors are also marked in the gutter and overview ruler. Counts cover the retained events and change as events arrive or are evicted; **Clear logs** resets them. Open events offer **Open code · file:line** to jump to the statement behind them, and **Logline: Show Log Statements That Have Not Logged** lists statements in the active file without retained events, which helps when a code path was never reached. Set `logline.logLenses` to `off` to stop indexing.
 
+## Insert logs
+
+**Logline: Insert Log** (Ctrl+Alt+L, or Cmd+Alt+L on macOS, in a writable editor) adds a log line for the value you are looking at, so you can see it at run time without typing the call. For each cursor it logs the selected expression when the selection is on one line, or otherwise the dotted name at the cursor, such as `order.items.length`; keywords are ignored. With nothing usable at the cursor, the line logs that the line was reached.
+
+The line uses the logging call the file already uses most, such as `logger.info`, `console.log`, `slog.Info`, `_logger.LogInformation`, Rust's `info!`, or `$this->logger->info`, at a quiet level: never a warning or an error. Where the logger supports it, the value is a structured field, as in `logger.info({ order }, "checkout: order")` for loggers that take an object first. A file that logs nothing yet gets the language's print. The message is `<enclosing function>: <expression>`. JavaScript, TypeScript, Python, Go, Java, Kotlin, Scala, Groovy, C#, Rust, Ruby, PHP, Swift, and Dart are supported.
+
+The line goes after the statement at the cursor, following a statement that spans several lines. When that statement opens a block, the line goes inside the block; before a `return` or `throw`, it goes above it so that it runs. Every inserted line ends in a `// logline` comment (`# logline` in Python and Ruby), which is how Logline recognises it later and never touches code you wrote.
+
+Once an inserted line has logged and `logline.logLenses` is on, its CodeLens leads with the latest value it logged: **order = {"id":42} · 3 hits · last 1s ago**.
+
+To remove inserted lines, run **Logline: Remove Inserted Logs in This File** for the active editor, or **Logline: Remove Inserted Logs in Workspace**. The workspace command finds marked lines in workspace source files, skipping dependency and build folders such as `node_modules`, asks for confirmation, removes them, and saves the files that had no unsaved changes before. A trash button in the Source Control view's title runs it while an open file has inserted lines, or this window inserted some since the last workspace removal.
+
 ## Log breakpoints
 
 Breakpoints usually stop on code. Log breakpoints stop on what the program logs, which is often how you notice a bug first.
