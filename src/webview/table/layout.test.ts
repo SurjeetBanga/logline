@@ -28,6 +28,13 @@ test('a wide panel keeps every column and is not compact', () => {
   assert.ok(px('base:message') >= 500);
 });
 
+test('the time and level start no wider than they need, leaving the rest to the message', () => {
+  const { px } = layout(1000);
+  assert.equal(px('base:time'), 124);
+  assert.equal(px('base:level'), 80);
+  assert.equal(px('base:message'), 1000 - 124 - 80 - 110);
+});
+
 test('a medium panel collapses Source but keeps Level', () => {
   const { table, visibility } = layout(450);
   assert.equal(visibility('base:source'), 'collapse');

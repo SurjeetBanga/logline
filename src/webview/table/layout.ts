@@ -8,7 +8,8 @@ export function layoutColumnWidths(
   table: HTMLElement,
 ) {
   if (!columnElements.size) return;
-  const defaults: Record<string, number> = { 'base:time': 140, 'base:level': 110, 'base:source': 110 };
+  // The time and level start at the width they need, so the message has the rest.
+  const defaults: Record<string, number> = { 'base:time': 124, 'base:level': 80, 'base:source': 110 };
   const messageFloor = 300;
   // In a narrow panel the message gives way first, down to this, so times and levels stay whole.
   let messageMin = 140;
