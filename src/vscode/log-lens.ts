@@ -13,12 +13,13 @@ import {
 } from '../core/log-sites';
 import type { LogStore } from '../core/log-store';
 import type { Settings } from '../core/settings';
+import { isInsertedLine, loggedValue } from '../core/log-insert';
 import { openSourceLocation } from './source-navigation';
 
 export type LensMode = 'off' | 'codelens' | 'codelens+gutter';
 
 export interface LensSources {
-  store: Pick<LogStore, 'eventsAfter'>;
+  store: Pick<LogStore, 'eventsAfter' | 'find'>;
   config: Settings;
   index: LogSiteIndex;
   tracker: LogSiteTracker;
@@ -200,9 +201,10 @@ export class LogLens implements vscode.CodeLensProvider, vscode.HoverProvider, v
       const stats = this.sources.tracker.stats.get(site.id);
       if (!stats?.hits || site.line > document.lineCount) continue;
       const range = new vscode.Range(site.line - 1, 0, site.line - 1, 0);
+      const value = this.insertedValue(document, site, stats);
       lenses.push(
         new vscode.CodeLens(range, {
-          title: lensTitle(stats, now),
+          title: value ? `${value} · ${lensTitle(stats, now).replace('$(pulse) ', '')}` : lensTitle(stats, now),
           command: 'logline.showLogSite',
           arguments: [site.id],
           tooltip: `Show the ${stats.hits.toLocaleString()} matching events in the Logs panel`,
@@ -245,6 +247,24 @@ export class LogLens implements vscode.CodeLensProvider, vscode.HoverProvider, v
       `\n[Show in Logs](command:logline.showLogSite?${encodeURIComponent(JSON.stringify([site.id]))})`,
     );
     return new vscode.Hover(markdown);
+  }
+
+  /**
+   * For a line Insert Log wrote, what it logged last: `order = {"id":42}`.
+   * The name comes from the label, `checkout: order`.
+   */
+  private insertedValue(document: vscode.TextDocument, site: LogSite, stats: SiteStats): string | undefined {
+    if (!isInsertedLine(document.lineAt(site.line - 1).text)) return undefined;
+    const latest = stats.samples[stats.samples.length - 1];
+    const event = latest && this.sources.store.find(latest.id);
+    if (!event) return undefined;
+    const label = site.literals[0] ?? '';
+    const value = loggedValue(event, label.trim());
+    if (!value) return undefined;
+    const name = label.match(/:\s*([^:]+?)\s*=?\s*$/)?.[1];
+    return name && !name.startsWith('reached line')
+      ? `$(debug-console) ${name} = ${value}`
+      : `$(debug-console) ${value}`;
   }
 
   /** The file an indexed site was read from, when it was indexed in this window. */

@@ -338,6 +338,22 @@
         "category": "Logline"
       },
       {
+        "command": "logline.insertLog",
+        "title": "Insert Log",
+        "category": "Logline"
+      },
+      {
+        "command": "logline.removeInsertedLogsInFile",
+        "title": "Remove Inserted Logs in This File",
+        "category": "Logline"
+      },
+      {
+        "command": "logline.removeInsertedLogs",
+        "title": "Remove Inserted Logs in Workspace",
+        "category": "Logline",
+        "icon": "$(trash)"
+      },
+      {
         "command": "logline.showLogSite",
         "title": "Show Log Statement Events",
         "category": "Logline"
@@ -368,8 +384,27 @@
         "category": "Logline"
       }
     ],
+    "keybindings": [
+      {
+        "command": "logline.insertLog",
+        "key": "ctrl+alt+l",
+        "mac": "cmd+alt+l",
+        "when": "editorTextFocus && !editorReadonly"
+      }
+    ],
     "menus": {
+      "scm/title": [
+        {
+          "command": "logline.removeInsertedLogs",
+          "when": "logline.hasInsertedLogs",
+          "group": "navigation"
+        }
+      ],
       "commandPalette": [
+        {
+          "command": "logline.removeInsertedLogsInFile",
+          "when": "editorIsOpen"
+        },
         {
           "command": "logline.showLogSite",
           "when": "false"
