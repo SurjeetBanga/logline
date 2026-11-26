@@ -71,6 +71,7 @@ test('a fetch keeps the rows that match the whole search, oldest first, in a run
     },
   });
   assert.deepEqual(started, [info.sessionId]);
+  assert.equal(info.native, false, 'the run sent the filter');
   assert.equal(typeof requests[0].firstPage, 'function');
   assert.deepEqual(
     requests.map(({ firstPage: _, ...request }) => request),
@@ -124,6 +125,7 @@ test('typed SQL keeps its own row order and filter; a store without SQL says so'
     { query: 'ignored', sql: 'SELECT * FROM logs ORDER BY id DESC', title: 'SQL' },
   );
   assert.equal(info.kind, 'sql');
+  assert.equal(info.native, undefined);
   assert.deepEqual(messages(), ['b', 'a']);
   const failed = await remote.fetch(target({ fetchLogs: async () => result([]) }), {
     query: '',
@@ -131,6 +133,17 @@ test('typed SQL keeps its own row order and filter; a store without SQL says so'
     title: 'SQL',
   });
   assert.equal(failed.error, 'SQLite · app does not run SQL.');
+});
+
+test('a search of a query in the store’s syntax keeps every row and says it sent that query', async () => {
+  const { remote, target, messages } = setup();
+  const info = await remote.fetch(target({ fetchLogs: async () => result([row(1, 'info', 'kept')]) }), {
+    query: 'level:error',
+    native: 'service:checkout',
+    title: 'service:checkout',
+  });
+  assert.equal(info.native, true);
+  assert.deepEqual(messages(), ['kept'], 'the filter does not apply to a query typed for the store');
 });
 
 test('a failed fetch is a failed run that says why', async () => {

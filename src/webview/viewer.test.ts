@@ -4890,7 +4890,10 @@ test('a connection says whether agents may query it, and the button asks to chan
 });
 
 test('a Datadog connection lists its services to choose one, and can send a query in Datadog syntax', () => {
-  const { get, receive, messages, timers, savedStates, runtime } = viewer({ server: 'conn:dd', query: 'level:error' });
+  const { get, receive, messages, timers, savedStates, runtime, app } = viewer({
+    server: 'conn:dd',
+    query: 'level:error',
+  });
   const plain = (value: unknown) => JSON.parse(JSON.stringify(value));
   const connection = {
     id: 'dd',
@@ -5004,12 +5007,71 @@ test('a Datadog connection lists its services to choose one, and can send a quer
   key('Enter');
   service.listeners.get('blur')!();
   assert.equal(get('search').value, 'level:error service:checkout');
-  // Enter in an empty box chooses any service.
+  // Escape puts back a service whose case differs from the listed name, and the change that follows keeps it.
+  app.search.setQuery('level:error service:Checkout', true);
   service.listeners.get('focus')!();
+  service.value = 'pay';
+  service.listeners.get('input')!({ inputType: 'insertText' });
+  key('Escape');
+  service.listeners.get('change')!();
+  service.listeners.get('blur')!();
+  assert.equal(get('search').value, 'level:error service:Checkout');
+  // Focus that comes back with the window leaves what is typed alone.
+  service.listeners.get('focus')!();
+  service.value = 'paym';
+  service.listeners.get('input')!({ inputType: 'insertText' });
+  service.listeners.get('focus')!();
+  assert.equal(service.value, 'paym');
+  // Enter that ends an input method's composition chooses nothing.
+  service.listeners.get('keydown')!({ key: 'Enter', isComposing: true, preventDefault() {} });
+  assert.equal(get('search').value, 'level:error service:Checkout');
+  // A suggestion picked after an Enter chose the text typed replaces it.
+  key('Enter');
+  assert.equal(get('search').value, 'level:error service:paym');
+  service.value = 'payments api';
+  service.listeners.get('input')!({ inputType: 'insertReplacementText' });
+  assert.equal(get('search').value, 'level:error service:"payments api"');
+  service.listeners.get('blur')!();
+  // Enter in a box only emptied by focus keeps the service.
+  service.listeners.get('focus')!();
+  key('Enter');
+  service.listeners.get('blur')!();
+  assert.equal(get('search').value, 'level:error service:"payments api"');
+  // A box cleared by hand and left chooses any service, as does its clear button.
+  service.listeners.get('focus')!();
+  service.value = 'x';
+  service.listeners.get('input')!({ inputType: 'insertText' });
+  service.value = '';
+  service.listeners.get('input')!({ inputType: 'deleteContentBackward' });
+  service.listeners.get('change')!();
+  service.listeners.get('blur')!();
+  assert.equal(get('search').value, 'level:error');
+  assert.equal(service.value, '');
+  app.search.setQuery('level:error service:checkout', true);
+  service.listeners.get('focus')!();
+  service.listeners.get('input')!({ inputType: 'deleteContent' });
+  service.listeners.get('search')!();
+  service.listeners.get('blur')!();
+  assert.equal(get('search').value, 'level:error');
+  // Enter in a box cleared by hand chooses any service.
+  app.search.setQuery('level:error service:checkout', true);
+  service.listeners.get('focus')!();
+  service.value = 'c';
+  service.listeners.get('input')!({ inputType: 'insertText' });
+  service.value = '';
+  service.listeners.get('input')!({ inputType: 'deleteContentBackward' });
   key('Enter');
   service.listeners.get('blur')!();
   assert.equal(get('search').value, 'level:error');
   assert.equal(service.value, '');
+  // A filter typed but not entered is kept when a service is chosen.
+  get('search').value = 'level:warn';
+  service.listeners.get('focus')!();
+  service.value = 'checkout';
+  key('Enter');
+  service.listeners.get('blur')!();
+  assert.equal(get('search').value, 'level:error level:warn service:checkout');
+  app.search.setQuery('level:error', true);
   // Datadog syntax starts from what the filter became, and Run and Tail send it as typed.
   [...timers.values()].at(-1)!();
   const preview = plain(messages.filter((message) => message.type === 'connectionPreview').at(-1));
@@ -5064,7 +5126,7 @@ test('a Datadog connection lists its services to choose one, and can send a quer
 });
 
 test('with Datadog syntax on, an empty table counts the logs a run fetched that the filter hides', () => {
-  const { get, receive, messages } = viewer({ server: 'conn:dd', query: 'level:error' });
+  const { get, receive, messages, app } = viewer({ server: 'conn:dd', query: 'level:error' });
   const connection = {
     id: 'dd',
     sourceId: 'conn:dd',
@@ -5099,12 +5161,15 @@ test('with Datadog syntax on, an empty table counts the logs a run fetched that 
       connections: [connection],
       ...extra,
     });
-  const last = { sessionId: 's', kind: 'fetch', running: false, fetched: 5, kept: 5, local: [], at: 0, query: '' };
+  const last = { sessionId: 's', kind: 'fetch', running: false, fetched: 5, kept: 5, local: [], at: 0, native: false };
   snapshot({ connections: [{ ...connection, last }] });
   // The filter was what Run searched, so the rows it kept match it: something else hides them.
   assert.equal(get('empty').textContent, 'No matching rows. Change the filter or the range and press Run.');
+  // That stays so once Datadog syntax is on: the run on show still sent the filter.
   get('connectionSyntax').listeners.get('click')!();
   snapshot({ connections: [{ ...connection, last }] });
+  assert.equal(get('empty').textContent, 'No matching rows. Change the filter or the range and press Run.');
+  snapshot({ connections: [{ ...connection, last: { ...last, native: true } }] });
   assert.equal(
     get('empty').textContent,
     '5 logs fetched, but none match the filter level:error. Clear or change the filter to see them.',
@@ -5116,6 +5181,23 @@ test('with Datadog syntax on, an empty table counts the logs a run fetched that 
   get('search').listeners.get('keydown')!({ key: 'Enter', preventDefault() {} });
   get('connectionRun').listeners.get('click')!();
   assert.equal(JSON.parse(JSON.stringify(messages.at(-1))).query, 'level:error service:check*');
+  const sent = (filter: string, datadog: string) => {
+    get('connectionNative').value = datadog;
+    get('connectionNative').listeners.get('input')!();
+    app.search.setQuery(filter, true);
+    get('connectionRun').listeners.get('click')!();
+    return JSON.parse(JSON.stringify(messages.at(-1))).query as string;
+  };
+  // A quoted name with a space is one name, so a filter for another service is dropped.
+  assert.equal(sent('service:"payments api"', 'service:checkout'), '');
+  assert.equal(sent('service:billing', 'service:"payments api"'), '');
+  // With OR or NOT on either side the filter may still match, so it is kept whole.
+  assert.equal(sent('service:billing OR service:checkout', 'service:checkout'), 'service:billing OR service:checkout');
+  assert.equal(sent('level:error OR service:billing', 'service:checkout'), 'level:error OR service:billing');
+  assert.equal(sent('service:payments', 'service:checkout OR service:payments'), 'service:payments');
+  assert.equal(sent('service:billing', 'NOT service:checkout'), 'service:billing');
+  // The filter matches part of a value, ignoring case, so a name the sent one contains is kept.
+  assert.equal(sent('service:Checkout', 'service:checkout-api'), 'service:Checkout');
 });
 
 test('About Logline is a dialog in the panel with the version, links, and a copy of the details', () => {

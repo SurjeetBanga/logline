@@ -32,25 +32,62 @@ const PREVIEW_DELAY_MS = 250;
 const SERVICES_TTL_MS = 5 * 60000;
 const SERVICES_RETRY_MS = 30000;
 const SERVICE_TERM = /^@?service:/i;
-// One service named outright, rather than a wildcard or a group such as (a OR b).
-const PLAIN_SERVICE = /^[^\s()*?]+$/;
+// A term that names the service in any way: negated, grouped, or as it is.
+const ANY_SERVICE_TERM = /^[-!(]*@?service:/i;
+// A boolean operator, or a group, makes which services a query searches more than one name.
+const BOOLEAN = /^(?:OR|NOT)$|^[-!]?\(|\)$/i;
+
+/** The query's terms, with a group such as `service:(a OR b)` kept as one term. */
+function serviceTokens(text: string): string[] {
+  const tokens: string[] = [];
+  let depth = 0;
+  for (const token of queryTokens(text)) {
+    if (depth > 0) tokens[tokens.length - 1] += ` ${token}`;
+    else if (SERVICE_TERM.test(token) && token.slice(token.indexOf(':') + 1).startsWith('(')) tokens.push(token);
+    else {
+      tokens.push(token);
+      continue;
+    }
+    for (const char of token.startsWith('"') ? '' : token) depth += char === '(' ? 1 : char === ')' ? -1 : 0;
+    depth = Math.max(depth, 0);
+  }
+  return tokens;
+}
+
+/** A `service:` term's value without quotes, and whether it was quoted. */
+function serviceValue(term: string): { value: string; quoted: boolean } {
+  const value = term.slice(term.indexOf(':') + 1);
+  if (!value.startsWith('"')) return { value, quoted: false };
+  try {
+    return { value: JSON.parse(value) as string, quoted: true };
+  } catch {
+    return { value: value.slice(1, -1), quoted: true };
+  }
+}
 
 /** The `service:` value of a query, without quotes, or '' when it has none. */
 export function serviceOf(text: string): string {
-  const term = queryTokens(text).find((token) => SERVICE_TERM.test(token));
-  if (!term) return '';
-  const value = term.slice(term.indexOf(':') + 1);
-  if (!value.startsWith('"')) return value;
-  try {
-    return JSON.parse(value) as string;
-  } catch {
-    return value.slice(1, -1);
-  }
+  const term = serviceTokens(text).find((token) => SERVICE_TERM.test(token));
+  return term ? serviceValue(term).value : '';
+}
+
+/**
+ * The one service a query names outright, or undefined when it names none, more
+ * than one, a wildcard, or a group, or combines terms with OR or NOT.
+ */
+export function soleService(text: string): string | undefined {
+  const tokens = serviceTokens(text);
+  const terms = tokens.filter((token) => ANY_SERVICE_TERM.test(token));
+  if (terms.length !== 1 || !SERVICE_TERM.test(terms[0])) return undefined;
+  if (tokens.some((token) => token !== terms[0] && BOOLEAN.test(token))) return undefined;
+  const { value, quoted } = serviceValue(terms[0]);
+  // A quoted value is a name as it is; unquoted, `*` and `?` are wildcards and parentheses a group.
+  return value && (quoted || !/[()*?]/.test(value)) ? value : undefined;
 }
 
 /** The query with its `service:` terms replaced by one for `service`, or removed when it is ''. */
 export function withService(text: string, service: string): string {
-  const kept = queryTokens(text).filter((token) => !SERVICE_TERM.test(token));
+  const kept = serviceTokens(text).filter((token) => !SERVICE_TERM.test(token));
   if (service) kept.push(`service:${/[\s"():]/.test(service) ? JSON.stringify(service) : service}`);
   return kept.join(' ');
 }
@@ -85,6 +122,8 @@ export function createConnectionBar(
   let listed: string[] = [];
   /** Whether the service box has focus, so a refresh leaves what is being typed alone. */
   let choosing = false;
+  /** Whether the box was typed in, or cleared, since it was focused or a service chosen. */
+  let edited = false;
   /** The search in the store's own syntax that the filter became, from the last preview. */
   let statement = '';
   const numbers = new Intl.NumberFormat();
@@ -238,7 +277,7 @@ export function createConnectionBar(
     });
     elements.connectionServices.replaceChildren(...options);
     listed = answer.services.map((service) => service.name);
-    const how = 'type to find one, or clear it and press Enter for any service';
+    const how = 'type to find one, or clear it for any service';
     elements.connectionService.title = answer.error
       ? `Could not list services: ${answer.error}`
       : answer.services.some((service) => service.count === undefined)
@@ -273,10 +312,12 @@ export function createConnectionBar(
    */
   function alignFilter(connection: ConnectionView): void {
     if (!native(connection)) return;
-    const sent = serviceOf(state.nativeOf(connection.type).query);
-    const shown = serviceOf(query());
-    // A wildcard or a group on either side may still match, so only two different plain names conflict.
-    if (PLAIN_SERVICE.test(sent) && PLAIN_SERVICE.test(shown) && sent !== shown) setQuery(withService(query(), ''));
+    const sent = soleService(state.nativeOf(connection.type).query);
+    const shown = soleService(query());
+    // The filter matches a value anywhere in the field, ignoring case, so only a name the sent one lacks conflicts.
+    // With OR, NOT, a wildcard, or a group on either side the filter may still match, and is left alone.
+    if (sent !== undefined && shown !== undefined && !sent.toLowerCase().includes(shown.toLowerCase()))
+      setQuery(withService(query(), ''));
   }
 
   function chooseService(service: string): void {
@@ -284,13 +325,14 @@ export function createConnectionBar(
     if (!connection) return;
     // The box may keep focus, so `choosing` stays set until it is left, and later typing is not overwritten.
     const input = elements.connectionService;
+    edited = false;
     if (service !== currentService(connection)) {
       if (native(connection)) {
         state.setNative(connection.type, { query: withService(state.nativeOf(connection.type).query, service) });
         saveState();
         alignFilter(connection);
         render();
-      } else setQuery(withService(query(), service));
+      } else if (applyPending()) setQuery(withService(query(), service));
     }
     input.value = currentService(connection);
     input.placeholder = input.value || 'Any service';
@@ -358,36 +400,66 @@ export function createConnectionBar(
   // The box empties on focus so the whole list shows and typing searches it; the service stays as its placeholder.
   scope.listen(elements.connectionService, 'focus', () => {
     const connection = selected();
-    if (!connection) return;
+    // Focus that comes back with the window leaves what was being typed alone.
+    if (!connection || choosing) return;
     choosing = true;
+    edited = false;
     const input = elements.connectionService;
     input.placeholder = currentService(connection) || 'Any service';
     input.value = '';
   });
   scope.listen(elements.connectionService, 'blur', () => {
+    // The window losing focus blurs the box but leaves it focused within the page: keep what is typed.
+    if (document.activeElement === elements.connectionService) return;
     const connection = selected();
     choosing = false;
+    edited = false;
     elements.connectionService.placeholder = 'Any service';
     if (connection) showService(connection);
   });
+  /** Whether the box holds the service chosen already, as Escape leaves it. */
+  const unchanged = () => {
+    const connection = selected();
+    return !connection || elements.connectionService.value === currentService(connection);
+  };
+  scope.listen(elements.connectionService, 'input', (event) => {
+    edited = true;
+    // A suggestion picked from the list replaces the text, after any Enter that picked it chose what was typed.
+    if ((event as InputEvent).inputType !== 'insertReplacementText' || unchanged()) return;
+    const name = resolveService(elements.connectionService.value);
+    if (listed.includes(name)) chooseService(name);
+  });
   // Picking a suggestion, or typing a listed name in full, chooses that service; part of a name, as when
-  // Run is clicked while searching the list, is left alone. Enter chooses a name that is not listed.
+  // Run is clicked while searching the list, is left alone. A box cleared and left chooses any service.
   scope.listen(elements.connectionService, 'change', () => {
-    const lower = elements.connectionService.value.trim().toLowerCase();
-    const name = lower && listed.find((listedName) => listedName.toLowerCase() === lower);
-    if (name) chooseService(name);
+    if (unchanged()) return;
+    const value = elements.connectionService.value.trim();
+    if (!value) {
+      if (edited) chooseService('');
+      return;
+    }
+    const name = resolveService(value);
+    if (listed.includes(name)) chooseService(name);
+  });
+  // The box's clear button.
+  scope.listen(elements.connectionService, 'search', () => {
+    if (edited && !elements.connectionService.value.trim() && !unchanged()) chooseService('');
   });
   scope.listen(elements.connectionService, 'keydown', (event) => {
-    const key = (event as KeyboardEvent).key;
-    if (key === 'Enter') {
-      // Enter in an empty box chooses any service.
+    const keyboard = event as KeyboardEvent;
+    // Enter that ends a composition belongs to the input method.
+    if (keyboard.isComposing) return;
+    if (keyboard.key === 'Enter') {
       event.preventDefault();
-      chooseService(resolveService(elements.connectionService.value));
-    } else if (key === 'Escape') {
+      const value = elements.connectionService.value;
+      // Enter in a box cleared by hand chooses any service; in one only emptied by focus, it keeps the service.
+      if (value.trim() || edited) chooseService(resolveService(value));
+    } else if (keyboard.key === 'Escape') {
       event.preventDefault();
       // Put the service back first: leaving the box fires a change for whatever was typed.
       const connection = selected();
       if (connection) elements.connectionService.value = currentService(connection);
+      edited = false;
       elements.connectionService.blur();
     }
   });
@@ -465,8 +537,9 @@ export function createConnectionBar(
       const filter = query().trim();
       // While the store's query is sent the filter only narrows what is shown, so rows fetched by the run
       // on show but none in the table are hidden by the filter: say so, rather than suggest there were none.
+      // A run that sent the filter kept only rows that match it, so only one that sent the store's query counts.
       const hiddenByFilter =
-        native(connection) && (!state.selectedSession || state.selectedSession === last?.sessionId);
+        last?.native === true && (!state.selectedSession || state.selectedSession === last.sessionId);
       if (last && last.kept > 0 && filter && !last.running && hiddenByFilter)
         return `${numbers.format(last.kept)} ${noun(connection, last.kept)} fetched, but none match the filter ${filter}. Clear or change the filter to see them.`;
       if (last) return 'No matching rows. Change the filter or the range and press Run.';
