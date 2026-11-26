@@ -107,6 +107,9 @@ function services() {
       calls.push({ name: 'copilot', value: anchor });
       return true;
     },
+    investigate: async (...args: unknown[]) => {
+      calls.push({ name: 'investigate', value: args });
+    },
     toggleTerminalCapture: async (enabled: boolean) => {
       calls.push({ name: 'terminalCapture', value: enabled });
     },
@@ -150,6 +153,7 @@ test('message router dispatches every public action and preserves normalized inp
     { type: 'stopSharing' },
     { type: 'askCopilot', anchor: 1 },
     { type: 'shareEvent', id: 1 },
+    { type: 'investigate', id: 1, query: 'message:"boom"' },
     { type: 'toggleTerminalCapture', enabled: true },
     { type: 'showGuide', section: 'whatsNew' },
     { type: 'import' },
@@ -189,6 +193,10 @@ test('message router dispatches every public action and preserves normalized inp
     calls.filter((call) => call.name === 'otlp').map((call) => call.value),
     [true],
   );
+  assert.deepEqual(
+    calls.filter((call) => call.name === 'investigate').map((call) => call.value),
+    [[1, 'message:"boom"']],
+  );
   for (const name of [
     'saveSearch',
     'deleteSavedSearch',
@@ -199,6 +207,7 @@ test('message router dispatches every public action and preserves normalized inp
     'share',
     'stopSharing',
     'copilot',
+    'investigate',
     'terminalCapture',
     'guide',
     'import',

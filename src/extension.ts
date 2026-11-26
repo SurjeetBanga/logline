@@ -25,6 +25,7 @@ import { LogBreakpoints } from './vscode/log-breakpoints';
 import { LogDoctor } from './vscode/log-doctor';
 import { LogLens } from './vscode/log-lens';
 import { RuntimeErrors } from './vscode/runtime-errors';
+import { Investigator } from './vscode/investigate';
 import { LogInserter } from './vscode/log-insert';
 import { GitChanges } from './vscode/git-changes';
 import { RatingPrompt } from './vscode/rating-prompt';
@@ -140,6 +141,20 @@ export function activate(context: vscode.ExtensionContext): { provider: LogsProv
       });
       context.subscriptions.push(controller.runtimeErrors);
     }
+  }
+  if (typeof vscode.window?.createTerminal === 'function') {
+    const logController = controller;
+    controller.investigator = new Investigator({
+      store: logController.store,
+      runs: () => logController.registry.records.values(),
+      shareStatus: () => logController.agentAccess.status(),
+      share: (sourceIds, anchor) => logController.shareWithAgent(sourceIds, anchor),
+      openChat: (prompt) => logController.openChat(prompt, 'investigation prompt'),
+      showQuery: (query) => logController.showQuery(query),
+      globalState: context.globalState,
+      usage,
+    });
+    context.subscriptions.push(controller.investigator);
   }
   // Insert Log edits documents; hosts without document events still capture logs.
   if (typeof vscode.workspace?.onDidOpenTextDocument === 'function') context.subscriptions.push(new LogInserter(usage));

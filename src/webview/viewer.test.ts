@@ -6933,6 +6933,41 @@ const errorGroupsOf = (count: number) =>
     query: `message:"failure ${index}"`,
   }));
 
+test('the inspector hands the open error to an agent with Investigate', () => {
+  const { get, messages, receive } = viewer();
+  get('logs').listeners.get('click')!(clickOn('.message-button', rowButton(get, 42)));
+  receive({ type: 'details', id: 42, text: 'raw', exceptions: [] });
+  const button = get('inspectorBody').querySelector('.event-details')!.querySelector('.investigate-button')!;
+  assert.equal(button.querySelector('.event-action-label')?.textContent, 'Investigate');
+  get('inspectorBody').listeners.get('click')!(clickOn('.investigate-button', button));
+  assert.deepEqual(JSON.parse(JSON.stringify(messages.at(-1))), { type: 'investigate', id: 42 });
+});
+
+test('Analyze lists Investigate beside an error group and hands its newest event and search to an agent', () => {
+  const { get, receive, messages } = viewer();
+  get('analyze').listeners.get('click')!();
+  receive({
+    type: 'analysis',
+    requestId: analysisRequests(messages).at(-1)!.requestId,
+    analysis: {
+      ...emptyAnalysis,
+      errorGroups: [
+        { ...errorGroupsOf(1)[0], sampleIds: [4, 9] },
+        { ...errorGroupsOf(2)[1], sampleIds: [] },
+      ],
+    },
+  });
+  const buttons = get('analysisContent').querySelectorAll('.group-investigate');
+  assert.equal(buttons.length, 1, 'a group with no event to start from has nothing to investigate');
+  assert.equal(buttons[0].textContent, 'Investigate');
+  get('analysisContent').listeners.get('click')!({ target: buttons[0] });
+  assert.deepEqual(JSON.parse(JSON.stringify(messages.at(-1))), {
+    type: 'investigate',
+    id: 9,
+    query: 'message:"failure 0"',
+  });
+});
+
 test('a status code that is not three digits is a plain row, not a button that does nothing', () => {
   const { get, receive, messages } = viewer();
   get('analyze').listeners.get('click')!();

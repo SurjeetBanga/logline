@@ -208,3 +208,16 @@ test("VS Code's built-in Copilot counts as Copilot, though no extension shows it
   const extension = load('VSCodium', [], {});
   assert.equal(extension.copilotAvailable(), true, 'the Copilot Chat extension counts wherever it is installed');
 });
+
+test('shellQuote and promptCommand quote a prompt for each shell', () => {
+  const { shellQuote, promptCommand } = withVscode(
+    { env: { appName: 'Visual Studio Code' } },
+    () => require('./agent-setup') as typeof import('./agent-setup'),
+  );
+  assert.equal(shellQuote('plain', 'posix'), 'plain');
+  assert.equal(shellQuote("it's", 'posix'), `'it'\\''s'`);
+  assert.equal(shellQuote("a 'b'", 'powershell'), "'a ''b'''");
+  assert.equal(shellQuote('say "hi"', 'cmd'), '"say ""hi"""');
+  assert.equal(promptCommand('claude', 'Fix it', 'posix'), "claude 'Fix it'");
+  assert.equal(promptCommand('claude', "a 'b'", 'powershell', 'C:\\x\\claude.exe'), "& 'C:\\x\\claude.exe' 'a ''b'''");
+});

@@ -318,6 +318,11 @@
         "category": "Logline"
       },
       {
+        "command": "logline.investigate",
+        "title": "Investigate an Error with an Agent",
+        "category": "Logline"
+      },
+      {
         "command": "logline.startOtlpReceiver",
         "title": "Start OpenTelemetry Receiver",
         "category": "Logline"

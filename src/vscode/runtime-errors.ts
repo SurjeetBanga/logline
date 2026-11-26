@@ -126,7 +126,23 @@ export class RuntimeErrors implements vscode.CodeActionProvider, vscode.Disposab
         arguments: [entry.error.key],
       };
       breakpoint.diagnostics = [diagnostic];
-      actions.push(show, breakpoint);
+      const investigate = new vscode.CodeAction('Investigate with agent', vscode.CodeActionKind.QuickFix);
+      const relative = vscode.workspace.asRelativePath?.(entry.uri) ?? entry.uri.path;
+      investigate.command = {
+        title: 'Investigate with agent',
+        command: 'logline.investigate',
+        arguments: [
+          {
+            message: entry.error.message,
+            eventId: entry.error.lastId,
+            query: entry.error.query,
+            count: entry.error.count,
+            location: `${relative}:${entry.line + 1}`,
+          },
+        ],
+      };
+      investigate.diagnostics = [diagnostic];
+      actions.push(show, investigate, breakpoint);
     }
     return actions;
   }

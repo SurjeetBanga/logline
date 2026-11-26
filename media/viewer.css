@@ -2496,6 +2496,34 @@ select {
   border-radius: 1px;
   background: var(--vscode-charts-blue, #75beff);
 }
+.group-item {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+.group-item > .group-row {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.group-investigate {
+  flex: none;
+  padding: 1px 8px;
+  border: 1px solid var(--vscode-button-border, transparent);
+  border-radius: 2px;
+  background: var(--vscode-button-secondaryBackground, rgba(255, 255, 255, 0.08));
+  color: var(--vscode-button-secondaryForeground, inherit);
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+.group-investigate:hover {
+  background: var(--vscode-button-secondaryHoverBackground, rgba(255, 255, 255, 0.14));
+}
+.group-investigate:focus-visible {
+  outline: 1px solid var(--vscode-focusBorder, #007fd4);
+  outline-offset: 1px;
+}
 .group-row .level {
   flex: none;
   width: 46px;

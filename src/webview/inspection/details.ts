@@ -208,8 +208,14 @@ export function buildEventDetails(
     'Share with agent',
     "Share the logs of this event's source with agents, such as Copilot, Claude Code, or Codex, so they can read them",
   );
-  copy.dataset.id = share.dataset.id = String(id);
-  output.append(copy, share);
+  const investigateAction = eventAction(
+    'investigate-button',
+    'agent',
+    'Investigate',
+    'Hand this event to an agent, such as Copilot, Claude Code, or Codex, to find the cause and fix it; Logline then checks whether the fix works',
+  );
+  copy.dataset.id = share.dataset.id = investigateAction.dataset.id = String(id);
+  output.append(copy, share, investigateAction);
   for (const finding of links.findings ?? []) {
     // What log doctor found on the statement behind this event, with the same actions as the toolbar list.
     const banner = document.createElement('div');

@@ -15,7 +15,7 @@ export function agentLaunch(script: string, runtime = process.execPath): AgentLa
   return { command: runtime, args: [script], env: { ELECTRON_RUN_AS_NODE: '1' } };
 }
 
-type Agent = 'claude' | 'codex';
+export type Agent = 'claude' | 'codex';
 const AGENT_NAMES: Record<Agent, string> = { claude: 'Claude Code', codex: 'Codex' };
 
 const EXTENSIONS: Record<Agent, string> = { claude: 'anthropic.claude-code', codex: 'openai.chatgpt' };
@@ -43,6 +43,11 @@ export function agentCli(
     if (exists(bundled)) return bundled;
   }
   return agent;
+}
+
+/** The CLI of an installed agent extension in this editor, or its name on PATH. */
+export function installedAgentCli(agent: Agent): string {
+  return agentCli(agent, vscode.extensions?.getExtension(EXTENSIONS[agent])?.extensionPath);
 }
 
 function safeList(directory: string): string[] {
@@ -147,6 +152,30 @@ export function shellKind(shellPath: string | undefined, platform: NodeJS.Platfo
   return 'powershell';
 }
 
+/** One argument quoted for a shell. */
+export function shellQuote(value: string, shell: Shell): string {
+  // PowerShell expands $ and ` inside double quotes, so it gets single quotes, where only ' is special ('').
+  // Command Prompt has only double quotes; programs read "" inside them as one ".
+  if (shell === 'posix') return /^[\w@%+=:,./-]+$/.test(value) ? value : `'${value.replace(/'/g, `'\\''`)}'`;
+  if (shell === 'powershell') return `'${value.replace(/'/g, "''")}'`;
+  return `"${value.replace(/"/g, '""')}"`;
+}
+
+// An agent's program: its name on PATH, or a quoted path, which PowerShell needs & to run.
+function programFor(agent: Agent, cli: string, shell: Shell): string {
+  return cli === agent ? agent : `${shell === 'powershell' ? '& ' : ''}${shellQuote(cli, shell)}`;
+}
+
+/** The command that starts an agent's CLI on a prompt. */
+export function promptCommand(
+  agent: Agent,
+  prompt: string,
+  shell: Shell = shellKind(vscode.env?.shell),
+  cli: string = agent,
+): string {
+  return `${programFor(agent, cli, shell)} ${shellQuote(prompt, shell)}`;
+}
+
 /** The command that registers Logline with an agent's CLI, for every project. */
 export function setupCommand(
   agent: Agent,
@@ -154,21 +183,14 @@ export function setupCommand(
   shell: Shell = shellKind(vscode.env?.shell),
   cli: string = agent,
 ): string {
-  // PowerShell expands $ and ` inside double quotes, so it gets single quotes, where only ' is special ('').
-  // Command Prompt has only double quotes; programs read "" inside them as one ".
-  const quote =
-    shell === 'posix'
-      ? (value: string) => (/^[\w@%+=:,./-]+$/.test(value) ? value : `'${value.replace(/'/g, `'\\''`)}'`)
-      : shell === 'powershell'
-        ? (value: string) => `'${value.replace(/'/g, "''")}'`
-        : (value: string) => `"${value.replace(/"/g, '""')}"`;
+  const quote = (value: string) => shellQuote(value, shell);
   const env = Object.entries(launch.env)
     .map(([key, value]) => `--env ${key}=${quote(value)}`)
     .join(' ');
   const server = [launch.command, ...launch.args].map(quote).join(' ');
   // Claude Code needs an option between --env and the server name.
   // PowerShell needs & to run a quoted program path.
-  const program = cli === agent ? agent : `${shell === 'powershell' ? '& ' : ''}${quote(cli)}`;
+  const program = programFor(agent, cli, shell);
   return agent === 'claude'
     ? `${program} mcp add ${env} --transport stdio --scope user logline -- ${server}`
     : `${program} mcp add logline ${env} -- ${server}`;
