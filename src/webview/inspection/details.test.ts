@@ -17,6 +17,9 @@ class Node {
   setAttribute(name: string, value: string) {
     this.attributes[name] = value;
   }
+  cloneNode() {
+    return new Node();
+  }
   all(className: string): Node[] {
     return this.children.flatMap((child) => [
       ...(child.className.split(' ').includes(className) ? [child] : []),
@@ -24,9 +27,12 @@ class Node {
     ]);
   }
 }
-(globalThis as { document?: unknown }).document = { createElement: () => new Node() };
+(globalThis as { document?: unknown }).document = {
+  createElement: () => new Node(),
+  createElementNS: () => new Node(),
+};
 
-import { buildEventFields } from './details';
+import { agentCallActions, buildEventFields } from './details';
 
 const fields = (text: string | undefined) => buildEventFields(text) as unknown as Node | undefined;
 
@@ -68,4 +74,24 @@ test('a nested, null, or empty value is listed without filter buttons', () => {
 test('text that is not a JSON object has no field list', () => {
   for (const text of [undefined, '', 'plain text', '{not json', '[1,2]', '"string"', '42', '{}', 'null'])
     assert.equal(fields(text), undefined, String(text));
+});
+
+test('an agent tool call offers its logs, transcript, and command, and a prompt only its transcript', () => {
+  const calls = (fields: Record<string, string | number | boolean> | undefined) =>
+    (agentCallActions(7, { fields }) as unknown as Node[]).map((button) => [
+      button.className,
+      button.dataset.call,
+      button.dataset.id,
+    ]);
+  assert.deepEqual(calls({ kind: 'agent', action: 'tool', command: 'npm test' }), [
+    ['event-action agent-call-button', 'logs', '7'],
+    ['event-action agent-call-button', 'transcript', '7'],
+    ['event-action agent-call-button', 'terminal', '7'],
+  ]);
+  assert.deepEqual(
+    calls({ kind: 'agent', action: 'prompt' }).map((button) => button[1]),
+    ['transcript'],
+  );
+  assert.deepEqual(calls({ kind: 'http' }), []);
+  assert.deepEqual(calls(undefined), []);
 });

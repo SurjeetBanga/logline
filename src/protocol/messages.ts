@@ -95,6 +95,8 @@ export type ViewRequest =
   | { type: 'askCopilot'; anchor?: number }
   /** Hand the error an event shows to an agent; `query` finds the error's other events. */
   | { type: 'investigate'; id: number; query?: string }
+  /** An agent's tool call: show the app's logs while it ran, open the session's transcript, or paste its command in a terminal. */
+  | { type: 'agentCall'; id: number; action: 'logs' | 'transcript' | 'terminal' }
   | { type: 'shareEvent'; id: number }
   | { type: 'toggleTerminalCapture'; enabled: boolean }
   | { type: 'showGuide'; section?: 'guide' | 'whatsNew' }
@@ -560,6 +562,12 @@ export function parseViewRequest(value: unknown): ViewRequest | undefined {
       if (id === undefined) return undefined;
       const query = typeof msg.query === 'string' && msg.query.length <= 2000 ? msg.query : undefined;
       return query ? { type: msg.type, id, query } : { type: msg.type, id };
+    }
+    case 'agentCall': {
+      const id = index('id');
+      const action =
+        msg.action === 'logs' || msg.action === 'transcript' || msg.action === 'terminal' ? msg.action : undefined;
+      return id === undefined || !action ? undefined : { type: msg.type, id, action };
     }
     case 'shareEvent': {
       const id = index('id');

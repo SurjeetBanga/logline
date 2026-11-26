@@ -105,6 +105,12 @@ export function createInspection(
       api.postMessage({ type: 'shareEvent', id: Number(share.dataset.id) });
       return true;
     }
+    const agentCall = (event.target as HTMLElement).closest<HTMLElement>('.agent-call-button');
+    const call = agentCall?.dataset.call;
+    if (call === 'logs' || call === 'transcript' || call === 'terminal') {
+      api.postMessage({ type: 'agentCall', id: Number(agentCall!.dataset.id), action: call });
+      return true;
+    }
     const context = (event.target as HTMLElement).closest<HTMLElement>('.context-button');
     if (context) {
       showContext(Number(context.dataset.id));

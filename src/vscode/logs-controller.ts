@@ -27,6 +27,7 @@ import {
 } from '../core/traces';
 import { OtelIntegration } from './otel-integration';
 import { BrowserCapture } from '../capture/browser-capture';
+import { AgentSessionCapture } from '../capture/agent-sessions';
 import type { BrowserLauncher } from './browser';
 import { FileFollower } from '../capture/file-follower';
 import { RemoteSource } from '../capture/remote-source';
@@ -148,6 +149,7 @@ export class LogsController {
   readonly files = new FileFollower(this.config, this.registry, this.ingestion, this.state);
   /** The browser Logline opened, whose console and requests are captured. */
   readonly browser = new BrowserCapture(this.config, this.registry, this.ingestion, this.state);
+  readonly agentSessions = new AgentSessionCapture(this.config, this.registry, this.ingestion, this.state);
   /** Opens that browser; set where the extension's storage folder is known. */
   browserLauncher?: BrowserLauncher;
   /** Hears each run as it starts, after usage has counted it. */
@@ -288,6 +290,7 @@ export class LogsController {
       context.environmentVariableCollection,
     );
     this.runner.environment = (server, env) => this.otel.processEnvironment(server, env);
+    this.agentSessions.folders = () => (vscode.workspace.workspaceFolders ?? []).map((folder) => folder.uri.fsPath);
     this.searches = new SavedSearches(context.globalState);
     const workspaceApi = vscode.workspace as typeof vscode.workspace & {
       onDidChangeWorkspaceFolders?: typeof vscode.workspace.onDidChangeWorkspaceFolders;
@@ -397,7 +400,7 @@ export class LogsController {
       ...snapshot,
       ...(applyQuery !== undefined ? { applyQuery } : {}),
       ...(openTrace ? { openTrace } : {}),
-      ...(applySource ? { applySource } : {}),
+      ...(applySource !== undefined ? { applySource } : {}),
       ...(applySource && applyRun ? { applyRun } : {}),
     };
   }
@@ -479,6 +482,7 @@ export class LogsController {
         stopSharing: () => this.stopSharing(),
         askCopilot: (anchor) => this.askCopilot(anchor),
         investigate: (id, query) => this.investigateEvent(id, query),
+        agentCall: (id, action) => this.agentCall(id, action),
         toggleTerminalCapture: async (enabled) => void (await this.toggleTerminalCapture(enabled)),
         detailLinks: (event) => this.detailLinks(event),
         openLogSite: (id) => this.openLogSite(id),
@@ -545,6 +549,37 @@ export class LogsController {
     if (query !== undefined) this.pendingQuery = query;
     await vscode.commands.executeCommand('logline.logs.focus');
     this.notifications.send({ type: 'update' });
+  }
+  /** An agent's tool call, from its actions in the inspector. */
+  async agentCall(id: number, action: 'logs' | 'transcript' | 'terminal'): Promise<void> {
+    const event = this.store.find(id);
+    const fields = event?.fields;
+    if (!event || fields?.kind !== 'agent') {
+      void vscode.window.showWarningMessage('This agent event is no longer available.');
+      return;
+    }
+    if (action === 'logs') {
+      const query = agentCallQuery(event);
+      if (query) await this.showSource('', undefined, query);
+      else void vscode.window.showWarningMessage('This agent event has no time to look around.');
+      return;
+    }
+    if (action === 'transcript') {
+      const file = event.sessionId && this.agentSessions.transcriptOf(event.sessionId);
+      if (!file) {
+        void vscode.window.showWarningMessage("This session's transcript is no longer being read.");
+        return;
+      }
+      await vscode.window.showTextDocument(vscode.Uri.file(file), { preview: true });
+      return;
+    }
+    const command = typeof fields.command === 'string' ? fields.command : undefined;
+    if (!command) return;
+    const cwd = event.sessionId ? this.registry.records.get(event.sessionId)?.cwd : undefined;
+    const terminal = vscode.window.createTerminal({ name: 'Agent command', ...(cwd ? { cwd } : {}) });
+    terminal.show();
+    // Pasted, not run: the person reads it and presses Enter.
+    terminal.sendText(command, false);
   }
   /** Show the Connection form as a tab of the Logs panel, delivered with the next snapshot like reveal. */
   private async showConnectionForm(open: FormOpen, focus: boolean): Promise<void> {
@@ -1311,6 +1346,7 @@ export class LogsController {
       this.tasks.stopSessionById(sessionId);
       this.files.stopSessionById(sessionId);
       this.browser.stopSessionById(sessionId);
+      this.agentSessions.stopSessionById(sessionId);
       this.debug.stopSessionById(sessionId);
       this.remote.stopSessionById(sessionId);
       return;
@@ -1321,6 +1357,7 @@ export class LogsController {
       this.runner.stopServer(serverId);
       this.files.stopServer(serverId);
       this.browser.stopServer(serverId);
+      this.agentSessions.stopServer(serverId);
       this.debug.stopServer(serverId);
       this.remote.stopServer(serverId);
     } else {
@@ -1396,6 +1433,7 @@ export class LogsController {
     await this.otel.dispose();
     await this.files.dispose();
     await this.browser.dispose();
+    this.agentSessions.dispose();
     await this.remote.dispose();
     await this.remoteMetrics.dispose();
     this.connections.dispose();
@@ -1414,6 +1452,17 @@ const RECENT_URL_LOOKED = 5000;
 const SEARCH_SETTLE_MS = 1500;
 
 /** What kind of capture a run is, as usage counts name it. */
+/** The app's logs while an agent's tool call ran: every source but the agents, from its start to its end. */
+export function agentCallQuery(event: LogEvent): string | undefined {
+  const start = event.timestampMs;
+  if (start === undefined) return undefined;
+  const duration = typeof event.fields?.durationMs === 'number' ? event.fields.durationMs : 0;
+  // A second either side catches what the call set off as it began and ended.
+  const from = new Date(start - 1000).toISOString();
+  const to = new Date(start + duration + 1000).toISOString();
+  return `-kind:agent @timestamp:[${from} TO ${to}]`;
+}
+
 function captureKind(record: SessionSummary): string {
   switch (record.sourceKind) {
     case 'process':

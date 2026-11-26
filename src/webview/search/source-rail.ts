@@ -23,6 +23,7 @@ const ICONS: Record<string, string> = {
   file: 'M4 2.5h5l3 3v8H4zM9 2.5v3h3',
   otel: 'M2 3.5h7M4 7.5h8M7 11.5h7',
   browser: 'M2.5 3.5h11v9h-11zM2.5 6h11M4.5 4.75h.01M6.5 4.75h.01',
+  agent: 'M7 2.5l1.2 3.3 3.3 1.2-3.3 1.2L7 11.5 5.8 8.2 2.5 7l3.3-1.2zM12 10.5v3M10.5 12h3',
   cloud: 'M4.5 12.5h7a2.5 2.5 0 0 0 .4-5A3.6 3.6 0 0 0 5 6.7a2.9 2.9 0 0 0-.5 5.8z',
   database:
     'M3 4c0-1 2.2-1.8 5-1.8s5 .8 5 1.8-2.2 1.8-5 1.8S3 5 3 4zM3 4v8c0 1 2.2 1.8 5 1.8s5-.8 5-1.8V4M3 8c0 1 2.2 1.8 5 1.8s5-.8 5-1.8',
@@ -63,6 +64,7 @@ function iconFor(server: Server): string {
   if (server.kind === 'import' || server.kind === 'file') return 'file';
   if (server.kind === 'otel') return 'otel';
   if (server.kind === 'browser') return 'browser';
+  if (server.kind === 'agent') return 'agent';
   return 'terminal';
 }
 
@@ -346,7 +348,10 @@ export function createSourceRail(
     // and so do a connection's or an import's runs, which are named by what they fetched.
     const byTime =
       new Set(sessions.map(runName)).size <= 1 &&
-      !sessions.some((session) => session.sourceKind === 'remote' || session.sourceKind === 'import');
+      !sessions.some(
+        (session) =>
+          session.sourceKind === 'remote' || session.sourceKind === 'import' || session.sourceKind === 'agent',
+      );
     for (const session of sessions) {
       const wrapper = document.createElement('div');
       wrapper.className = 'run-option-row';
@@ -358,11 +363,12 @@ export function createSourceRail(
         : runButton(
             session.id,
             runName(session),
-            [started, stateText].filter(Boolean).join(' · '),
-            session.sourceKind === 'remote' || session.sourceKind === 'import',
+            [started, session.detail ?? stateText].filter(Boolean).join(' · '),
+            session.sourceKind === 'remote' || session.sourceKind === 'import' || session.sourceKind === 'agent',
           );
       button.title = [
         runName(session),
+        session.detail && `${session.detail} · ${stateText}`,
         session.cwd,
         session.captureStatus && `Capture: ${session.captureStatus}`,
         session.captureReason,

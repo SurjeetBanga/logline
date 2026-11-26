@@ -17,6 +17,7 @@ import { BROWSER_OFFER_DELAYS_MS, BrowserLauncher, BrowserOffer } from './vscode
 import { CaptureOffer } from './vscode/capture-offer';
 import { looksLikeDevServer } from './capture/dev-command';
 import { IntegrationNotice } from './vscode/integration-notice';
+import { ClaudeUsageReader } from './capture/claude-usage-reader';
 import { CodexUsageReader } from './capture/codex-usage-reader';
 import { AiUsageStatus } from './vscode/ai-usage-status';
 import { CaptureStatus } from './vscode/capture-status';
@@ -202,6 +203,11 @@ export function activate(context: vscode.ExtensionContext): { provider: LogsProv
     config: agentController.config,
     calls: () => agentController.aiCallRecords(),
     reader: new CodexUsageReader({ codexDir: process.env.CODEX_HOME || join(homedir(), '.codex') }),
+    claudeReader: new ClaudeUsageReader({ claudeDir: join(homedir(), '.claude') }),
+    showAgentSessions: () => {
+      void agentController.agentSessions.poll();
+      void agentController.showQuery('kind:agent');
+    },
   });
   const syncBridge = async () => {
     try {

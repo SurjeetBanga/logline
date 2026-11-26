@@ -387,6 +387,16 @@
         "command": "logline.enableCodexUsage",
         "title": "Show Codex Usage",
         "category": "Logline"
+      },
+      {
+        "command": "logline.enableClaudeUsage",
+        "title": "Show Claude Code Usage",
+        "category": "Logline"
+      },
+      {
+        "command": "logline.showAgentSessions",
+        "title": "Show Agent Sessions",
+        "category": "Logline"
       }
     ],
     "keybindings": [
@@ -1599,6 +1609,18 @@
             "default": false,
             "order": 3,
             "markdownDescription": "Read the session files Codex keeps under `~/.codex` (or `CODEX_HOME`), to show the plan limits it records and the tokens of today. Nothing that is read leaves this machine."
+          },
+          "logline.aiUsage.claude": {
+            "type": "boolean",
+            "default": false,
+            "order": 4,
+            "markdownDescription": "Read the session files Claude Code keeps under `~/.claude/projects`, to show today's tokens and how much of their input came from the prompt cache. Claude Code does not record its plan limits there. Nothing that is read leaves this machine."
+          },
+          "logline.agentSessions.enabled": {
+            "type": "boolean",
+            "default": false,
+            "order": 5,
+            "markdownDescription": "Show the sessions of Claude Code and Codex that worked in this workspace as logs, under an **Agents** source: each prompt, tool call (with its command, file, outcome, and duration), and reply is a line, beside your app's logs. Logline reads the transcripts the agents keep on this machine, from the last day; nothing that is read leaves it unless you share it with an agent."
           }
         }
       }
