@@ -831,12 +831,16 @@
               <input
                 id="connectionService"
                 type="search"
-                list="connectionServices"
+                role="combobox"
+                aria-autocomplete="list"
+                aria-expanded="false"
+                aria-controls="connectionServices"
                 placeholder="Any service"
                 autocomplete="off"
                 spellcheck="false"
                 maxlength="256"
-                title="Search or tail one service's logs" /><datalist id="connectionServices"></datalist
+                title="Search or tail one service's logs" />
+              <ul id="connectionServices" class="service-list" role="listbox" aria-label="Services" hidden></ul
             ></label>
             <button id="connectionRun" type="button">Run</button>
             <button id="connectionTail" type="button" aria-pressed="false">Tail</button>

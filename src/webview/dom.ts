@@ -44,7 +44,7 @@ export function getElements() {
     connectionSyntax: element<HTMLButtonElement>('connectionSyntax'),
     connectionNative: element<HTMLInputElement>('connectionNative'),
     connectionService: element<HTMLInputElement>('connectionService'),
-    connectionServices: element<HTMLDataListElement>('connectionServices'),
+    connectionServices: element<HTMLUListElement>('connectionServices'),
     connectionServiceLabel: element<HTMLElement>('connectionServiceLabel'),
     compare: element<HTMLButtonElement>('compare'),
     compareView: element<HTMLElement>('compareView'),

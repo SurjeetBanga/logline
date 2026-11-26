@@ -6,7 +6,7 @@ All notable changes to Logline are documented in this file.
 
 ### Changes
 
-- **Search the Service list**: a connection's **Service** list is now a box you type in to find a service among the suggestions, instead of scrolling a long list. Press Enter to choose what you typed, clear it for any service, or press Escape to keep the one chosen.
+- **Search the Service list**: a connection's **Service** list is now a box you type in to narrow the list of services under it, instead of scrolling a long list. Pick one with a click, or with Up and Down and Enter; press Enter to choose what you typed, clear it for any service, or press Escape to keep the one chosen.
 
 ### Fixes
 

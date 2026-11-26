@@ -1676,6 +1676,56 @@ select {
   height: 26px;
   padding: 2px 6px;
 }
+/* The services that hold what is typed, under the box; placed in the window by connection-bar.ts. */
+.service-list {
+  position: fixed;
+  z-index: 30;
+  box-sizing: border-box;
+  margin: 0;
+  padding: 4px;
+  overflow-y: auto;
+  list-style: none;
+  border: 1px solid var(--vscode-menu-border, var(--vscode-editorWidget-border, #454545));
+  border-radius: 6px;
+  background: var(--vscode-menu-background, var(--vscode-editorWidget-background, #252526));
+  box-shadow: 0 2px 8px var(--vscode-widget-shadow, rgba(0, 0, 0, 0.36));
+  color: var(--vscode-menu-foreground, var(--vscode-foreground, #d4d4d4));
+}
+.service-list[hidden] {
+  display: none;
+}
+.service-list [role='option'] {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 24px;
+  padding: 0 8px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+.service-list .service-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.service-list .service-count {
+  flex: none;
+  color: var(--vscode-descriptionForeground, #aaa);
+  font-variant-numeric: tabular-nums;
+}
+.service-list [role='option']:hover,
+.service-list [role='option'][aria-selected='true'] {
+  outline: 1px solid var(--vscode-menu-selectionBorder, transparent);
+  outline-offset: -1px;
+  background: var(--vscode-menu-selectionBackground, var(--vscode-list-activeSelectionBackground, #04395e));
+  color: var(--vscode-menu-selectionForeground, var(--vscode-list-activeSelectionForeground, #ffffff));
+}
+.service-list [role='option']:hover .service-count,
+.service-list [role='option'][aria-selected='true'] .service-count {
+  color: inherit;
+}
 #connectionRun:not(:disabled) {
   color: var(--vscode-button-foreground, #fff);
   background: var(--vscode-button-background, #0e639c);

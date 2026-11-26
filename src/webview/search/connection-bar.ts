@@ -32,6 +32,8 @@ const PREVIEW_DELAY_MS = 250;
 const SERVICES_TTL_MS = 5 * 60000;
 const SERVICES_RETRY_MS = 30000;
 const SERVICE_TERM = /^@?service:/i;
+// The most services the list shows at once; typing narrows it to the rest.
+const MAX_SHOWN = 200;
 // A term that names the service in any way: negated, grouped, or as it is.
 const ANY_SERVICE_TERM = /^[-!(]*@?service:/i;
 // A boolean operator, or a group, makes which services a query searches more than one name.
@@ -118,8 +120,13 @@ export function createConnectionBar(
   /** Which connection and range the listed services are for, and until when they stand. */
   let services: { key: string; until: number } | undefined;
   let servicesAsked = '';
-  /** The services the list shows. */
+  /** The services the connection listed, with how many logs each had when the store counts them. */
+  let listedServices: { name: string; count?: number }[] = [];
   let listed: string[] = [];
+  /** Whether the list under the box is open, the services it shows for what is typed, and which is highlighted. */
+  let listOpen = false;
+  let shown: { name: string; count?: number }[] = [];
+  let active = -1;
   /** Whether the service box has focus, so a refresh leaves what is being typed alone. */
   let choosing = false;
   /** Whether the box was typed in, or cleared, since it was focused or a service chosen. */
@@ -269,14 +276,9 @@ export function createConnectionBar(
     if (key !== servicesAsked) return;
     servicesAsked = '';
     services = { key, until: Date.now() + (answer.error ? SERVICES_RETRY_MS : SERVICES_TTL_MS) };
-    const options = answer.services.map(({ name, count }) => {
-      const option = document.createElement('option');
-      option.value = name;
-      if (count !== undefined) option.textContent = `${name} · ${numbers.format(count)} logs`;
-      return option;
-    });
-    elements.connectionServices.replaceChildren(...options);
+    listedServices = answer.services;
     listed = answer.services.map((service) => service.name);
+    renderList();
     const how = 'type to find one, or clear it for any service';
     elements.connectionService.title = answer.error
       ? `Could not list services: ${answer.error}`
@@ -285,6 +287,74 @@ export function createConnectionBar(
         : `Search or tail one service's logs, listed by how many logs they had in the range; ${how}`;
     const connection = selected();
     if (connection) showService(connection);
+  }
+
+  /**
+   * The list under the box: drawn by the panel rather than left to the browser, whose suggestions in a VS Code
+   * webview ignore the arrow keys and Enter. It shows the services whose names hold what is typed.
+   */
+  function renderList(): void {
+    const input = elements.connectionService;
+    const list = elements.connectionServices;
+    const typed = input.value.trim().toLowerCase();
+    shown =
+      listOpen && choosing
+        ? listedServices.filter((service) => service.name.toLowerCase().includes(typed)).slice(0, MAX_SHOWN)
+        : [];
+    if (active >= shown.length) active = -1;
+    list.replaceChildren(
+      ...shown.map((service, index) => {
+        const item = document.createElement('li');
+        item.id = `connectionService-${index}`;
+        item.setAttribute('role', 'option');
+        item.setAttribute('aria-selected', String(index === active));
+        item.dataset.index = String(index);
+        const name = document.createElement('span');
+        name.className = 'service-name';
+        name.textContent = service.name;
+        item.append(name);
+        if (service.count !== undefined) {
+          const count = document.createElement('span');
+          count.className = 'service-count';
+          count.textContent = `${numbers.format(service.count)} logs`;
+          item.append(count);
+        }
+        return item;
+      }),
+    );
+    list.hidden = shown.length === 0;
+    if (shown.length) placeList();
+    input.setAttribute('aria-expanded', String(shown.length > 0));
+    if (active < 0) input.removeAttribute('aria-activedescendant');
+    else {
+      input.setAttribute('aria-activedescendant', `connectionService-${active}`);
+      list.children[active]?.scrollIntoView({ block: 'nearest' });
+    }
+  }
+
+  /**
+   * Place the list under the box, or above it when there is more room there. It is placed in the window rather
+   * than in the connection's controls, which scroll within themselves in a short panel and would cut it off.
+   */
+  function placeList(): void {
+    const box = elements.connectionService.getBoundingClientRect();
+    const style = elements.connectionServices.style;
+    const gutter = 8;
+    const width = Math.min(Math.max(box.width, 280), window.innerWidth - 2 * gutter);
+    const below = window.innerHeight - box.bottom - gutter;
+    const above = box.top - gutter;
+    const under = below >= Math.min(240, above);
+    style.left = `${Math.max(gutter, Math.min(box.left, window.innerWidth - width - gutter))}px`;
+    style.width = `${width}px`;
+    style.top = under ? `${box.bottom + 2}px` : '';
+    style.bottom = under ? '' : `${window.innerHeight - box.top + 2}px`;
+    style.maxHeight = `${Math.max(Math.min(240, (under ? below : above) - 2), 72)}px`;
+  }
+
+  function closeList(): void {
+    listOpen = false;
+    active = -1;
+    renderList();
   }
 
   /** The service the search names: the one in the store's query while that is sent, else the filter's. */
@@ -326,6 +396,7 @@ export function createConnectionBar(
     // The box may keep focus, so `choosing` stays set until it is left, and later typing is not overwritten.
     const input = elements.connectionService;
     edited = false;
+    closeList();
     if (service !== currentService(connection)) {
       if (native(connection)) {
         state.setNative(connection.type, { query: withService(state.nativeOf(connection.type).query, service) });
@@ -412,6 +483,9 @@ export function createConnectionBar(
     const input = elements.connectionService;
     input.placeholder = currentService(connection) || 'Any service';
     input.value = '';
+    listOpen = true;
+    active = -1;
+    renderList();
   });
   scope.listen(elements.connectionService, 'blur', () => {
     // The window losing focus blurs the box but leaves it focused within the page: keep what is typed.
@@ -423,19 +497,17 @@ export function createConnectionBar(
     edited = false;
     elements.connectionService.placeholder = 'Any service';
     if (cleared) chooseService('');
+    closeList();
     if (connection) showService(connection);
   });
-  scope.listen(elements.connectionService, 'input', (event) => {
+  scope.listen(elements.connectionService, 'input', () => {
     edited = true;
-    // A suggestion picked from the list replaces the text, after any Enter that picked it chose what was typed.
-    // Chromium marks that input as a replacement, or leaves its type empty, as for the clear button; typing has one.
-    const type = (event as InputEvent).inputType;
-    if ((type && type !== 'insertReplacementText') || unchanged()) return;
-    const name = resolveService(elements.connectionService.value);
-    if (listed.includes(name)) chooseService(name);
+    listOpen = true;
+    active = -1;
+    renderList();
   });
-  // Picking a suggestion, or typing a listed name in full, chooses that service; part of a name, as when
-  // Run is clicked while searching the list, is left alone.
+  // Typing a listed name in full chooses that service; part of a name, as when Run is clicked while searching
+  // the list, is left alone.
   scope.listen(elements.connectionService, 'change', () => {
     const value = elements.connectionService.value.trim();
     if (!value || unchanged()) return;
@@ -450,8 +522,25 @@ export function createConnectionBar(
     const keyboard = event as KeyboardEvent;
     // Enter that ends a composition belongs to the input method.
     if (keyboard.isComposing) return;
-    if (keyboard.key === 'Enter') {
+    if (keyboard.key === 'ArrowDown' || keyboard.key === 'ArrowUp') {
       event.preventDefault();
+      if (!listOpen) {
+        listOpen = true;
+        active = -1;
+        renderList();
+      }
+      if (!shown.length) return;
+      // Up from the first service goes back to what was typed; Down from it, or Up from there, wraps.
+      const last = shown.length - 1;
+      if (keyboard.key === 'ArrowDown') active = active >= last ? 0 : active + 1;
+      else active = active === 0 ? -1 : active < 0 ? last : active - 1;
+      renderList();
+    } else if (keyboard.key === 'Enter') {
+      event.preventDefault();
+      if (active >= 0 && shown[active]) {
+        chooseService(shown[active].name);
+        return;
+      }
       const value = elements.connectionService.value;
       // Enter in a box cleared by hand chooses any service; in one only emptied by focus, it keeps the service.
       if (value.trim() || edited) chooseService(resolveService(value));
@@ -463,6 +552,19 @@ export function createConnectionBar(
       edited = false;
       elements.connectionService.blur();
     }
+  });
+  // The list stays under the box as the panel resizes or the controls scroll.
+  const follow = () => {
+    if (shown.length) placeList();
+  };
+  scope.listen(window, 'resize', follow);
+  scope.listen(elements.connectionBar, 'scroll', follow);
+  // Pressing a service keeps focus in the box, so leaving it does not close the list before the click lands.
+  scope.listen(elements.connectionServices, 'mousedown', (event) => event.preventDefault());
+  scope.listen(elements.connectionServices, 'click', (event) => {
+    const item = (event.target as HTMLElement | null)?.closest<HTMLElement>('[role="option"]');
+    const service = item ? shown[Number(item.dataset.index)] : undefined;
+    if (service) chooseService(service.name);
   });
   scope.listen(elements.connectionSyntax, 'click', () => {
     const connection = selected();

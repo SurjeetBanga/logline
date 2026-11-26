@@ -4320,6 +4320,7 @@ Span ${call.spanId}`
   var SERVICES_TTL_MS = 5 * 6e4;
   var SERVICES_RETRY_MS = 3e4;
   var SERVICE_TERM = /^@?service:/i;
+  var MAX_SHOWN = 200;
   var ANY_SERVICE_TERM = /^[-!(]*@?service:/i;
   var BOOLEAN = /^(?:OR|NOT)$|^[-!]?\(|\)$/i;
   function serviceTokens(text2) {
@@ -4369,7 +4370,11 @@ Span ${call.spanId}`
     let previewTimer;
     let services;
     let servicesAsked = "";
+    let listedServices = [];
     let listed = [];
+    let listOpen = false;
+    let shown2 = [];
+    let active = -1;
     let choosing = false;
     let edited = false;
     let statement = "";
@@ -4475,18 +4480,67 @@ ${answer.range}`;
       if (key !== servicesAsked) return;
       servicesAsked = "";
       services = { key, until: Date.now() + (answer.error ? SERVICES_RETRY_MS : SERVICES_TTL_MS) };
-      const options = answer.services.map(({ name, count }) => {
-        const option = document.createElement("option");
-        option.value = name;
-        if (count !== void 0) option.textContent = `${name} \xB7 ${numbers.format(count)} logs`;
-        return option;
-      });
-      elements.connectionServices.replaceChildren(...options);
+      listedServices = answer.services;
       listed = answer.services.map((service) => service.name);
+      renderList();
       const how = "type to find one, or clear it for any service";
       elements.connectionService.title = answer.error ? `Could not list services: ${answer.error}` : answer.services.some((service) => service.count === void 0) ? `Search or tail one service's logs; ${how}` : `Search or tail one service's logs, listed by how many logs they had in the range; ${how}`;
       const connection = selected();
       if (connection) showService(connection);
+    }
+    function renderList() {
+      const input = elements.connectionService;
+      const list = elements.connectionServices;
+      const typed = input.value.trim().toLowerCase();
+      shown2 = listOpen && choosing ? listedServices.filter((service) => service.name.toLowerCase().includes(typed)).slice(0, MAX_SHOWN) : [];
+      if (active >= shown2.length) active = -1;
+      list.replaceChildren(
+        ...shown2.map((service, index) => {
+          const item = document.createElement("li");
+          item.id = `connectionService-${index}`;
+          item.setAttribute("role", "option");
+          item.setAttribute("aria-selected", String(index === active));
+          item.dataset.index = String(index);
+          const name = document.createElement("span");
+          name.className = "service-name";
+          name.textContent = service.name;
+          item.append(name);
+          if (service.count !== void 0) {
+            const count = document.createElement("span");
+            count.className = "service-count";
+            count.textContent = `${numbers.format(service.count)} logs`;
+            item.append(count);
+          }
+          return item;
+        })
+      );
+      list.hidden = shown2.length === 0;
+      if (shown2.length) placeList();
+      input.setAttribute("aria-expanded", String(shown2.length > 0));
+      if (active < 0) input.removeAttribute("aria-activedescendant");
+      else {
+        input.setAttribute("aria-activedescendant", `connectionService-${active}`);
+        list.children[active]?.scrollIntoView({ block: "nearest" });
+      }
+    }
+    function placeList() {
+      const box = elements.connectionService.getBoundingClientRect();
+      const style = elements.connectionServices.style;
+      const gutter = 8;
+      const width = Math.min(Math.max(box.width, 280), window.innerWidth - 2 * gutter);
+      const below = window.innerHeight - box.bottom - gutter;
+      const above = box.top - gutter;
+      const under = below >= Math.min(240, above);
+      style.left = `${Math.max(gutter, Math.min(box.left, window.innerWidth - width - gutter))}px`;
+      style.width = `${width}px`;
+      style.top = under ? `${box.bottom + 2}px` : "";
+      style.bottom = under ? "" : `${window.innerHeight - box.top + 2}px`;
+      style.maxHeight = `${Math.max(Math.min(240, (under ? below : above) - 2), 72)}px`;
+    }
+    function closeList() {
+      listOpen = false;
+      active = -1;
+      renderList();
     }
     const currentService = (connection) => serviceOf(native(connection) ? state.nativeOf(connection.type).query : query());
     function showService(connection) {
@@ -4503,8 +4557,8 @@ ${answer.range}`;
     function alignFilter(connection) {
       if (!native(connection)) return;
       const sent = soleService(state.nativeOf(connection.type).query);
-      const shown2 = soleService(query());
-      if (sent !== void 0 && shown2 !== void 0 && !sent.toLowerCase().includes(shown2.toLowerCase()))
+      const shown3 = soleService(query());
+      if (sent !== void 0 && shown3 !== void 0 && !sent.toLowerCase().includes(shown3.toLowerCase()))
         setQuery(withService(query(), ""));
     }
     function chooseService(service) {
@@ -4512,6 +4566,7 @@ ${answer.range}`;
       if (!connection) return;
       const input = elements.connectionService;
       edited = false;
+      closeList();
       if (service !== currentService(connection)) {
         if (native(connection)) {
           state.setNative(connection.type, { query: withService(state.nativeOf(connection.type).query, service) });
@@ -4590,6 +4645,9 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
       const input = elements.connectionService;
       input.placeholder = currentService(connection) || "Any service";
       input.value = "";
+      listOpen = true;
+      active = -1;
+      renderList();
     });
     scope.listen(elements.connectionService, "blur", () => {
       if (document.activeElement === elements.connectionService) return;
@@ -4599,14 +4657,14 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
       edited = false;
       elements.connectionService.placeholder = "Any service";
       if (cleared) chooseService("");
+      closeList();
       if (connection) showService(connection);
     });
-    scope.listen(elements.connectionService, "input", (event) => {
+    scope.listen(elements.connectionService, "input", () => {
       edited = true;
-      const type = event.inputType;
-      if (type && type !== "insertReplacementText" || unchanged()) return;
-      const name = resolveService(elements.connectionService.value);
-      if (listed.includes(name)) chooseService(name);
+      listOpen = true;
+      active = -1;
+      renderList();
     });
     scope.listen(elements.connectionService, "change", () => {
       const value = elements.connectionService.value.trim();
@@ -4620,8 +4678,24 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
     scope.listen(elements.connectionService, "keydown", (event) => {
       const keyboard = event;
       if (keyboard.isComposing) return;
-      if (keyboard.key === "Enter") {
+      if (keyboard.key === "ArrowDown" || keyboard.key === "ArrowUp") {
         event.preventDefault();
+        if (!listOpen) {
+          listOpen = true;
+          active = -1;
+          renderList();
+        }
+        if (!shown2.length) return;
+        const last = shown2.length - 1;
+        if (keyboard.key === "ArrowDown") active = active >= last ? 0 : active + 1;
+        else active = active === 0 ? -1 : active < 0 ? last : active - 1;
+        renderList();
+      } else if (keyboard.key === "Enter") {
+        event.preventDefault();
+        if (active >= 0 && shown2[active]) {
+          chooseService(shown2[active].name);
+          return;
+        }
         const value = elements.connectionService.value;
         if (value.trim() || edited) chooseService(resolveService(value));
       } else if (keyboard.key === "Escape") {
@@ -4631,6 +4705,17 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
         edited = false;
         elements.connectionService.blur();
       }
+    });
+    const follow = () => {
+      if (shown2.length) placeList();
+    };
+    scope.listen(window, "resize", follow);
+    scope.listen(elements.connectionBar, "scroll", follow);
+    scope.listen(elements.connectionServices, "mousedown", (event) => event.preventDefault());
+    scope.listen(elements.connectionServices, "click", (event) => {
+      const item = event.target?.closest('[role="option"]');
+      const service = item ? shown2[Number(item.dataset.index)] : void 0;
+      if (service) chooseService(service.name);
     });
     scope.listen(elements.connectionSyntax, "click", () => {
       const connection = selected();

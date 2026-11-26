@@ -4955,20 +4955,55 @@ test('a Datadog connection lists its services to choose one, and can send a quer
       { name: 'payments api', count: 4 },
     ],
   });
-  const options = get('connectionServices').children;
-  assert.deepEqual(
-    options.map((option) => [option.value, option.textContent]),
-    [
-      ['checkout', 'checkout · 1,200 logs'],
-      ['payments api', 'payments api · 4 logs'],
-    ],
-  );
   const service = get('connectionService');
+  const list = get('connectionServices');
   const key = (name: string) => service.listeners.get('keydown')!({ key: name, preventDefault() {} });
-  // Focus empties the box so the whole list shows and typing searches it.
+  const items = () => list.children.map((item) => item.children.map((part) => part.textContent).join(' · '));
+  const type = (value: string) => {
+    service.value = value;
+    service.listeners.get('input')!({ inputType: 'insertText' });
+  };
+  assert.equal(list.hidden, true, 'the list opens only while the box has focus');
+  // Focus empties the box and opens the whole list, by how many logs; typing narrows it.
   service.listeners.get('focus')!();
   assert.equal(service.value, '');
   assert.equal(service.placeholder, 'Any service');
+  assert.equal(list.hidden, false);
+  assert.equal(service.attributes['aria-expanded'], 'true');
+  assert.deepEqual(items(), ['checkout · 1,200 logs', 'payments api · 4 logs']);
+  type('API');
+  assert.deepEqual(items(), ['payments api · 4 logs']);
+  type('nothing like it');
+  assert.equal(list.hidden, true);
+  assert.equal(service.attributes['aria-expanded'], 'false');
+  // The arrow keys move through the list, and Up from the first service goes back to what was typed.
+  type('');
+  key('ArrowDown');
+  assert.equal(service.attributes['aria-activedescendant'], 'connectionService-0');
+  assert.equal(list.children[0].attributes['aria-selected'], 'true');
+  key('ArrowDown');
+  key('ArrowDown');
+  assert.equal(service.attributes['aria-activedescendant'], 'connectionService-0', 'Down from the last wraps');
+  key('ArrowUp');
+  assert.equal(service.attributes['aria-activedescendant'], undefined);
+  key('ArrowUp');
+  assert.equal(service.attributes['aria-activedescendant'], 'connectionService-1', 'Up from the text wraps');
+  // Enter picks the highlighted service, not the text typed, and closes the list.
+  type('pay');
+  key('ArrowDown');
+  key('Enter');
+  assert.equal(get('search').value, 'level:error service:"payments api"');
+  assert.equal(list.hidden, true);
+  // A click picks a service; pressing it keeps focus in the box.
+  type('c');
+  let kept = false;
+  list.listeners.get('mousedown')!({ preventDefault: () => (kept = true) });
+  assert.equal(kept, true);
+  list.listeners.get('click')!({ target: list.children[0] });
+  assert.equal(get('search').value, 'level:error service:checkout');
+  service.listeners.get('blur')!();
+  assert.equal(list.hidden, true);
+  service.listeners.get('focus')!();
   // Choosing a service puts it in the filter, in place of any other; a name typed in any case finds it.
   service.value = 'payments api';
   service.listeners.get('change')!();
@@ -5025,14 +5060,10 @@ test('a Datadog connection lists its services to choose one, and can send a quer
   // Enter that ends an input method's composition chooses nothing.
   service.listeners.get('keydown')!({ key: 'Enter', isComposing: true, preventDefault() {} });
   assert.equal(get('search').value, 'level:error service:Checkout');
-  // A suggestion picked after an Enter chose the text typed replaces it.
   key('Enter');
   assert.equal(get('search').value, 'level:error service:paym');
-  service.value = 'checkout';
-  service.listeners.get('input')!({ inputType: '' });
-  assert.equal(get('search').value, 'level:error service:checkout', 'a fill without an input type is a pick too');
   service.value = 'payments api';
-  service.listeners.get('input')!({ inputType: 'insertReplacementText' });
+  key('Enter');
   assert.equal(get('search').value, 'level:error service:"payments api"');
   service.listeners.get('blur')!();
   // Enter in a box only emptied by focus keeps the service.

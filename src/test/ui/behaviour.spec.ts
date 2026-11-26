@@ -255,3 +255,62 @@ test.describe('the trace waterfall', () => {
     await expect(spanRow(panel, 'b'), 'closing keeps focus on the row').toBeFocused();
   });
 });
+
+test.describe('the Service list', () => {
+  test('narrows as you type, takes the arrow keys and Enter or a click, and is not cut off', async ({ openPanel }) => {
+    const connection = { id: 'dd', sourceId: 'conn:dd', label: 'prod', type: 'datadog', mapped: true, sql: false };
+    const panel = await openPanel({
+      saved: { server: 'conn:dd', query: 'level:error' },
+      first: {
+        ...snapshot,
+        events: [],
+        servers: [{ id: 'conn:dd', label: 'Datadog · prod', status: 'idle', activeSessions: 0 }],
+        sessions: [],
+        connections: [{ ...connection, agents: false, tailing: false, watching: [] }],
+      },
+    });
+    const { page } = panel;
+    await panel.post({
+      type: 'connectionServices',
+      connectionId: 'dd',
+      range: '1h',
+      services: [
+        { name: 'checkout', count: 1200 },
+        { name: 'payments', count: 40 },
+        { name: 'payments api', count: 4 },
+      ],
+    });
+    const box = page.locator('#connectionService');
+    const list = page.locator('#connectionServices');
+    const options = list.getByRole('option');
+
+    await box.click();
+    await expect(list).toBeVisible();
+    await expect(options).toHaveText(['checkout1,200 logs', 'payments40 logs', 'payments api4 logs']);
+    await panel.fits('the Service list open');
+    // Nothing covers the last service: a click there lands on it.
+    const last = await options.last().boundingBox();
+    const hit = await page.evaluate(
+      ({ x, y }) => document.elementFromPoint(x, y)?.closest('[role="option"]')?.textContent,
+      { x: last!.x + last!.width / 2, y: last!.y + last!.height / 2 },
+    );
+    expect(hit).toBe('payments api4 logs');
+
+    await box.pressSequentially('pay');
+    await expect(options).toHaveCount(2);
+    await box.press('ArrowDown');
+    await box.press('ArrowDown');
+    await expect(box).toHaveAttribute('aria-activedescendant', 'connectionService-1');
+    await box.press('Enter');
+    await expect(list).toBeHidden();
+    await expect(box).toHaveValue('payments api');
+    await expect(page.locator('#search')).toHaveValue('level:error service:"payments api"');
+
+    await box.press('Escape');
+    await box.click();
+    await options.filter({ hasText: 'checkout' }).click();
+    await expect(box).toBeFocused();
+    await expect(box).toHaveValue('checkout');
+    await expect(page.locator('#search')).toHaveValue('level:error service:checkout');
+  });
+});
