@@ -141,7 +141,7 @@ export function createViewer(api: WebviewApi) {
     () => search.query(),
     saveState,
     (baselineServerId, baselineSessionId) => compareView.open({ baselineServerId, baselineSessionId }),
-    (query) => search.setQuery(query, true),
+    (query, keepDraft) => search.setQuery(query, true, keepDraft),
     () => search.applyPending(),
   );
   const rail = createSourceRail(elements, state, api, scope, {
@@ -960,6 +960,9 @@ export function createViewer(api: WebviewApi) {
     }, 150);
     requestAutocomplete();
   });
+
+  // A request still waiting when the box is left would only bring suggestions for a box no longer in use.
+  scope.listen(elements.search, 'blur', () => clearTimeout(autocompleteDebounce));
 
   /** Ask the host for suggestions for what is typed in the search box, once typing pauses. */
   function requestAutocomplete(): void {

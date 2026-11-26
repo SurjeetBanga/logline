@@ -203,7 +203,8 @@ export function createSearch(
     return appliedQuery;
   }
 
-  function setQuery(value: string, notify = false) {
+  /** Replace the applied filter; with `keepDraft`, what is typed but not yet entered stays in the box. */
+  function setQuery(value: string, notify = false, keepDraft = false) {
     const normalized = tokens(value).join(' ').slice(0, MAX_QUERY_LENGTH);
     const regexError = queryError(normalized);
     if (regexError) {
@@ -215,9 +216,11 @@ export function createSearch(
     // Keep the serialized value until focus moves into the editor. This makes
     // the state inspectable to assistive tooling and lets the native input
     // remain a useful fallback while the chips are being rendered.
-    elements.search.value = appliedQuery;
-    setError();
-    clearAutocomplete();
+    if (!keepDraft) {
+      elements.search.value = appliedQuery;
+      setError();
+      clearAutocomplete();
+    }
     renderChips();
     if (notify) filterChanged();
     return true;
@@ -383,6 +386,8 @@ export function createSearch(
   }
 
   function renderAutocomplete(data: Extract<HostMessage, { type: 'autocomplete' }>) {
+    // A reply that lands after the box was left would open a list nothing closes until the box is left again.
+    if (document.activeElement !== elements.search) return suggestions.hide();
     suggestions.show(completeQuery(data.input, data.fields, data.values).map((value) => ({ value })));
   }
 

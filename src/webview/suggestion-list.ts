@@ -10,7 +10,10 @@ export interface Suggestion {
 }
 
 export interface SuggestionList {
-  /** Show these suggestions under the box, none highlighted; none closes the list. */
+  /**
+   * Show these suggestions under the box, keeping the highlighted one if it is among them and else none; none
+   * closes the list.
+   */
   show(items: Suggestion[]): void;
   hide(): void;
   /** Whether the list is showing. */
@@ -101,8 +104,11 @@ export function createSuggestionList(
   }
 
   function show(next: Suggestion[]): void {
+    // A refreshed list keeps the highlighted suggestion while it is still there, so a reply that lands while the
+    // arrow keys are in use does not make Enter pick what was typed instead.
+    const highlighted = items[active]?.value;
     items = next;
-    active = -1;
+    active = highlighted === undefined ? -1 : items.findIndex((item) => item.value === highlighted);
     render();
   }
 
@@ -139,6 +145,11 @@ export function createSuggestionList(
     return false;
   }
 
+  // Typing goes back to what is typed, so Enter then takes the text rather than a suggestion highlighted before.
+  scope.listen(input, 'input', () => {
+    active = -1;
+    highlight();
+  });
   // Leaving the box closes the list; the window losing focus leaves the box focused within the page, and it open.
   scope.listen(input, 'blur', () => {
     if (document.activeElement !== input) show([]);

@@ -764,6 +764,8 @@ test('analysis rows, values and bars narrow the search to their logs', () => {
 
 test('autocomplete suggestions list known field names alongside matching values', () => {
   const { get, receive } = viewer();
+  // Suggestions are shown only while the box has focus.
+  get('search').focus();
   receive({
     type: 'autocomplete',
     input: 'timeout',
@@ -793,6 +795,8 @@ test('Clear removes stale autocomplete suggestions', () => {
 
 test('clearing Search logs removes column suggestions and ignores an in-flight autocomplete response', () => {
   const { get, receive } = viewer();
+  // Suggestions are shown only while the box has focus.
+  get('search').focus();
   receive({
     type: 'autocomplete',
     input: 'timeout',
@@ -1313,6 +1317,8 @@ test('explicit paging, filtering, sorting and column selection keep the selected
 
 test('autocomplete ignores changed input or server and inserts a complete query', () => {
   const { get, app, receive } = viewer();
+  // Suggestions are shown only while the box has focus.
+  get('search').focus();
   get('search').value = 'level:error service:a';
   const response = {
     type: 'autocomplete',

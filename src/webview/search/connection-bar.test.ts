@@ -20,6 +20,15 @@ test('withService replaces every service term, a group included, or removes them
   assert.equal(withService('level:error service:checkout', ''), 'level:error');
 });
 
+test('withService keeps the terms after a group that is never closed, and ignores parentheses in quotes', () => {
+  assert.equal(
+    withService('service:(checkout OR payments @http.status_code:500 env:prod', 'billing'),
+    'OR payments @http.status_code:500 env:prod service:billing',
+  );
+  assert.equal(withService('service:("a)" OR b) env:prod', 'billing'), 'env:prod service:billing');
+  assert.equal(withService('service:(a OR "b)" OR c) env:prod', ''), 'env:prod');
+});
+
 test('soleService is the one name a query searches, and undefined when it may search more', () => {
   assert.equal(soleService('level:error service:checkout'), 'checkout');
   assert.equal(soleService('service:"payments api"'), 'payments api', 'a quoted name is a name, spaces and all');
