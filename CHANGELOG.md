@@ -11,6 +11,7 @@ All notable changes to Logline are documented in this file.
 ### Performance
 
 - The Logs panel's script is minified, so the panel loads about half as much code (about 240 KiB instead of 440 KiB).
+- Searches with a regular expression are much faster, and still give the same results. Over 50,000 logs, `/request\s4\d{3}\b/` takes about 40 ms instead of about 750 ms. An expression whose matches have a bounded length runs on the JavaScript engine, written so that it means what RE2 means. Any other expression is passed to RE2 only for logs that contain the text every match must have, such as `"status":5` in `/"status":5\d+/`. A search no longer compiles its expression again on each refresh.
 
 ### Fixes
 
