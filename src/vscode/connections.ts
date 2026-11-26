@@ -6,7 +6,9 @@ import { DatadogConnector, type DatadogKeys } from '../capture/connectors/datado
 import { iamPassword, listProfiles } from '../capture/connectors/aws-auth';
 import { ElasticConnector } from '../capture/connectors/elastic';
 import { GcpConnector } from '../capture/connectors/gcp';
+import { GitHubActionsConnector } from '../capture/connectors/github-actions';
 import { LokiConnector } from '../capture/connectors/loki';
+import { githubAuth } from './github-auth';
 import { MongoConnector } from '../capture/connectors/mongo';
 import { MysqlDriver } from '../capture/connectors/mysql-driver';
 import { PostgresDriver } from '../capture/connectors/postgres-driver';
@@ -127,6 +129,8 @@ export class ConnectionManager implements vscode.Disposable {
     if (connection.type === 'gcp')
       return `gcp:${connection.endpoint ?? ''}/${connection.project}/${connection.filter ?? ''}`;
     // The same groups read with the same credentials; other groups are another permission.
+    if (connection.type === 'github-actions')
+      return `github-actions:${connection.endpoint ?? ''}/${connection.repository}/${connection.branch ?? ''}`;
     if (connection.type === 'cloudwatch')
       return `cloudwatch:${cloudwatchEndpoint(connection)}/${connection.profile ?? ''}/${[...connection.logGroups].sort().join(',')}`;
     return secretKey(connection);
@@ -324,6 +328,7 @@ export class ConnectionManager implements vscode.Disposable {
   } = {
     cloudwatch: async (connection) => new CloudWatchConnector(connection, this.timeoutMs),
     gcp: async (connection) => new GcpConnector(connection, this.timeoutMs),
+    'github-actions': async (connection) => new GitHubActionsConnector(connection, githubAuth, this.timeoutMs),
     elasticsearch: async (connection, secret) =>
       new ElasticConnector(
         connection,

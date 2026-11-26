@@ -86,6 +86,7 @@ const WEIGHTS = {
   'datadog-logs': 3,
   'cloudwatch-logs': 3,
   'loki-logs': 3,
+  'ci-logs': 3,
   'sites-shared': 3,
   copy: 3,
   traces: 3,
@@ -368,6 +369,39 @@ timed('loki-logs', 'Turn 5,000 Loki lines, JSON and plain text, into events', as
       ingestion.accept(lokiLine(labels, ns, line).line, 'remote', {
         serverId: 'conn:prod',
         server: 'Loki · prod',
+        sessionId: 'run',
+      });
+  };
+});
+timed('ci-logs', 'Turn a 5,000-line CI job log, with steps, colours, and failed tests, into events', async () => {
+  const { LogStore } = await load('core/log-store.js');
+  const { Ingestion } = await load('capture/ingestion.js');
+  const { parseJobLog } = await load('core/ci-log.js');
+  const stamp = (i) => new Date(receivedAt.getTime() + i * 10).toISOString().replace('Z', '0000Z');
+  const lines = Array.from({ length: 5000 }, (_, i) => {
+    if (i % 500 === 0) return `${stamp(i)} ##[group]Run step ${i / 500}`;
+    if (i % 500 === 499) return `${stamp(i)} ##[endgroup]`;
+    if (i % 250 === 7) return `${stamp(i)} not ok ${i} - case ${i} fails`;
+    if (i % 250 === 9) return `${stamp(i)}   location: '/home/runner/work/shop/shop/out-tests/cart.test.js:${i}:3'`;
+    if (i % 1000 === 3) return `${stamp(i)} ##[error]Process completed with exit code 1.`;
+    return `${stamp(i)} \x1b[32m✔\x1b[39m request ${i} took ${i % 900} ms`;
+  });
+  const log = lines.join('\n');
+  const job = {
+    run: 4812,
+    runId: 1,
+    workflow: 'CI',
+    job: 'build (ubuntu-latest)',
+    jobId: 2,
+    branch: 'main',
+    sha: 'abcdef0123',
+  };
+  return () => {
+    const ingestion = new Ingestion(new LogStore(10000, 100 * 1024 * 1024), () => {});
+    for (const record of parseJobLog(log, job))
+      ingestion.accept(JSON.stringify({ ...record, service: job.job }), 'remote', {
+        serverId: 'conn:ci',
+        server: 'GitHub Actions · shop',
         sessionId: 'run',
       });
   };

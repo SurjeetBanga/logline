@@ -2,6 +2,8 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import {
   cloudwatchEndpoint,
+  isGitBranch,
+  isGitHubRepository,
   connectionIdOf,
   connectionLabel,
   connectionSourceId,
@@ -335,4 +337,56 @@ test('a Cloud Logging connection needs a project id, and takes another API only 
   ]);
   assert.equal(remote.type === 'gcp' && remote.endpoint, undefined);
   assert.equal(normalizeConnections([{ id: 'bad', type: 'gcp', project: 'Shop Prod' }]).length, 0);
+});
+
+test('github-actions connections keep a valid repository, branch and local endpoint', () => {
+  const [kept] = normalizeConnections([
+    {
+      id: 'ci',
+      type: 'github-actions',
+      repository: 'octo/shop',
+      branch: 'main',
+      endpoint: 'http://localhost:8080/api',
+    },
+  ]);
+  assert.deepEqual(kept, {
+    id: 'ci',
+    label: 'ci',
+    type: 'github-actions',
+    repository: 'octo/shop',
+    branch: 'main',
+    endpoint: 'http://localhost:8080/api',
+  });
+  assert.equal(normalizeConnections([{ id: 'x', type: 'github-actions', repository: 'shop' }]).length, 0);
+  const [loose] = normalizeConnections([
+    { id: 'y', type: 'github-actions', repository: 'octo/shop', branch: 'bad..name', endpoint: 'http://example.com' },
+  ]);
+  assert.equal(loose.type === 'github-actions' && loose.branch, undefined);
+  assert.equal(loose.type === 'github-actions' && loose.endpoint, undefined);
+});
+
+test('isGitHubRepository and isGitBranch', () => {
+  for (const ok of ['a/b', 'octo-org/shop.v2', 'a/_x', 'a/.github']) assert.equal(isGitHubRepository(ok), true, ok);
+  for (const bad of ['', 'a', 'a/', '/b', '-a/b', 'a/b/c', 'a/..', 'a/.', 'a b/c', `${'a'.repeat(40)}/b`])
+    assert.equal(isGitHubRepository(bad), false, bad);
+  for (const ok of ['main', 'feat/x', 'release-1.2', 'a@b']) assert.equal(isGitBranch(ok), true, ok);
+  for (const bad of [
+    '-x',
+    '/x',
+    '.x',
+    'a..b',
+    'a b',
+    'a~',
+    'a^',
+    'a:b',
+    'a?',
+    'a*',
+    'a[',
+    'a\\b',
+    'x/',
+    'x.lock',
+    'a@{b',
+    'a'.repeat(256),
+  ])
+    assert.equal(isGitBranch(bad), false, bad);
 });

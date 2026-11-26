@@ -43,6 +43,7 @@ export const CONNECTION_TYPES: readonly ConnectionType[] = [
   'datadog',
   'cloudwatch',
   'loki',
+  'github-actions',
   'elasticsearch',
   'gcp',
 ];

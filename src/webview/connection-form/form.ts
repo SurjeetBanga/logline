@@ -524,6 +524,28 @@ export function createConnectionForm(api: FormApi, root: HTMLElement) {
     ];
   }
 
+  function githubDetails(): Child[] {
+    return [
+      h(
+        'div',
+        { className: 'grid' },
+        field('repository', 'Repository', {
+          placeholder: 'octo-org/shop',
+          hint: 'The repository as owner/name, or its github.com address.',
+        }),
+        field('branch', 'Branch', {
+          placeholder: 'The checked-out branch',
+          hint: 'Optional: the branch whose runs are read. Left empty, it follows the branch checked out in this workspace.',
+        }),
+      ),
+      h(
+        'div',
+        { className: 'hint' },
+        'Signs in with the GitHub account VS Code is signed in to; VS Code asks the first time. A search reads the jobs that failed in the newest failed runs of the branch in its range. Nothing is stored.',
+      ),
+    ];
+  }
+
   function elasticDetails(): Child[] {
     const iamHint = h(
       'div',
@@ -769,6 +791,9 @@ export function createConnectionForm(api: FormApi, root: HTMLElement) {
         break;
       case 'gcp':
         children.push(...gcpDetails());
+        break;
+      case 'github-actions':
+        children.push(...githubDetails());
         break;
     }
     details.replaceChildren(...children.filter((child): child is Node | string => !!child));

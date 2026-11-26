@@ -6,6 +6,7 @@ import type {
   ConnectionConfig,
   ConnectionType,
   GcpConnection,
+  GitHubActionsConnection,
   SqliteConnection,
 } from './connections';
 
@@ -109,6 +110,18 @@ export const CONNECTION_KINDS: Record<ConnectionType, ConnectionKind> = {
     maxRowsSetting: 'logServiceMaxRows',
     secret: 'password',
   },
+  'github-actions': {
+    label: 'GitHub Actions',
+    description: 'The logs of the CI jobs that failed in a GitHub repository',
+    service: true,
+    icon: 'cloud',
+    noun: 'log',
+    fields:
+      'Searches run on the fetched job logs: their fields are run, workflow, job, step, and, for a failed test, test, file, and line.',
+    services: true,
+    maxRowsSetting: 'logServiceMaxRows',
+    secret: 'none',
+  },
   postgres: {
     label: 'Postgres',
     description: 'Also Aurora PostgreSQL, RDS, Cloud SQL',
@@ -178,6 +191,9 @@ export function storeName(type: ConnectionType): string {
 /** A connection whose password or keys are kept in secret storage. */
 export function keepsSecret(
   connection: ConnectionConfig,
-): connection is Exclude<ConnectionConfig, SqliteConnection | CloudWatchConnection | GcpConnection> {
+): connection is Exclude<
+  ConnectionConfig,
+  SqliteConnection | CloudWatchConnection | GcpConnection | GitHubActionsConnection
+> {
   return CONNECTION_KINDS[connection.type].secret !== 'none';
 }

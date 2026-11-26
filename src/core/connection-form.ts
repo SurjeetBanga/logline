@@ -10,6 +10,8 @@ import {
   apiUrl,
   isAwsRegion,
   isGcpProject,
+  isGitBranch,
+  isGitHubRepository,
   isLokiSelector,
   isRdsHost,
   logGroupIdentifier,
@@ -69,6 +71,9 @@ export interface FormDraft {
   /** Cloud Logging: the Google Cloud project, and a query every search is narrowed by. */
   project: string;
   filter: string;
+  /** GitHub Actions: the repository as owner/name, and the branch whose runs are read ('' for the checked-out one). */
+  repository: string;
+  branch: string;
   /** A MongoDB URL, without its password. */
   url: string;
   /** A SQLite file, relative to the workspace when inside it. */
@@ -103,6 +108,8 @@ export function emptyDraft(type: ConnectionType = 'postgres'): FormDraft {
     selector: '',
     project: '',
     filter: '',
+    repository: '',
+    branch: '',
     url: '',
     path: '',
     site: DATADOG_SITES[0],
@@ -144,6 +151,8 @@ export function draftFromConnection(connection: ConnectionConfig): FormDraft {
       return { ...draft, site: connection.site };
     case 'gcp':
       return { ...draft, project: connection.project, filter: connection.filter ?? '' };
+    case 'github-actions':
+      return { ...draft, repository: connection.repository, branch: connection.branch ?? '' };
     case 'elasticsearch':
       return {
         ...draft,
@@ -182,6 +191,7 @@ export function draftLogGroups(draft: Pick<FormDraft, 'logGroups'>): string[] {
 export function suggestedLabel(draft: FormDraft): string {
   if (draft.type === 'datadog') return 'prod';
   if (draft.type === 'gcp') return draft.project.trim();
+  if (draft.type === 'github-actions') return draft.repository.trim().split('/').pop() ?? '';
   if (draft.type === 'loki' || draft.type === 'elasticsearch')
     return /\/\/(?:localhost|127\.0\.0\.1|\[::1\])[:/]?/.test(draft.url) ? 'local' : 'prod';
   if (draft.type === 'cloudwatch') {
@@ -256,6 +266,8 @@ export function keepUnmodeled(next: ConnectionConfig, before?: ConnectionConfig)
   if (next.type === 'datadog' && before.type === 'datadog' && before.indexes && !next.indexes)
     return { ...next, indexes: before.indexes };
   // A service field and an endpoint are set in settings only.
+  if (next.type === 'github-actions' && before.type === 'github-actions' && before.endpoint && !next.endpoint)
+    return { ...next, endpoint: before.endpoint };
   if (next.type === 'gcp' && before.type === 'gcp')
     return {
       ...next,
@@ -371,6 +383,20 @@ export function readDraft(draft: FormDraft, saved: { secret?: boolean } = {}): D
       else if (!isGcpProject(project))
         errors.project = 'A project id: lowercase letters, digits, and dashes, such as shop-prod-1234';
       item = { type: 'gcp', project, ...(draft.filter.trim() ? { filter: draft.filter.trim() } : {}) };
+      break;
+    }
+    case 'github-actions': {
+      const repository = draft.repository
+        .trim()
+        .replace(/^(?:https?:\/\/github\.com\/|git@github\.com:)/, '')
+        .replace(/\.git$/, '');
+      const branch = draft.branch.trim();
+      if (!repository) errors.repository = 'Enter the repository, such as octo-org/shop';
+      else if (!isGitHubRepository(repository))
+        errors.repository = 'The repository as owner/name, such as octo-org/shop';
+      if (branch && !isGitBranch(branch))
+        errors.branch = 'A branch name such as main, or leave it empty for the checked-out branch';
+      item = { type: 'github-actions', repository, ...(branch ? { branch } : {}) };
       break;
     }
     case 'elasticsearch': {
