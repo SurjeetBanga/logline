@@ -367,3 +367,16 @@ test('investigate messages keep a short search and need an event id', () => {
   assert.equal(parseViewRequest({ type: 'investigate', id: '3' }), undefined);
   assert.equal(parseViewRequest({ type: 'investigate', id: -1 }), undefined);
 });
+
+test('agentCall messages need an event id and one of three actions', () => {
+  for (const action of ['logs', 'transcript', 'terminal'])
+    assert.deepEqual(parseViewRequest({ type: 'agentCall', id: 4, action, ignored: 1 }), {
+      type: 'agentCall',
+      id: 4,
+      action,
+    });
+  assert.equal(parseViewRequest({ type: 'agentCall', id: 4, action: 'run' }), undefined);
+  assert.equal(parseViewRequest({ type: 'agentCall', id: 4 }), undefined);
+  assert.equal(parseViewRequest({ type: 'agentCall', action: 'logs' }), undefined);
+  assert.equal(parseViewRequest({ type: 'agentCall', id: -1, action: 'logs' }), undefined);
+});

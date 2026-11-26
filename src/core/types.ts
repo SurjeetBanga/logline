@@ -76,4 +76,6 @@ export interface SessionSummary {
   captureReason?: string;
   command?: string;
   cwd?: string;
+  /** A short summary shown under the run's name, such as an agent session's tool calls and tokens. */
+  detail?: string;
 }

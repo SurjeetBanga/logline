@@ -2,7 +2,15 @@ import { randomBytes } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
-import { AgentSessionParser, agentSource, claudeProjectDir, within, type AgentName } from '../core/agent-session';
+import {
+  AgentSessionParser,
+  agentSource,
+  claudeProjectDir,
+  within,
+  type AgentName,
+  type AgentSessionInfo,
+} from '../core/agent-session';
+import { shortCount } from '../core/codex-usage';
 import type { Settings } from '../core/settings';
 import type { SessionSummary } from '../core/types';
 import type { Ingestion } from './ingestion';
@@ -127,6 +135,7 @@ export class AgentSessionCapture {
     const label = followed.parser.label;
     if (label) record.command = label;
     if (cwd) record.cwd = cwd;
+    record.detail = sessionDetail(followed.parser.info);
     if (followed.parser.info.startedAt !== undefined) record.startedAt = followed.parser.info.startedAt;
     if (!followed.listed) {
       followed.listed = true;
@@ -232,6 +241,12 @@ export class AgentSessionCapture {
     this.state.notify();
   }
 
+  /** The transcript a run was read from, while it is followed. */
+  transcriptOf(sessionId: string): string | undefined {
+    for (const [file, followed] of this.followed) if (followed.record.id === sessionId) return file;
+    return undefined;
+  }
+
   /** A removed source stays removed: its sessions are no longer read. */
   stopServer(serverId: string): void {
     for (const [file, followed] of this.followed) if (followed.record.serverId === serverId) this.ignore(file);
@@ -245,4 +260,17 @@ export class AgentSessionCapture {
     clearInterval(this.timer);
     this.followed.clear();
   }
+}
+
+/** `42 tools · 3 failed · 186k tok`: a session's run, under its name. */
+export function sessionDetail(info: AgentSessionInfo): string {
+  const { toolCalls, failedCalls, tokens } = info;
+  const total = tokens.input + tokens.output + tokens.cached;
+  return [
+    `${toolCalls} tool${toolCalls === 1 ? '' : 's'}`,
+    failedCalls ? `${failedCalls} failed` : '',
+    total ? `${shortCount(total)} tok` : '',
+  ]
+    .filter(Boolean)
+    .join(' · ');
 }

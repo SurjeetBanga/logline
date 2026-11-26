@@ -110,6 +110,9 @@ function services() {
     investigate: async (...args: unknown[]) => {
       calls.push({ name: 'investigate', value: args });
     },
+    agentCall: async (...args: unknown[]) => {
+      calls.push({ name: 'agentCall', value: args });
+    },
     toggleTerminalCapture: async (enabled: boolean) => {
       calls.push({ name: 'terminalCapture', value: enabled });
     },
@@ -154,6 +157,7 @@ test('message router dispatches every public action and preserves normalized inp
     { type: 'askCopilot', anchor: 1 },
     { type: 'shareEvent', id: 1 },
     { type: 'investigate', id: 1, query: 'message:"boom"' },
+    { type: 'agentCall', id: 2, action: 'terminal' },
     { type: 'toggleTerminalCapture', enabled: true },
     { type: 'showGuide', section: 'whatsNew' },
     { type: 'import' },
@@ -196,6 +200,10 @@ test('message router dispatches every public action and preserves normalized inp
   assert.deepEqual(
     calls.filter((call) => call.name === 'investigate').map((call) => call.value),
     [[1, 'message:"boom"']],
+  );
+  assert.deepEqual(
+    calls.filter((call) => call.name === 'agentCall').map((call) => call.value),
+    [[2, 'terminal']],
   );
   for (const name of [
     'saveSearch',

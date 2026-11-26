@@ -104,6 +104,7 @@ export class SessionRegistry {
     | 'captureReason'
     | 'command'
     | 'cwd'
+    | 'detail'
   >[] {
     return [...this.records.values()].map((record) => ({
       id: record.id,
@@ -124,6 +125,7 @@ export class SessionRegistry {
       captureReason: record.captureReason,
       command: record.command,
       cwd: record.cwd,
+      ...(record.detail ? { detail: record.detail } : {}),
       canStop: record.canStop,
     }));
   }

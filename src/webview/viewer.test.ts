@@ -7090,3 +7090,33 @@ test('the Traces list says when it holds the newest 200 of more traces', () => {
   receive({ type: 'traces', traces: [trace(1), trace(2)] });
   assert.match(get('tracesStatus').textContent, /^2 recent traces/, 'a short list is not cut');
 });
+
+test('an agent session shows what it did on its second line, under the agent icon', () => {
+  const { get, receive } = viewer({ server: 'agent:claude-code' });
+  receive({
+    ...railSnapshot,
+    servers: [
+      ...railSnapshot.servers,
+      { id: 'agent:claude-code', label: 'Claude Code', status: 'running', activeSessions: 1, kind: 'agent' },
+    ],
+    sessions: [
+      {
+        id: 'c1',
+        serverId: 'agent:claude-code',
+        server: 'Claude Code',
+        command: 'Fix the checkout 500',
+        status: 'running',
+        startedAt: 1,
+        sourceKind: 'agent',
+        detail: '3 tools · 1 failed · 1.2k tok',
+      },
+    ],
+  });
+  const view = rail(get);
+  assert.ok(view.row('agent:claude-code'), 'listed as a source');
+  const run = view.runs().find((button) => button.dataset.runId === 'c1')!;
+  assert.ok(run.classList.contains('stacked'));
+  assert.equal(run.querySelector('.rail-name')!.textContent, 'Fix the checkout 500');
+  assert.match(run.querySelector('.rail-status')!.textContent!, /3 tools · 1 failed · 1\.2k tok/);
+  assert.match(run.title, /3 tools · 1 failed · 1\.2k tok/);
+});
