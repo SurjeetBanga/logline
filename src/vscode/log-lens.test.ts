@@ -72,6 +72,12 @@ class EventEmitter {
 }
 
 const commands = new Map<string, (...args: unknown[]) => unknown>();
+// A document whose lines come from the fake files.
+const textDocument = (path: string) => ({
+  uri: Uri.file(path),
+  lineCount: 6,
+  lineAt: (line: number) => ({ text: files.get(path)?.split('\n')[line] ?? '' }),
+});
 const files = new Map<string, string>([
   [
     '/w/src/auth.ts',
@@ -86,7 +92,7 @@ const opened: { path: string; line: number }[] = [];
 let configured = 'codelens+gutter';
 let decorations: Range[] = [];
 const editor = {
-  document: { uri: Uri.file('/w/src/auth.ts'), lineCount: 6 },
+  document: textDocument('/w/src/auth.ts'),
   setDecorations(_type: unknown, ranges: Range[]) {
     decorations = ranges;
   },
@@ -143,7 +149,7 @@ const mock = {
       stat: async (uri: Uri) => ({ size: (files.get(uri.path) ?? unscanned.get(uri.path))!.length }),
       readFile: async (uri: Uri) => new TextEncoder().encode(files.get(uri.path) ?? unscanned.get(uri.path)),
     },
-    openTextDocument: async (uri: Uri) => ({ uri, lineCount: 6 }),
+    openTextDocument: async (uri: Uri) => textDocument(uri.path),
   },
 };
 
@@ -195,7 +201,7 @@ test('log lenses count events per statement and filter the Logs panel', async ()
   add(h.store, 3, '{"level":"error","msg":"login failed for user bob"}');
   add(h.store, 4, '{"level":"info","msg":"unrelated"}');
   h.lens.refresh(Date.now() + 5000);
-  const document = { uri: Uri.file('/w/src/auth.ts'), lineCount: 6 };
+  const document = textDocument('/w/src/auth.ts');
   const lenses = h.lens.provideCodeLenses(document as never) as unknown as CodeLens[];
   assert.deepEqual(
     lenses.map((lens) => [lens.range.startLine, lens.command.title.replace(/ · last .*$/, '')]),
@@ -270,7 +276,7 @@ test('turning lenses off releases the index', async () => {
   const h = await harness();
   assert.equal(h.lens.enabled, false);
   assert.equal(h.index.size, 0);
-  assert.deepEqual(h.lens.provideCodeLenses({ uri: Uri.file('/w/src/auth.ts'), lineCount: 6 } as never), []);
+  assert.deepEqual(h.lens.provideCodeLenses(textDocument('/w/src/auth.ts') as never), []);
   h.lens.dispose();
   configured = 'codelens+gutter';
 });
@@ -280,7 +286,7 @@ test('lens counts drop events evicted from retention', async () => {
   add(h.store, 1, '{"level":"info","msg":"user 41 logged in"}');
   const later = Date.now() + 5000;
   h.lens.refresh(later);
-  const document = { uri: Uri.file('/w/src/auth.ts'), lineCount: 6 };
+  const document = textDocument('/w/src/auth.ts');
   add(h.store, 2, '{"level":"info","msg":"user 42 logged in"}');
   add(h.store, 3, '{"level":"error","msg":"login failed for user bob"}');
   h.lens.refresh(later + 1000);
@@ -305,10 +311,7 @@ test('files that events report are indexed on demand beyond the workspace scan',
     await new Promise((resolve) => setImmediate(resolve));
   assert.equal(h.index.sitesIn('deep/pkg/worker.go').length, 1);
   h.lens.refresh(Date.now() + 10000);
-  const lenses = h.lens.provideCodeLenses({
-    uri: Uri.file('/w/deep/pkg/worker.go'),
-    lineCount: 6,
-  } as never) as unknown as CodeLens[];
+  const lenses = h.lens.provideCodeLenses(textDocument('/w/deep/pkg/worker.go') as never) as unknown as CodeLens[];
   assert.match(lenses[0].command.title, /1 hit/, 'the short "ok" statement matches by its reported location');
   h.lens.dispose();
 });
