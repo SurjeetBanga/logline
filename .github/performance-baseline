@@ -1,3 +1,3 @@
 # The commit whose performance no change may drift more than 15% above (see scripts/perf-compare.mjs).
 # Move it, in a pull request, to lock in a speedup or to accept a slowdown that buys something.
-78a3f8eec27b60defe74366af603e04cb03089c5
+a0b60ed611627b2bc30088bf8608efb9c44b0b1c
