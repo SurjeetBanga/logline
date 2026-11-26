@@ -162,6 +162,7 @@ export function getElements() {
     railAddFile: element<HTMLButtonElement>('railAddFile'),
     railAddConnectionItem: element<HTMLButtonElement>('railAddConnectionItem'),
     railAddOtlp: element<HTMLButtonElement>('railAddOtlp'),
+    railAddAgents: element<HTMLButtonElement>('railAddAgents'),
     memorySummary: element<HTMLElement>('memorySummary'),
     memoryDetails: element<HTMLElement>('memoryDetails'),
     memorySettings: element<HTMLButtonElement>('memorySettings'),

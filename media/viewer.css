@@ -760,6 +760,40 @@ body > header {
 .rail-row.has-actions.selected .rail-actions {
   display: flex;
 }
+/* An agent's sessions on offer while they are off: a quiet dashed row whose Show and x appear when
+   it is pointed at or focused. */
+.rail-hint {
+  margin-top: 4px;
+  border: 1px dashed var(--vscode-panel-border, #3c3c3c);
+  color: var(--vscode-descriptionForeground, #9d9d9d);
+}
+.rail-hint .rail-glyph {
+  color: inherit;
+}
+.rail-hint:hover,
+.rail-hint:focus-within {
+  color: var(--vscode-foreground, #ccc);
+}
+.rail-hint:hover .rail-glyph,
+.rail-hint:focus-within .rail-glyph {
+  color: var(--vscode-icon-foreground, #c5c5c5);
+}
+.rail-hint-show {
+  display: none;
+  flex: none;
+  padding: 1px 8px;
+  border-radius: 3px;
+  background: var(--vscode-button-background, #0e639c);
+  color: var(--vscode-button-foreground, #fff);
+  font-size: 12px;
+}
+.rail-hint:hover .rail-hint-show,
+.rail-hint:focus-within .rail-hint-show {
+  display: inline-block;
+}
+.source-rail.collapsed .rail-hint {
+  display: none;
+}
 .rail-row.has-actions:hover .rail-meta,
 .rail-row.has-actions:focus-within .rail-meta,
 .rail-row.has-actions.selected .rail-meta,
@@ -832,40 +866,27 @@ body > header {
   margin: 4px 0 0;
   padding: 2px 2px 2px 8px;
 }
-.rail-info {
-  display: inline-grid;
-  flex: none;
-  place-items: center;
-  width: 18px;
-  height: 18px;
-  min-height: 0;
-  padding: 0;
-  border: 1px solid currentColor;
-  border-radius: 50%;
-  background: transparent;
-  color: var(--vscode-descriptionForeground, #aaa);
-  font-family: Georgia, 'Times New Roman', serif;
-  font-size: 11px;
-  font-style: italic;
-  line-height: 1;
-  cursor: help;
-}
-.rail-info:hover,
-.rail-info:focus {
-  background: transparent;
-  color: var(--vscode-foreground, #d4d4d4);
-}
-/* In a narrow rail the button gives up its text before the i is pushed past the edge. */
+/* A link, not a filled button, so an empty group stays quiet. In a narrow rail it gives up its text
+   before the i is pushed past the edge. */
 .rail-empty-add {
   min-width: 0;
+  min-height: 24px;
+  padding: 2px 0;
   overflow: hidden;
   text-overflow: ellipsis;
   border-color: transparent;
-  background: var(--vscode-button-secondaryBackground, #3a3d41);
-  color: var(--vscode-button-secondaryForeground, #fff);
+  background: transparent;
+  color: var(--vscode-textLink-foreground, #3794ff);
+  font-size: 12px;
 }
 .rail-empty-add:hover {
-  background: var(--vscode-button-secondaryHoverBackground, #45494e);
+  background: transparent;
+  color: var(--vscode-textLink-activeForeground, #5aa8ff);
+  text-decoration: underline;
+}
+.rail-empty-add:focus-visible {
+  outline: 1px solid var(--vscode-focusBorder, #007fd4);
+  outline-offset: 1px;
 }
 /* The rail's right edge drags to resize it; the line shows while pointed at or dragged. */
 .rail-resizer {
@@ -927,8 +948,7 @@ body > header {
 .source-rail.collapsed .rail-meta,
 .source-rail.collapsed .rail-agents,
 .source-rail.collapsed .rail-actions,
-.source-rail.collapsed .rail-runs,
-.source-rail.collapsed .rail-info {
+.source-rail.collapsed .rail-runs {
   display: none;
 }
 /* Outranks the rules that show a pointed-at or selected row's actions in place of its dot. */

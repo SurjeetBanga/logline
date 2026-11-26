@@ -72,6 +72,8 @@ export type ViewRequest =
   /** The panel tour ended: finished, or skipped. */
   | { type: 'tourEnded'; finished: boolean }
   | { type: 'connectAgent'; agent?: 'claude' | 'codex' }
+  | { type: 'agentHint'; action: 'show' | 'dismiss'; agent: AgentHintView['agent'] }
+  | { type: 'showAgentSessions' }
   | { type: 'onboardingSeen'; choice?: WelcomeChoice }
   | { type: 'installUpdate' }
   | { type: 'panelSize'; width: number }
@@ -268,6 +270,17 @@ export interface Snapshot extends Stats {
   agentSetup?: AgentSetupView;
   /** Files changed since the last commit, while the workspace is a git repository. */
   changes?: { files: number };
+  /** Agents the rail offers: with recent sessions here while agent sessions are off, or removed while on. */
+  agentHints?: AgentHintView[];
+  /** Add logs offers agent sessions: they are off, or an agent's source was removed. */
+  agentSessionsOffer?: boolean;
+}
+/** An agent whose sessions the rail offers to show. */
+export interface AgentHintView {
+  agent: 'claude-code' | 'codex';
+  label: string;
+  /** Its sessions in an open folder in the last day. */
+  sessions: number;
 }
 /** Which agents are set up to read shared logs. */
 export interface AgentSetupView {
@@ -543,6 +556,11 @@ export function parseViewRequest(value: unknown): ViewRequest | undefined {
       return ABOUT_ACTIONS.includes(msg.action as AboutAction)
         ? { type: msg.type, action: msg.action as AboutAction }
         : undefined;
+    case 'agentHint':
+      return (msg.action === 'show' || msg.action === 'dismiss') &&
+        (msg.agent === 'claude-code' || msg.agent === 'codex')
+        ? { type: msg.type, action: msg.action, agent: msg.agent }
+        : undefined;
     case 'emptyAction':
       return msg.action === 'capture' || msg.action === 'openFile' || msg.action === 'browser' || msg.action === 'agent'
         ? { type: msg.type, action: msg.action }
@@ -664,6 +682,7 @@ export function parseViewRequest(value: unknown): ViewRequest | undefined {
         : { type: msg.type };
     }
     case 'import':
+    case 'showAgentSessions':
     case 'clear':
     case 'manageServers':
     case 'addConnection':

@@ -205,6 +205,8 @@ export function activate(context: vscode.ExtensionContext): { provider: LogsProv
     reader: new CodexUsageReader({ codexDir: process.env.CODEX_HOME || join(homedir(), '.codex') }),
     claudeReader: new ClaudeUsageReader({ claudeDir: join(homedir(), '.claude') }),
     showAgentSessions: () => {
+      // The command also brings back agents whose source was removed.
+      agentController.agentSessions.restore();
       void agentController.agentSessions.poll();
       void agentController.showQuery('kind:agent');
     },

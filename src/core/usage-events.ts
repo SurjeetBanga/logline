@@ -147,7 +147,15 @@ export type NudgeKind = (typeof NUDGE_KINDS)[number];
 export const NUDGE_STEPS = ['shown', 'accepted', 'never', 'dismissed'] as const;
 export type NudgeStep = (typeof NUDGE_STEPS)[number];
 /** Where outside the Logs panel someone came into Logline from. */
-export const ENTRY_POINTS = ['status_bar', 'explorer', 'editor', 'terminal_menu', 'empty_state'] as const;
+export const ENTRY_POINTS = [
+  'status_bar',
+  'explorer',
+  'editor',
+  'terminal_menu',
+  'empty_state',
+  'agent_hint',
+  'add_menu',
+] as const;
 export type EntryPoint = (typeof ENTRY_POINTS)[number];
 /** Captures that start without anyone asking for that run: the rest are a deliberate step. */
 export const AUTOMATIC_CAPTURES: readonly string[] = ['debug', 'terminal', 'otlp'];

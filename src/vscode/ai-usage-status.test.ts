@@ -74,7 +74,10 @@ const mock = {
     executeCommand: async (id: string) => void ui.executed.push(id),
   },
 };
-const { AiUsageStatus } = withVscode(mock, () => require('./ai-usage-status') as typeof import('./ai-usage-status'));
+const { AiUsageStatus, agentNames } = withVscode(
+  mock,
+  () => require('./ai-usage-status') as typeof import('./ai-usage-status'),
+);
 
 const NOW = new Date(2026, 10, 15, 12).getTime();
 const background = () => item.backgroundColor?.id;
@@ -220,4 +223,11 @@ test('a host with no status bar still registers its commands', async () => {
   await bare.refresh();
   assert.ok(registered.has('logline.showAiUsage'));
   bare.dispose();
+});
+
+test('the agent sessions dialog names the agents on offer, or both', () => {
+  assert.equal(agentNames(['Claude Code']), 'Claude Code keeps');
+  assert.equal(agentNames(['Claude Code', 'Codex']), 'Claude Code and Codex keep');
+  assert.equal(agentNames(), 'Claude Code and Codex keep');
+  assert.equal(agentNames([]), 'Claude Code and Codex keep');
 });

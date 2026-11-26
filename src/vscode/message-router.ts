@@ -116,6 +116,10 @@ interface MessageServices {
   about?(): AboutInfo | undefined;
   /** A way in chosen from the empty Logs panel. */
   emptyAction?(action: 'capture' | 'openFile' | 'browser' | 'agent'): Promise<void>;
+  /** The rail's offer of an agent's sessions: show them, or stop offering them in this workspace. */
+  agentHint?(action: 'show' | 'dismiss', agent: 'claude-code' | 'codex'): Promise<void>;
+  /** Add logs › Agent sessions: turn them on after asking, and restore removed agents. */
+  showAgentSessions?(): Promise<void>;
   connections?: Pick<
     ConnectionManager,
     | 'fetch'
@@ -286,6 +290,14 @@ export async function handleMessage(
       return;
     case 'aboutAction':
       await runAboutAction(msg.action, services.about?.());
+      return;
+    case 'agentHint':
+      if (msg.action === 'show') services.usage?.record('entry', { from: 'agent_hint' });
+      await services.agentHint?.(msg.action, msg.agent);
+      return;
+    case 'showAgentSessions':
+      services.usage?.record('entry', { from: 'add_menu' });
+      await services.showAgentSessions?.();
       return;
     case 'emptyAction':
       services.usage?.record('entry', { from: 'empty_state' });

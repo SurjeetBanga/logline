@@ -548,3 +548,29 @@ test('a span request reads the span, and copying one is routed and counted', asy
   );
   assert.deepEqual(actions, ['copy_span', 'copy_span']);
 });
+
+test('the rail’s offer of an agent’s sessions reaches the window, and a malformed one is ignored', async () => {
+  const hints: unknown[][] = [];
+  const service = { ...services(), agentHint: async (...args: unknown[]) => void hints.push(args) };
+  await handleMessage(service as any, () => undefined, { type: 'agentHint', action: 'show', agent: 'claude-code' });
+  await handleMessage(service as any, () => undefined, { type: 'agentHint', action: 'dismiss', agent: 'codex' });
+  await handleMessage(service as any, () => undefined, { type: 'agentHint', action: 'show', agent: 'copilot' });
+  await handleMessage(service as any, () => undefined, { type: 'agentHint', action: 'delete', agent: 'codex' });
+  assert.deepEqual(hints, [
+    ['show', 'claude-code'],
+    ['dismiss', 'codex'],
+  ]);
+});
+
+test('Add logs › Show agent sessions reaches the window and is counted as a way in', async () => {
+  let shown = 0;
+  const entries: unknown[] = [];
+  const service = {
+    ...services(),
+    showAgentSessions: async () => void shown++,
+    usage: { record: (name: string, props: unknown) => void entries.push([name, props]) },
+  };
+  await handleMessage(service as any, () => undefined, { type: 'showAgentSessions' });
+  assert.equal(shown, 1);
+  assert.deepEqual(entries, [['entry', { from: 'add_menu' }]]);
+});
