@@ -37,7 +37,7 @@ export interface RemoteRunInfo {
   statement?: string;
   /** What a tail follows, as typed. */
   query?: string;
-  /** Whether a tail's query is in the store's own syntax. */
+  /** Whether a search or tail sent a query in the store's own syntax, rather than the filter. */
   native?: boolean;
   error?: string;
   at: number;
@@ -187,6 +187,7 @@ export class RemoteSource {
     if (options.replace) this.cancelFetches(target.id);
     const run = this.start(target, options.sql === undefined ? 'fetch' : 'sql', options.title);
     run.replaceable = options.replace === true;
+    if (options.sql === undefined) run.info.native = options.native !== undefined;
     this.state.status = `Fetching from ${target.label}…`;
     this.state.notify();
     options.started?.(run.record.id);

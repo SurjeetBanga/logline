@@ -6,7 +6,7 @@ All notable changes to Logline are documented in this file.
 
 ### Changes
 
-- **Search the Service list**: a connection's **Service** list is now a box you type in to find a service among the suggestions, instead of scrolling a long list. Press Enter to choose what you typed, clear it and press Enter for any service, or press Escape to keep the one chosen.
+- **Search the Service list**: a connection's **Service** list is now a box you type in to narrow the list of services under it, instead of scrolling a long list. Pick one with a click, or with Up and Down and Enter; press Enter to choose what you typed, clear it for any service, or press Escape to keep the one chosen.
 
 ### Performance
 
@@ -14,7 +14,10 @@ All notable changes to Logline are documented in this file.
 
 ### Fixes
 
-- With **Datadog syntax** on, a `service:` filter left in the search box naming another service no longer hides every log a run fetches: **Run**, **Tail**, and choosing a service remove it. When a filter hides every log fetched, the table says how many were fetched and that the filter hides them, rather than *No matching rows*.
+- With **Datadog syntax** on, a `service:` filter left in the search box naming another service no longer hides every log a run fetches: **Run**, **Tail**, and choosing a service remove it. A `service:` filter is only removed when it names one service that the Datadog query's one service does not contain: a name with a space counts as one name, and a filter or query that uses OR or NOT, a wildcard, or a group is left alone. When a run sent with **Datadog syntax** fetched logs the filter hides, the table says how many were fetched and that the filter hides them, rather than *No matching rows*.
+- Choosing a service when the query has a group such as `service:(a OR b)` replaces the whole group, instead of leaving part of it behind.
+- Choosing a service keeps a filter typed in the search box but not yet entered.
+- The search box's suggestions and the **Metric query** bar's metric names can be picked with Up and Down and Enter, as well as with a click; the browser's own list ignored those keys in VS Code. Enter on a highlighted suggestion picks it rather than applying or running what is typed, Escape closes the list, and picking a metric name after an aggregation such as `avg:` keeps the aggregation.
 
 ## 1.22.2 — 2026-11-24
 

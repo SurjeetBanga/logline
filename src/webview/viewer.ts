@@ -125,7 +125,14 @@ export function createViewer(api: WebviewApi) {
   const inspection = createInspection(elements, scrollViewport, api, formatTimestamp, scope, (traceId) =>
     traceView.show(traceId),
   );
-  const search = createSearch(elements, state, api, popovers, { filterChanged, updateScopeSelection }, scope);
+  const search = createSearch(
+    elements,
+    state,
+    api,
+    popovers,
+    { filterChanged, updateScopeSelection, suggest: () => requestAutocomplete() },
+    scope,
+  );
   const connectionBar = createConnectionBar(
     elements,
     state,
@@ -951,6 +958,11 @@ export function createViewer(api: WebviewApi) {
     searchDebounce = setTimeout(() => {
       searchDebounce = undefined;
     }, 150);
+    requestAutocomplete();
+  });
+
+  /** Ask the host for suggestions for what is typed in the search box, once typing pauses. */
+  function requestAutocomplete(): void {
     clearTimeout(autocompleteDebounce);
     if (!search.draft().trim()) {
       search.clearAutocomplete();
@@ -959,7 +971,7 @@ export function createViewer(api: WebviewApi) {
     autocompleteDebounce = setTimeout(() => {
       api.postMessage({ type: 'autocomplete', input: search.draft(), serverId: state.selectedServer || undefined });
     }, 150);
-  });
+  }
 
   search.buildLevelMenu();
 

@@ -1,7 +1,10 @@
 /** Resources owned by one viewer instance, released together on disposal. */
 type ViewerEventMap = GlobalEventHandlersEventMap &
   Pick<WindowEventMap, 'message'> &
-  Pick<DocumentEventMap, 'visibilitychange'>;
+  Pick<DocumentEventMap, 'visibilitychange'> & {
+    /** A search input's clear button, or Enter in it. */
+    search: Event;
+  };
 export class EventScope {
   private readonly abort = new AbortController();
   private readonly cleanups: (() => void)[] = [];
