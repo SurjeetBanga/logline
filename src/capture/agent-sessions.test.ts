@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { test } from 'node:test';
 import { claudeProjectDir } from '../core/agent-session';
 import { LogStore } from '../core/log-store';
-import { AGENT_IDLE_MS, AgentSessionCapture, sessionDetail } from './agent-sessions';
+import { AGENT_HINT_SCAN_MS, AGENT_IDLE_MS, AgentSessionCapture, sessionDetail } from './agent-sessions';
 import { Ingestion } from './ingestion';
 import { RuntimeState } from './runtime-state';
 import { SessionRegistry } from './session-registry';
@@ -234,6 +234,48 @@ test('a removed source is no longer read', async () => {
   }
 });
 
+test('a removed agent is offered again, ignores new sessions, and comes back when restored', async () => {
+  const t = setup(true);
+  try {
+    const file = t.claudeFile();
+    writeFileSync(file, t.jsonl(...claudeSession(t.folder)));
+    await t.capture.poll();
+    assert.deepEqual(t.capture.hints, []);
+    t.capture.stopServer('agent:claude-code');
+    assert.deepEqual(t.capture.removedAgents, ['claude-code']);
+    assert.deepEqual(t.capture.hints, [{ agent: 'claude-code', label: 'Claude Code', sessions: 1 }]);
+    assert.equal(t.registry.records.size, 0);
+    // A session it starts after the removal is not read either.
+    writeFileSync(t.claudeFile('y.jsonl'), t.jsonl(...claudeSession(t.folder)));
+    t.clock.now += 20_000;
+    await t.capture.poll();
+    assert.equal(t.capture.active, 0);
+    assert.equal(t.capture.restore('codex'), false);
+    assert.equal(t.capture.restore(), true);
+    assert.deepEqual(t.capture.hints, []);
+    await t.capture.poll();
+    assert.equal(t.capture.active, 2);
+    assert.equal(t.registry.records.size, 2);
+  } finally {
+    t.cleanup();
+  }
+});
+
+test('turning agent sessions off forgets which agents were removed', async () => {
+  const t = setup(true);
+  try {
+    writeFileSync(t.claudeFile(), t.jsonl(...claudeSession(t.folder)));
+    await t.capture.poll();
+    t.capture.stopServer('agent:claude-code');
+    t.settings['agentSessions.enabled'] = false;
+    await t.capture.poll();
+    t.settings['agentSessions.enabled'] = true;
+    assert.deepEqual(t.capture.removedAgents, []);
+  } finally {
+    t.cleanup();
+  }
+});
+
 test('a session that stops growing is exited, and running again when it grows', async () => {
   const t = setup(true);
   try {
@@ -316,4 +358,130 @@ test('a session detail counts tools, failures, and tokens, leaving out what is z
   assert.equal(sessionDetail(info(3, 1, 1000, 100, 100)), '3 tools · 1 failed · 1.2k tok');
   assert.equal(sessionDetail(info(1, 0, 5)), '1 tool · 5 tok');
   assert.equal(sessionDetail(info(0, 0, 0)), '0 tools');
+});
+
+test('after a clear, a run counts only what its session did since, and old lines are not read again', async () => {
+  const t = setup(true);
+  try {
+    const file = t.claudeFile();
+    writeFileSync(file, t.jsonl(...claudeSession(t.folder)));
+    await t.capture.poll();
+    const [run] = [...t.registry.records.values()];
+    assert.equal(run.detail, '1 tool · 1 failed · 30 tok');
+    t.store.clear();
+    t.registry.clearCompleted();
+    t.capture.cleared();
+    assert.equal(run.events, 0);
+    assert.equal(run.detail, '0 tools');
+    assert.equal(t.registry.records.get(run.id), run, 'a running session keeps its run');
+    appendFileSync(
+      file,
+      t.jsonl({
+        type: 'assistant',
+        timestamp: iso(5),
+        message: { id: 'msg_2', content: [{ type: 'text', text: 'All fixed' }], usage: { output_tokens: 7 } },
+      }),
+    );
+    await t.capture.poll();
+    assert.deepEqual(
+      t.store.all().map((event) => event.message),
+      ['All fixed'],
+    );
+    assert.equal(run.events, 1);
+    assert.equal(run.detail, '0 tools · 7 tok');
+  } finally {
+    t.cleanup();
+  }
+});
+
+test('an ended session that a clear removed is listed again when it resumes', async () => {
+  const t = setup(true);
+  try {
+    const file = t.claudeFile();
+    writeFileSync(file, t.jsonl(...claudeSession(t.folder)));
+    await t.capture.poll();
+    const [run] = [...t.registry.records.values()];
+    t.clock.now += AGENT_IDLE_MS + 1000;
+    await t.capture.poll();
+    assert.equal(run.status, 'exited');
+    t.store.clear();
+    t.registry.clearCompleted();
+    t.capture.cleared();
+    assert.equal(t.registry.records.size, 0);
+    appendFileSync(file, t.jsonl({ type: 'user', timestamp: iso(9), message: { role: 'user', content: 'Again' } }));
+    await t.capture.poll();
+    assert.equal(t.registry.records.get(run.id), run);
+    assert.equal(run.status, 'running');
+    assert.equal(run.events, 1);
+    assert.equal(t.store.all()[0].sessionId, run.id);
+  } finally {
+    t.cleanup();
+  }
+});
+
+test('while agent sessions are off, the agents with sessions in the folder are offered, without following them', async () => {
+  const t = setup(false);
+  try {
+    writeFileSync(t.claudeFile('a.jsonl'), t.jsonl(...claudeSession(t.folder)));
+    writeFileSync(t.claudeFile('b.jsonl'), t.jsonl(...claudeSession(t.folder)));
+    // A sibling folder whose name starts with this one's is filed under a matching prefix, but worked elsewhere.
+    writeFileSync(
+      t.claudeFile('c.jsonl', `${claudeProjectDir(t.folder)}-site`),
+      t.jsonl(...claudeSession(`${t.folder}-site`)),
+    );
+    // A subfolder's session counts.
+    writeFileSync(
+      t.claudeFile('d.jsonl', `${claudeProjectDir(t.folder)}-api`),
+      t.jsonl(...claudeSession(join(t.folder, 'api'))),
+    );
+    const dir = join(t.codexDir, 'sessions', '2026', '11', '15');
+    mkdirSync(dir, { recursive: true });
+    const meta = (cwd: string) => t.jsonl({ timestamp: iso(0), type: 'session_meta', payload: { id: 's', cwd } });
+    writeFileSync(join(dir, 'rollout-here.jsonl'), meta(t.folder));
+    writeFileSync(join(dir, 'rollout-other.jsonl'), meta(join(t.root, 'other')));
+    const before = t.notified();
+    await t.capture.poll();
+    assert.deepEqual(
+      t.capture.hints.map((hint) => ({ ...hint })),
+      [
+        { agent: 'claude-code', label: 'Claude Code', sessions: 3 },
+        { agent: 'codex', label: 'Codex', sessions: 1 },
+      ],
+    );
+    assert.ok(t.notified() > before, 'the panel hears of the offer');
+    assert.equal(t.capture.active, 0);
+    assert.equal(t.store.all().length, 0);
+    assert.equal(t.registry.records.size, 0);
+
+    // The folders are listed again only after a while.
+    writeFileSync(join(dir, 'rollout-later.jsonl'), meta(t.folder));
+    t.clock.now += 10_000;
+    await t.capture.poll();
+    assert.equal(t.capture.hints[1].sessions, 1);
+    t.clock.now += AGENT_HINT_SCAN_MS;
+    await t.capture.poll();
+    assert.equal(t.capture.hints[1].sessions, 2);
+
+    // Once on, nothing is offered: the sessions are shown.
+    t.settings['agentSessions.enabled'] = true;
+    assert.deepEqual(t.capture.hints, []);
+    await t.capture.poll();
+    assert.equal(t.capture.active, 5);
+  } finally {
+    t.cleanup();
+  }
+});
+
+test('with no sessions in the folder, nothing is offered', async () => {
+  const t = setup(false);
+  try {
+    writeFileSync(
+      t.claudeFile('x.jsonl', claudeProjectDir(join(t.root, 'elsewhere'))),
+      t.jsonl(...claudeSession(t.root)),
+    );
+    await t.capture.poll();
+    assert.deepEqual(t.capture.hints, []);
+  } finally {
+    t.cleanup();
+  }
 });

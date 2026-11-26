@@ -23,7 +23,7 @@ export const TOUR_STEPS: TourStep[] = [
     target: 'railAddConnection',
     fallback: 'sourceRail',
     title: 'Production, next to local',
-    text: 'Press + to add Datadog, Postgres, MySQL or Aurora, MongoDB, or SQLite in a form that tests it and previews its log table; Edit changes it later. Searches run read-only, and each result is a run you can compare with your own.',
+    text: 'Add connection, or + once you have one, opens a form for Datadog, Postgres, MySQL or Aurora, MongoDB, or SQLite that tests it and previews its log table; Edit changes it later. Searches run read-only, and each result is a run you can compare with your own.',
   },
   {
     target: 'searchEditor',

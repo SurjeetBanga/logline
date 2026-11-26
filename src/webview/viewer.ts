@@ -515,6 +515,7 @@ export function createViewer(api: WebviewApi) {
       : (data.otlp?.error ?? 'Off');
     elements.statusOtlp.textContent = otlpRunning ? 'Stop' : 'Start';
     elements.railAddOtlp.hidden = otlpRunning;
+    elements.railAddAgents.hidden = !data.agentSessionsOffer;
     elements.otlpStatus.setAttribute('aria-pressed', String(otlpRunning));
     elements.otlpStatus.textContent = otlpRunning
       ? `OpenTelemetry ${data.otlp?.endpoint?.replace(/^https?:\/\//, '') ?? ''}`.trim()
@@ -671,6 +672,7 @@ export function createViewer(api: WebviewApi) {
       servers: data.servers,
       sessions: data.sessions ? visibleSessions : undefined,
       connections: data.connections ?? [],
+      hints: data.agentHints ?? [],
     });
     connectionTab.setConnections(data.connections ?? []);
     if (selectionChanged) {
@@ -1489,6 +1491,7 @@ export function createViewer(api: WebviewApi) {
     elements.railAddFile,
     elements.openBrowser,
     elements.import,
+    elements.railAddAgents,
     elements.railAddConnectionItem,
     elements.railAddOtlp,
   ];
@@ -1499,6 +1502,7 @@ export function createViewer(api: WebviewApi) {
   scope.listen(elements.railAddRun, 'click', () => api.postMessage({ type: 'run' }));
   scope.listen(elements.railAddFile, 'click', () => api.postMessage({ type: 'followFile' }));
   scope.listen(elements.railAddConnectionItem, 'click', () => api.postMessage({ type: 'addConnection' }));
+  scope.listen(elements.railAddAgents, 'click', () => api.postMessage({ type: 'showAgentSessions' }));
   scope.listen(elements.railAddOtlp, 'click', () => api.postMessage({ type: 'toggleOtlp', enabled: true }));
   scope.listen(elements.breakOnLogs, 'click', () =>
     api.postMessage({ type: 'breakOnQuery', query: search.query(), levels: state.currentLevels() }),

@@ -7,6 +7,7 @@ const notices: string[] = [];
 let buttons: string[] = [];
 const settings: { key: string; value: unknown; target?: unknown }[] = [];
 const commands: string[] = [];
+const commandArgs: unknown[][] = [];
 const copied: string[] = [];
 let pick: (items: { runId: string }[]) => unknown = () => undefined;
 const terminals: { options: unknown; shown: boolean; sent: unknown[][] }[] = [];
@@ -14,7 +15,12 @@ const opened: unknown[] = [];
 const mock = {
   Uri: { file: (path: string) => ({ fsPath: path }) },
   ConfigurationTarget: { Global: 1, Workspace: 2 },
-  commands: { executeCommand: async (id: string) => void commands.push(id) },
+  commands: {
+    executeCommand: async (id: string, ...args: unknown[]) => {
+      commands.push(id);
+      commandArgs.push(args);
+    },
+  },
   extensions: { getExtension: () => undefined },
   env: { clipboard: { writeText: async (text: string) => void copied.push(text) } },
   workspace: {
@@ -855,4 +861,73 @@ test('an agent call opens the logs around it, the transcript, or its command in 
   (controller.agentSessions as { transcriptOf: (id: string) => string | undefined }).transcriptOf = () => '/x/s.jsonl';
   await controller.agentCall(1, 'transcript');
   assert.deepEqual(opened, [[{ fsPath: '/x/s.jsonl' }, { preview: true }]]);
+});
+
+test('an agent offered in the rail can be shown, or dismissed in this folder only', async (t) => {
+  const saved = new Map<string, unknown>();
+  const controller = new LogsController({
+    globalState: {
+      get: (key: string, fallback?: unknown) => (saved.has(key) ? saved.get(key) : fallback),
+      update: async (key: string, value: unknown) => void saved.set(key, value),
+    },
+  } as unknown as import('vscode').ExtensionContext);
+  t.after(() => {
+    host.folders = undefined;
+    return controller.dispose();
+  });
+  const hints = [
+    { agent: 'claude-code' as const, label: 'Claude Code', sessions: 3 },
+    { agent: 'codex' as const, label: 'Codex', sessions: 1 },
+  ];
+  Object.defineProperty(controller.agentSessions, 'hints', { get: () => hints });
+  host.folders = [{ uri: { fsPath: '/work/shop' } }];
+  assert.deepEqual(controller.snapshot({ type: 'snapshot' }).agentHints, hints);
+
+  commands.length = 0;
+  await controller.agentHint('show', 'claude-code');
+  assert.deepEqual(commands, ['logline.showAgentSessions'], 'Show asks first, as the command does');
+  assert.deepEqual(commandArgs.at(-1), [['Claude Code', 'Codex']], 'naming the agents on offer');
+
+  await controller.agentHint('dismiss', 'claude-code');
+  assert.deepEqual(
+    controller.snapshot({ type: 'snapshot' }).agentHints?.map((hint) => hint.agent),
+    ['codex'],
+    'only the agent dismissed goes',
+  );
+  host.folders = [{ uri: { fsPath: '/work/other' } }];
+  assert.equal(controller.snapshot({ type: 'snapshot' }).agentHints?.length, 2, 'another folder still offers it');
+});
+
+test('a removed agent is offered again, even where dismissed, and Show restores it without asking', async (t) => {
+  const saved = new Map<string, unknown>([['logline.agentHints.dismissed', ['claude-code /work/shop']]]);
+  const controller = new LogsController({
+    globalState: {
+      get: (key: string, fallback?: unknown) => (saved.has(key) ? saved.get(key) : fallback),
+      update: async (key: string, value: unknown) => void saved.set(key, value),
+    },
+  } as unknown as import('vscode').ExtensionContext);
+  t.after(() => {
+    host.folders = undefined;
+    return controller.dispose();
+  });
+  host.folders = [{ uri: { fsPath: '/work/shop' } }];
+  const sessions = controller.agentSessions;
+  const restored: unknown[] = [];
+  Object.defineProperty(sessions, 'enabled', { get: () => true });
+  Object.defineProperty(sessions, 'removedAgents', { get: () => ['claude-code'] });
+  Object.defineProperty(sessions, 'hints', {
+    get: () => [{ agent: 'claude-code' as const, label: 'Claude Code', sessions: 1 }],
+  });
+  sessions.restore = (agent?: 'claude-code' | 'codex') => (restored.push(agent), true);
+  assert.equal(controller.snapshot({ type: 'snapshot' }).agentSessionsOffer, true, 'Add logs offers it');
+  assert.equal(controller.snapshot({ type: 'snapshot' }).agentHints, undefined, 'dismissed before');
+
+  controller.stop('agent:claude-code');
+  assert.deepEqual(saved.get('logline.agentHints.dismissed'), [], 'removing it lifts the dismissal');
+  assert.equal(controller.snapshot({ type: 'snapshot' }).agentHints?.length, 1);
+
+  commands.length = 0;
+  await controller.agentHint('show', 'claude-code');
+  assert.deepEqual(restored, ['claude-code']);
+  assert.ok(!commands.includes('logline.showAgentSessions'), 'no dialog: sessions are already on');
 });

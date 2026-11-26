@@ -1,6 +1,6 @@
 import { connectionKind } from '../../core/connection-types';
 import { connectionIdOf } from '../../core/connections';
-import type { ConnectionView, Snapshot } from '../../protocol/messages';
+import type { AgentHintView, ConnectionView, Snapshot } from '../../protocol/messages';
 import type { Elements } from '../dom';
 import type { EventScope } from '../event-scope';
 import type { ViewerState } from '../state';
@@ -32,6 +32,7 @@ const ICONS: Record<string, string> = {
   add: 'M8 3v10M3 8h10',
   edit: 'M10.5 2.5l3 3-8 8h-3v-3zM9 4l3 3',
   remove: 'M3 4.5h10M6.5 4.5V3h3v1.5M4.5 4.5l.6 8.5h5.8l.6-8.5M7 7v4M9 7v4',
+  dismiss: 'M4.5 4.5l7 7M11.5 4.5l-7 7',
 };
 
 export function icon(name: string, size = 14): SVGElement {
@@ -137,6 +138,7 @@ export function createSourceRail(
   let servers: Server[] = [];
   let sessions: Session[] = [];
   let connections: ConnectionView[] = [];
+  let hints: AgentHintView[] = [];
   let signature = '';
   // Each row's remove action by source id, for the Delete key.
   const removers = new Map<string, () => void>();
@@ -428,6 +430,50 @@ export function createSourceRail(
     return button;
   }
 
+  /**
+   * While agent sessions are off, an agent that worked in this folder is
+   * offered as a quiet row: Show turns them on (after asking), and the x stops
+   * offering it here. Delete dismisses it too.
+   */
+  function hintRow(hint: AgentHintView): HTMLElement {
+    const id = `hint:${hint.agent}`;
+    const wrapper = document.createElement('div');
+    wrapper.className = 'rail-row rail-hint has-actions';
+    wrapper.dataset.sourceId = id;
+    const select = document.createElement('button');
+    select.type = 'button';
+    select.className = 'rail-select rail-focusable';
+    select.dataset.sourceId = id;
+    select.tabIndex = -1;
+    select.title = `See what ${hint.label} did here: each prompt, tool call, and reply as logs beside your app's. Read on this machine only.`;
+    const glyph = span('rail-glyph');
+    glyph.append(icon('agent'));
+    const text = span('rail-text');
+    text.append(
+      span('rail-name', hint.label),
+      span('rail-status muted', `${hint.sessions} session${hint.sessions === 1 ? '' : 's'} in this folder`),
+    );
+    select.append(glyph, text, span('rail-hint-show', 'Show'));
+    scope.listen(select, 'click', () => api.postMessage({ type: 'agentHint', action: 'show', agent: hint.agent }));
+    const dismiss = () => api.postMessage({ type: 'agentHint', action: 'dismiss', agent: hint.agent });
+    removers.set(id, dismiss);
+    const close = document.createElement('button');
+    close.type = 'button';
+    close.className = 'rail-action rail-hint-dismiss';
+    const label = `Stop offering ${hint.label} sessions in this folder`;
+    close.setAttribute('aria-label', label);
+    close.title = label;
+    close.append(icon('dismiss', 12));
+    scope.listen(close, 'click', (event) => {
+      event.stopPropagation();
+      dismiss();
+    });
+    const actionsGroup = span('rail-actions');
+    actionsGroup.append(close);
+    wrapper.append(select, actionsGroup);
+    return wrapper;
+  }
+
   function group(label: string, extra?: HTMLElement): HTMLElement {
     const heading = document.createElement('div');
     heading.className = 'rail-group';
@@ -471,29 +517,27 @@ export function createSourceRail(
       children.push(element);
       if (id && id === state.selectedServer && sessions.length) children.push(runRows());
     };
-    if (local.length) children.push(group('Local'));
+    if (local.length || hints.length) children.push(group('Local'));
     for (const server of local) withRuns(serverRow(server), server.id);
-    const add = addButton();
-    children.push(group('Connections', add));
+    for (const hint of hints) children.push(hintRow(hint));
+    const none = !connections.length && !detached.length;
+    // With no connection yet there is nothing to group: the link alone adds one, and the heading and its + come with the first.
+    if (!none) children.push(group('Connections', addButton()));
     for (const connection of connections) withRuns(connectionRow(connection), connection.sourceId);
     for (const server of detached) withRuns(detachedRow(server), server.id);
-    if (!connections.length && !detached.length) {
+    if (none) {
       const empty = document.createElement('div');
       empty.className = 'rail-empty';
-      // What a connection is waits behind an i, shown on hover or focus, so the card is one line.
-      const about = document.createElement('button');
-      about.type = 'button';
-      about.className = 'rail-info';
-      about.textContent = 'i';
-      about.setAttribute('aria-label', 'About connections');
-      about.title =
-        'Search Datadog, CloudWatch, Loki, Elasticsearch, Cloud Logging, or a database next to your local runs.';
       const button = document.createElement('button');
       button.type = 'button';
+      // The tour and the guide's Show me point here while the + is not shown.
+      button.id = 'railAddConnection';
       button.className = 'rail-empty-add';
       button.textContent = 'Add connection';
+      button.title =
+        'Search Datadog, CloudWatch, Loki, Elasticsearch, Cloud Logging, or a database next to your local runs.';
       scope.listen(button, 'click', () => api.postMessage({ type: 'addConnection' }));
-      empty.append(button, about);
+      empty.append(button);
       children.push(empty);
     }
     elements.railList.replaceChildren(...children);
@@ -549,6 +593,7 @@ export function createSourceRail(
         session.captureStatus,
         session.canStop,
       ]),
+      hints.map((hint) => [hint.agent, hint.label, hint.sessions]),
       connections.map((connection) => [
         connection.sourceId,
         connection.label,
@@ -616,8 +661,14 @@ export function createSourceRail(
 
   return {
     /** The rail's data from a snapshot; sessions are those of the selected source. */
-    update(next: { servers?: Server[]; sessions?: Session[]; connections?: ConnectionView[] }): void {
+    update(next: {
+      servers?: Server[];
+      sessions?: Session[];
+      connections?: ConnectionView[];
+      hints?: AgentHintView[];
+    }): void {
       if (next.servers) servers = next.servers;
+      if (next.hints) hints = next.hints;
       if (next.sessions) sessions = next.sessions;
       if (next.connections) connections = next.connections;
       refresh();

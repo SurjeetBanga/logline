@@ -783,7 +783,7 @@
       "from": {
         "classification": "SystemMetaData",
         "purpose": "FeatureInsight",
-        "comment": "One of: status_bar, explorer, editor, terminal_menu, empty_state."
+        "comment": "One of: status_bar, explorer, editor, terminal_menu, empty_state, agent_hint, add_menu."
       }
     },
     "surjeetbanga.logline/prompt_answered": {

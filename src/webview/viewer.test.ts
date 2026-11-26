@@ -2267,24 +2267,49 @@ test('a rail collapsed or opened by hand stays that way', () => {
   assert.equal(viewer({ rail: 'open' }).get('sourceRail').classList.contains('collapsed'), false);
 });
 
+test('an agent with sessions in the folder is offered under Local, to show or to stop offering', () => {
+  const { get, messages, receive } = viewer({ server: '' });
+  const plain = (value: unknown) => JSON.parse(JSON.stringify(value));
+  receive({ ...railSnapshot, servers: [], agentHints: [{ agent: 'claude-code', label: 'Claude Code', sessions: 3 }] });
+  const groups = get('railList')
+    .querySelectorAll('.rail-group-label')
+    .map((label) => label.textContent);
+  assert.deepEqual(groups, ['Local'], 'Local is listed for the offer alone');
+  const [hint] = get('railList').querySelectorAll('.rail-hint');
+  assert.ok(hint, 'the offer is a row');
+  const select = hint.querySelectorAll('.rail-select')[0];
+  assert.equal(select.querySelectorAll('.rail-name')[0].textContent, 'Claude Code');
+  assert.equal(select.querySelectorAll('.rail-status')[0].textContent, '3 sessions in this folder');
+  assert.equal(select.querySelectorAll('.rail-hint-show')[0].textContent, 'Show');
+  assert.match(select.title, /Read on this machine only/);
+  select.listeners.get('click')!();
+  assert.deepEqual(plain(messages.at(-1)), { type: 'agentHint', action: 'show', agent: 'claude-code' });
+  const dismiss = hint.querySelectorAll('.rail-hint-dismiss')[0];
+  assert.equal(dismiss.attributes['aria-label'], 'Stop offering Claude Code sessions in this folder');
+  dismiss.listeners.get('click')!({ stopPropagation() {} });
+  assert.deepEqual(plain(messages.at(-1)), { type: 'agentHint', action: 'dismiss', agent: 'claude-code' });
+
+  receive({ ...railSnapshot, servers: [] });
+  assert.equal(get('railList').querySelectorAll('.rail-hint').length, 0, 'gone once it is not offered');
+});
+
 test('the rail lists connections with what they are doing, and offers to add one', () => {
   const { get, messages, receive } = viewer({ server: '' });
   const plain = (value: unknown) => JSON.parse(JSON.stringify(value));
   receive({ ...railSnapshot, connections: [] });
-  const about = get('railList').querySelectorAll('.rail-info')[0];
-  assert.equal(about.attributes['aria-label'], 'About connections');
-  assert.match(about.title, /^Search Datadog/, 'what a connection is shows on hover, not in the card');
-  assert.deepEqual(
-    get('railList')
-      .querySelectorAll('.rail-empty')[0]
-      .children.map((child) => child.className),
-    ['rail-empty-add', 'rail-info'],
-    'the card is its button and the i',
+  assert.equal(get('railList').querySelectorAll('.rail-add').length, 0, 'no + while the link adds one');
+  assert.ok(
+    !get('railList')
+      .querySelectorAll('.rail-group-label')
+      .some((label) => label.textContent === 'Connections'),
+    'no heading over nothing',
   );
-  const empty = get('railList').querySelectorAll('.rail-empty-add')[0];
+  assert.equal(get('railList').querySelectorAll('.rail-info').length, 0);
+  const [empty] = get('railList').querySelectorAll('.rail-empty-add');
+  assert.equal(empty.textContent, 'Add connection');
+  assert.equal((empty as unknown as { id: string }).id, 'railAddConnection', 'the tour and Show me point at it');
+  assert.match(empty.title, /^Search Datadog/, 'what a connection is shows on hover');
   empty.listeners.get('click')!();
-  assert.deepEqual(plain(messages.at(-1)), { type: 'addConnection' });
-  get('railList').querySelectorAll('.rail-add')[0].listeners.get('click')!();
   assert.deepEqual(plain(messages.at(-1)), { type: 'addConnection' });
 
   const connection = {
@@ -2312,6 +2337,7 @@ test('the rail lists connections with what they are doing, and offers to add one
   assert.equal(view.select('conn:pg')!.querySelector('.rail-status')!.textContent, 'Tailing · 12 rows');
   assert.ok(view.select('conn:pg')!.querySelector('.rail-agents'), 'agents may fetch from it');
   assert.equal(get('railList').querySelectorAll('.rail-empty').length, 0);
+  assert.equal(get('railList').querySelectorAll('.rail-add').length, 1, 'with a connection, + adds another');
   view.actions('conn:pg')[0].listeners.get('click')!({ stopPropagation() {} });
   assert.deepEqual(plain(messages.at(-1)), {
     type: 'connectionTail',
@@ -5845,6 +5871,16 @@ test('the Add logs menu offers each way to bring logs in, and hides the receiver
   assert.equal(get('railAddOtlp').hidden, true);
   receive({ ...quietSnapshot, otlp: { running: false } });
   assert.equal(get('railAddOtlp').hidden, false);
+});
+
+test('the Add logs menu offers agent sessions while they are off or an agent was removed', () => {
+  const { get, receive, messages } = viewer();
+  receive({ ...quietSnapshot });
+  assert.equal(get('railAddAgents').hidden, true);
+  receive({ ...quietSnapshot, agentSessionsOffer: true });
+  assert.equal(get('railAddAgents').hidden, false);
+  get('railAddAgents').listeners.get('click')!();
+  assert.deepEqual(JSON.parse(JSON.stringify(messages.at(-1))), { type: 'showAgentSessions' });
 });
 
 test('the Add logs menu moves between its shown items with the arrow, Home, and End keys', () => {

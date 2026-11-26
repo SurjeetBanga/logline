@@ -6,6 +6,7 @@ import { getField, parseQuery, usesChangedScope } from '../core/query';
 import type { Settings } from '../core/settings';
 import type { LogEvent } from '../core/types';
 import type {
+  AgentHintView,
   AgentSetupView,
   ConnectionView,
   DoctorFindingView,
@@ -66,6 +67,9 @@ export interface SnapshotSources {
   rowLinksVersion?: string;
   /** Files changed since the last commit, while the workspace is a git repository. */
   changes?: { files: number };
+  /** Agents whose sessions the rail offers to show. */
+  agentHints?: AgentHintView[];
+  agentSessionsOffer?: boolean;
 }
 
 // The newest page only changes at its ends: matches are appended and the
@@ -116,6 +120,8 @@ export function buildSnapshot(
     agentSetup,
     rowLinksVersion,
     changes,
+    agentHints,
+    agentSessionsOffer,
   }: SnapshotSources,
 ): Snapshot {
   const options = {
@@ -216,6 +222,8 @@ export function buildSnapshot(
     ...(agentClients?.length ? { agentClients } : {}),
     ...(agentSetup ? { agentSetup } : {}),
     ...(changes ? { changes } : {}),
+    ...(agentHints?.length ? { agentHints } : {}),
+    ...(agentSessionsOffer ? { agentSessionsOffer } : {}),
     ...(connections?.length ? { connections } : {}),
   };
 }

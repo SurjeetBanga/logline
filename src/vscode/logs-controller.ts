@@ -28,6 +28,7 @@ import {
 import { OtelIntegration } from './otel-integration';
 import { BrowserCapture } from '../capture/browser-capture';
 import { AgentSessionCapture } from '../capture/agent-sessions';
+import { agentSource, type AgentName } from '../core/agent-session';
 import type { BrowserLauncher } from './browser';
 import { FileFollower } from '../capture/file-follower';
 import { RemoteSource } from '../capture/remote-source';
@@ -76,6 +77,7 @@ import { extractExceptions } from '../core/exceptions';
 import { testFailureFrames } from '../core/runtime-errors';
 import type { LogEvent, SessionSummary } from '../core/types';
 import type {
+  AgentHintView,
   AgentSetupView,
   CompareRequest,
   CompareView,
@@ -110,6 +112,11 @@ import type { UpdateCheck } from './update-check';
 import { feedbackSendable, sendFeedback } from './feedback';
 
 const SHARE_ALL_CONFIRMED_KEY = 'logline.shareAllLogsConfirmed.v1';
+/** `<agent> <folder>` for each folder where the rail's offer of an agent's sessions was dismissed. */
+const AGENT_HINTS_DISMISSED_KEY = 'logline.agentHints.dismissed';
+const AGENT_SERVER_IDS = new Map<string, AgentName>(
+  (['claude-code', 'codex'] as const).map((agent) => [agentSource(agent).serverId, agent]),
+);
 /**
  * Set by the one-step agent setup: every window on this profile shares what it
  * captures from its start, until Stop sharing. Kept out of settings so a
@@ -426,6 +433,8 @@ export class LogsController {
       agentClients: this.agentBridge?.recentClients() ?? [],
       agentSetup: this.agentSetup(),
       changes: this.gitChanges?.status(),
+      agentHints: this.agentHints(),
+      agentSessionsOffer: !this.agentSessions.enabled || this.agentSessions.removedAgents.length > 0,
       doctor:
         this.doctor && doctorMode(this.config) !== 'off'
           ? {
@@ -436,6 +445,45 @@ export class LogsController {
             }
           : undefined,
     });
+  }
+  /** Agents whose sessions the rail offers, leaving out those dismissed in an open folder. */
+  agentHints(): AgentHintView[] {
+    const dismissed = new Set(this.globalState.get<string[]>(AGENT_HINTS_DISMISSED_KEY) ?? []);
+    const folders = (vscode.workspace.workspaceFolders ?? []).map((folder) => folder.uri.fsPath);
+    return this.agentSessions.hints
+      .filter((hint) => !folders.some((folder) => dismissed.has(`${hint.agent} ${folder}`)))
+      .map(({ agent, label, sessions }) => ({ agent, label, sessions }));
+  }
+  async agentHint(action: 'show' | 'dismiss', agent: AgentName): Promise<void> {
+    if (action === 'show' && this.agentSessions.enabled) {
+      // A removed agent comes back without asking: agent sessions are already on.
+      this.agentSessions.restore(agent);
+      void this.agentSessions.poll();
+      await this.showQuery('kind:agent');
+      return;
+    }
+    if (action === 'show') {
+      // The dialog names the agents on offer here, not every agent Logline can read.
+      const offered = this.agentHints().map((hint) => hint.label);
+      await vscode.commands.executeCommand('logline.showAgentSessions', offered.length ? offered : undefined);
+      return;
+    }
+    const folders = (vscode.workspace.workspaceFolders ?? []).map((folder) => `${agent} ${folder.uri.fsPath}`);
+    const dismissed = new Set(this.globalState.get<string[]>(AGENT_HINTS_DISMISSED_KEY) ?? []);
+    for (const key of folders) dismissed.add(key);
+    // The newest ones are kept, so the list stays small however many folders are opened.
+    await this.globalState.update(AGENT_HINTS_DISMISSED_KEY, [...dismissed].slice(-200));
+    this.state.notify();
+  }
+  /** Removing an agent's source offers it in the rail again, even where its offer was dismissed. */
+  private undismissAgent(agent: AgentName): void {
+    const folders = new Set((vscode.workspace.workspaceFolders ?? []).map((folder) => `${agent} ${folder.uri.fsPath}`));
+    const dismissed = this.globalState.get<string[]>(AGENT_HINTS_DISMISSED_KEY) ?? [];
+    if (dismissed.some((key) => folders.has(key)))
+      void this.globalState.update(
+        AGENT_HINTS_DISMISSED_KEY,
+        dismissed.filter((key) => !folders.has(key)),
+      );
   }
   guideStatus() {
     return getGuideStatus(this.globalState.get<string>(GUIDE_STATE_KEY));
@@ -509,6 +557,10 @@ export class LogsController {
         },
         showStatus: async () => {
           await vscode.commands.executeCommand('logline.showStatus');
+        },
+        agentHint: (action, agent) => this.agentHint(action, agent),
+        showAgentSessions: async () => {
+          await vscode.commands.executeCommand('logline.showAgentSessions');
         },
         connections: this.connections,
         compare: (request) => this.compare.build(request),
@@ -908,6 +960,7 @@ export class LogsController {
     this.remote.clearResults();
     this.compare.unpin();
     this.registry.clearCompleted();
+    this.agentSessions.cleared();
     // A clear must also remove a completed import's status. Active capture is
     // intentionally retained, so keep its truthful running state instead.
     this.state.reset(this.isRunning());
@@ -1358,6 +1411,8 @@ export class LogsController {
       this.files.stopServer(serverId);
       this.browser.stopServer(serverId);
       this.agentSessions.stopServer(serverId);
+      const agent = AGENT_SERVER_IDS.get(serverId);
+      if (agent) this.undismissAgent(agent);
       this.debug.stopServer(serverId);
       this.remote.stopServer(serverId);
     } else {

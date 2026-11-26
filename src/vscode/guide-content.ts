@@ -534,7 +534,7 @@ export const GUIDE_CARDS: GuideCard[] = [
   {
     section: 'connections',
     title: 'Add a connection',
-    where: ['Sources rail', 'Connections', '+'],
+    where: ['Sources rail', 'Connections', 'Add connection'],
     text: 'A Connection tab opens with a form: choose Datadog, CloudWatch, Loki, Elasticsearch, Cloud Logging, Postgres, MySQL, MongoDB, or SQLite, test it, and pick the log table with a preview of its rows, or none to only run queries. Passwords and keys stay in VS Code secret storage, never in settings; Aurora and RDS can sign in with AWS IAM instead.',
     target: 'railAddConnection',
     fallback: 'sourceRail',

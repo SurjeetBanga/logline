@@ -66,7 +66,11 @@ export class AiUsageStatus implements vscode.Disposable {
     register('logline.setAiUsageDetail', (detail?: unknown) => this.setDetail(detail));
     register('logline.enableCodexUsage', () => this.enableCodex());
     register('logline.enableClaudeUsage', () => this.enableClaude());
-    register('logline.showAgentSessions', () => this.showAgentSessions());
+    register('logline.showAgentSessions', (agents?: unknown) =>
+      this.showAgentSessions(
+        Array.isArray(agents) ? agents.filter((agent): agent is string => typeof agent === 'string') : undefined,
+      ),
+    );
     const changed = vscode.workspace.onDidChangeConfiguration?.((event) => {
       if (event.affectsConfiguration('logline.aiUsage') || event.affectsConfiguration('logline.agentSessions'))
         void this.refresh();
@@ -189,15 +193,18 @@ export class AiUsageStatus implements vscode.Disposable {
     if (choice === 'Show Usage') await this.update('aiUsage.claude', true);
   }
 
-  /** Open the agent sessions in the Logs panel, turning their capture on first if the person agrees. */
-  async showAgentSessions(): Promise<void> {
+  /**
+   * Open the agent sessions in the Logs panel, turning their capture on first
+   * if the person agrees. `agents` names the ones found in this workspace,
+   * such as the rail's offer of Claude Code; without it, both are named.
+   */
+  async showAgentSessions(agents?: string[]): Promise<void> {
     if (!this.sources.config.get('agentSessions.enabled', false)) {
       const choice = await vscode.window.showInformationMessage(
         'Show agent sessions as logs?',
         {
           modal: true,
-          detail:
-            "Logline reads the transcripts Claude Code and Codex keep on this machine, for sessions in this workspace from the last day, and shows each prompt, tool call, and reply beside your app's logs. Nothing is sent anywhere unless you share it with an agent.",
+          detail: `Logline reads the transcripts ${agentNames(agents)} on this machine, for sessions in this workspace from the last day, and shows each prompt, tool call, and reply beside your app's logs. Nothing is sent anywhere unless you share it with an agent.`,
         },
         'Show Sessions',
       );
@@ -212,4 +219,10 @@ export class AiUsageStatus implements vscode.Disposable {
     this.item?.dispose();
     for (const disposable of this.disposables) disposable.dispose();
   }
+}
+
+/** `Claude Code keeps`, `Claude Code and Codex keep`: who keeps the transcripts, as the dialog says it. */
+export function agentNames(agents?: string[]): string {
+  const names = agents?.length ? agents : ['Claude Code', 'Codex'];
+  return names.length === 1 ? `${names[0]} keeps` : `${names.slice(0, -1).join(', ')} and ${names.at(-1)} keep`;
 }
