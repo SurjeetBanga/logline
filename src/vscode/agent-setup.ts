@@ -173,6 +173,10 @@ export function promptCommand(
   shell: Shell = shellKind(vscode.env?.shell),
   cli: string = agent,
 ): string {
+  // Windows PowerShell 5.1 passes a native program an argument with embedded double quotes
+  // unescaped, which splits it, and Command Prompt expands %NAME% even inside double quotes.
+  if (shell !== 'posix') prompt = prompt.replace(/"/g, "'");
+  if (shell === 'cmd') prompt = prompt.replace(/%/g, ' percent');
   return `${programFor(agent, cli, shell)} ${shellQuote(prompt, shell)}`;
 }
 

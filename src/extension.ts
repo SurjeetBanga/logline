@@ -148,7 +148,7 @@ export function activate(context: vscode.ExtensionContext): { provider: LogsProv
       store: logController.store,
       runs: () => logController.registry.records.values(),
       shareStatus: () => logController.agentAccess.status(),
-      share: (sourceIds, anchor) => logController.shareWithAgent(sourceIds, anchor),
+      share: (sourceIds, anchor, sessionIds) => logController.shareWithAgent(sourceIds, anchor, sessionIds),
       openChat: (prompt) => logController.openChat(prompt, 'investigation prompt'),
       showQuery: (query) => logController.showQuery(query),
       globalState: context.globalState,

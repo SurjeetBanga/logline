@@ -798,6 +798,43 @@ timed('stream', 'Sorted page while 1,000 events stream in, 50 at a time', async 
   };
 });
 
+timed('investigate-watch', 'Watch 5 investigated errors while 1,000 events stream in, 50 at a time', async () => {
+  const { LogStore } = await load('core/log-store.js');
+  const { parseLogLine } = await load('core/log-event.js');
+  const { InvestigationWatch } = await load('core/investigation.js');
+  const template = parseLogLine(line(1), 'stdout', 1, receivedAt);
+  template.serverId = 'api';
+  let next = 0;
+  const copy = () => ({ ...template, id: ++next, sessionId: `run-${next % 20}` });
+  const store = new LogStore(RETAINED, 100 * 1024 * 1024);
+  for (let i = 0; i < RETAINED; i++) store.add(copy());
+  const runs = Array.from({ length: 20 }, (_, index) => ({
+    id: `run-${index}`,
+    serverId: 'api',
+    server: 'npm run dev',
+    status: 'running',
+    startedAt: 0,
+    events: 0,
+  }));
+  // Errors that never recur, so no watch settles and each keeps reading what streams in.
+  const watches = Array.from(
+    { length: 5 },
+    (_, index) =>
+      new InvestigationWatch(
+        { message: `Error: never ${index}`, eventId: 1, query: `message:"never ${index}"`, serverId: 'api' },
+        0,
+        next,
+      ),
+  );
+  const eventsAfter = (id) => store.eventsAfter(id);
+  return () => {
+    for (let refresh = 0; refresh < 20; refresh++) {
+      for (let i = 0; i < 50; i++) store.add(copy());
+      for (const watch of watches) assert.equal(watch.check(runs, eventsAfter), undefined);
+    }
+  };
+});
+
 timed('removeSource', 'Remove a 100-event source from 50,000 retained events', async () => {
   const { LogStore } = await load('core/log-store.js');
   const { parseLogLine } = await load('core/log-event.js');

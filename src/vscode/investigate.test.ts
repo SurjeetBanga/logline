@@ -9,6 +9,8 @@ interface Options {
   copilot?: boolean;
   connected?: string[];
   shared?: boolean;
+  /** The source shared, when it is. */
+  sharedSource?: string;
   pick?: string;
 }
 
@@ -17,7 +19,7 @@ function harness(options: Options = {}) {
   const messages: string[] = [];
   const terminals: { name: string; sent: string[] }[] = [];
   const chats: string[] = [];
-  const shares: [string[], number][] = [];
+  const shares: [string[], number | undefined, string[] | undefined][] = [];
   const queries: string[] = [];
   const picks: string[][] = [];
   const state = new Map<string, unknown>();
@@ -25,6 +27,7 @@ function harness(options: Options = {}) {
   let saveListener: ((document: { uri: { scheme: string } }) => void) | undefined;
   let warningAnswer: string | undefined;
   let shared = options.shared ?? true;
+  let sharedSources = [options.sharedSource ?? 'api'];
   const vscode = {
     commands: {
       registerCommand: (id: string, handler: (...args: unknown[]) => unknown) => {
@@ -77,15 +80,22 @@ function harness(options: Options = {}) {
   const { Investigator } = withVscode(vscode, () => require('./investigate') as typeof import('./investigate'));
   const status = (): AgentShareStatus =>
     shared
-      ? { active: true, shareId: 'share-1', revision: 1, sources: [{ runs: [{ id: 'run-1' }] }] as never }
+      ? {
+          active: true,
+          shareId: 'share-1',
+          revision: 1,
+          scope: 'selected',
+          sources: sharedSources.map((id) => ({ id, runs: [{ id: id === 'api' ? 'run-1' : `${id}-run` }] })) as never,
+        }
       : { active: false, revision: 0, sources: [] };
   const investigator = new Investigator({
     store,
     runs: () => runs,
     shareStatus: status,
-    share: async (ids, anchor) => {
-      shares.push([ids, anchor]);
+    share: async (ids, anchor, sessionIds) => {
+      shares.push([ids, anchor, sessionIds]);
       shared = true;
+      sharedSources = ids;
     },
     openChat: async (prompt) => {
       chats.push(prompt);
@@ -157,7 +167,7 @@ test('logs are shared first when they are not, and an error no longer retained i
   const h = harness({ shared: false });
   h.error(7);
   await h.investigator.investigate({ ...boom, eventId: 7 }, 'copy');
-  assert.deepEqual(h.shares, [[['api'], 7]]);
+  assert.deepEqual(h.shares, [[['api'], 7, undefined]]);
   assert.equal(await h.investigator.investigate({ ...boom, eventId: 99 }, 'copy'), undefined);
   assert.match(h.messages.at(-1)!, /no longer in the retained logs/);
 });
@@ -208,5 +218,35 @@ test('the command without an error lists the error groups to choose from', async
   h.error(1);
   h.error(2);
   assert.equal(await h.commands.get('logline.investigate')!(), 'copy');
-  assert.match(h.clipboard(), /"Error: boom" \(2 times\)/);
+  assert.match(h.clipboard(), /`Error: boom` \(2 times\)/);
+});
+
+test('an error from a source not shared yet is added to what is shared, so the agent can read it', async () => {
+  const h = harness({ sharedSource: 'web' });
+  h.error(3, 'run-1');
+  await h.investigator.investigate({ ...boom, eventId: 3 }, 'copy');
+  assert.deepEqual(h.shares, [[['web', 'api'], undefined, ['web-run', 'run-1']]]);
+  assert.match(h.clipboard(), /Start with event id 3/);
+});
+
+test('captured events are checked once for a burst, not on every notification', async () => {
+  const h = harness();
+  h.error(1);
+  h.investigator.schedule(0);
+  await h.investigator.investigate(boom, 'copy');
+  h.runs.push({
+    id: 'run-2',
+    serverId: 'api',
+    server: 'npm run dev',
+    status: 'running',
+    startedAt: Date.now() + 1,
+    events: 1,
+  });
+  h.error(2, 'run-2');
+  h.investigator.schedule(0);
+  h.investigator.schedule(0);
+  assert.ok(!h.messages.some((message) => message.includes('Still failing')), 'not yet');
+  await new Promise((resolve) => setTimeout(resolve, 5));
+  assert.equal(h.messages.filter((message) => message.includes('Still failing')).length, 1);
+  h.investigator.dispose();
 });

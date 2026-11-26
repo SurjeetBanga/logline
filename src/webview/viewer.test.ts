@@ -6937,8 +6937,17 @@ test('the inspector hands the open error to an agent with Investigate', () => {
   const { get, messages, receive } = viewer();
   get('logs').listeners.get('click')!(clickOn('.message-button', rowButton(get, 42)));
   receive({ type: 'details', id: 42, text: 'raw', exceptions: [] });
+  const notError = get('inspectorBody').querySelector('.event-details')!.querySelector('.investigate-button')!;
+  assert.equal(
+    notError.getAttribute('aria-disabled'),
+    'true',
+    'an event that is not an error has nothing to watch for',
+  );
+  assert.match(notError.title, /not an error/);
+  receive({ type: 'details', id: 42, text: 'raw', exceptions: [], error: true });
   const button = get('inspectorBody').querySelector('.event-details')!.querySelector('.investigate-button')!;
   assert.equal(button.querySelector('.event-action-label')?.textContent, 'Investigate');
+  assert.equal(button.getAttribute('aria-disabled'), null);
   get('inspectorBody').listeners.get('click')!(clickOn('.investigate-button', button));
   assert.deepEqual(JSON.parse(JSON.stringify(messages.at(-1))), { type: 'investigate', id: 42 });
 });

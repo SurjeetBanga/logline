@@ -318,6 +318,8 @@ export interface DetailLinks {
   crash?: { id: number; message: string; exceptions: ExceptionBlock[] };
   /** For a crash, the JSON error it followed. */
   attachedTo?: { id: number; message: string };
+  /** The event is an error as Analyze counts them, so Investigate can watch for it. */
+  error?: boolean;
 }
 export interface GuideStatus {
   version: string;

@@ -212,7 +212,11 @@ export function buildEventDetails(
     'investigate-button',
     'agent',
     'Investigate',
-    'Hand this event to an agent, such as Copilot, Claude Code, or Codex, to find the cause and fix it; Logline then checks whether the fix works',
+    'Hand this error to an agent, such as Copilot, Claude Code, or Codex, to find the cause and fix it; Logline then checks whether the fix works',
+    links.error
+      ? undefined
+      : (loading ??
+          'This event is not an error. Investigate hands an error to an agent: an event logged at error or fatal, or with an HTTP status of 500 or more.'),
   );
   copy.dataset.id = share.dataset.id = investigateAction.dataset.id = String(id);
   output.append(copy, share, investigateAction);

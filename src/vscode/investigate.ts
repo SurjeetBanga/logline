@@ -17,11 +17,14 @@ import { counted, type Usage } from './usage';
 export type InvestigateAgent = 'copilot' | Agent | 'copy';
 
 export interface InvestigatorSources {
-  store: Pick<LogStore, 'find' | 'eventsAfter' | 'all'>;
+  store: Pick<LogStore, 'find' | 'eventsAfter' | 'all' | 'newestFirst'>;
   runs(): Iterable<SessionSummary>;
   shareStatus(): AgentShareStatus;
-  /** Share the runs of these sources with agents, with the usual warning; resolves when the user has answered. */
-  share(sourceIds: string[], anchor: number): Promise<void>;
+  /**
+   * Share with agents, with the usual warning; resolves when the user has answered. With an
+   * anchor, its run alone; with runs, those runs.
+   */
+  share(sourceIds: string[], anchor?: number, sessionIds?: string[]): Promise<void>;
   /** Open Copilot's chat with a prompt. */
   openChat(prompt: string): Promise<boolean>;
   showQuery(query: string): Promise<void>;
@@ -40,6 +43,8 @@ const NAMES: Record<InvestigateAgent, string> = {
 };
 // Errors watched for a fix at a time; an older watch gives way.
 const MAX_WATCHES = 5;
+// Captured events are checked at most this often, as the Logs panel refreshes.
+const CHECK_DELAY_MS = 500;
 
 /**
  * Investigate: hands one error to an agent the user has, with the evidence
@@ -49,6 +54,7 @@ const MAX_WATCHES = 5;
 export class Investigator implements vscode.Disposable {
   private readonly watches: InvestigationWatch[] = [];
   private readonly disposables: vscode.Disposable[] = [];
+  private timer?: ReturnType<typeof setTimeout>;
 
   constructor(private readonly sources: InvestigatorSources) {
     this.disposables.push(
@@ -59,7 +65,9 @@ export class Investigator implements vscode.Disposable {
         ),
       ),
       vscode.workspace.onDidSaveTextDocument((document) => {
-        if (document.uri.scheme !== 'file') return;
+        if (document.uri.scheme !== 'file' || !this.watches.length) return;
+        // Events logged before the save are read as before it.
+        this.check();
         const last = this.newestId();
         for (const watch of this.watches) watch.saved(Date.now(), last);
       }),
@@ -67,6 +75,8 @@ export class Investigator implements vscode.Disposable {
   }
 
   dispose(): void {
+    clearTimeout(this.timer);
+    this.timer = undefined;
     for (const disposable of this.disposables) disposable.dispose();
   }
 
@@ -91,11 +101,20 @@ export class Investigator implements vscode.Disposable {
     }
     target = { ...target, serverId: target.serverId ?? event.serverId };
     let status = this.sources.shareStatus();
-    if (!status.active && target.serverId) {
-      await this.sources.share([target.serverId], target.eventId);
+    const shared = () => !target.serverId || status.sources.some((source) => source.id === target.serverId);
+    if (target.serverId && !(status.active && shared())) {
+      if (!status.active) await this.sources.share([target.serverId], target.eventId);
+      else if (status.scope !== 'all') {
+        // Add the error's run to what is shared already, so the agent can read the event it starts from.
+        const runs = status.sources.flatMap((source) => source.runs.map((run) => run.id));
+        await this.sources.share([...status.sources.map((source) => source.id), target.serverId], undefined, [
+          ...runs,
+          event.sessionId ?? '*',
+        ]);
+      }
       status = this.sources.shareStatus();
     }
-    if (!status.active || !status.shareId) return undefined;
+    if (!status.active || !status.shareId || !shared()) return undefined;
     agent ??= await this.chooseAgent();
     if (!agent) return undefined;
     await this.sources.globalState.update(LAST_AGENT_KEY, agent);
@@ -125,12 +144,22 @@ export class Investigator implements vscode.Disposable {
     return agent;
   }
 
+  /** Check for new events soon; captured events arrive in bursts. */
+  schedule(delay = CHECK_DELAY_MS): void {
+    if (!this.watches.length || this.timer) return;
+    this.timer = setTimeout(() => {
+      this.timer = undefined;
+      this.check();
+    }, delay);
+    this.timer.unref?.();
+  }
+
   /** Look at the runs after each investigation for whether its error is gone. */
   check(): void {
     if (!this.watches.length) return;
     const runs = [...this.sources.runs()];
     for (const watch of [...this.watches]) {
-      const outcome = watch.check(runs, (run, afterId) => this.eventsOf(run, afterId));
+      const outcome = watch.check(runs, (afterId) => this.sources.store.eventsAfter(afterId));
       if (!outcome) continue;
       this.watches.splice(this.watches.indexOf(watch), 1);
       const name = shortMessage(watch.target.message);
@@ -160,6 +189,8 @@ export class Investigator implements vscode.Disposable {
   }
 
   private watch(target: InvestigationTarget): void {
+    // Without a source there is no run to tell the fix by.
+    if (!target.serverId) return;
     const existing = this.watches.findIndex(
       (watch) => watch.target.message === target.message && watch.target.serverId === target.serverId,
     );
@@ -168,14 +199,8 @@ export class Investigator implements vscode.Disposable {
     if (this.watches.length > MAX_WATCHES) this.watches.shift();
   }
 
-  private *eventsOf(run: SessionSummary, afterId: number) {
-    for (const event of this.sources.store.eventsAfter(afterId)) if (event.sessionId === run.id) yield event;
-  }
-
   private newestId(): number {
-    let last = 0;
-    for (const event of this.sources.store.eventsAfter(0)) last = event.id;
-    return last;
+    return this.sources.store.newestFirst().next().value?.id ?? 0;
   }
 
   private async chooseAgent(): Promise<InvestigateAgent | undefined> {

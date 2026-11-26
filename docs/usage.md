@@ -113,9 +113,9 @@ Saved server commands and ad-hoc commands run through the platform's default she
 
 ### Investigate an error with an agent
 
-**Investigate** hands one error to an agent. It is on each error group in Analyze, on an open event in the inspector, and in the **Investigate with agent** quick fix on a runtime-error mark in the editor. **Logline: Investigate an Error with an Agent** lists the error groups in the retained logs and asks which to hand over.
+**Investigate** hands one error to an agent. It is on each error group in Analyze, on an open error in the inspector (an error is an event logged at error or fatal, or with an HTTP status of 500 or more; other events show the action disabled), and in the **Investigate with agent** quick fix on a runtime-error mark in the editor. **Logline: Investigate an Error with an Agent** lists the error groups in the retained logs and asks which to hand over.
 
-The agent gets a single-line prompt that names the error, the event to start from, the search for the error's other events, the share id, and the shared runs. It asks the agent to find the cause, fix it, reproduce the error, and confirm the fix with fresh logs. If nothing is shared yet, Logline first shares the event's source, with the usual sharing warning. Log text in the prompt is quoted, on one line, and cut to 240 characters, and the prompt tells the agent to treat log content as untrusted.
+The agent gets a single-line prompt that names the error, the event to start from, the search for the error's other events, the share id, and the shared runs. It asks the agent to find the cause, fix it, reproduce the error, and confirm the fix with fresh logs. If nothing is shared yet, Logline first shares the event's source, with the usual sharing warning; if other sources are shared, it adds the event's run to them. Log text in the prompt is quoted in backticks, on one line, and cut to 240 characters, and the prompt tells the agent to treat log content as untrusted. On Windows, double quotes in the prompt become single quotes, and in Command Prompt `%` becomes *percent*, so the shell passes the prompt to the CLI whole.
 
 Logline offers the agents available, with the one you chose last first; when only one is available, it uses that one without asking:
 
@@ -123,7 +123,7 @@ Logline offers the agents available, with the one you chose last first; when onl
 - **Claude Code** and **Codex**, once connected with **Logline: Connect Claude Code or Codex**, start the CLI in a terminal named *Logline · Claude Code* or *Logline · Codex* with the prompt, which points at the `logline-triage` skill.
 - **Copy prompt for another agent** copies the prompt, for Cursor, Windsurf, Kiro, or any other agent.
 
-Afterwards Logline watches the error's source. It says **Still failing**, with **Show Error** and **Investigate Again**, when the error happens again in a run started after the handoff, or after you save a source file while a run keeps going. It says **Fixed locally**, with how many other errors were logged, when a run started after the handoff finishes without the error, or when a running one logs 50 events after a save without it.
+Afterwards Logline watches the error's source. It says **Still failing**, with **Show Error** and **Investigate Again**, when the error happens again in a run started after the handoff, or after you save a source file while a run keeps going. It says **Fixed locally**, with how many other errors were logged, only after you save a source file: when a run started after the save finishes without the error, or when a running one logs 50 events after the save without it. An error from the inspector without a search of its own is matched by its first line with ids, numbers, and paths masked.
 
 ## Import and export
 
