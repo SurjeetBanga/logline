@@ -72,6 +72,7 @@ import { errorLine } from '../core/investigation';
 import { isErrorEvent, normalizeMessage, templateQuery } from '../core/log-analysis';
 import { getField } from '../core/query';
 import { extractExceptions } from '../core/exceptions';
+import { testFailureFrames } from '../core/runtime-errors';
 import type { LogEvent, SessionSummary } from '../core/types';
 import type {
   AgentSetupView,
@@ -1241,13 +1242,22 @@ export class LogsController {
     if (!event || !this.investigator) return;
     const message = errorLine(event);
     const site = this.lens?.enabled ? this.logSites.match(event)?.site : undefined;
+    // A test that failed in CI carries where it failed and where it is written.
+    const failure = testFailureFrames(event);
+    const place =
+      failure && event.fields?.file
+        ? `${event.fields.file}${event.fields.line ? `:${event.fields.line}` : ''}`
+        : undefined;
     await this.investigator.investigate({
       message,
       eventId: id,
       // The same search Analyze gives the error's group, so its later occurrences are found though their ids differ.
-      query: query ?? templateQuery(normalizeMessage(message)),
-      location: site ? `${site.file}:${site.line}` : undefined,
+      query:
+        query ??
+        (failure ? `kind:test-failure test:${JSON.stringify(failure.test)}` : templateQuery(normalizeMessage(message))),
+      location: place ?? (site ? `${site.file}:${site.line}` : undefined),
       serverId: event.serverId,
+      ...(failure ? { ci: failure.ci } : {}),
     });
   }
   async askCopilot(anchor?: number): Promise<boolean> {

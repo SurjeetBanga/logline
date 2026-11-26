@@ -114,3 +114,25 @@ test('imported files compare by their events when the registry has no runs for t
   assert.equal(view.rows[0].status, 'reproduced');
   assert.equal(view.baseline.label, 'Imported · prod.log');
 });
+
+test('a baseline of failed CI tests is compared by test and summarized as CI', () => {
+  const { compare, run } = setup();
+  const failed = (name: string) => ({
+    level: 'error',
+    message: `✕ ${name}`,
+    kind: 'test-failure',
+    test: name,
+    file: 'src/cart.test.ts',
+  });
+  run('conn:ci', 'GitHub Actions', 'c1', [failed('adds items'), failed('totals')], { sourceKind: 'remote' });
+  run('npm-test', 'npm test', 'r1', [{ level: 'error', message: '✖ adds items (2ms)' }]);
+  const view = compare.build({ baselineServerId: 'conn:ci', baselineSessionId: 'c1', localServerId: 'npm-test' });
+  assert.deepEqual(
+    view.rows.map((row) => [row.pattern, row.status]),
+    [
+      ['✕ adds items', 'reproduced'],
+      ['✕ totals', 'notSeen'],
+    ],
+  );
+  assert.equal(view.summary, '1 CI test failure reproduced');
+});

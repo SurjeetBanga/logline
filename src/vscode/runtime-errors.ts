@@ -138,6 +138,7 @@ export class RuntimeErrors implements vscode.CodeActionProvider, vscode.Disposab
             query: entry.error.query,
             count: entry.error.count,
             location: `${relative}:${entry.line + 1}`,
+            ...(entry.error.ci ? { ci: entry.error.ci } : {}),
           },
         ],
       };
@@ -194,7 +195,7 @@ export class RuntimeErrors implements vscode.CodeActionProvider, vscode.Disposab
     const byFile = new Map<string, { uri: vscode.Uri; entries: { error: RuntimeError; line: number }[] }>();
     const taken = new Set<string>();
     for (const error of this.tracker.list(MAX_SHOWN)) {
-      const place = await this.locate(error.frames);
+      const place = await this.locate(error.frames, error.test);
       if (!place) continue;
       const key = shownKey(place.uri, place.line);
       // The newest error on a line speaks for it.
@@ -265,10 +266,16 @@ export class RuntimeErrors implements vscode.CodeActionProvider, vscode.Disposab
   }
 
   /** The first frame in a workspace file, as a 0-based line. */
-  private async locate(frames: SourceLocation[]): Promise<{ uri: vscode.Uri; line: number } | undefined> {
+  private async locate(
+    frames: SourceLocation[],
+    test?: string,
+  ): Promise<{ uri: vscode.Uri; line: number } | undefined> {
     for (const frame of frames) {
       const uri = await this.resolve(frame.file);
-      if (uri) return { uri, line: frame.line - 1 };
+      if (!uri) continue;
+      // A failed CI test whose runner gave no source line is marked where the test is named.
+      if (frame.line === 0) return { uri, line: test ? await testLine(uri, test) : 0 };
+      return { uri, line: frame.line - 1 };
     }
     return undefined;
   }
@@ -306,6 +313,25 @@ export class RuntimeErrors implements vscode.CodeActionProvider, vscode.Disposab
 }
 
 const shownKey = (uri: vscode.Uri, line: number) => `${uri.toString()}#${line}`;
+
+/** The 0-based line that names a test, `test('adds items', …)`, by its own name without its suites; 0 when not found. */
+export async function testLine(uri: vscode.Uri, test: string): Promise<number> {
+  const name = test.split(' › ').at(-1)?.trim();
+  if (!name) return 0;
+  let text: string;
+  try {
+    text = new TextDecoder().decode(await vscode.workspace.fs.readFile(uri));
+  } catch {
+    return 0;
+  }
+  const lines = text.split(/\r?\n/);
+  for (const quote of ["'", '"', '`']) {
+    const needle = `${quote}${name}${quote}`;
+    const index = lines.findIndex((line) => line.includes(needle));
+    if (index >= 0) return index;
+  }
+  return 0;
+}
 
 /**
  * The workspace file a stack frame names, without asking: an absolute path

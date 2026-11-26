@@ -1,7 +1,13 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { parseLogLine } from './log-event';
-import { compareSignatures, differingFields, summarizeComparison } from './signature-compare';
+import {
+  compareSignatures,
+  compareTestFailures,
+  differingFields,
+  hasTestFailures,
+  summarizeComparison,
+} from './signature-compare';
 import type { LogEvent } from './types';
 
 let id = 0;
@@ -84,4 +90,86 @@ test('fields that differ between two events are listed for highlighting', () => 
   const local = event('error', 'timeout', { retries: 0, gateway: 'adyen', timeoutMs: 800 });
   assert.deepEqual(differingFields(prod, local).sort(), ['region', 'retries', 'timeoutMs']);
   assert.deepEqual(differingFields(local, local), []);
+});
+
+const ciFailure = (testName: string, fields: Record<string, unknown> = {}) =>
+  event('error', `✕ ${testName}`, { kind: 'test-failure', test: testName, file: 'out-tests/cart.test.js', ...fields });
+const output = (...lines: string[]) => event('info', lines.join('\n'));
+
+test('CI test failures are told apart from errors', () => {
+  assert.equal(hasTestFailures([event('error', 'x'), ciFailure('a')]), true);
+  assert.equal(hasTestFailures([event('error', 'x', { kind: 'ci' })]), false);
+});
+
+test('tests that failed in CI are matched with the failures local runner output names', () => {
+  const baseline = [
+    ciFailure('adds items', { line: 12, file: 'src/cart.test.ts' }),
+    ciFailure('adds items'),
+    ciFailure('removes items'),
+    ciFailure('totals'),
+    ciFailure('refunds'),
+    // The job's own lines are not read again, so counts are not doubled.
+    event('error', '✖ adds items (1ms)', { kind: 'ci' }),
+  ];
+  const run1 = [output('✖ totals (3ms)', 'ok 2 - fine'), output('not ok 1 - brand new')];
+  const run2 = [
+    output('✖ adds items (1ms)', 'FAILED tests/t.py::test_total - boom'),
+    output('not ok 3 - brand new'),
+    output('not ok 4 - only now'),
+  ];
+  const rows = compareTestFailures(baseline, [run1, run2]);
+  const byName = Object.fromEntries(rows.map((row) => [row.signature, row]));
+  assert.deepEqual(
+    rows.map((row) => [row.signature, row.baseline, row.runs, row.status]),
+    [
+      ['adds items', 2, [0, 1], 'reproduced'],
+      ['totals', 1, [1, 0], 'fixed'],
+      ['only now', 0, [0, 1], 'new'],
+      ['test_total', 0, [0, 1], 'new'],
+      ['brand new', 0, [1, 1], 'localOnly'],
+      ['refunds', 1, [0, 0], 'notSeen'],
+      ['removes items', 1, [0, 0], 'notSeen'],
+    ],
+  );
+  assert.equal(byName['adds items'].query, 'kind:test-failure test:"adds items"');
+  assert.equal(byName['adds items'].message, '✕ adds items');
+  assert.equal(byName['adds items'].location, 'cart.test.ts:12');
+  assert.ok(byName['adds items'].baselineSample! < byName['adds items'].localSample!);
+  assert.equal(byName['totals'].localSample !== undefined, true);
+  assert.equal(byName['refunds'].localSample, undefined);
+  assert.equal(byName['brand new'].baselineSample, undefined);
+});
+
+test('a local failure with a place wins over the CI one, and one local run makes new tests local only', () => {
+  const rows = compareTestFailures(
+    [
+      ciFailure('test_x', { file: 'src/a/cart.test.ts', line: 3 }),
+      ciFailure('lonely', { file: 'src/a/lonely.test.ts', line: 3 }),
+    ],
+    [[output('FAILED tests/test_cart.py::test_x'), output('FAILED tests/test_cart.py::test_y')]],
+  );
+  assert.deepEqual(
+    rows.map((row) => [row.signature, row.status, row.location]),
+    [
+      ['test_x', 'reproduced', 'test_cart.py'],
+      ['test_y', 'localOnly', 'test_cart.py'],
+      ['lonely', 'notSeen', 'lonely.test.ts:3'],
+    ],
+  );
+  assert.deepEqual(compareTestFailures([], []), []);
+  assert.equal(compareTestFailures([ciFailure('a'), ciFailure('b')], [], 1).length, 1);
+});
+
+test('the summary of a CI comparison speaks of tests', () => {
+  const rows = (...statuses: string[]) =>
+    statuses.map((status) => ({ status, baseline: 1, runs: [], changed: false }) as never);
+  assert.equal(summarizeComparison(rows('reproduced', 'reproduced'), 'ci'), '2 CI test failures reproduced');
+  assert.equal(summarizeComparison(rows('fixed'), 'ci'), '1 CI test failure fixed locally');
+  assert.equal(
+    summarizeComparison(rows('notSeen'), 'ci'),
+    'None of the tests that failed in CI failed in the newest run.',
+  );
+  assert.equal(summarizeComparison([], 'ci'), 'No failed tests in CI or the newest run.');
+  assert.equal(summarizeComparison(rows('reproduced')), '1 production error reproduced');
+  assert.equal(summarizeComparison([]), 'No errors in production or the newest run.');
 });
