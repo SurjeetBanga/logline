@@ -324,6 +324,15 @@ Once an inserted line has logged and `logline.logLenses` is on, its CodeLens lea
 
 To remove inserted lines, run **Logline: Remove Inserted Logs in This File** for the active editor, or **Logline: Remove Inserted Logs in Workspace**. The workspace command finds marked lines in workspace source files, skipping dependency and build folders such as `node_modules`, asks for confirmation, removes them, and saves the files that had no unsaved changes before. A trash button in the Source Control view's title runs it while an open file has inserted lines, or this window inserted some since the last workspace removal.
 
+## Runtime errors in the editor
+
+When a captured error carries a stack trace, Logline marks the line of your code that raised it. The mark appears after the line, such as **TypeError: Cannot read properties of undefined (reading 'card') · 14× · 2s ago**, and as an error in the Problems panel with the source **Logline runtime**. Stack traces are read the same way as in the inspector: JSON `err`, `error`, and `exception` fields, OpenTelemetry exception fields, and joined plain-text traces from Node, Java, Python, and other runtimes. Only events at `error` or `fatal` count.
+
+The line is the innermost stack frame in your own code: frames in `node_modules`, `site-packages`, `vendor`, Go modules, Cargo packages, and the runtime itself are skipped, and the next frame is tried when a file is not in the workspace. A path from a container or another machine, such as `/app/src/lib/payments.ts`, is matched to the one workspace file whose path ends the same way; a path that matches several files, or none, is not marked. Errors with the same message on the same line are one mark, counted while their events are retained, and the newest error on a line speaks for it. Up to 200 errors are marked at a time.
+
+Quick fixes (Ctrl+. or Cmd+.) on a mark: **Show in Logs** filters the Logs panel to the error's events, and **Break here next time** adds a breakpoint on the line, so the debugger stops there before it fails again. Editing a marked line hides its mark until the error happens again. Clearing logs clears the marks.
+
+Set `logline.runtimeErrors` to `problems` to show errors in the Problems panel only, or `off`.
 ## Log breakpoints
 
 Breakpoints usually stop on code. Log breakpoints stop on what the program logs, which is often how you notice a bug first.
@@ -515,6 +524,7 @@ Settings are grouped the same way in the Settings editor (**More actions → Set
 | `logline.logLenses` | `codelens` | `off`, `codelens`, or `codelens+gutter`: show activity for log statements in the editor. |
 | `logline.logLensMaxFiles` | `5000` | Workspace source files scanned for log statements; files that events report are indexed on demand beyond it. |
 | `logline.logDoctor` | `all` | `off`, `security` (secrets and personal data), or `all`: report problems with log statements in the Problems panel. |
+| `logline.runtimeErrors` | `inline` | `inline`, `problems`, or `off`: mark the line that raised each captured error, after the line and in the Problems panel. |
 
 ## Bounded retention
 

@@ -618,6 +618,38 @@ timed('sites-shared', 'Attribute 1,000 events among 4,000 statements that share 
   };
 });
 
+timed(
+  'runtime-errors',
+  'Count 10,000 events, one in ten an error with a stack, by the line that raised it',
+  async () => {
+    const { RuntimeErrorTracker } = await load('core/runtime-errors.js');
+    const { parseLogLine } = await load('core/log-event.js');
+    const events = Array.from({ length: 10000 }, (_, i) =>
+      parseLogLine(
+        i % 10 === 9
+          ? JSON.stringify({
+              level: 'error',
+              msg: 'request failed',
+              err: {
+                type: 'TypeError',
+                message: `Cannot read properties of undefined (reading 'id${i % 7}')`,
+                stack: `TypeError: x\n    at load (/srv/app/node_modules/db/index.js:1:1)\n    at handler (/srv/app/src/route${i % 50}.ts:${i % 90}:5)`,
+              },
+            })
+          : JSON.stringify({ level: 'info', msg: `request ${i} done`, durationMs: i % 200 }),
+        'stdout',
+        i + 1,
+        receivedAt,
+      ),
+    );
+    return () => {
+      const tracker = new RuntimeErrorTracker();
+      tracker.process(events);
+      assert.ok(tracker.errors.size > 0);
+    };
+  },
+);
+
 // Reading retained history: what the Logs panel, search, and agents ask for.
 timed('page', 'Newest page of 50,000 retained events', async () => {
   const { store } = await retained();

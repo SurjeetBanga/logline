@@ -24,6 +24,7 @@ import { registerDebugCapture } from './vscode/debug-capture';
 import { LogBreakpoints } from './vscode/log-breakpoints';
 import { LogDoctor } from './vscode/log-doctor';
 import { LogLens } from './vscode/log-lens';
+import { RuntimeErrors } from './vscode/runtime-errors';
 import { LogInserter } from './vscode/log-insert';
 import { GitChanges } from './vscode/git-changes';
 import { RatingPrompt } from './vscode/rating-prompt';
@@ -130,6 +131,14 @@ export function activate(context: vscode.ExtensionContext): { provider: LogsProv
         telemetry: () => logController.telemetryFindings(),
       });
       context.subscriptions.push(controller.doctor);
+      controller.runtimeErrors = new RuntimeErrors({
+        store: logController.store,
+        config: logController.config,
+        generation: () => logController.state.generation,
+        showQuery: (query) => logController.showQuery(query),
+        usage,
+      });
+      context.subscriptions.push(controller.runtimeErrors);
     }
   }
   // Insert Log edits documents; hosts without document events still capture logs.

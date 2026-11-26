@@ -359,6 +359,16 @@
         "category": "Logline"
       },
       {
+        "command": "logline.showRuntimeError",
+        "title": "Show Runtime Error in Logs",
+        "category": "Logline"
+      },
+      {
+        "command": "logline.breakOnRuntimeError",
+        "title": "Break on the Line That Raised a Runtime Error",
+        "category": "Logline"
+      },
+      {
         "command": "logline.manageTerminalCapture",
         "title": "Manage Terminal Capture",
         "category": "Logline"
@@ -405,6 +415,14 @@
         },
         {
           "command": "logline.captureThisTerminal",
+          "when": "false"
+        },
+        {
+          "command": "logline.showRuntimeError",
+          "when": "false"
+        },
+        {
+          "command": "logline.breakOnRuntimeError",
           "when": "false"
         }
       ],
@@ -1516,6 +1534,22 @@
             "default": "all",
             "order": 3,
             "markdownDescription": "Report problems with log statements in the Problems panel, based on the events they actually logged. Requires #logline.logLenses#. Values are masked in every report. Add a `logline-ignore` comment on or above a statement to silence it."
+          },
+          "logline.runtimeErrors": {
+            "type": "string",
+            "enum": [
+              "inline",
+              "problems",
+              "off"
+            ],
+            "enumDescriptions": [
+              "Show each error after the line that raised it, and in the Problems panel.",
+              "Show errors in the Problems panel only.",
+              "Do not mark lines that raised errors."
+            ],
+            "default": "inline",
+            "markdownDescription": "Mark the line of your code that raised each captured error, with how often and how recently it failed, using the error's stack trace. Frames in dependencies and the runtime are skipped.",
+            "order": 4
           }
         }
       },
