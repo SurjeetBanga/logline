@@ -428,7 +428,9 @@ export function createConnectionBar(
   scope.listen(elements.connectionService, 'input', (event) => {
     edited = true;
     // A suggestion picked from the list replaces the text, after any Enter that picked it chose what was typed.
-    if ((event as InputEvent).inputType !== 'insertReplacementText' || unchanged()) return;
+    // Chromium marks that input as a replacement, or leaves its type empty, as for the clear button; typing has one.
+    const type = (event as InputEvent).inputType;
+    if ((type && type !== 'insertReplacementText') || unchanged()) return;
     const name = resolveService(elements.connectionService.value);
     if (listed.includes(name)) chooseService(name);
   });

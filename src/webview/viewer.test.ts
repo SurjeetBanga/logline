@@ -5028,6 +5028,9 @@ test('a Datadog connection lists its services to choose one, and can send a quer
   // A suggestion picked after an Enter chose the text typed replaces it.
   key('Enter');
   assert.equal(get('search').value, 'level:error service:paym');
+  service.value = 'checkout';
+  service.listeners.get('input')!({ inputType: '' });
+  assert.equal(get('search').value, 'level:error service:checkout', 'a fill without an input type is a pick too');
   service.value = 'payments api';
   service.listeners.get('input')!({ inputType: 'insertReplacementText' });
   assert.equal(get('search').value, 'level:error service:"payments api"');

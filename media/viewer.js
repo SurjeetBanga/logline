@@ -4603,7 +4603,8 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
     });
     scope.listen(elements.connectionService, "input", (event) => {
       edited = true;
-      if (event.inputType !== "insertReplacementText" || unchanged()) return;
+      const type = event.inputType;
+      if (type && type !== "insertReplacementText" || unchanged()) return;
       const name = resolveService(elements.connectionService.value);
       if (listed.includes(name)) chooseService(name);
     });
