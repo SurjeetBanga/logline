@@ -86,7 +86,7 @@ Add a message to `ViewRequest`/`HostMessage`, validate it in `parseViewRequest`,
 
 ## Builds and tests
 
-- `npm run compile` type-checks and builds host code into `out/`, then bundles `src/webview/main.ts` into `media/viewer.js`. The generated browser file is checked in; edit its TypeScript sources and rebuild it. Guide assets in `media/guide.*` are authored static files and are packaged as-is.
+- `npm run compile` type-checks and builds host code into `out/`, then bundles and minifies `src/webview/main.ts` into `media/viewer.js`. The generated browser file is checked in; edit its TypeScript sources and rebuild it. Guide assets in `media/guide.*` are authored static files and are packaged as-is.
 - `npm run watch` watches host compilation, browser type checking, and browser bundling.
 - `npm run check` checks both runtimes and tests, builds, lints, and runs the test suite.
 - `npm run format` formats the code with Prettier (`.prettierrc.json`), and `npm run format:check`, part of `npm run check` and CI, fails on unformatted files. Markdown, the generated viewer bundle, and `samples/` are not formatted (`.prettierignore`).
