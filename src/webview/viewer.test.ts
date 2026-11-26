@@ -200,6 +200,9 @@ class Element {
   }
 }
 
+/** What a suggestion list's rows show. */
+const suggested = (list: Element) => list.children.map((item) => item.children[0].textContent);
+
 /** A click whose target answers only the one selector that `closest` is asked for. */
 const clickOn = (selector: string, target: Element | undefined) => ({
   target: { closest: (wanted: string) => (wanted === selector ? target : undefined) },
@@ -243,7 +246,7 @@ function viewer(
     return element;
   };
   const get = (id: string) => {
-    if (!elements.has(id)) elements.set(id, makeElement());
+    if (!elements.has(id)) elements.set(id, Object.assign(makeElement(), { id }));
     return elements.get(id)!;
   };
   const messages: Record<string, any>[] = [];
@@ -768,11 +771,9 @@ test('autocomplete suggestions list known field names alongside matching values'
     fields: ['service', 'status'],
     values: [{ value: 'api', count: 4 }],
   });
-  assert.deepEqual(
-    get('fieldSuggestions').children.map((option) => option.value),
-    ['service:', 'status:'],
-  );
-  assert.equal(get('search').attributes.list, 'fieldSuggestions');
+  assert.deepEqual(suggested(get('fieldSuggestions')), ['service:', 'status:']);
+  assert.equal(get('fieldSuggestions').hidden, false);
+  assert.equal(get('search').attributes['aria-expanded'], 'true');
 });
 
 test('Clear removes stale autocomplete suggestions', () => {
@@ -814,13 +815,64 @@ test('clearing Search logs removes column suggestions and ignores an in-flight a
   assert.equal(get('fieldSuggestions').children.length, 0);
 });
 
-test('new autocomplete suggestions restore the search datalist after it was cleared', () => {
-  const { get, receive } = viewer();
-  get('search').removeAttribute('list');
-
-  receive({ type: 'autocomplete', input: 'timeout', serverId: 'api', fields: ['service'], values: [] });
-
-  assert.equal(get('search').attributes.list, 'fieldSuggestions');
+test('the arrow keys and Enter pick a search suggestion, and Escape closes the list', () => {
+  const { get, app, receive, messages, timers } = viewer();
+  get('searchClear').listeners.get('click')!({ stopPropagation() {} });
+  const search = get('search');
+  const list = get('fieldSuggestions');
+  const key = (name: string) => {
+    let prevented = false;
+    search.listeners.get('keydown')!({ key: name, preventDefault: () => (prevented = true) });
+    return prevented;
+  };
+  search.value = 'app';
+  receive({ type: 'autocomplete', input: 'app', serverId: 'api', fields: ['appname', 'status'], values: [] });
+  assert.equal(key('ArrowDown'), true);
+  assert.equal(search.attributes['aria-activedescendant'], 'search-0');
+  key('ArrowDown');
+  key('ArrowDown');
+  assert.equal(search.attributes['aria-activedescendant'], 'search-0', 'Down from the last wraps');
+  // Picking a field name leaves it to be finished, and asks for its values.
+  timers.clear();
+  key('Enter');
+  assert.equal(search.value, 'appname:');
+  assert.equal(app.search.query(), '');
+  assert.equal(list.hidden, true);
+  [...timers.values()].at(-1)!();
+  assert.deepEqual({ ...messages.at(-1) }, { type: 'autocomplete', input: 'appname:', serverId: 'api' });
+  // Picking a whole term, here with a click, applies it.
+  receive({
+    type: 'autocomplete',
+    input: 'appname:',
+    serverId: 'api',
+    fields: ['appname'],
+    values: [{ value: 'prod', count: 2 }],
+  });
+  assert.deepEqual(suggested(list), ['appname:"prod"']);
+  let kept = false;
+  list.listeners.get('mousedown')!({ preventDefault: () => (kept = true) });
+  assert.equal(kept, true, 'pressing a suggestion keeps focus in the box');
+  list.listeners.get('click')!({ target: list.children[0] });
+  assert.equal(app.search.query(), 'appname:"prod"');
+  assert.equal(search.value, '');
+  // Enter with nothing highlighted applies what is typed; Escape closes the list and keeps it.
+  search.value = 'status:';
+  receive({
+    type: 'autocomplete',
+    input: 'status:',
+    serverId: 'api',
+    fields: ['status'],
+    values: [{ value: 'ok', count: 1 }],
+  });
+  assert.equal(key('Escape'), true);
+  assert.equal(list.hidden, true);
+  assert.equal(search.value, 'status:');
+  assert.equal(key('ArrowDown'), false, 'a closed list leaves the arrow keys to the box');
+  search.value = 'level:error';
+  receive({ type: 'autocomplete', input: 'level:error', serverId: 'api', fields: ['level'], values: [] });
+  key('Enter');
+  assert.equal(app.search.query(), 'appname:"prod" level:error');
+  assert.equal(list.hidden, true);
 });
 
 test('search drafts become removable include and exclude chips when applied', () => {
@@ -831,15 +883,6 @@ test('search drafts become removable include and exclude chips when applied', ()
   get('search').value = 'service:api';
   get('search').listeners.get('input')!();
   assert.equal(snapshots().length, before, 'typing keeps the current filter until Enter');
-  // A field name chosen from the suggestions stays to be finished; a whole term chosen there is applied.
-  get('search').value = 'appname:';
-  get('search').listeners.get('input')!({ inputType: 'insertReplacementText' });
-  assert.equal(app.search.query(), '');
-  get('search').value = 'appname:"prod"';
-  get('search').listeners.get('input')!({ inputType: 'insertReplacementText' });
-  assert.equal(app.search.query(), 'appname:"prod"');
-  assert.equal(get('search').value, '');
-  get('searchClear').listeners.get('click')!({ stopPropagation() {} });
   get('search').value = 'service:api';
   get('search').listeners.get('keydown')!({ key: 'Enter', preventDefault() {} });
   assert.equal(app.search.query(), 'service:api');
@@ -1279,8 +1322,7 @@ test('autocomplete ignores changed input or server and inserts a complete query'
     values: [{ value: 'API west', count: 1 }],
   };
   receive(response);
-  assert.equal(get('fieldSuggestions').children[0].value, 'level:error service:"API west"');
-  assert.equal(get('fieldSuggestions').children[0].attributes.label, 'level:error service:a');
+  assert.deepEqual(suggested(get('fieldSuggestions')), ['level:error service:"API west"']);
   get('search').value = 'level:error service:b';
   get('search').listeners.get('input')!();
   receive(response);
@@ -4717,13 +4759,37 @@ test('a metric query is charted, and a window dragged across it shows the logs f
   assert.equal(get('metricQuery').hidden, false);
   assert.equal(get('metricConnection').value, 'prod');
   assert.match((get('metricInput') as unknown as { placeholder: string }).placeholder, /^avg:/);
-  // Metric names are suggested while the first word is typed.
-  get('metricInput').value = 'trace';
-  get('metricInput').listeners.get('input')!();
+  // Metric names are suggested while the first word is typed, after an aggregation too.
+  const metric = get('metricInput');
+  const names = get('metricSuggestions');
+  metric.focus();
+  metric.value = 'avg:trace';
+  metric.listeners.get('input')!();
   [...timers.values()].at(-1)!();
   assert.deepEqual(plain(messages.at(-1)), { type: 'metricNames', connectionId: 'prod', search: 'trace' });
-  receive({ type: 'metricNames', connectionId: 'prod', search: 'trace', names: ['trace.http.request.duration'] });
-  assert.equal(get('metricSuggestions').children[0].value, 'trace.http.request.duration');
+  receive({
+    type: 'metricNames',
+    connectionId: 'prod',
+    search: 'trace',
+    names: ['trace.http.request.duration', 'trace.http.request.hits'],
+  });
+  assert.deepEqual(suggested(names), ['trace.http.request.duration', 'trace.http.request.hits']);
+  // Typing narrows them; Enter on a highlighted name picks it, keeping the aggregation, and runs nothing.
+  metric.value = 'avg:trace.http.request.h';
+  metric.listeners.get('input')!();
+  assert.deepEqual(suggested(names), ['trace.http.request.hits']);
+  const sent = messages.length;
+  metric.listeners.get('keydown')!({ key: 'ArrowDown', preventDefault() {} });
+  metric.listeners.get('keydown')!({ key: 'Enter', preventDefault() {} });
+  assert.equal(metric.value, 'avg:trace.http.request.hits');
+  assert.equal(names.hidden, true);
+  assert.equal(
+    messages.slice(sent).some((message) => message.type === 'metricQuery'),
+    false,
+  );
+  metric.value = 'avg:trace.http.request.hits{*}';
+  metric.listeners.get('input')!();
+  assert.equal(names.hidden, true, 'no names once the first word is done');
   get('metricInput').value = 'avg:trace.http.request.duration{*} by {env}';
   get('metricInput').listeners.get('input')!();
   get('metricRun').listeners.get('click')!();

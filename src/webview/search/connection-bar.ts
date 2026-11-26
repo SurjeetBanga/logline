@@ -4,6 +4,7 @@ import type { ConnectionView, HostMessage } from '../../protocol/messages';
 import type { getElements } from '../dom';
 import type { EventScope } from '../event-scope';
 import type { ViewerState } from '../state';
+import { createSuggestionList } from '../suggestion-list';
 import type { WebviewApi } from '../types';
 
 type Elements = Pick<
@@ -123,10 +124,8 @@ export function createConnectionBar(
   /** The services the connection listed, with how many logs each had when the store counts them. */
   let listedServices: { name: string; count?: number }[] = [];
   let listed: string[] = [];
-  /** Whether the list under the box is open, the services it shows for what is typed, and which is highlighted. */
+  /** Whether the list under the box is open, showing the services that hold what is typed. */
   let listOpen = false;
-  let shown: { name: string; count?: number }[] = [];
-  let active = -1;
   /** Whether the service box has focus, so a refresh leaves what is being typed alone. */
   let choosing = false;
   /** Whether the box was typed in, or cleared, since it was focused or a service chosen. */
@@ -134,6 +133,13 @@ export function createConnectionBar(
   /** The search in the store's own syntax that the filter became, from the last preview. */
   let statement = '';
   const numbers = new Intl.NumberFormat();
+  const serviceList = createSuggestionList(elements.connectionService, elements.connectionServices, scope, {
+    pick: (item) => chooseService(item.value),
+    reveal: () => {
+      listOpen = true;
+      renderList();
+    },
+  });
   const selected = () => connections.find((connection) => connection.sourceId === state.selectedServer);
 
   // A database has rows, MongoDB documents, and a log service logs.
@@ -289,71 +295,23 @@ export function createConnectionBar(
     if (connection) showService(connection);
   }
 
-  /**
-   * The list under the box: drawn by the panel rather than left to the browser, whose suggestions in a VS Code
-   * webview ignore the arrow keys and Enter. It shows the services whose names hold what is typed.
-   */
   function renderList(): void {
-    const input = elements.connectionService;
-    const list = elements.connectionServices;
-    const typed = input.value.trim().toLowerCase();
-    shown =
+    const typed = elements.connectionService.value.trim().toLowerCase();
+    serviceList.show(
       listOpen && choosing
-        ? listedServices.filter((service) => service.name.toLowerCase().includes(typed)).slice(0, MAX_SHOWN)
-        : [];
-    if (active >= shown.length) active = -1;
-    list.replaceChildren(
-      ...shown.map((service, index) => {
-        const item = document.createElement('li');
-        item.id = `connectionService-${index}`;
-        item.setAttribute('role', 'option');
-        item.setAttribute('aria-selected', String(index === active));
-        item.dataset.index = String(index);
-        const name = document.createElement('span');
-        name.className = 'service-name';
-        name.textContent = service.name;
-        item.append(name);
-        if (service.count !== undefined) {
-          const count = document.createElement('span');
-          count.className = 'service-count';
-          count.textContent = `${numbers.format(service.count)} logs`;
-          item.append(count);
-        }
-        return item;
-      }),
+        ? listedServices
+            .filter((service) => service.name.toLowerCase().includes(typed))
+            .slice(0, MAX_SHOWN)
+            .map((service) => ({
+              value: service.name,
+              detail: service.count === undefined ? undefined : `${numbers.format(service.count)} logs`,
+            }))
+        : [],
     );
-    list.hidden = shown.length === 0;
-    if (shown.length) placeList();
-    input.setAttribute('aria-expanded', String(shown.length > 0));
-    if (active < 0) input.removeAttribute('aria-activedescendant');
-    else {
-      input.setAttribute('aria-activedescendant', `connectionService-${active}`);
-      list.children[active]?.scrollIntoView({ block: 'nearest' });
-    }
-  }
-
-  /**
-   * Place the list under the box, or above it when there is more room there. It is placed in the window rather
-   * than in the connection's controls, which scroll within themselves in a short panel and would cut it off.
-   */
-  function placeList(): void {
-    const box = elements.connectionService.getBoundingClientRect();
-    const style = elements.connectionServices.style;
-    const gutter = 8;
-    const width = Math.min(Math.max(box.width, 280), window.innerWidth - 2 * gutter);
-    const below = window.innerHeight - box.bottom - gutter;
-    const above = box.top - gutter;
-    const under = below >= Math.min(240, above);
-    style.left = `${Math.max(gutter, Math.min(box.left, window.innerWidth - width - gutter))}px`;
-    style.width = `${width}px`;
-    style.top = under ? `${box.bottom + 2}px` : '';
-    style.bottom = under ? '' : `${window.innerHeight - box.top + 2}px`;
-    style.maxHeight = `${Math.max(Math.min(240, (under ? below : above) - 2), 72)}px`;
   }
 
   function closeList(): void {
     listOpen = false;
-    active = -1;
     renderList();
   }
 
@@ -484,7 +442,6 @@ export function createConnectionBar(
     input.placeholder = currentService(connection) || 'Any service';
     input.value = '';
     listOpen = true;
-    active = -1;
     renderList();
   });
   scope.listen(elements.connectionService, 'blur', () => {
@@ -503,7 +460,6 @@ export function createConnectionBar(
   scope.listen(elements.connectionService, 'input', () => {
     edited = true;
     listOpen = true;
-    active = -1;
     renderList();
   });
   // Typing a listed name in full chooses that service; part of a name, as when Run is clicked while searching
@@ -524,23 +480,10 @@ export function createConnectionBar(
     if (keyboard.isComposing) return;
     if (keyboard.key === 'ArrowDown' || keyboard.key === 'ArrowUp') {
       event.preventDefault();
-      if (!listOpen) {
-        listOpen = true;
-        active = -1;
-        renderList();
-      }
-      if (!shown.length) return;
-      // Up from the first service goes back to what was typed; Down from it, or Up from there, wraps.
-      const last = shown.length - 1;
-      if (keyboard.key === 'ArrowDown') active = active >= last ? 0 : active + 1;
-      else active = active === 0 ? -1 : active < 0 ? last : active - 1;
-      renderList();
+      serviceList.keydown(keyboard);
     } else if (keyboard.key === 'Enter') {
+      if (serviceList.keydown(keyboard)) return;
       event.preventDefault();
-      if (active >= 0 && shown[active]) {
-        chooseService(shown[active].name);
-        return;
-      }
       const value = elements.connectionService.value;
       // Enter in a box cleared by hand chooses any service; in one only emptied by focus, it keeps the service.
       if (value.trim() || edited) chooseService(resolveService(value));
@@ -552,19 +495,6 @@ export function createConnectionBar(
       edited = false;
       elements.connectionService.blur();
     }
-  });
-  // The list stays under the box as the panel resizes or the controls scroll.
-  const follow = () => {
-    if (shown.length) placeList();
-  };
-  scope.listen(window, 'resize', follow);
-  scope.listen(elements.connectionBar, 'scroll', follow);
-  // Pressing a service keeps focus in the box, so leaving it does not close the list before the click lands.
-  scope.listen(elements.connectionServices, 'mousedown', (event) => event.preventDefault());
-  scope.listen(elements.connectionServices, 'click', (event) => {
-    const item = (event.target as HTMLElement | null)?.closest<HTMLElement>('[role="option"]');
-    const service = item ? shown[Number(item.dataset.index)] : undefined;
-    if (service) chooseService(service.name);
   });
   scope.listen(elements.connectionSyntax, 'click', () => {
     const connection = selected();

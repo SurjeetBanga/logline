@@ -2,6 +2,7 @@ import type { MetricSeriesData } from '../../core/metric-query';
 import type { ConnectionView, HostMessage } from '../../protocol/messages';
 import type { Elements } from '../dom';
 import type { EventScope } from '../event-scope';
+import { createSuggestionList } from '../suggestion-list';
 import { withoutFraction, withoutSeconds } from '../time';
 import type { WebviewApi } from '../types';
 import { formatMetric } from './metrics';
@@ -57,6 +58,31 @@ export function createMetricQuery(
   const selected = () => connections.find((connection) => connection.id === elements.metricConnection.value);
   // The last hour, like a connection's log searches, rather than the first option.
   elements.metricRange.value = '1h';
+  /** The metric names the connection suggested for the first word of the query. */
+  let names: string[] = [];
+  // Picking a name puts it in place of the first word, keeping an aggregation typed before it, as in `avg:`.
+  const suggestions = createSuggestionList(elements.metricInput, elements.metricSuggestions, scope, {
+    pick: (item) => {
+      elements.metricInput.value = `${aggregation()}${item.value}`;
+      updateWatch();
+    },
+    reveal: showNames,
+  });
+  const aggregation = () => /^[a-z]+:/.exec(elements.metricInput.value.trim())?.[0] ?? '';
+  /** The first word of the query, without its aggregation, while it is still being typed. */
+  function nameTyped(): string | undefined {
+    const search = elements.metricInput.value.trim();
+    return search && !/[\s{(]/.test(search) ? search.slice(aggregation().length) : undefined;
+  }
+  /** The suggested names that hold what is typed. */
+  function showNames(): void {
+    const typed = nameTyped()?.toLowerCase();
+    suggestions.show(
+      typed === undefined || document.activeElement !== elements.metricInput
+        ? []
+        : names.filter((name) => name.toLowerCase().includes(typed)).map((value) => ({ value })),
+    );
+  }
 
   function placeholder(): void {
     const connection = selected();
@@ -131,13 +157,8 @@ export function createMetricQuery(
 
   function receiveNames(message: Extract<HostMessage, { type: 'metricNames' }>): void {
     if (message.connectionId !== elements.metricConnection.value) return;
-    elements.metricSuggestions.replaceChildren(
-      ...message.names.map((name) => {
-        const option = document.createElement('option');
-        option.value = name;
-        return option;
-      }),
-    );
+    names = message.names;
+    showNames();
   }
 
   function draw(): void {
@@ -300,22 +321,26 @@ export function createMetricQuery(
 
   scope.listen(elements.metricRun, 'click', run);
   scope.listen(elements.metricInput, 'keydown', (event) => {
+    // With a name highlighted, Enter picks it rather than running the query.
+    if (suggestions.keydown(event as KeyboardEvent)) return;
     if ((event as KeyboardEvent).key === 'Enter') run();
   });
   scope.listen(elements.metricInput, 'input', () => {
     updateWatch();
     clearTimeout(suggestTimer);
-    const connection = selected();
-    const search = elements.metricInput.value.trim();
     // Names are suggested while the first word of a query is typed.
-    if (!connection || connection.type !== 'datadog' || !search || /[\s{(]/.test(search)) return;
+    showNames();
+    const connection = selected();
+    const search = nameTyped();
+    if (!connection || connection.type !== 'datadog' || !search) return;
     suggestTimer = setTimeout(
-      () =>
-        api.postMessage({ type: 'metricNames', connectionId: connection.id, search: search.replace(/^[a-z]+:/, '') }),
+      () => api.postMessage({ type: 'metricNames', connectionId: connection.id, search }),
       SUGGEST_DELAY_MS,
     );
   });
   function connectionChanged(): void {
+    names = [];
+    suggestions.hide();
     placeholder();
     updateWatch();
   }

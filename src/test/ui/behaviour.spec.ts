@@ -314,3 +314,89 @@ test.describe('the Service list', () => {
     await expect(page.locator('#search')).toHaveValue('level:error service:checkout');
   });
 });
+
+test.describe('the search suggestions', () => {
+  test('take the arrow keys and Enter or a click, and are not cut off', async ({ openPanel }) => {
+    const panel = await openPanel();
+    const { page } = panel;
+    const box = page.locator('#search');
+    const list = page.locator('#fieldSuggestions');
+    const options = list.getByRole('option');
+    /** Answers the panel's request for suggestions for what is typed. */
+    const answer = async (fields: string[], values: { value: string; count: number }[] = []) => {
+      await expect
+        .poll(async () => (await panel.posted()).filter((message) => message.type === 'autocomplete').at(-1)?.input)
+        .toBe(await box.inputValue());
+      const asked = (await panel.posted()).filter((message) => message.type === 'autocomplete').at(-1)!;
+      await panel.post({ type: 'autocomplete', input: asked.input, serverId: asked.serverId, fields, values });
+    };
+
+    await box.click();
+    await box.pressSequentially('app');
+    await answer(['appname', 'status']);
+    await expect(options).toHaveText(['appname:', 'status:']);
+    await panel.fits('the search suggestions open');
+    const first = await options.first().boundingBox();
+    const hit = await page.evaluate(
+      ({ x, y }) => document.elementFromPoint(x, y)?.closest('[role="option"]')?.textContent,
+      { x: first!.x + first!.width / 2, y: first!.y + first!.height / 2 },
+    );
+    expect(hit).toBe('appname:');
+
+    // A field name picked with the keys stays to be finished, and its values are suggested.
+    await box.press('ArrowDown');
+    await expect(box).toHaveAttribute('aria-activedescendant', 'search-0');
+    await box.press('Enter');
+    await expect(box).toHaveValue('appname:');
+    await expect(list).toBeHidden();
+    await answer(['appname'], [{ value: 'prod', count: 3 }]);
+    // A whole term picked with a click is applied, and focus stays in the box.
+    await options.filter({ hasText: 'prod' }).click();
+    await expect(box).toBeFocused();
+    await expect(box).toHaveValue('');
+    await expect(page.locator('#searchChips')).toContainText('appname');
+    await expect(list).toBeHidden();
+  });
+});
+
+test.describe('the metric name suggestions', () => {
+  test('narrow as you type, take the arrow keys and Enter, and are not cut off', async ({ openPanel }) => {
+    const connection = { id: 'dd', sourceId: 'conn:dd', label: 'prod', type: 'datadog', mapped: true, sql: false };
+    const panel = await openPanel({
+      first: { ...snapshot, connections: [{ ...connection, agents: false, tailing: false, watching: [] }] },
+    });
+    const { page } = panel;
+    await page.locator('#metrics').click();
+    const box = page.locator('#metricInput');
+    const list = page.locator('#metricSuggestions');
+    const options = list.getByRole('option');
+
+    await box.click();
+    await box.pressSequentially('avg:trace');
+    await expect
+      .poll(async () => (await panel.posted()).find((message) => message.type === 'metricNames'))
+      .toEqual({ type: 'metricNames', connectionId: 'dd', search: 'trace' });
+    await panel.post({
+      type: 'metricNames',
+      connectionId: 'dd',
+      search: 'trace',
+      names: ['trace.http.request.duration', 'trace.http.request.hits'],
+    });
+    await expect(options).toHaveText(['trace.http.request.duration', 'trace.http.request.hits']);
+    await panel.fits('the metric names open');
+    const last = await options.last().boundingBox();
+    const hit = await page.evaluate(
+      ({ x, y }) => document.elementFromPoint(x, y)?.closest('[role="option"]')?.textContent,
+      { x: last!.x + last!.width / 2, y: last!.y + last!.height / 2 },
+    );
+    expect(hit).toBe('trace.http.request.hits');
+
+    await box.pressSequentially('.http.request.h');
+    await expect(options).toHaveText(['trace.http.request.hits']);
+    await box.press('ArrowDown');
+    await box.press('Enter');
+    await expect(box).toHaveValue('avg:trace.http.request.hits');
+    await expect(list).toBeHidden();
+    expect((await panel.posted()).some((message) => message.type === 'metricQuery')).toBe(false);
+  });
+});

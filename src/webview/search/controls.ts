@@ -9,6 +9,7 @@ import { EventScope } from '../event-scope';
 import type { Popover } from '../popovers';
 import type { ViewerState } from '../state';
 import { LEVELS } from '../state';
+import { createSuggestionList } from '../suggestion-list';
 import type { ViewerActions, WebviewApi } from '../types';
 
 export function createSearch(
@@ -16,10 +17,25 @@ export function createSearch(
   state: ViewerState,
   api: WebviewApi,
   popovers: Popover[],
-  actions: Pick<ViewerActions, 'filterChanged'> & { updateScopeSelection?: () => void },
+  actions: Pick<ViewerActions, 'filterChanged'> & {
+    updateScopeSelection?: () => void;
+    /** Ask for suggestions for what is typed, as after a field name is picked. */
+    suggest?: () => void;
+  },
   scope: EventScope,
 ) {
-  const { filterChanged, updateScopeSelection = () => {} } = actions;
+  const { filterChanged, updateScopeSelection = () => {}, suggest = () => {} } = actions;
+  // Picking a value, such as `appname:"prod"`, applies it as Enter would; a field name such as `appname:` stays to
+  // be finished, with suggestions for its values.
+  const suggestions = createSuggestionList(elements.search, elements.fieldSuggestions, scope, {
+    anchor: elements.searchEditor,
+    pick: (item) => {
+      elements.search.value = item.value;
+      setError();
+      if (item.value.trimEnd().endsWith(':')) suggest();
+      else applyDraft();
+    },
+  });
   const MAX_QUERY_LENGTH = 256;
   let appliedQuery = queryTokens(elements.search.value.trim())
     .map((value) => (value.toLowerCase() === 'or' ? 'OR' : value))
@@ -367,30 +383,16 @@ export function createSearch(
   }
 
   function renderAutocomplete(data: Extract<HostMessage, { type: 'autocomplete' }>) {
-    if (!elements.fieldSuggestions) return;
-    elements.fieldSuggestions.replaceChildren(
-      ...completeQuery(data.input, data.fields, data.values).map((value) => {
-        const option = document.createElement('option');
-        option.value = value;
-        // Quoting may interrupt the typed prefix in the replacement value.
-        // Native datalists also match labels, so retain that prefix there.
-        if (!value.toLowerCase().includes(data.input.toLowerCase())) option.setAttribute('label', data.input);
-        return option;
-      }),
-    );
-    // clearAutocomplete removes this association to dismiss the native menu
-    // promptly. Restore it whenever fresh suggestions arrive.
-    elements.search.setAttribute('list', 'fieldSuggestions');
+    suggestions.show(completeQuery(data.input, data.fields, data.values).map((value) => ({ value })));
   }
 
   function clearAutocomplete() {
-    elements.fieldSuggestions?.replaceChildren();
-    // Removing the association closes the native dropdown immediately rather
-    // than merely emptying its backing options.
-    elements.search.removeAttribute('list');
+    suggestions.hide();
   }
 
   scope.listen(elements.search, 'keydown', (event) => {
+    // With a suggestion highlighted, Enter picks it rather than applying what is typed; Escape closes the list.
+    if (suggestions.keydown(event)) return;
     if (event.key === 'Enter') {
       event.preventDefault();
       applyDraft();
@@ -410,15 +412,8 @@ export function createSearch(
   scope.listen(elements.search, 'focus', () => {
     if (editingIndex === undefined && elements.search.value === appliedQuery) elements.search.value = '';
   });
-  scope.listen(elements.search, 'input', (event) => {
+  scope.listen(elements.search, 'input', () => {
     setError();
-    // Choosing a value from the suggestions, such as `appname:"prod"`, applies it as Enter would; a field name
-    // such as `appname:` stays to be finished.
-    if (
-      (event as InputEvent | undefined)?.inputType === 'insertReplacementText' &&
-      !elements.search.value.trimEnd().endsWith(':')
-    )
-      applyDraft();
   });
   scope.listen(elements.searchClear, 'click', (event) => {
     event.stopPropagation();

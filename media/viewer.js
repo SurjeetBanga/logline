@@ -3947,10 +3947,127 @@ Span ${call.spanId}`
     }
   };
 
+  // src/webview/suggestion-list.ts
+  var MAX_HEIGHT = 240;
+  var MIN_HEIGHT = 72;
+  var MIN_WIDTH = 280;
+  var GUTTER = 8;
+  function createSuggestionList(input, list, scope, options) {
+    let items = [];
+    let active = -1;
+    const anchor = options.anchor ?? input;
+    const id = (index) => `${input.id}-${index}`;
+    input.setAttribute("aria-expanded", "false");
+    function render() {
+      list.replaceChildren(
+        ...items.map((item, index) => {
+          const row = document.createElement("li");
+          row.id = id(index);
+          row.setAttribute("role", "option");
+          row.setAttribute("aria-selected", "false");
+          row.dataset.index = String(index);
+          const label = document.createElement("span");
+          label.className = "suggestion-label";
+          label.textContent = item.label ?? item.value;
+          row.append(label);
+          if (item.detail !== void 0) {
+            const detail = document.createElement("span");
+            detail.className = "suggestion-detail";
+            detail.textContent = item.detail;
+            row.append(detail);
+          }
+          return row;
+        })
+      );
+      list.hidden = !items.length;
+      input.setAttribute("aria-expanded", String(items.length > 0));
+      if (items.length) place();
+      highlight();
+    }
+    function highlight() {
+      list.children[active]?.scrollIntoView({ block: "nearest" });
+      for (const [index, row] of [...list.children].entries())
+        row.setAttribute("aria-selected", String(index === active));
+      if (active < 0) input.removeAttribute("aria-activedescendant");
+      else input.setAttribute("aria-activedescendant", id(active));
+    }
+    function place() {
+      const box = anchor.getBoundingClientRect();
+      const style = list.style;
+      const width = Math.min(Math.max(box.width, MIN_WIDTH), window.innerWidth - 2 * GUTTER);
+      const below = window.innerHeight - box.bottom - GUTTER;
+      const above = box.top - GUTTER;
+      const under = below >= Math.min(MAX_HEIGHT, above);
+      style.left = `${Math.max(GUTTER, Math.min(box.left, window.innerWidth - width - GUTTER))}px`;
+      style.width = `${width}px`;
+      style.top = under ? `${box.bottom + 2}px` : "";
+      style.bottom = under ? "" : `${window.innerHeight - box.top + 2}px`;
+      style.maxHeight = `${Math.max(Math.min(MAX_HEIGHT, (under ? below : above) - 2), MIN_HEIGHT)}px`;
+    }
+    function show(next) {
+      items = next;
+      active = -1;
+      render();
+    }
+    function pick(item) {
+      if (!item) return;
+      show([]);
+      options.pick(item);
+    }
+    function keydown(event) {
+      if (event.isComposing) return false;
+      if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+        if (!items.length) options.reveal?.();
+        if (!items.length) return false;
+        event.preventDefault();
+        const last = items.length - 1;
+        if (event.key === "ArrowDown") active = active >= last ? 0 : active + 1;
+        else active = active === 0 ? -1 : active < 0 ? last : active - 1;
+        highlight();
+        return true;
+      }
+      if (event.key === "Enter" && active >= 0) {
+        event.preventDefault();
+        pick(items[active]);
+        return true;
+      }
+      if (event.key === "Escape" && items.length) {
+        event.preventDefault();
+        show([]);
+        return true;
+      }
+      return false;
+    }
+    scope.listen(input, "blur", () => {
+      if (document.activeElement !== input) show([]);
+    });
+    scope.listen(list, "mousedown", (event) => event.preventDefault());
+    scope.listen(list, "click", (event) => {
+      const row = event.target?.closest('[role="option"]');
+      if (row) pick(items[Number(row.dataset.index)]);
+    });
+    const follow = () => {
+      if (items.length) place();
+    };
+    scope.listen(window, "resize", follow);
+    scope.listen(document, "scroll", follow, { capture: true, passive: true });
+    return { show, hide: () => show([]), open: () => items.length > 0, keydown };
+  }
+
   // src/webview/search/controls.ts
   function createSearch(elements, state, api, popovers, actions, scope) {
     const { filterChanged, updateScopeSelection = () => {
+    }, suggest = () => {
     } } = actions;
+    const suggestions = createSuggestionList(elements.search, elements.fieldSuggestions, scope, {
+      anchor: elements.searchEditor,
+      pick: (item) => {
+        elements.search.value = item.value;
+        setError();
+        if (item.value.trimEnd().endsWith(":")) suggest();
+        else applyDraft();
+      }
+    });
     const MAX_QUERY_LENGTH = 256;
     let appliedQuery = queryTokens(elements.search.value.trim()).map((value) => value.toLowerCase() === "or" ? "OR" : value).join(" ").slice(0, MAX_QUERY_LENGTH);
     let editingIndex;
@@ -4247,22 +4364,13 @@ Span ${call.spanId}`
       );
     }
     function renderAutocomplete(data) {
-      if (!elements.fieldSuggestions) return;
-      elements.fieldSuggestions.replaceChildren(
-        ...completeQuery(data.input, data.fields, data.values).map((value) => {
-          const option = document.createElement("option");
-          option.value = value;
-          if (!value.toLowerCase().includes(data.input.toLowerCase())) option.setAttribute("label", data.input);
-          return option;
-        })
-      );
-      elements.search.setAttribute("list", "fieldSuggestions");
+      suggestions.show(completeQuery(data.input, data.fields, data.values).map((value) => ({ value })));
     }
     function clearAutocomplete() {
-      elements.fieldSuggestions?.replaceChildren();
-      elements.search.removeAttribute("list");
+      suggestions.hide();
     }
     scope.listen(elements.search, "keydown", (event) => {
+      if (suggestions.keydown(event)) return;
       if (event.key === "Enter") {
         event.preventDefault();
         applyDraft();
@@ -4282,10 +4390,8 @@ Span ${call.spanId}`
     scope.listen(elements.search, "focus", () => {
       if (editingIndex === void 0 && elements.search.value === appliedQuery) elements.search.value = "";
     });
-    scope.listen(elements.search, "input", (event) => {
+    scope.listen(elements.search, "input", () => {
       setError();
-      if (event?.inputType === "insertReplacementText" && !elements.search.value.trimEnd().endsWith(":"))
-        applyDraft();
     });
     scope.listen(elements.searchClear, "click", (event) => {
       event.stopPropagation();
@@ -4373,12 +4479,17 @@ Span ${call.spanId}`
     let listedServices = [];
     let listed = [];
     let listOpen = false;
-    let shown2 = [];
-    let active = -1;
     let choosing = false;
     let edited = false;
     let statement = "";
     const numbers = new Intl.NumberFormat();
+    const serviceList = createSuggestionList(elements.connectionService, elements.connectionServices, scope, {
+      pick: (item) => chooseService(item.value),
+      reveal: () => {
+        listOpen = true;
+        renderList();
+      }
+    });
     const selected = () => connections.find((connection) => connection.sourceId === state.selectedServer);
     const noun2 = (connection, count) => `${connectionKind(connection.type).noun}${count === 1 ? "" : "s"}`;
     const native = (connection) => connectionKind(connection.type).native !== void 0 && state.nativeOf(connection.type).on;
@@ -4489,57 +4600,16 @@ ${answer.range}`;
       if (connection) showService(connection);
     }
     function renderList() {
-      const input = elements.connectionService;
-      const list = elements.connectionServices;
-      const typed = input.value.trim().toLowerCase();
-      shown2 = listOpen && choosing ? listedServices.filter((service) => service.name.toLowerCase().includes(typed)).slice(0, MAX_SHOWN) : [];
-      if (active >= shown2.length) active = -1;
-      list.replaceChildren(
-        ...shown2.map((service, index) => {
-          const item = document.createElement("li");
-          item.id = `connectionService-${index}`;
-          item.setAttribute("role", "option");
-          item.setAttribute("aria-selected", String(index === active));
-          item.dataset.index = String(index);
-          const name = document.createElement("span");
-          name.className = "service-name";
-          name.textContent = service.name;
-          item.append(name);
-          if (service.count !== void 0) {
-            const count = document.createElement("span");
-            count.className = "service-count";
-            count.textContent = `${numbers.format(service.count)} logs`;
-            item.append(count);
-          }
-          return item;
-        })
+      const typed = elements.connectionService.value.trim().toLowerCase();
+      serviceList.show(
+        listOpen && choosing ? listedServices.filter((service) => service.name.toLowerCase().includes(typed)).slice(0, MAX_SHOWN).map((service) => ({
+          value: service.name,
+          detail: service.count === void 0 ? void 0 : `${numbers.format(service.count)} logs`
+        })) : []
       );
-      list.hidden = shown2.length === 0;
-      if (shown2.length) placeList();
-      input.setAttribute("aria-expanded", String(shown2.length > 0));
-      if (active < 0) input.removeAttribute("aria-activedescendant");
-      else {
-        input.setAttribute("aria-activedescendant", `connectionService-${active}`);
-        list.children[active]?.scrollIntoView({ block: "nearest" });
-      }
-    }
-    function placeList() {
-      const box = elements.connectionService.getBoundingClientRect();
-      const style = elements.connectionServices.style;
-      const gutter = 8;
-      const width = Math.min(Math.max(box.width, 280), window.innerWidth - 2 * gutter);
-      const below = window.innerHeight - box.bottom - gutter;
-      const above = box.top - gutter;
-      const under = below >= Math.min(240, above);
-      style.left = `${Math.max(gutter, Math.min(box.left, window.innerWidth - width - gutter))}px`;
-      style.width = `${width}px`;
-      style.top = under ? `${box.bottom + 2}px` : "";
-      style.bottom = under ? "" : `${window.innerHeight - box.top + 2}px`;
-      style.maxHeight = `${Math.max(Math.min(240, (under ? below : above) - 2), 72)}px`;
     }
     function closeList() {
       listOpen = false;
-      active = -1;
       renderList();
     }
     const currentService = (connection) => serviceOf(native(connection) ? state.nativeOf(connection.type).query : query());
@@ -4557,8 +4627,8 @@ ${answer.range}`;
     function alignFilter(connection) {
       if (!native(connection)) return;
       const sent = soleService(state.nativeOf(connection.type).query);
-      const shown3 = soleService(query());
-      if (sent !== void 0 && shown3 !== void 0 && !sent.toLowerCase().includes(shown3.toLowerCase()))
+      const shown2 = soleService(query());
+      if (sent !== void 0 && shown2 !== void 0 && !sent.toLowerCase().includes(shown2.toLowerCase()))
         setQuery(withService(query(), ""));
     }
     function chooseService(service) {
@@ -4646,7 +4716,6 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
       input.placeholder = currentService(connection) || "Any service";
       input.value = "";
       listOpen = true;
-      active = -1;
       renderList();
     });
     scope.listen(elements.connectionService, "blur", () => {
@@ -4663,7 +4732,6 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
     scope.listen(elements.connectionService, "input", () => {
       edited = true;
       listOpen = true;
-      active = -1;
       renderList();
     });
     scope.listen(elements.connectionService, "change", () => {
@@ -4680,22 +4748,10 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
       if (keyboard.isComposing) return;
       if (keyboard.key === "ArrowDown" || keyboard.key === "ArrowUp") {
         event.preventDefault();
-        if (!listOpen) {
-          listOpen = true;
-          active = -1;
-          renderList();
-        }
-        if (!shown2.length) return;
-        const last = shown2.length - 1;
-        if (keyboard.key === "ArrowDown") active = active >= last ? 0 : active + 1;
-        else active = active === 0 ? -1 : active < 0 ? last : active - 1;
-        renderList();
+        serviceList.keydown(keyboard);
       } else if (keyboard.key === "Enter") {
+        if (serviceList.keydown(keyboard)) return;
         event.preventDefault();
-        if (active >= 0 && shown2[active]) {
-          chooseService(shown2[active].name);
-          return;
-        }
         const value = elements.connectionService.value;
         if (value.trim() || edited) chooseService(resolveService(value));
       } else if (keyboard.key === "Escape") {
@@ -4705,17 +4761,6 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
         edited = false;
         elements.connectionService.blur();
       }
-    });
-    const follow = () => {
-      if (shown2.length) placeList();
-    };
-    scope.listen(window, "resize", follow);
-    scope.listen(elements.connectionBar, "scroll", follow);
-    scope.listen(elements.connectionServices, "mousedown", (event) => event.preventDefault());
-    scope.listen(elements.connectionServices, "click", (event) => {
-      const item = event.target?.closest('[role="option"]');
-      const service = item ? shown2[Number(item.dataset.index)] : void 0;
-      if (service) chooseService(service.name);
     });
     scope.listen(elements.connectionSyntax, "click", () => {
       const connection = selected();
@@ -8324,6 +8369,25 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
     let suggestTimer;
     const selected = () => connections.find((connection) => connection.id === elements.metricConnection.value);
     elements.metricRange.value = "1h";
+    let names = [];
+    const suggestions = createSuggestionList(elements.metricInput, elements.metricSuggestions, scope, {
+      pick: (item) => {
+        elements.metricInput.value = `${aggregation()}${item.value}`;
+        updateWatch();
+      },
+      reveal: showNames
+    });
+    const aggregation = () => /^[a-z]+:/.exec(elements.metricInput.value.trim())?.[0] ?? "";
+    function nameTyped() {
+      const search = elements.metricInput.value.trim();
+      return search && !/[\s{(]/.test(search) ? search.slice(aggregation().length) : void 0;
+    }
+    function showNames() {
+      const typed = nameTyped()?.toLowerCase();
+      suggestions.show(
+        typed === void 0 || document.activeElement !== elements.metricInput ? [] : names.filter((name) => name.toLowerCase().includes(typed)).map((value) => ({ value }))
+      );
+    }
     function placeholder() {
       const connection = selected();
       elements.metricInput.placeholder = connection?.type === "datadog" ? "avg:trace.http.request.duration{service:checkout} by {env}" : "SELECT minute AS time, avg(duration_ms) AS value, service FROM requests GROUP BY 1, 3";
@@ -8381,13 +8445,8 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
     }
     function receiveNames(message) {
       if (message.connectionId !== elements.metricConnection.value) return;
-      elements.metricSuggestions.replaceChildren(
-        ...message.names.map((name) => {
-          const option = document.createElement("option");
-          option.value = name;
-          return option;
-        })
-      );
+      names = message.names;
+      showNames();
     }
     function draw() {
       const chart = elements.metricChart;
@@ -8538,20 +8597,24 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
     }
     scope.listen(elements.metricRun, "click", run);
     scope.listen(elements.metricInput, "keydown", (event) => {
+      if (suggestions.keydown(event)) return;
       if (event.key === "Enter") run();
     });
     scope.listen(elements.metricInput, "input", () => {
       updateWatch();
       clearTimeout(suggestTimer);
+      showNames();
       const connection = selected();
-      const search = elements.metricInput.value.trim();
-      if (!connection || connection.type !== "datadog" || !search || /[\s{(]/.test(search)) return;
+      const search = nameTyped();
+      if (!connection || connection.type !== "datadog" || !search) return;
       suggestTimer = setTimeout(
-        () => api.postMessage({ type: "metricNames", connectionId: connection.id, search: search.replace(/^[a-z]+:/, "") }),
+        () => api.postMessage({ type: "metricNames", connectionId: connection.id, search }),
         SUGGEST_DELAY_MS
       );
     });
     function connectionChanged() {
+      names = [];
+      suggestions.hide();
       placeholder();
       updateWatch();
     }
@@ -9554,7 +9617,14 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
       scope,
       (traceId) => traceView.show(traceId)
     );
-    const search = createSearch(elements, state, api, popovers, { filterChanged, updateScopeSelection }, scope);
+    const search = createSearch(
+      elements,
+      state,
+      api,
+      popovers,
+      { filterChanged, updateScopeSelection, suggest: () => requestAutocomplete() },
+      scope
+    );
     const connectionBar = createConnectionBar(
       elements,
       state,
@@ -10222,6 +10292,9 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
       searchDebounce = setTimeout(() => {
         searchDebounce = void 0;
       }, 150);
+      requestAutocomplete();
+    });
+    function requestAutocomplete() {
       clearTimeout(autocompleteDebounce);
       if (!search.draft().trim()) {
         search.clearAutocomplete();
@@ -10230,7 +10303,7 @@ Terms SQL cannot express are applied to the fetched rows: ${preview.local.join("
       autocompleteDebounce = setTimeout(() => {
         api.postMessage({ type: "autocomplete", input: search.draft(), serverId: state.selectedServer || void 0 });
       }, 150);
-    });
+    }
     search.buildLevelMenu();
     search.updateLevelButtonLabel();
     updateFollowControl();

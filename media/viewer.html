@@ -222,7 +222,10 @@
                   aria-label="Add a filter"
                   maxlength="256"
                   autocomplete="off"
-                  list="fieldSuggestions"
+                  role="combobox"
+                  aria-autocomplete="list"
+                  aria-expanded="false"
+                  aria-controls="fieldSuggestions"
                 />
               </div>
               <button
@@ -283,7 +286,13 @@
                 Syntax
               </button>
             </div>
-            <datalist id="fieldSuggestions"></datalist>
+            <ul
+              id="fieldSuggestions"
+              class="suggestion-list"
+              role="listbox"
+              aria-label="Filter suggestions"
+              hidden
+            ></ul>
             <div id="searchError" class="search-error" role="alert" hidden></div>
             <div id="searchToolsPanel" class="popover saved-searches" hidden>
               <div class="popover-heading">
@@ -840,7 +849,7 @@
                 spellcheck="false"
                 maxlength="256"
                 title="Search or tail one service's logs" />
-              <ul id="connectionServices" class="service-list" role="listbox" aria-label="Services" hidden></ul
+              <ul id="connectionServices" class="suggestion-list" role="listbox" aria-label="Services" hidden></ul
             ></label>
             <button id="connectionRun" type="button">Run</button>
             <button id="connectionTail" type="button" aria-pressed="false">Tail</button>
@@ -993,12 +1002,21 @@
                   <input
                     id="metricInput"
                     type="text"
-                    list="metricSuggestions"
                     autocomplete="off"
+                    role="combobox"
+                    aria-autocomplete="list"
+                    aria-expanded="false"
+                    aria-controls="metricSuggestions"
                     maxlength="2048"
                     aria-label="Metric query"
                   />
-                  <datalist id="metricSuggestions"></datalist>
+                  <ul
+                    id="metricSuggestions"
+                    class="suggestion-list"
+                    role="listbox"
+                    aria-label="Metric names"
+                    hidden
+                  ></ul>
                   <select id="metricRange" aria-label="Time range">
                     <option value="15m">Last 15 minutes</option>
                     <option value="1h">Last hour</option>

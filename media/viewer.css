@@ -1676,8 +1676,8 @@ select {
   height: 26px;
   padding: 2px 6px;
 }
-/* The services that hold what is typed, under the box; placed in the window by connection-bar.ts. */
-.service-list {
+/* A box's suggestions, such as the services that hold what is typed; placed in the window by suggestion-list.ts. */
+.suggestion-list {
   position: fixed;
   z-index: 30;
   box-sizing: border-box;
@@ -1691,10 +1691,10 @@ select {
   box-shadow: 0 2px 8px var(--vscode-widget-shadow, rgba(0, 0, 0, 0.36));
   color: var(--vscode-menu-foreground, var(--vscode-foreground, #d4d4d4));
 }
-.service-list[hidden] {
+.suggestion-list[hidden] {
   display: none;
 }
-.service-list [role='option'] {
+.suggestion-list [role='option'] {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -1703,27 +1703,27 @@ select {
   border-radius: 4px;
   cursor: pointer;
 }
-.service-list .service-name {
+.suggestion-list .suggestion-label {
   flex: 1 1 auto;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.service-list .service-count {
+.suggestion-list .suggestion-detail {
   flex: none;
   color: var(--vscode-descriptionForeground, #aaa);
   font-variant-numeric: tabular-nums;
 }
-.service-list [role='option']:hover,
-.service-list [role='option'][aria-selected='true'] {
+.suggestion-list [role='option']:hover,
+.suggestion-list [role='option'][aria-selected='true'] {
   outline: 1px solid var(--vscode-menu-selectionBorder, transparent);
   outline-offset: -1px;
   background: var(--vscode-menu-selectionBackground, var(--vscode-list-activeSelectionBackground, #04395e));
   color: var(--vscode-menu-selectionForeground, var(--vscode-list-activeSelectionForeground, #ffffff));
 }
-.service-list [role='option']:hover .service-count,
-.service-list [role='option'][aria-selected='true'] .service-count {
+.suggestion-list [role='option']:hover .suggestion-detail,
+.suggestion-list [role='option'][aria-selected='true'] .suggestion-detail {
   color: inherit;
 }
 #connectionRun:not(:disabled) {
@@ -1772,12 +1772,6 @@ select {
 }
 .connection-note.connection-error {
   color: var(--vscode-errorForeground, #f48771);
-}
-/* Chromium adds a datalist disclosure chevron to inputs with `list`. The
-   suggestions remain available while typing, but the disclosure is redundant
-   beside the editor's own controls. */
-#search::-webkit-list-button {
-  display: none;
 }
 .search-saved-button {
   grid-column: 3;
