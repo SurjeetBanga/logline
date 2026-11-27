@@ -174,6 +174,79 @@ export const AGENT_ERROR_CODES = [
   'REMOTE_ERROR',
   'RESULT_TOO_LARGE',
 ] as const;
+/** The debugger a session used, from its debug type, as one of a few runtimes. */
+export const DEBUGGERS = [
+  'node',
+  'browser',
+  'extension_host',
+  'python',
+  'dotnet',
+  'java',
+  'go',
+  'cpp',
+  'rust',
+  'php',
+  'ruby',
+  'dart',
+  'other',
+] as const;
+export type Debugger = (typeof DEBUGGERS)[number];
+const DEBUG_TYPES: Record<string, Debugger> = {
+  node: 'node',
+  'pwa-node': 'node',
+  node2: 'node',
+  'node-terminal': 'node',
+  chrome: 'browser',
+  'pwa-chrome': 'browser',
+  msedge: 'browser',
+  'pwa-msedge': 'browser',
+  firefox: 'browser',
+  extensionHost: 'extension_host',
+  'pwa-extensionHost': 'extension_host',
+  python: 'python',
+  debugpy: 'python',
+  coreclr: 'dotnet',
+  clr: 'dotnet',
+  dotnet: 'dotnet',
+  java: 'java',
+  go: 'go',
+  cppdbg: 'cpp',
+  cppvsdbg: 'cpp',
+  lldb: 'rust',
+  rust: 'rust',
+  php: 'php',
+  rdbg: 'ruby',
+  ruby_lsp: 'ruby',
+  dart: 'dart',
+};
+/** A debug type, which an extension can name anything, as one of the runtimes above. */
+export function debuggerKind(type: string | undefined): Debugger {
+  return (type && Object.hasOwn(DEBUG_TYPES, type) ? DEBUG_TYPES[type] : undefined) ?? 'other';
+}
+/** The test runners whose failures Logline reads, as `core/ci-log` names them. */
+export const TEST_FRAMEWORKS = ['vitest', 'jest', 'node', 'tap', 'pytest', 'go', 'junit', 'dotnet', 'other'] as const;
+/** The languages Insert Log writes, as `core/log-insert` names their families. */
+export const INSERT_LANGUAGES = [
+  'js',
+  'python',
+  'go',
+  'java',
+  'kotlin',
+  'scala',
+  'groovy',
+  'csharp',
+  'rust',
+  'ruby',
+  'php',
+  'swift',
+  'dart',
+] as const;
+/** Where Investigate was started from. */
+export const INVESTIGATE_FROM = ['analyze', 'inspector', 'editor', 'palette', 'again'] as const;
+/** The agents connected to Logline in an editor: its own, Claude Code, Codex, or Copilot. */
+export const READY_AGENTS = ['host', 'claude', 'codex', 'copilot'] as const;
+/** Agents whose sessions Logline reads. */
+export const SESSION_AGENTS = ['claude-code', 'codex', 'copilot'] as const;
 /** What failed inside Logline, by area, as one of these codes. */
 export const ERROR_CODES = ['start_failed', 'write_failed', 'read_failed', 'message_failed'] as const;
 /** What Log Doctor finds: its own checks and the OpenTelemetry conventions. */
@@ -203,11 +276,16 @@ const connection = oneOf(...CONNECTION_TYPES);
 export const USAGE_EVENTS: Record<string, Record<string, Rule>> = {
   installed: {},
   updated: { from: { kind: 'version' } },
-  activated: {},
+  /** `ms`: how long activation took, sent with the event rather than as a perf event of its own. */
+  activated: { ms: MS },
   active_day: {},
   milestone: { name: oneOf(...MILESTONES), after: DURATION },
   command: { id: { kind: 'enum', values: (vocabulary) => vocabulary.commands } },
-  capture_started: { kind: oneOf(...CAPTURE_KINDS), auto: BOOL },
+  capture_started: { kind: oneOf(...CAPTURE_KINDS), auto: BOOL, by_default: BOOL },
+  debug_session: { debugger: oneOf(...DEBUGGERS) },
+  exception_snapshot: { debugger: oneOf(...DEBUGGERS), frames: COUNT, locals: COUNT },
+  test_run: { framework: oneOf(...TEST_FRAMEWORKS), failed: COUNT, fixed: COUNT },
+  log_inserted: { language: oneOf(...INSERT_LANGUAGES), styled: BOOL },
   terminal_checked: { shell: oneOf('posix', 'powershell', 'cmd'), integrated: BOOL },
   panel_opened: {},
   panel_size: { width: oneOf('narrow', 'medium', 'wide') },
@@ -220,11 +298,16 @@ export const USAGE_EVENTS: Record<string, Record<string, Rule>> = {
   connection_sql_run: { type: connection, ok: BOOL },
   connection_tested: { type: connection, ok: BOOL },
   connection_agent_allowed: { type: connection },
-  shared_with_agent: { how: oneOf('all', 'runs', 'event', 'auto'), sources: COUNT, events: COUNT },
+  shared_with_agent: {
+    how: oneOf('all', 'runs', 'event', 'auto'),
+    sources: COUNT,
+    events: COUNT,
+    agents_ready: listOf(...READY_AGENTS),
+  },
   sharing_stopped: { duration: DURATION, by: oneOf('user', 'closed') },
   exported_for_ai: {},
   ask_copilot: {},
-  investigate: { agent: oneOf('copilot', 'claude', 'codex', 'copy') },
+  investigate: { agent: oneOf('copilot', 'claude', 'codex', 'copy'), from: oneOf(...INVESTIGATE_FROM), ci: BOOL },
   investigate_outcome: { fixed: BOOL },
   agent_setup: {
     agent: oneOf('host', 'claude', 'codex', 'other', 'none'),
@@ -260,7 +343,7 @@ export const USAGE_EVENTS: Record<string, Record<string, Rule>> = {
     key: { kind: 'enum', values: (vocabulary) => new Set(vocabulary.settings.keys()) },
     value: { kind: 'setting' },
   },
-  perf: { op: oneOf('activate', 'first_render', 'search', 'import'), ms: MS, events: COUNT },
+  perf: { op: oneOf('first_render', 'search', 'import'), ms: MS, events: COUNT },
   doctor_finding: { code: oneOf(...DOCTOR_CODES) },
   doctor_action: { action: oneOf('open', 'showEvents', 'fix', 'report') },
   feedback: { surface: oneOf('doctor', 'copilot'), code: oneOf(...DOCTOR_CODES), helpful: BOOL },
@@ -301,6 +384,14 @@ export const USAGE_EVENTS: Record<string, Record<string, Rule>> = {
     tool_calls: COUNT,
     unused_shares: COUNT,
     clients_used: listOf(...AGENT_CLIENTS),
+    capture_default: BOOL,
+    runtime_errors: COUNT,
+    test_runs: COUNT,
+    tests_failed: COUNT,
+    exception_snapshots: COUNT,
+    agent_sessions: COUNT,
+    agents_followed: listOf(...SESSION_AGENTS),
+    debuggers: listOf(...DEBUGGERS),
   },
 };
 export type UsageEventName = keyof typeof USAGE_EVENTS;

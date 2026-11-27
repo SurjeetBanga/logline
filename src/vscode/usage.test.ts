@@ -138,6 +138,12 @@ function setup(
       return true;
     },
   });
+  // The extension reports how long activation took at its end, in the same turn as start().
+  const start = usage.start.bind(usage);
+  usage.start = (summary) => {
+    start(summary);
+    usage.activated(12);
+  };
   return {
     usage,
     sent,
@@ -148,7 +154,7 @@ function setup(
   };
 }
 
-test('a batch PostHog does not accept is sent once more, ahead of newer events, then dropped', async () => {
+test('a batch PostHog does not accept is sent again, ahead of newer events, then dropped after three tries', async () => {
   const options = { accepted: false };
   const { usage, bodies, events } = setup(options);
   usage.start();
@@ -162,10 +168,11 @@ test('a batch PostHog does not accept is sent once more, ahead of newer events, 
   failing.usage.start();
   await failing.usage.flush();
   await failing.usage.flush();
+  await failing.usage.flush();
   const tries = failing.bodies.length;
   await failing.usage.flush();
-  assert.equal(tries, 2);
-  assert.equal(failing.bodies.length, 2, 'nothing is left to try a third time');
+  assert.equal(tries, 3);
+  assert.equal(failing.bodies.length, 3, 'nothing is left to try a fourth time');
   assert.equal(bodies.length, 2);
   usage.dispose();
   failing.usage.dispose();
@@ -897,4 +904,79 @@ test('the summary says how long the session ran, what was lost, and how logs par
   assert.equal(summary.events_discarded, '100-999');
   assert.equal(summary.events_truncated, '1-9');
   assert.deepEqual([summary.pct_json, summary.pct_unclassified, summary.pct_multiline], ['100', '25-49', '0']);
+});
+
+test('activation sends its time, or is counted without it when it never reports', async (t) => {
+  const { usage, sent } = setup();
+  usage.start();
+  await usage.close();
+  const activated = sent.filter((item) => item.event === 'activated');
+  assert.equal(activated.length, 1);
+  assert.equal(activated[0].properties.ms, '10-24ms');
+  assert.ok(!sent.some((item) => item.event === 'perf' && item.properties.op === 'activate'));
+
+  // An activation that failed partway never reports: start sends the event without a time.
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const stuck = setup();
+  Object.getPrototypeOf(stuck.usage).start.call(stuck.usage);
+  t.mock.timers.tick(30_000);
+  stuck.usage.activated(50);
+  await stuck.usage.close();
+  const counted = stuck.sent.filter((item) => item.event === 'activated');
+  assert.equal(counted.length, 1, 'counted once');
+  assert.equal(counted[0].properties.ms, undefined);
+});
+
+test('debuggers, snapshots, test runs, and agent sessions are sent once a kind and counted in the summary', async () => {
+  const { usage, sent } = setup();
+  usage.start({
+    eventsCaptured: () => 0,
+    sources: () => 0,
+    memoryMb: () => 0,
+    trimmed: () => false,
+    connections: () => ({}),
+    captureDefault: () => true,
+    runtimeErrors: () => 3,
+    agentSessions: () => ({ sessions: 4, agents: ['claude-code', 'codex'] }),
+  });
+  usage.debugSession('pwa-node');
+  usage.debugSession('node');
+  usage.debugSession('debugpy');
+  usage.debugSession('acme-secret-debugger');
+  usage.exceptionSnapshot('debugpy', 2, 14);
+  usage.exceptionSnapshot('python', 3, 9);
+  usage.testRun('vitest', 2, 0);
+  usage.testRun('vitest', 0, 2);
+  usage.testRun('a-runner-of-our-own', 1, 0);
+  usage.capture('terminal', true);
+  usage.shared('all', 1, 10, ['copilot', 'claude', 'someone']);
+  await usage.close();
+  const of = (event: string) => sent.filter((item) => item.event === event).map((item) => item.properties);
+  assert.deepEqual(
+    of('debug_session').map((properties) => properties.debugger),
+    ['node', 'python', 'other'],
+  );
+  // Two snapshots from one debugger: the first is sent, both are counted.
+  assert.deepEqual(
+    of('exception_snapshot').map(({ debugger: kind, frames, locals }) => [kind, frames, locals]),
+    [['python', '1-9', '10-99']],
+  );
+  assert.deepEqual(
+    of('test_run').map(({ framework, failed, fixed }) => [framework, failed, fixed]),
+    [
+      ['vitest', '1-9', '0'],
+      ['other', '1-9', '0'],
+    ],
+  );
+  assert.equal(of('capture_started')[0].by_default, true);
+  assert.deepEqual(of('shared_with_agent')[0].agents_ready, ['copilot', 'claude']);
+  const [summary] = of('session_summary');
+  assert.equal(summary.capture_default, true);
+  assert.equal(summary.runtime_errors, '1-9');
+  assert.equal(summary.test_runs, '1-9');
+  assert.equal(summary.tests_failed, '1-9');
+  assert.equal(summary.exception_snapshots, '1-9');
+  assert.equal(summary.agent_sessions, '1-9');
+  assert.deepEqual(summary.agents_followed, ['claude-code', 'codex']);
+  assert.deepEqual(summary.debuggers, ['node', 'python', 'other']);
 });

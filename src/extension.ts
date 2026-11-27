@@ -69,7 +69,7 @@ export function activate(context: vscode.ExtensionContext): { provider: LogsProv
     ...registerCommands(controller, (section) => guide.open(section), packageJSON?.version, usage),
     ...registerTasks(controller.runner, controller.registry, controller.tasks),
     ...registerAgentTools(context, controller.agentAccess, usage),
-    ...registerDebugCapture(controller.debug),
+    ...registerDebugCapture(controller.debug, usage),
     ...controller.otel.registerDebugEnvironment(),
     controller,
     guide,
@@ -339,7 +339,7 @@ export function activate(context: vscode.ExtensionContext): { provider: LogsProv
   });
   if (opensPanelOnInstall(usage.newInstall, context.extensionMode, vscode.env?.remoteName))
     void vscode.commands.executeCommand('logline.logs.focus');
-  usage.record('perf', { op: 'activate', ms: performance.now() - started });
+  usage.activated(performance.now() - started);
   return { provider };
 }
 

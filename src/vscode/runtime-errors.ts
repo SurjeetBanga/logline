@@ -81,6 +81,11 @@ export class RuntimeErrors implements vscode.CodeActionProvider, vscode.Disposab
     this.applyMode();
   }
 
+  /** The errors and failed tests marked in the editor now. */
+  get marked(): number {
+    return this.shown.size;
+  }
+
   get enabled(): boolean {
     return this.mode !== 'off';
   }

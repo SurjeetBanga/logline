@@ -97,7 +97,7 @@ export function createInspection(
     }
     const investigate = (event.target as HTMLElement).closest<HTMLElement>('.investigate-button');
     if (investigate) {
-      api.postMessage({ type: 'investigate', id: Number(investigate.dataset.id) });
+      api.postMessage({ type: 'investigate', id: Number(investigate.dataset.id), from: 'inspector' });
       return true;
     }
     const share = (event.target as HTMLElement).closest<HTMLElement>('.share-source-button');

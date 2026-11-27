@@ -28,6 +28,7 @@ All notable changes to Logline are documented in this file.
 
 ### Fixes
 
+- Anonymous usage counts send less and say more: how long activation took is part of the activation event rather than one of its own, and a batch PostHog does not accept is tried three times rather than twice. They now also count the kind of debugger a session used, local test runs and their runner, exception snapshots, Insert Log's language, where Investigate was started, which agents were set up when logs were shared, and whether terminal capture is on only by default. None of them carries a value, name, path, or command; [PRIVACY.md](PRIVACY.md) lists them.
 - In Windows PowerShell, a typographic single quote (`’`) in an error message or a path no longer ends the quoted text of a command Logline puts in a terminal, so the rest of it cannot run as a command. This covers the commands that start an agent to investigate an error and that register Logline with an agent.
 - The Sources rail lists a source's runs newest first, so the run you just started is at the top under **All runs**. Agent sessions were listed in the order they were first read, so a new chat could land at the bottom.
 - Clicking the selected source in the Sources rail again hides its runs, and clicking it once more shows them, so a source with many runs, such as an agent's sessions, can be folded away. Hiding them while a run is selected shows the whole source's logs.

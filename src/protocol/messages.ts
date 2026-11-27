@@ -97,7 +97,7 @@ export type ViewRequest =
   | { type: 'stopSharing' }
   | { type: 'askCopilot'; anchor?: number }
   /** Hand the error an event shows to an agent; `query` finds the error's other events. */
-  | { type: 'investigate'; id: number; query?: string }
+  | { type: 'investigate'; id: number; query?: string; from?: 'analyze' | 'inspector' }
   /** An agent's tool call: show the app's logs while it ran, open the session's transcript, or paste its command in a terminal. */
   | { type: 'agentCall'; id: number; action: 'logs' | 'transcript' | 'terminal' }
   | { type: 'shareEvent'; id: number }
@@ -581,7 +581,8 @@ export function parseViewRequest(value: unknown): ViewRequest | undefined {
       const id = index('id');
       if (id === undefined) return undefined;
       const query = typeof msg.query === 'string' && msg.query.length <= 2000 ? msg.query : undefined;
-      return query ? { type: msg.type, id, query } : { type: msg.type, id };
+      const from = msg.from === 'analyze' || msg.from === 'inspector' ? msg.from : undefined;
+      return { type: msg.type, id, ...(query ? { query } : {}), ...(from ? { from } : {}) };
     }
     case 'agentCall': {
       const id = index('id');

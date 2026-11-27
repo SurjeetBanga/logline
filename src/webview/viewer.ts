@@ -121,7 +121,8 @@ export function createViewer(api: WebviewApi) {
         views.show('logs');
         search.setQuery(choice.query, true);
       },
-      investigate: (id, query) => api.postMessage({ type: 'investigate', id, ...(query ? { query } : {}) }),
+      investigate: (id, query) =>
+        api.postMessage({ type: 'investigate', id, from: 'analyze', ...(query ? { query } : {}) }),
       selectSource: (id) => {
         views.show('logs');
         selectSource(id);

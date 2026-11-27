@@ -209,6 +209,22 @@ test("VS Code's built-in Copilot counts as Copilot, though no extension shows it
   assert.equal(extension.copilotAvailable(), true, 'the Copilot Chat extension counts wherever it is installed');
 });
 
+test('the agents ready to read a share are Copilot, those with the skills, and the editor’s own once it lists Logline', () => {
+  delete require.cache[require.resolve('./agent-setup')];
+  const { readyAgents } = withVscode(
+    { env: { appName: 'Cursor' }, extensions: { getExtension: () => undefined } },
+    () => require('./agent-setup') as typeof import('./agent-setup'),
+  );
+  const file = join(mkdtempSync(join(tmpdir(), 'logline-ready-')), 'mcp.json');
+  const host = { name: 'Cursor', file };
+  assert.deepEqual(readyAgents(host, []), [], 'no settings file yet');
+  writeFileSync(file, JSON.stringify({ mcpServers: { other: {} } }));
+  assert.deepEqual(readyAgents(host, ['Codex']), ['codex']);
+  writeFileSync(file, JSON.stringify({ mcpServers: { logline: { command: 'node' } } }));
+  assert.deepEqual(readyAgents(host, ['Claude Code', 'Codex']), ['claude', 'codex', 'host']);
+  assert.deepEqual(readyAgents(undefined, []), []);
+});
+
 test('shellQuote and promptCommand quote a prompt for each shell', () => {
   const { shellQuote, promptCommand } = withVscode(
     { env: { appName: 'Visual Studio Code' } },

@@ -106,6 +106,27 @@ export function agentsWithSkills(directory: (agent: Agent) => string = (agent) =
     .map((agent) => AGENT_NAMES[agent]);
 }
 
+/**
+ * The agents that can read what is shared here, as usage counts name them: Copilot while its chat is available,
+ * Claude Code and Codex with Logline's skills installed, and the editor's own agent with Logline in its MCP settings.
+ */
+export function readyAgents(
+  host = hostAgent(),
+  skills = agentsWithSkills(),
+): ('host' | 'claude' | 'codex' | 'copilot')[] {
+  const ready: ('host' | 'claude' | 'codex' | 'copilot')[] = [];
+  if (copilotAvailable()) ready.push('copilot');
+  if (skills.includes(AGENT_NAMES.claude)) ready.push('claude');
+  if (skills.includes(AGENT_NAMES.codex)) ready.push('codex');
+  if (host)
+    try {
+      if (readFileSync(host.file, 'utf8').includes('"logline"')) ready.push('host');
+    } catch {
+      /* no settings file yet */
+    }
+  return ready;
+}
+
 // Whether VS Code's built-in chat can open, as `refreshCopilot` last found.
 let builtInChat = false;
 

@@ -43,6 +43,8 @@ test('inserts a pino-style structured line after the statement at the cursor', (
     line: 3,
     text: '  logger.info({ order }, "checkout: order"); // logline',
     label: 'checkout: order',
+    family: 'js',
+    styled: true,
   });
   // A member expression is logged under its last name.
   assert.equal(
@@ -70,6 +72,9 @@ test('goes inside a block the line opens and before a line that leaves the funct
     line: 1,
     text: '    console.log("a: req.query", req.query); // logline',
     label: 'a: req.query',
+    // No logging call in the file: the language's own print, which usage counts tell apart.
+    family: 'js',
+    styled: false,
   });
   const exit = ['function f(x) {', '  return compute(x);', '}'];
   assert.equal(plan('a.ts', exit, 1, 'x')?.line, 1);
