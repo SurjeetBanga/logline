@@ -223,6 +223,6 @@ export class AiUsageStatus implements vscode.Disposable {
 
 /** `Claude Code keeps`, `Claude Code and Codex keep`: who keeps the transcripts, as the dialog says it. */
 export function agentNames(agents?: string[]): string {
-  const names = agents?.length ? agents : ['Claude Code', 'Codex'];
+  const names = agents?.length ? agents : ['Claude Code', 'Codex', 'Copilot'];
   return names.length === 1 ? `${names[0]} keeps` : `${names.slice(0, -1).join(', ')} and ${names.at(-1)} keep`;
 }

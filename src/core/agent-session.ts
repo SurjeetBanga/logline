@@ -1,10 +1,22 @@
 // What a coding agent did in one session, read from the transcript it keeps on
-// this machine: Claude Code under ~/.claude/projects, Codex under ~/.codex/sessions.
+// this machine: Claude Code under ~/.claude/projects, Codex under ~/.codex/sessions,
+// Copilot CLI under ~/.copilot/session-state, and Copilot Chat in VS Code's workspace storage.
 // Each prompt, tool call, and reply becomes one JSON log line, so search, Analyze,
 // and sharing treat an agent session like any other run.
 
-export type AgentName = 'claude-code' | 'codex';
-export const AGENT_LABELS: Record<AgentName, string> = { 'claude-code': 'Claude Code', codex: 'Codex' };
+import { finishedTools, plainMessage, replayChatLine, replyText } from './copilot-chat';
+
+export type AgentName = 'claude-code' | 'codex' | 'copilot';
+export const AGENT_LABELS: Record<AgentName, string> = {
+  'claude-code': 'Claude Code',
+  codex: 'Codex',
+  copilot: 'Copilot',
+};
+export const AGENT_NAMES = Object.keys(AGENT_LABELS) as AgentName[];
+
+export function isAgentName(value: unknown): value is AgentName {
+  return typeof value === 'string' && (AGENT_NAMES as string[]).includes(value);
+}
 
 /** The source an agent's sessions belong to. */
 export function agentSource(agent: AgentName): { serverId: string; server: string } {
@@ -120,6 +132,12 @@ export class AgentSessionParser {
   private readonly pending = new Map<string, Pending>();
   /** Claude Code repeats a reply's usage on each of its content parts: counted once per reply. */
   private readonly counted = new Map<string, AgentTokens>();
+  /** A Copilot Chat session as its file's lines so far have made it. */
+  private chat?: Json;
+  /** What of a Copilot Chat session was logged: `prompt <request>`, `reply <request>`, `tool <call>`. */
+  private readonly logged = new Set<string>();
+  /** Copilot CLI recorded each model call's usage, so its totals at shutdown are not needed. */
+  private cliUsage = false;
 
   constructor(readonly agent: AgentName) {}
 
@@ -132,12 +150,18 @@ export class AgentSessionParser {
       return [];
     }
     if (!entry) return [];
+    // Copilot Chat lines change the session rather than say what happened, and have no time of their own.
+    if (this.agent === 'copilot' && typeof entry.kind === 'number') return this.copilotChat(entry);
     const at = Date.parse(text(entry.timestamp) ?? '') || undefined;
-    if (at !== undefined) {
-      this.info.startedAt ??= at;
-      this.info.lastAt = Math.max(this.info.lastAt ?? at, at);
-    }
+    this.seen(at);
+    if (this.agent === 'copilot') return this.copilotCli(entry, at);
     return this.agent === 'claude-code' ? this.claude(entry, at) : this.codex(entry, at);
+  }
+
+  private seen(at: number | undefined): void {
+    if (at === undefined) return;
+    this.info.startedAt ??= at;
+    this.info.lastAt = Math.max(this.info.lastAt ?? at, at);
   }
 
   private record(at: number | undefined, fields: Omit<AgentRecord, 'timestamp' | 'kind' | 'agent' | 'session'>) {
@@ -357,6 +381,166 @@ export class AgentSessionParser {
       ...(summary ? { summary: headline(summary, MAX_COMMAND) } : {}),
     };
   }
+
+  /** Copilot CLI: one event per line, such as `user.message` or `tool.execution_complete`. */
+  private copilotCli(entry: Json, at: number | undefined): AgentRecord[] {
+    const data = object(entry.data) ?? {};
+    switch (entry.type) {
+      case 'session.start':
+      case 'session.resume':
+        this.info.id ??= text(data.sessionId);
+        this.info.cwd ??= text(object(data.context)?.cwd);
+        return [];
+      case 'session.model_change':
+        this.info.model = modelName(data.newModel) ?? this.info.model;
+        return [];
+      case 'session.auto_mode_resolved':
+        this.info.model = modelName(data.chosenModel) ?? this.info.model;
+        return [];
+      case 'session.usage_record': {
+        const usage = object(data.usage);
+        if (!usage) return [];
+        const cached = count(usage.cacheReadTokens);
+        this.info.tokens.input += Math.max(0, count(usage.inputTokens) - cached);
+        this.info.tokens.output += count(usage.outputTokens);
+        this.info.tokens.cached += cached;
+        this.cliUsage = true;
+        return [];
+      }
+      case 'session.shutdown': {
+        // Earlier versions record only the session's totals, when it ends.
+        const details = object(data.tokenDetails);
+        const tokens = (name: string) => count(object(details?.[name])?.tokenCount);
+        if (details && !this.cliUsage)
+          this.info.tokens = {
+            input: tokens('input') + tokens('cache_write'),
+            output: tokens('output'),
+            cached: tokens('cache_read'),
+          };
+        return [];
+      }
+      case 'user.message': {
+        const prompt = typed(text(data.content));
+        return prompt ? [this.prompt(at, prompt)] : [];
+      }
+      case 'assistant.message': {
+        this.info.model = modelName(data.model) ?? this.info.model;
+        const said = text(data.content);
+        return said?.trim() ? [this.record(at, { level: 'info', message: headline(said), action: 'reply' })] : [];
+      }
+      case 'tool.execution_start': {
+        const id = text(data.toolCallId);
+        if (id && at !== undefined)
+          this.call(id, this.claudeTool(text(data.toolName) ?? 'tool', object(data.arguments) ?? {}, at));
+        return [];
+      }
+      case 'tool.execution_complete': {
+        const id = text(data.toolCallId);
+        if (!id) return [];
+        const exit = object(data.shellExecution)?.exitCode;
+        const said = text(object(data.result)?.content) ?? text(object(data.error)?.message) ?? text(data.error) ?? '';
+        const output = typeof exit === 'number' ? `Exit code: ${exit}\n${said}` : said;
+        return this.finished(id, at, output, data.success === false);
+      }
+      case 'session.error': {
+        const message = text(data.message);
+        return message ? [this.record(at, { level: 'error', message: headline(message), action: 'reply' })] : [];
+      }
+      default:
+        return [];
+    }
+  }
+
+  /**
+   * Copilot Chat: replay the line, then log what the session has that was not
+   * logged yet. A request's prompt is logged once it appears, each tool call
+   * once it finished, and the reply once the request is done.
+   */
+  private copilotChat(entry: Json): AgentRecord[] {
+    this.chat = replayChatLine(this.chat, entry);
+    const chat = this.chat;
+    if (!chat) return [];
+    this.info.id ??= text(chat.sessionId);
+    const created = typeof chat.creationDate === 'number' ? chat.creationDate : undefined;
+    this.seen(created);
+    if (text(chat.customTitle)?.trim()) this.info.title = headline(text(chat.customTitle)!, 120);
+    const records: AgentRecord[] = [];
+    for (const value of Array.isArray(chat.requests) ? chat.requests : []) {
+      const request = object(value);
+      const id = text(request?.requestId);
+      if (!request || !id) continue;
+      const at = typeof request.timestamp === 'number' ? request.timestamp : undefined;
+      this.seen(at);
+      this.info.model =
+        modelName(object(object(request.result)?.metadata)?.resolvedModel) ??
+        modelName(request.modelId) ??
+        this.info.model;
+      if (!this.logged.has(`prompt ${id}`)) {
+        this.logged.add(`prompt ${id}`);
+        const prompt = typed(text(object(request.message)?.text));
+        if (prompt) records.push(this.prompt(at, prompt));
+      }
+      for (const call of finishedTools(request)) {
+        if (this.logged.has(`tool ${call.id}`)) continue;
+        this.logged.add(`tool ${call.id}`);
+        const { text: said, file } = plainMessage(call.said, this.info.cwd);
+        const when = call.at ?? at;
+        this.seen(when);
+        this.info.toolCalls++;
+        if (call.failed) this.info.failedCalls++;
+        const outcome = call.denied
+          ? 'denied'
+          : call.exitCode !== undefined
+            ? `exit ${call.exitCode}`
+            : call.failed
+              ? 'failed'
+              : '';
+        const summary = call.command ? headline(call.command, MAX_COMMAND) : headline(said, 160);
+        records.push(
+          this.record(when, {
+            level: call.failed ? 'error' : call.denied ? 'warn' : 'info',
+            message: [call.tool, summary, outcome].filter(Boolean).join('  '),
+            action: 'tool',
+            tool: call.tool,
+            ...(call.command ? { command: headline(call.command, MAX_COMMAND) } : {}),
+            ...(file ? { file } : {}),
+            ...(call.exitCode !== undefined ? { exitCode: call.exitCode } : {}),
+            ...(call.durationMs !== undefined ? { durationMs: call.durationMs } : {}),
+            ...(call.failed && call.output?.trim() ? { output: tail(call.output.trim()) } : {}),
+          }),
+        );
+      }
+      const result = object(request.result);
+      if (!result || this.logged.has(`reply ${id}`)) continue;
+      this.logged.add(`reply ${id}`);
+      this.usage(`chat ${id}`, { input_tokens: request.promptTokens, output_tokens: request.completionTokens });
+      const elapsed = typeof request.elapsedMs === 'number' ? request.elapsedMs : undefined;
+      const done =
+        count(object(request.modelState)?.completedAt) ||
+        (at !== undefined && elapsed !== undefined ? at + elapsed : at);
+      this.seen(done || undefined);
+      const error = text(object(result.errorDetails)?.message);
+      const reply = replyText(request);
+      if (reply)
+        records.push(this.record(done || undefined, { level: 'info', message: headline(reply), action: 'reply' }));
+      if (error)
+        records.push(
+          this.record(done || undefined, {
+            level: 'error',
+            message: headline(error),
+            action: 'reply',
+            ...(elapsed !== undefined ? { durationMs: elapsed } : {}),
+          }),
+        );
+    }
+    return records;
+  }
+}
+
+/** Copilot names models `copilot/auto` in Chat; the name after the provider is the model. */
+function modelName(value: unknown): string | undefined {
+  const name = text(value)?.replace(/^copilot\//, '');
+  return name && name !== 'auto' ? name : undefined;
 }
 
 /** Codex sends some outputs as JSON: `{"output": "...", "metadata": {"exit_code": 1}}`, or a list of text parts. */

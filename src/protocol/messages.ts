@@ -1,3 +1,4 @@
+import { isAgentName, type AgentName } from '../core/agent-session';
 import { WELCOME_CHOICES, type WelcomeChoice } from '../core/usage-events';
 import type { ServerSummary, SessionRegistry } from '../capture/session-registry';
 import type { FormUpdate } from '../core/connection-form';
@@ -277,7 +278,7 @@ export interface Snapshot extends Stats {
 }
 /** An agent whose sessions the rail offers to show. */
 export interface AgentHintView {
-  agent: 'claude-code' | 'codex';
+  agent: AgentName;
   label: string;
   /** Its sessions in an open folder in the last day. */
   sessions: number;
@@ -557,8 +558,7 @@ export function parseViewRequest(value: unknown): ViewRequest | undefined {
         ? { type: msg.type, action: msg.action as AboutAction }
         : undefined;
     case 'agentHint':
-      return (msg.action === 'show' || msg.action === 'dismiss') &&
-        (msg.agent === 'claude-code' || msg.agent === 'codex')
+      return (msg.action === 'show' || msg.action === 'dismiss') && isAgentName(msg.agent)
         ? { type: msg.type, action: msg.action, agent: msg.agent }
         : undefined;
     case 'emptyAction':

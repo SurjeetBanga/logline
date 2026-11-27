@@ -1620,7 +1620,7 @@
             "type": "boolean",
             "default": false,
             "order": 5,
-            "markdownDescription": "Show the sessions of Claude Code and Codex that worked in this workspace as logs, under an **Agents** source: each prompt, tool call (with its command, file, outcome, and duration), and reply is a line, beside your app's logs. Logline reads the transcripts the agents keep on this machine, from the last day; nothing that is read leaves it unless you share it with an agent."
+            "markdownDescription": "Show the sessions of Claude Code, Codex, and GitHub Copilot (Chat and CLI) that worked in this workspace as logs, under an **Agents** source: each prompt, tool call (with its command, file, outcome, and duration), and reply is a line, beside your app's logs. Logline reads the transcripts the agents keep on this machine, from the last day; nothing that is read leaves it unless you share it with an agent."
           }
         }
       }

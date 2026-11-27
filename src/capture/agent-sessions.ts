@@ -3,7 +3,7 @@ import { promises as fs } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import {
-  AGENT_LABELS,
+  AGENT_NAMES,
   AgentSessionParser,
   agentSource,
   claudeProjectDir,
@@ -46,6 +46,7 @@ export interface AgentHint {
 export interface AgentSessionsOptions {
   claudeDir?: string;
   codexDir?: string;
+  copilotDir?: string;
   now?: () => number;
 }
 
@@ -64,8 +65,12 @@ interface Followed {
 /** What a run's detail counts. */
 export type AgentCounts = Pick<AgentSessionInfo, 'toolCalls' | 'failedCalls' | 'tokens'>;
 
+/** No sessions yet for any agent. */
+const noCounts = (): Record<AgentName, number> =>
+  Object.fromEntries(AGENT_NAMES.map((agent) => [agent, 0])) as Record<AgentName, number>;
+
 /**
- * Agent sessions as logs: each Claude Code or Codex session that worked in an
+ * Agent sessions as logs: each Claude Code, Codex, or Copilot session that worked in an
  * open folder is a run, under one source per agent, with a log line for each
  * prompt, tool call, and reply. It reads the transcripts the agents keep on
  * this machine, only while `logline.agentSessions.enabled` is on.
@@ -73,6 +78,11 @@ export type AgentCounts = Pick<AgentSessionInfo, 'toolCalls' | 'failedCalls' | '
 export class AgentSessionCapture {
   /** The open workspace folders; sessions in other folders are left alone. */
   folders: () => string[] = () => [];
+  /**
+   * The folder where VS Code keeps this workspace's Copilot Chat sessions;
+   * every session in it worked in this workspace.
+   */
+  chatSessions: () => string | undefined = () => undefined;
   private readonly followed = new Map<string, Followed>();
   /** Session files that belong to another folder, or whose source was removed. */
   private readonly ignored = new Set<string>();
@@ -89,6 +99,7 @@ export class AgentSessionCapture {
   private polling?: Promise<void>;
   private readonly claudeDir: string;
   private readonly codexDir: string;
+  private readonly copilotDir: string;
 
   constructor(
     private readonly config: Settings,
@@ -99,6 +110,7 @@ export class AgentSessionCapture {
   ) {
     this.claudeDir = options.claudeDir ?? join(homedir(), '.claude');
     this.codexDir = options.codexDir ?? process.env.CODEX_HOME ?? join(homedir(), '.codex');
+    this.copilotDir = options.copilotDir ?? join(homedir(), '.copilot');
     this.timer = setInterval(() => void this.poll(), AGENT_POLL_MS);
     this.timer.unref?.();
   }
@@ -257,6 +269,14 @@ export class AgentSessionCapture {
         for (const day of (await listFolder(join(sessions, year, month))).sort().reverse().slice(0, 2))
           for (const name of await listFolder(join(sessions, year, month, day)))
             if (name.endsWith('.jsonl')) await add('codex', join(sessions, year, month, day, name));
+    // Copilot CLI keeps a folder per session: session-state/<id>/events.jsonl.
+    const state = join(this.copilotDir, 'session-state');
+    for (const id of await listFolder(state)) await add('copilot', join(state, id, 'events.jsonl'));
+    // Copilot Chat keeps this workspace's sessions in its storage: chatSessions/<id>.jsonl.
+    const chat = this.chatSessions();
+    if (chat)
+      for (const name of await listFolder(chat))
+        if (name.endsWith('.jsonl')) await add('copilot', join(chat, name), true);
     return found.sort((a, b) => b.modifiedAt - a.modifiedAt);
   }
 
@@ -267,7 +287,7 @@ export class AgentSessionCapture {
    */
   private async findHints(now: number): Promise<void> {
     const folders = this.folders();
-    const counts: Record<AgentName, number> = { 'claude-code': 0, codex: 0 };
+    const counts = noCounts();
     const recent = await this.recent(now);
     const files = new Set(recent.map(({ file }) => file));
     for (const file of this.cwds.keys()) if (!files.has(file)) this.cwds.delete(file);
@@ -276,9 +296,11 @@ export class AgentSessionCapture {
       const cwd = exact ? undefined : await this.cwdOf(agent, file);
       if (exact || (cwd && folders.some((folder) => within(cwd, folder)))) counts[agent]++;
     }
-    const next = (Object.keys(counts) as AgentName[])
-      .filter((agent) => counts[agent] > 0)
-      .map((agent) => ({ agent, label: agentSource(agent).server, sessions: counts[agent] }));
+    const next = AGENT_NAMES.filter((agent) => counts[agent] > 0).map((agent) => ({
+      agent,
+      label: agentSource(agent).server,
+      sessions: counts[agent],
+    }));
     if (JSON.stringify(next) === JSON.stringify(this.found)) return;
     this.found = next;
     this.state.notify();
@@ -296,16 +318,16 @@ export class AgentSessionCapture {
 
   private async scan(now: number): Promise<void> {
     const found = await this.recent(now);
-    const counts: Record<AgentName, number> = { 'claude-code': 0, codex: 0 };
+    const counts = noCounts();
     for (const followed of this.followed.values()) counts[followed.agent]++;
-    for (const { agent, file, modifiedAt } of found) {
+    for (const { agent, file, modifiedAt, exact } of found) {
       if (this.removed.has(agent) || counts[agent] >= AGENT_MAX_SESSIONS) continue;
       counts[agent]++;
-      this.follow(agent, file, modifiedAt);
+      this.follow(agent, file, modifiedAt, exact);
     }
   }
 
-  private follow(agent: AgentName, file: string, modifiedAt: number): void {
+  private follow(agent: AgentName, file: string, modifiedAt: number, exact = false): void {
     const { serverId, server } = agentSource(agent);
     const record: SessionSummary = {
       id: randomBytes(8).toString('hex'),
@@ -319,10 +341,14 @@ export class AgentSessionCapture {
       canStop: false,
       captureComplete: false,
     };
+    const parser = new AgentSessionParser(agent);
+    // A Copilot Chat session does not name its folder: it is this workspace's, which has one unless it is multi-root.
+    const folders = this.folders();
+    if (agent === 'copilot' && exact && folders.length === 1) parser.info.cwd = folders[0];
     this.followed.set(file, {
       agent,
       tail: new JsonlTail(file),
-      parser: new AgentSessionParser(agent),
+      parser,
       record,
       listed: false,
       modifiedAt,
@@ -374,7 +400,7 @@ export class AgentSessionCapture {
    * not read until it is restored, and the rail offers it again.
    */
   stopServer(serverId: string): void {
-    const agent = (Object.keys(AGENT_LABELS) as AgentName[]).find((name) => agentSource(name).serverId === serverId);
+    const agent = AGENT_NAMES.find((name) => agentSource(name).serverId === serverId);
     let sessions = 0;
     for (const [file, followed] of this.followed)
       if (followed.record.serverId === serverId) {

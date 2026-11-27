@@ -228,6 +228,6 @@ test('a host with no status bar still registers its commands', async () => {
 test('the agent sessions dialog names the agents on offer, or both', () => {
   assert.equal(agentNames(['Claude Code']), 'Claude Code keeps');
   assert.equal(agentNames(['Claude Code', 'Codex']), 'Claude Code and Codex keep');
-  assert.equal(agentNames(), 'Claude Code and Codex keep');
-  assert.equal(agentNames([]), 'Claude Code and Codex keep');
+  assert.equal(agentNames(), 'Claude Code, Codex and Copilot keep');
+  assert.equal(agentNames([]), 'Claude Code, Codex and Copilot keep');
 });

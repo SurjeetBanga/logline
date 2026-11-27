@@ -18,6 +18,8 @@ function setup(enabled: boolean) {
   const folder = join(root, 'shop');
   const claudeDir = join(root, 'claude');
   const codexDir = join(root, 'codex');
+  const copilotDir = join(root, 'copilot');
+  const chatDir = join(root, 'workspaceStorage', 'abc', 'chatSessions');
   mkdirSync(folder);
   const store = new LogStore();
   const registry = new SessionRegistry();
@@ -28,10 +30,12 @@ function setup(enabled: boolean) {
   const capture = new AgentSessionCapture(config, registry, new Ingestion(store, () => undefined), state, {
     claudeDir,
     codexDir,
+    copilotDir,
     now: () => clock.now,
   });
   const clock = { now: NOW };
   capture.folders = () => [folder];
+  capture.chatSessions = () => chatDir;
   const jsonl = (...entries: unknown[]) => entries.map((entry) => JSON.stringify(entry)).join('\n') + '\n';
   const claudeFile = (name = 'x.jsonl', dir = claudeProjectDir(folder)) => {
     mkdirSync(join(claudeDir, 'projects', dir), { recursive: true });
@@ -48,6 +52,8 @@ function setup(enabled: boolean) {
     jsonl,
     claudeFile,
     codexDir,
+    copilotDir,
+    chatDir,
     notified: () => notified,
     cleanup: () => {
       capture.dispose();
@@ -481,6 +487,100 @@ test('with no sessions in the folder, nothing is offered', async () => {
     );
     await t.capture.poll();
     assert.deepEqual(t.capture.hints, []);
+  } finally {
+    t.cleanup();
+  }
+});
+
+/** A Copilot CLI session folder: session-state/<id>/events.jsonl. */
+function copilotCliSession(t: ReturnType<typeof setup>, id: string, cwd: string, ...events: [string, unknown][]) {
+  const dir = join(t.copilotDir, 'session-state', id);
+  mkdirSync(dir, { recursive: true });
+  const lines = [['session.start', { sessionId: id, context: { cwd } }], ...events] as [string, unknown][];
+  writeFileSync(
+    join(dir, 'events.jsonl'),
+    t.jsonl(...lines.map(([type, data], index) => ({ type, timestamp: iso(index), data }))),
+  );
+}
+
+test('a Copilot CLI session in the folder is read; one in another folder is ignored', async () => {
+  const t = setup(true);
+  try {
+    copilotCliSession(
+      t,
+      'here',
+      join(t.folder, 'api'),
+      ['user.message', { content: 'Why is login slow?' }],
+      ['tool.execution_start', { toolCallId: 't1', toolName: 'bash', arguments: { command: 'npm run bench' } }],
+      ['tool.execution_complete', { toolCallId: 't1', success: true, shellExecution: { exitCode: 0 } }],
+    );
+    copilotCliSession(t, 'elsewhere', join(t.root, 'other'), ['user.message', { content: 'hi' }]);
+    await t.capture.poll();
+    assert.deepEqual(
+      t.store.all().map((event) => [event.serverId, event.server, event.message]),
+      [
+        ['agent:copilot', 'Copilot', 'Why is login slow?'],
+        ['agent:copilot', 'Copilot', 'bash  npm run bench  exit 0'],
+      ],
+    );
+    const [run] = [...t.registry.records.values()];
+    assert.equal(run.command, 'Why is login slow?');
+    assert.equal(run.cwd, join(t.folder, 'api'));
+    assert.equal(t.capture.active, 1);
+  } finally {
+    t.cleanup();
+  }
+});
+
+test("a Copilot Chat session in the workspace's storage is read as the folder's, as it changes", async () => {
+  const t = setup(true);
+  try {
+    mkdirSync(t.chatDir, { recursive: true });
+    const file = join(t.chatDir, 'chat-1.jsonl');
+    const request = { requestId: 'r1', timestamp: NOW - 30_000, message: { text: 'Fix the flaky test' }, response: [] };
+    writeFileSync(
+      file,
+      t.jsonl({ kind: 0, v: { sessionId: 'chat-1', creationDate: NOW - 40_000, requests: [request] } }),
+    );
+    writeFileSync(join(t.chatDir, 'notes.txt'), 'not a session');
+    await t.capture.poll();
+    assert.deepEqual(
+      t.store.all().map((event) => event.message),
+      ['Fix the flaky test'],
+    );
+    const [run] = [...t.registry.records.values()];
+    assert.equal(run.serverId, 'agent:copilot');
+    assert.equal(run.cwd, t.folder);
+    appendFileSync(
+      file,
+      t.jsonl(
+        { kind: 2, k: ['requests', 0, 'response'], v: [{ value: 'It waits on a timer; fixed.' }] },
+        { kind: 1, k: ['requests', 0, 'result'], v: {} },
+      ),
+    );
+    await t.capture.poll();
+    assert.deepEqual(
+      t.store.all().map((event) => event.message),
+      ['Fix the flaky test', 'It waits on a timer; fixed.'],
+    );
+    assert.equal(t.capture.transcriptOf(run.id), file);
+  } finally {
+    t.cleanup();
+  }
+});
+
+test('Copilot is offered with its CLI and Chat sessions in the folder counted together', async () => {
+  const t = setup(false);
+  try {
+    copilotCliSession(t, 'here', t.folder);
+    copilotCliSession(t, 'elsewhere', join(t.root, 'other'));
+    mkdirSync(t.chatDir, { recursive: true });
+    writeFileSync(join(t.chatDir, 'chat-1.jsonl'), t.jsonl({ kind: 0, v: { sessionId: 'chat-1', requests: [] } }));
+    await t.capture.poll();
+    assert.deepEqual(
+      t.capture.hints.map((hint) => ({ ...hint })),
+      [{ agent: 'copilot', label: 'Copilot', sessions: 2 }],
+    );
   } finally {
     t.cleanup();
   }
