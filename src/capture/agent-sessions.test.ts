@@ -563,6 +563,7 @@ test('a cleared session is read again from its start when reloaded, its run coun
     assert.equal(run.events, t.store.all().length);
     assert.ok(run.events > 0);
     assert.equal(run.detail, '3s · 1 tool · 1 failed', 'no baseline from the clear');
+    assert.equal(run.tooltip, 'Tokens\t10 in · 20 out\nModel\tclaude-opus-5-5', 'the tokens are counted again');
     assert.equal(run.status, 'exited', 'reading old lines again is not activity');
     const once = t.store.all().length;
     t.store.clear();
