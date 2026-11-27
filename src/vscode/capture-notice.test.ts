@@ -46,6 +46,7 @@ test('the first capture by default says so once, and Turn Off turns capture off'
   assert.match(ui.said[0], /capturing this terminal command.*stays on this computer/);
   assert.equal(calls.turnedOff, 1);
   assert.equal(global.stored.get(CAPTURE_NOTICE_KEY), true);
+  assert.equal(instance.finished, true);
   assert.equal(await instance.captured(), false, 'once');
   assert.deepEqual(calls.steps, ['shown', 'never']);
 });
@@ -67,6 +68,7 @@ test('Show Logs opens the panel, and a later window does not say it again', asyn
 test('capture someone turned on themselves is not announced', async () => {
   const { instance, calls } = notice('Turn Off', { byDefault: false });
   assert.equal(await instance.captured(), false);
+  assert.equal(instance.finished, false, 'still said once capture is on by default');
   assert.deepEqual(ui.said, []);
   assert.equal(calls.turnedOff, 0);
 });

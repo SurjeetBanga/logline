@@ -460,7 +460,7 @@ export const GUIDE_CARDS: GuideCard[] = [
     section: 'capture',
     title: 'Capture your terminal',
     where: ['Status bar', 'Capture'],
-    text: 'Run commands as usual in a VS Code terminal: capture is on, so their output becomes searchable here. Capture in the status bar turns it off.',
+    text: 'Run commands as usual in a VS Code terminal, and their output becomes searchable here. Capture is on by default on this machine and off on a remote host; Capture in the status bar turns it on and off.',
     example: 'npm test',
     target: 'captureToggle',
     docs: 'capture-and-live-tail',

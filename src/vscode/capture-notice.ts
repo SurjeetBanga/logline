@@ -26,10 +26,15 @@ export class CaptureNotice {
 
   constructor(private readonly options: CaptureNoticeOptions) {}
 
+  /** Whether the notice was shown, in this window or an earlier one, so there is nothing left to say. */
+  get finished(): boolean {
+    return this.told || this.options.global.get<boolean>(CAPTURE_NOTICE_KEY, false) === true;
+  }
+
   /** A terminal command started being captured; returns whether the notice was shown. */
   async captured(): Promise<boolean> {
     const { global, record } = this.options;
-    if (this.told || global.get<boolean>(CAPTURE_NOTICE_KEY, false) || !this.options.byDefault()) return false;
+    if (this.finished || !this.options.byDefault()) return false;
     this.told = true;
     // Saved before asking, so another window or an unanswered notice does not show it again.
     await Promise.resolve(global.update(CAPTURE_NOTICE_KEY, true)).catch(() => undefined);
