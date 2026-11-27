@@ -138,7 +138,8 @@ export function agentCallActions(id: number, event: Pick<LogEvent, 'fields'> | u
       "Open the session's transcript, the file the agent keeps on this machine",
     ),
   );
-  if (typeof fields.command === 'string' && fields.command)
+  // A command cut short in the log, ending in …, is not all the agent ran: the transcript has the rest.
+  if (typeof fields.command === 'string' && fields.command && !fields.command.endsWith('…'))
     buttons.push(
       action(
         'terminal',

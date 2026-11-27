@@ -1,6 +1,9 @@
 import { parseJobLog, type CiJob } from '../../core/ci-log';
 import type { GitHubActionsConnection } from '../../core/connections';
+import { parseLogLine } from '../../core/log-event';
 import { termGroups } from '../../core/pushdown';
+import { matchesQuery } from '../../core/query';
+import { rowFilter } from '../../core/remote-query';
 import { object, requestJson, retryAfter, type Fetch, type Json } from './http';
 import type { Connector, FetchRequest, FetchResult, RemoteRecord } from './types';
 
@@ -48,6 +51,24 @@ function problem(status: number, headers: Headers, body: string, repository: str
   if (status === 404)
     return new Error(`GitHub has no repository ${repository} that this account can read, or Actions is off for it.`);
   return new Error(`GitHub answered ${status}${detail ? `: ${detail}` : ''}.`);
+}
+
+const searchTime = (ms: number) => new Date(ms).toISOString().replace(/\.\d+Z$/, 'Z');
+
+/** Fields that come from where an event was captured, which a fetched line does not have yet. */
+const CAPTURE_FIELDS = new Set(['id', 'serverId', 'server', 'sessionId']);
+
+/**
+ * Whether a fetched line matches the search, for a search whose terms the line alone decides; undefined when
+ * every line is kept. The lines are checked again as they are captured.
+ */
+function searchFilter(query: string): ((record: RemoteRecord) => boolean) | undefined {
+  const filter = rowFilter(query);
+  if (!filter || filter.some((group) => group.some((token) => token.field && CAPTURE_FIELDS.has(token.field))))
+    return undefined;
+  const now = Date.now();
+  const received = new Date(now);
+  return (record) => matchesQuery(parseLogLine(record.line, 'remote', 0, received), filter, now);
 }
 
 function safeJson(body: string): unknown {
@@ -148,7 +169,8 @@ export class GitHubActionsConnector implements Connector {
     const params = new URLSearchParams({
       per_page: String(perPage),
       status: 'completed',
-      created: `${new Date(fromMs).toISOString()}..${new Date(toMs).toISOString()}`,
+      // GitHub's search syntax gives times to the second: YYYY-MM-DDTHH:MM:SSZ.
+      created: `${searchTime(fromMs)}..${searchTime(toMs)}`,
       ...(branch ? { branch } : {}),
     });
     const answer = await this.json(`/repos/${this.repo()}/actions/runs?${params}`, signal);
@@ -228,12 +250,15 @@ export class GitHubActionsConnector implements Connector {
     const toMs = request.toMs ?? started;
     const fromMs = request.fromMs ?? toMs - 7 * 86400_000;
     const runs = (await this.runs(fromMs, toMs, signal)).filter((run) => run.conclusion && FAILED.has(run.conclusion));
+    // GitHub applies no search terms, so they are applied here, before the limit cuts the lines short.
+    const keep = request.native === undefined ? searchFilter(request.query) : undefined;
     const records: RemoteRecord[] = [];
     let jobs = 0;
     for (const run of runs.slice(0, MAX_RUNS)) {
       for (const job of await this.failedJobs(run, signal)) {
         jobs++;
-        records.push(...(await this.jobLog(job, signal)));
+        // A long job log has more lines than one call can take as arguments.
+        for (const record of await this.jobLog(job, signal)) if (!keep || keep(record)) records.push(record);
       }
       if (records.length >= request.limit * 4) break;
     }

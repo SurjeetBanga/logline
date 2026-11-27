@@ -630,6 +630,13 @@ export class LogsController {
     }
     const command = typeof fields.command === 'string' ? fields.command : undefined;
     if (!command) return;
+    // Cut short in the log, it is not what the agent ran, and pasted it could run something else.
+    if (command.endsWith('…')) {
+      void vscode.window.showWarningMessage(
+        'This command was cut short in the log. Open the transcript to see all of it.',
+      );
+      return;
+    }
     const cwd = event.sessionId ? this.registry.records.get(event.sessionId)?.cwd : undefined;
     const terminal = vscode.window.createTerminal({ name: 'Agent command', ...(cwd ? { cwd } : {}) });
     terminal.show();

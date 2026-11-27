@@ -1771,12 +1771,13 @@ test('the Sources rail lists each source with its status, and the runs of the se
   const runs = view.runs();
   assert.deepEqual(
     runs.map((run) => run.children[0].textContent),
-    ['All runs · 3', 'npm run api', 'npm run worker', 'npm run done'],
+    ['All runs · 3', 'npm run done', 'npm run worker', 'npm run api'],
+    'the newest run first',
   );
   const runRows = view.list.querySelectorAll('.run-option-row');
-  runRows[0].querySelector('.run-stop')!.listeners.get('click')!({ stopPropagation() {} });
+  runRows[2].querySelector('.run-stop')!.listeners.get('click')!({ stopPropagation() {} });
   assert.deepEqual(plain(messages.at(-1)), { type: 'stop', serverId: 'api', sessionId: 'run-a' });
-  assert.equal(runRows[2].querySelector('.run-stop'), undefined, 'a finished run has nothing to stop');
+  assert.equal(runRows[0].querySelector('.run-stop'), undefined, 'a finished run has nothing to stop');
 
   view.select('task-build')!.listeners.get('click')!();
   // One command's runs are named by when they started; the command, here its task, is in the title.
@@ -1788,7 +1789,7 @@ test('the rail selects a run, moves with the arrow keys, and collapses to a stri
   receive(railSnapshot);
   const view = rail(get);
   view.runs()[1].listeners.get('click')!();
-  assert.equal(app.state.selectedSession, 'run-a');
+  assert.equal(app.state.selectedSession, 'done');
   assert.equal(messages.at(-1)?.type, 'snapshot');
   assert.equal(rail(get).runs()[1].attributes['aria-current'], 'true');
 
@@ -1812,7 +1813,7 @@ test('clicking the selected source again hides its runs, and again shows them', 
   assert.equal(rail(get).runs().length, 4, 'All runs and the source’s three runs');
   assert.equal(rail(get).select('api')!.attributes['aria-expanded'], 'true');
   rail(get).runs()[1].listeners.get('click')!();
-  assert.equal(app.state.selectedSession, 'run-a');
+  assert.equal(app.state.selectedSession, 'done');
 
   rail(get).select('api')!.listeners.get('click')!();
   assert.equal(rail(get).runs().length, 0);
@@ -7192,6 +7193,34 @@ test('an agent session shows what it did on its second line, under the agent ico
     run.title,
     'running · 1.0k in · 100 out · 41.1M cached · claude-opus-5-5 · /work/shop',
     'the tooltip says only what the row does not',
+  );
+});
+
+test("an agent's sessions are listed newest first, whatever order they first logged in", () => {
+  const { get, receive } = viewer({ server: 'agent:claude-code' });
+  const session = (id: string, startedAt: number) => ({
+    id,
+    serverId: 'agent:claude-code',
+    server: 'Claude Code',
+    command: id,
+    status: 'exited',
+    startedAt,
+    sourceKind: 'agent',
+  });
+  receive({
+    ...railSnapshot,
+    servers: [
+      ...railSnapshot.servers,
+      { id: 'agent:claude-code', label: 'Claude Code', status: 'exited', activeSessions: 0, kind: 'agent' },
+    ],
+    sessions: [session('middle', 2), session('oldest', 1), session('newest', 3)],
+  });
+  assert.deepEqual(
+    rail(get)
+      .runs()
+      .map((button) => button.dataset.runId)
+      .filter(Boolean),
+    ['newest', 'middle', 'oldest'],
   );
 });
 

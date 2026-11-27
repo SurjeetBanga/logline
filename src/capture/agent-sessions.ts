@@ -32,6 +32,8 @@ export const AGENT_IDLE_MS = 10 * 60_000;
 export const AGENT_MAX_SESSIONS = 20;
 /** The most one poll reads, so a long session read for the first time does not hold up the others. */
 export const AGENT_POLL_BYTES = 32 * 1024 * 1024;
+/** Ended sessions that gave way to newer ones, kept so they go on from where they were read if they resume. */
+const AGENT_MAX_PARKED = 200;
 /** While agent sessions are off, how often the folders are listed for sessions worth offering. */
 export const AGENT_HINT_SCAN_MS = 3 * 60_000;
 /** How much of a session file's start is read for the folder it worked in. */
@@ -49,6 +51,8 @@ export interface AgentSessionsOptions {
   codexDir?: string;
   copilotDir?: string;
   now?: () => number;
+  /** The most one poll reads; for tests. */
+  pollBytes?: number;
 }
 
 interface Followed {
@@ -61,6 +65,10 @@ interface Followed {
   modifiedAt: number;
   /** Found in a folder that holds only this workspace's sessions. */
   exact: boolean;
+  /** The file has been read to its end once: what is appended after that is activity. */
+  caughtUp: boolean;
+  /** When it gave way to a newer session; it is followed again once its file changes after this. */
+  parkedAt?: number;
   /** What the session had done when the logs were last cleared, left out of its run's detail. */
   baseline?: AgentCounts;
 }
@@ -76,7 +84,9 @@ const noCounts = (): Record<AgentName, number> =>
  * Agent sessions as logs: each Claude Code, Codex, or Copilot session that worked in an
  * open folder is a run, under one source per agent, with a log line for each
  * prompt, tool call, and reply. It reads the transcripts the agents keep on
- * this machine, only while `logline.agentSessions.enabled` is on.
+ * this machine while `logline.agentSessions.enabled` is on; while it is off, it
+ * reads only the start of a session file that does not say which folder it
+ * worked in, to offer the agents that worked here.
  */
 export class AgentSessionCapture {
   /** The open workspace folders; sessions in other folders are left alone. */
@@ -87,6 +97,8 @@ export class AgentSessionCapture {
    */
   chatSessions: () => string | undefined = () => undefined;
   private readonly followed = new Map<string, Followed>();
+  /** Ended sessions that gave way to newer ones once an agent had its most; they resume where they were read. */
+  private readonly parked = new Map<string, Followed>();
   /** Session files that belong to another folder, or whose source was removed. */
   private readonly ignored = new Set<string>();
   private readonly timer: ReturnType<typeof setInterval>;
@@ -187,15 +199,18 @@ export class AgentSessionCapture {
       this.scanned = now;
       await this.scan(now);
     }
-    let budget = AGENT_POLL_BYTES;
+    let budget = this.options.pollBytes ?? AGENT_POLL_BYTES;
     let changed = false;
     for (const [file, followed] of this.followed) {
       if (budget <= 0) break;
       const before = followed.record.events;
+      const caughtUp = followed.caughtUp;
       const read = await followed.tail.read(budget, (line) => this.line(file, followed, line));
       budget -= read;
-      // What was there when the file was first read is old: only what is appended later is activity.
-      if (read && followed.tail.offset > read) followed.modifiedAt = now;
+      // What was there until the file was first read to its end is old, however many polls that took: only
+      // what is appended later is activity.
+      if (read && caughtUp) followed.modifiedAt = now;
+      if (followed.tail.offset >= followed.tail.size) followed.caughtUp = true;
       const settled = this.settle(followed, now);
       changed = changed || settled || followed.record.events !== before;
     }
@@ -252,6 +267,9 @@ export class AgentSessionCapture {
       if (this.ignored.has(file) || this.followed.has(file)) return;
       try {
         const { mtimeMs } = await fs.stat(file);
+        // A session that gave way to newer ones is found again only once it changes.
+        const parkedAt = this.parked.get(file)?.parkedAt;
+        if (parkedAt !== undefined && mtimeMs <= parkedAt) return;
         if (now - mtimeMs <= AGENT_RECENT_MS) found.push({ agent, file, modifiedAt: mtimeMs, exact });
       } catch {
         /* gone */
@@ -322,13 +340,45 @@ export class AgentSessionCapture {
 
   private async scan(now: number): Promise<void> {
     const found = await this.recent(now);
-    const counts = noCounts();
-    for (const followed of this.followed.values()) counts[followed.agent]++;
     for (const { agent, file, modifiedAt, exact } of found) {
-      if (this.removed.has(agent) || counts[agent] >= AGENT_MAX_SESSIONS) continue;
-      counts[agent]++;
-      this.follow(agent, file, modifiedAt, exact);
+      if (this.removed.has(agent) || !this.makeRoom(agent, modifiedAt, now)) continue;
+      const parked = this.parked.get(file);
+      if (!parked) this.follow(agent, file, modifiedAt, exact);
+      else {
+        // It resumed: it goes on from where it was read.
+        this.parked.delete(file);
+        delete parked.parkedAt;
+        this.followed.set(file, parked);
+      }
     }
+  }
+
+  /**
+   * Whether a session written to at `modifiedAt` can be followed: the agent has fewer than its most, or the
+   * longest-ended of its sessions is older and gives way to it.
+   */
+  private makeRoom(agent: AgentName, modifiedAt: number, now: number): boolean {
+    let count = 0;
+    let oldest: [string, Followed] | undefined;
+    for (const entry of this.followed) {
+      if (entry[1].agent !== agent) continue;
+      count++;
+      if (entry[1].record.status === 'exited' && (!oldest || entry[1].modifiedAt < oldest[1].modifiedAt))
+        oldest = entry;
+    }
+    if (count < AGENT_MAX_SESSIONS) return true;
+    if (!oldest || oldest[1].modifiedAt >= modifiedAt) return false;
+    const [file, followed] = oldest;
+    this.followed.delete(file);
+    followed.parkedAt = now;
+    this.parked.set(file, followed);
+    // The longest-parked is let go for good, so it is not read again from its start and logged twice.
+    if (this.parked.size > AGENT_MAX_PARKED) {
+      const first = this.parked.keys().next().value!;
+      this.parked.delete(first);
+      this.ignored.add(first);
+    }
+    return true;
   }
 
   private follow(agent: AgentName, file: string, modifiedAt: number, exact = false): void {
@@ -353,6 +403,7 @@ export class AgentSessionCapture {
       listed: false,
       modifiedAt,
       exact,
+      caughtUp: false,
     });
   }
 
@@ -366,17 +417,19 @@ export class AgentSessionCapture {
 
   private ignore(file: string): void {
     this.ignored.add(file);
-    const followed = this.followed.get(file);
+    const followed = this.followed.get(file) ?? this.parked.get(file);
     this.followed.delete(file);
+    this.parked.delete(file);
     if (followed?.listed && !followed.record.events) this.registry.records.delete(followed.record.id);
   }
 
   private forgetAll(): void {
-    for (const followed of this.followed.values()) {
+    for (const followed of this.sessions()) {
       followed.record.status = 'exited';
       followed.record.captureComplete = true;
     }
     this.followed.clear();
+    this.parked.clear();
     this.ignored.clear();
     this.removed.clear();
     this.removedFiles.clear();
@@ -390,7 +443,7 @@ export class AgentSessionCapture {
    * from now on.
    */
   cleared(): void {
-    for (const followed of this.followed.values()) {
+    for (const followed of this.sessions()) {
       const { toolCalls, failedCalls, tokens } = followed.parser.info;
       followed.baseline = { toolCalls, failedCalls, tokens: { ...tokens } };
       followed.record.events = 0;
@@ -407,16 +460,20 @@ export class AgentSessionCapture {
     const { serverId, sessionId } = target;
     if (!serverId && !sessionId) this.restore();
     const runs: string[] = [];
-    for (const [file, followed] of this.followed) {
+    for (const [file, followed] of [...this.followed, ...this.parked]) {
       const { record } = followed;
       if (sessionId ? record.id !== sessionId : serverId && record.serverId !== serverId) continue;
       runs.push(record.id);
       record.events = 0;
+      // A parked session is followed again, so its logs come back.
+      this.parked.delete(file);
       this.followed.set(file, {
         ...followed,
         tail: new JsonlTail(file),
         parser: this.parser(followed.agent, followed.exact),
         baseline: undefined,
+        caughtUp: false,
+        parkedAt: undefined,
       });
     }
     // Sessions begun since the last scan are found now, not ten seconds later.
@@ -426,7 +483,8 @@ export class AgentSessionCapture {
 
   /** The transcript a run was read from, while it is followed. */
   transcriptOf(sessionId: string): string | undefined {
-    for (const [file, followed] of this.followed) if (followed.record.id === sessionId) return file;
+    for (const [file, followed] of [...this.followed, ...this.parked])
+      if (followed.record.id === sessionId) return file;
     return undefined;
   }
 
@@ -437,7 +495,7 @@ export class AgentSessionCapture {
   stopServer(serverId: string): void {
     const agent = AGENT_NAMES.find((name) => agentSource(name).serverId === serverId);
     let sessions = 0;
-    for (const [file, followed] of this.followed)
+    for (const [file, followed] of [...this.followed, ...this.parked])
       if (followed.record.serverId === serverId) {
         if (followed.listed) sessions++;
         if (agent) this.removedFiles.set(file, agent);
@@ -452,12 +510,18 @@ export class AgentSessionCapture {
   }
 
   stopSessionById(id: string): void {
-    for (const [file, followed] of this.followed) if (followed.record.id === id) this.ignore(file);
+    for (const [file, followed] of [...this.followed, ...this.parked]) if (followed.record.id === id) this.ignore(file);
+  }
+
+  /** Every session read, followed or parked. */
+  private sessions(): Followed[] {
+    return [...this.followed.values(), ...this.parked.values()];
   }
 
   dispose(): void {
     clearInterval(this.timer);
     this.followed.clear();
+    this.parked.clear();
   }
 }
 

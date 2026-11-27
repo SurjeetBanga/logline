@@ -76,11 +76,11 @@ test('test() reports repository, branch and latest run', async () => {
 test('fetchLogs reads the failed jobs of failed runs and shapes records', async () => {
   const f = fake();
   const connector = make(f);
-  const result = await connector.fetchLogs({ query: 'boom "x y"', ...range, limit: 2, order: 'asc', countTotal: true });
+  const result = await connector.fetchLogs({ query: 'one OR two', ...range, limit: 2, order: 'asc', countTotal: true });
   const list = f.calls.find((c) => c.url.includes('/actions/runs?'))!.url;
   assert.match(list, /^https:\/\/api\.github\.com\/repos\/o\/r\/actions\/runs\?/);
   assert.match(list, /status=completed/);
-  assert.match(list, /created=2026-11-01T00%3A00%3A00\.000Z\.\.2026-11-30T00%3A00%3A00\.000Z/);
+  assert.match(list, /created=2026-11-01T00%3A00%3A00Z\.\.2026-11-30T00%3A00%3A00Z/);
   assert.match(list, /branch=feat/);
   assert.ok(f.calls.some((c) => c.url.endsWith('/actions/runs/1/jobs?per_page=100&filter=latest')));
   assert.ok(f.calls.some((c) => c.url.endsWith('/actions/jobs/10/logs')));
@@ -88,13 +88,13 @@ test('fetchLogs reads the failed jobs of failed runs and shapes records', async 
   assert.ok(!f.calls.some((c) => c.url.includes('/actions/jobs/11/')));
   assert.ok(!f.calls.some((c) => c.url.includes('/actions/runs/2/jobs')));
   assert.equal(result.records.length, 2);
-  assert.equal(result.total, 6);
+  assert.equal(result.total, 4, 'the lines that match the search, in both failed jobs');
   const first = JSON.parse(result.records[0].line);
   assert.equal(first.service === 'unit' || first.service === 'e2e', true);
   assert.equal(first.kind, 'ci');
   assert.equal(first.run, 5);
   assert.deepEqual(result.pushed, []);
-  assert.ok(result.local.includes('boom'));
+  assert.ok(result.local.includes('one'));
   assert.match(result.statement, /2 failed jobs in 1 run/);
   assert.match(result.statement, /o\/r/);
   const times = result.records.map((r) => r.timeMs!);
@@ -106,6 +106,20 @@ test('fetchLogs reads the failed jobs of failed runs and shapes records', async 
     [...d].sort((a, b) => b - a),
   );
   assert.equal(desc.total, undefined);
+});
+
+test('the search is applied before the limit, so matching lines past it are not lost', async () => {
+  const connector = make(fake());
+  const result = await connector.fetchLogs({
+    query: 'level:error',
+    ...range,
+    limit: 1,
+    order: 'desc',
+    countTotal: true,
+  });
+  assert.equal(result.records.length, 1);
+  assert.equal(result.total, 2);
+  assert.equal(JSON.parse(result.records[0].line).message, 'bad');
 });
 
 test('a second fetch reuses job lists and logs, a re-run lists jobs again', async () => {

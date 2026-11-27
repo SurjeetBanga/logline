@@ -133,7 +133,7 @@ export interface GitHubActionsConnection extends BaseConnection {
   repository: string;
   /** The branch whose runs are read; the checked-out branch when left out. */
   branch?: string;
-  /** A GitHub API in place of github.com's, such as GitHub Enterprise Server's `https://github.example.com/api/v3`, or one on this machine for tests. */
+  /** A GitHub API on this machine in place of github.com's, for tests; requests carry the github.com account's token. */
   endpoint?: string;
 }
 /** `owner/name`, as GitHub allows them. */
@@ -470,6 +470,7 @@ export function normalizeConnections(value: unknown): ConnectionConfig[] {
     } else if (item.type === 'github-actions') {
       const repository = text(item.repository, 140);
       const branch = text(item.branch, 255);
+      // Only a GitHub API on this machine stands in for github.com's: requests carry the github.com account's token.
       const endpoint = typeof item.endpoint === 'string' ? apiUrl(item.endpoint.trim()) : undefined;
       if (repository && isGitHubRepository(repository))
         connection = {
@@ -478,7 +479,7 @@ export function normalizeConnections(value: unknown): ConnectionConfig[] {
           type: 'github-actions',
           repository,
           ...(branch && isGitBranch(branch) ? { branch } : {}),
-          ...(endpoint ? { endpoint } : {}),
+          ...(endpoint && /^http:\/\/(?:127\.0\.0\.1|localhost|\[::1\])[:/]/.test(`${endpoint}/`) ? { endpoint } : {}),
         };
     } else if (item.type === 'cloudwatch') {
       const region = text(item.region, 32);
