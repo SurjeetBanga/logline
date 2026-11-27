@@ -379,6 +379,11 @@
         "category": "Logline"
       },
       {
+        "command": "logline.runTestsAgain",
+        "title": "Run Failed Test Command Again",
+        "category": "Logline"
+      },
+      {
         "command": "logline.breakOnRuntimeError",
         "title": "Break on the Line That Raised a Runtime Error",
         "category": "Logline"
@@ -441,6 +446,10 @@
         },
         {
           "command": "logline.copyLogValue",
+          "when": "false"
+        },
+        {
+          "command": "logline.runTestsAgain",
           "when": "false"
         },
         {

@@ -193,6 +193,8 @@ function failedTests(events: LogEvent[]): Map<string, { count: number; id: numbe
       ids.push(event.id);
     }
   }
+  // Failures already read from a local run's output, as Logline records them, are not read from it again.
+  if (failed.size) return failed;
   for (const failure of testFailures(lines)) {
     const entry = failed.get(failure.test);
     if (entry) entry.count++;

@@ -146,3 +146,14 @@ test('a CI failure says where it failed, and how often only when more than once'
     '✕ cart › adds items · failed in CI #1 · build · 2× · 4s ago',
   );
 });
+
+test('a test failing on this machine says the command it failed in, apart from the same test failing in CI', () => {
+  const tracker = new RuntimeErrorTracker();
+  const local = (id: number) => ciFailure(id, { run: undefined, job: undefined, scope: 'local', command: 'npm test' });
+  tracker.process([local(1), ciFailure(2)]);
+  const errors = tracker.list();
+  assert.equal(errors.length, 2, 'a local failure and a CI failure of one test are two marks');
+  const mark = errors.find((error) => error.local)!;
+  assert.deepEqual([mark.local, mark.ci], ['npm test', undefined]);
+  assert.equal(runtimeErrorText(mark, 6000), '✕ cart › adds items · failed locally · npm test · 5s ago');
+});

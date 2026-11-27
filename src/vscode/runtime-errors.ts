@@ -14,6 +14,8 @@ export interface RuntimeErrorSources {
   /** Changes when retained logs are cleared. */
   generation(): number;
   showQuery(query: string): Promise<void>;
+  /** Run a command again in the terminal of the source it ran in; false when that terminal is gone. */
+  runAgain?(serverId: string, command: string): boolean;
   usage?: Usage;
 }
 
@@ -46,6 +48,8 @@ export class RuntimeErrors implements vscode.CodeActionProvider, vscode.Disposab
   private readonly resolving = new Map<string, Promise<vscode.Uri | null>>();
   // Lines edited since an error was last seen there, until it happens again.
   private readonly dismissed = new Map<string, number>();
+  // Local test failures a later run of their command passed, until the test fails again.
+  private readonly passed = new Map<string, number>();
   // What each shown diagnostic stands for, for its quick fixes.
   private readonly shown = new Map<string, { error: RuntimeError; uri: vscode.Uri; line: number }>();
   private disposed = false;
@@ -58,6 +62,10 @@ export class RuntimeErrors implements vscode.CodeActionProvider, vscode.Disposab
       vscode.commands.registerCommand(
         'logline.showRuntimeError',
         counted(sources.usage, 'logline.showRuntimeError', (key: unknown) => this.showError(key)),
+      ),
+      vscode.commands.registerCommand(
+        'logline.runTestsAgain',
+        counted(sources.usage, 'logline.runTestsAgain', (key: unknown) => this.runAgain(key)),
       ),
       vscode.commands.registerCommand(
         'logline.breakOnRuntimeError',
@@ -96,6 +104,7 @@ export class RuntimeErrors implements vscode.CodeActionProvider, vscode.Disposab
       this.generation = generation;
       tracker.reset();
       this.dismissed.clear();
+      this.passed.clear();
     }
     tracker.process(store.eventsAfter(tracker.watermark));
     tracker.evict(store.eventsAfter(0).next().value?.id ?? Infinity);
@@ -143,6 +152,14 @@ export class RuntimeErrors implements vscode.CodeActionProvider, vscode.Disposab
         ],
       };
       investigate.diagnostics = [diagnostic];
+      const { local, serverId } = entry.error;
+      if (local !== undefined && serverId && this.sources.runAgain) {
+        const again = new vscode.CodeAction(`Run ${shortCommand(local)} again`, vscode.CodeActionKind.QuickFix);
+        again.command = { title: again.title, command: 'logline.runTestsAgain', arguments: [entry.error.key] };
+        again.diagnostics = [diagnostic];
+        again.isPreferred = true;
+        actions.push(again);
+      }
       actions.push(show, investigate, breakpoint);
     }
     return actions;
@@ -200,6 +217,7 @@ export class RuntimeErrors implements vscode.CodeActionProvider, vscode.Disposab
       const key = shownKey(place.uri, place.line);
       // The newest error on a line speaks for it.
       if (taken.has(key) || (this.dismissed.get(key) ?? -1) >= error.lastId) continue;
+      if ((this.passed.get(error.key) ?? -1) >= error.lastId) continue;
       taken.add(key);
       const file = byFile.get(place.uri.toString()) ?? { uri: place.uri, entries: [] };
       file.entries.push({ error, line: place.line });
@@ -301,6 +319,31 @@ export class RuntimeErrors implements vscode.CodeActionProvider, vscode.Disposab
     await this.sources.showQuery(error.query ?? `id:${error.lastId}`);
   }
 
+  /**
+   * A run of `command` in source `serverId` passed these tests, which an earlier run failed: their local marks
+   * clear until they fail again.
+   */
+  testsPassed(serverId: string, command: string, tests: readonly string[]): void {
+    if (!tests.length) return;
+    const names = new Set(tests);
+    let changed = false;
+    for (const error of this.tracker.errors.values()) {
+      if (error.local !== command || error.serverId !== serverId || !error.test || !names.has(error.test)) continue;
+      this.passed.set(error.key, error.lastId);
+      changed = true;
+    }
+    if (changed && this.enabled) void this.show(Date.now());
+  }
+
+  private runAgain(key: unknown): void {
+    const error = [...this.shown.values()].find((item) => item.error.key === key)?.error;
+    if (!error?.local || !error.serverId) return;
+    if (!this.sources.runAgain?.(error.serverId, error.local))
+      void vscode.window.showInformationMessage(
+        `The terminal that ran ${shortCommand(error.local)} is closed. Run it again in a terminal to check the test.`,
+      );
+  }
+
   private breakOn(key: unknown): void {
     const entry = [...this.shown.values()].find((item) => item.error.key === key);
     if (!entry) return;
@@ -313,6 +356,11 @@ export class RuntimeErrors implements vscode.CodeActionProvider, vscode.Disposab
 }
 
 const shownKey = (uri: vscode.Uri, line: number) => `${uri.toString()}#${line}`;
+
+/** A command short enough for a quick fix's title. */
+function shortCommand(command: string): string {
+  return command.length > 40 ? `${command.slice(0, 39)}…` : command;
+}
 
 /** The 0-based line that names a test, `test('adds items', …)`, by its own name without its suites; 0 when not found. */
 export async function testLine(uri: vscode.Uri, test: string): Promise<number> {

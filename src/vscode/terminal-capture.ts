@@ -107,6 +107,16 @@ export class TerminalCapture {
   get isEnabled(): boolean {
     return this.enabled;
   }
+
+  /** Run a command again in the open terminal a captured run came from; false when it is closed. */
+  runAgain(serverId: string, command: string): boolean {
+    const terminal = this.terminals.get(serverId)?.terminal as
+      { show?: (preserveFocus?: boolean) => void; sendText?: (text: string, addNewLine?: boolean) => void } | undefined;
+    if (!terminal?.sendText) return false;
+    terminal.show?.(true);
+    terminal.sendText(command, true);
+    return true;
+  }
   status(): { state: 'off' | 'waiting' | 'capturing' | 'attention'; detail: string; active: number; failed: number } {
     const failed = [...this.registry.records.values()].filter(
       (record) =>

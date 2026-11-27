@@ -400,6 +400,12 @@ Quick fixes (Ctrl+. or Cmd+.) on a mark: **Show in Logs** filters the Logs panel
 
 A test that failed in a GitHub Actions job is marked the same way, on the test's own line; see [GitHub Actions](#github-actions).
 
+A test that fails in a run on this machine is marked too, with no setting of its own: it follows `logline.runtimeErrors`. When a captured run of a test command finishes, in a terminal or a Logline task or server, Logline reads its output for the tests the runner says failed, the same way it reads a CI job log. It understands Vitest, Jest, node:test (and TAP), pytest, go test, Maven Surefire (JUnit), and dotnet test, and recognises test commands by their command line, such as `npm test`, `pnpm run test:unit`, `npx vitest run`, `jest`, `pytest`, `python -m pytest`, `node --test`, `go test`, `cargo test`, `dotnet test`, `mvn test`, and `./gradlew test`.
+
+Each failed test becomes an event of its own in that run, at level error, with the message `Test failed: <test>` and the fields `kind:test-failure`, `scope:local`, `test`, `framework`, `command`, and `file` and `line` when the output gives them, so `kind:test-failure scope:local` finds them. Each is marked on the test's line, inline and in the Problems panel (source **Logline runtime**), as `✕ <test> · failed locally · <command> · 12s ago`, with `N×` when it failed more than once. A local failure is a separate mark from the same test failing in CI. The quick fixes on the mark are **Run <command> again** (for a terminal run, in the same terminal; if that terminal was closed, Logline says so), **Show in Logs**, **Investigate with agent**, and **Break here next time**.
+
+When a later run of the same command, from the same source, passes a test that an earlier run failed, its mark clears and the status bar says `✓ 1 test fixed since the last npm test` (or `N tests`) for a few seconds. The mark returns if the test fails again. Clearing logs clears the marks.
+
 Set `logline.runtimeErrors` to `problems` to show errors in the Problems panel only, or `off`.
 ## Log breakpoints
 

@@ -139,6 +139,7 @@ export function activate(context: vscode.ExtensionContext): { provider: LogsProv
         config: logController.config,
         generation: () => logController.state.generation,
         showQuery: (query) => logController.showQuery(query),
+        runAgain: (serverId, command) => logController.terminalCapture.runAgain(serverId, command),
         usage,
       });
       context.subscriptions.push(controller.runtimeErrors);
