@@ -14,6 +14,7 @@ import { AgentReachNotice } from './vscode/agent-reach';
 import { copilotAvailable, refreshCopilot, refreshInstalledSkills } from './vscode/agent-setup';
 import { AgentOnboarding } from './vscode/agent-onboarding';
 import { BROWSER_OFFER_DELAYS_MS, BrowserLauncher, BrowserOffer } from './vscode/browser';
+import { CaptureNotice } from './vscode/capture-notice';
 import { CaptureOffer } from './vscode/capture-offer';
 import { looksLikeDevServer } from './capture/dev-command';
 import { IntegrationNotice } from './vscode/integration-notice';
@@ -257,6 +258,20 @@ export function activate(context: vscode.ExtensionContext): { provider: LogsProv
     enable: (everywhere) => agentController.toggleTerminalCapture(true, everywhere),
     record: (step) => usage?.record('nudge', { kind: 'capture_offer', step }),
   });
+  // Capture that is on because nobody turned it off says so the first time it captures, with a way out.
+  if (context.extensionMode === (vscode.ExtensionMode?.Production ?? 1)) {
+    const captureNotice = new CaptureNotice({
+      global: context.globalState,
+      byDefault: () => agentController.config.isDefault('captureTerminals'),
+      turnOff: () => agentController.toggleTerminalCapture(false, true),
+      showLogs: () => void vscode.commands.executeCommand('logline.showLogs'),
+      record: (step) => usage?.record('nudge', { kind: 'capture_notice', step }),
+    });
+    agentController.terminalCapture.captured = () => {
+      void vscode.commands.executeCommand('setContext', 'logline.terminalCaptured', true);
+      void captureNotice.captured();
+    };
+  }
   // Capture that is on but cannot read a terminal says so, rather than staying silent.
   if (context.extensionMode === (vscode.ExtensionMode?.Production ?? 1)) {
     const integrationNotice = new IntegrationNotice({

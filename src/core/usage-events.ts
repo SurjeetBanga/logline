@@ -143,8 +143,8 @@ export const AGENT_ONBOARDING_STEPS = [
   'failed_share',
 ] as const;
 export type AgentOnboardingStep = (typeof AGENT_ONBOARDING_STEPS)[number];
-/** A notification Logline raised on its own: errors caught while the panel was hidden, or an offer to capture a dev server. */
-export const NUDGE_KINDS = ['errors', 'capture_offer', 'browser_offer', 'no_integration'] as const;
+/** A notification Logline raised on its own: errors caught while the panel was hidden, an offer to capture a dev server, or that capture is on. */
+export const NUDGE_KINDS = ['errors', 'capture_offer', 'capture_notice', 'browser_offer', 'no_integration'] as const;
 export type NudgeKind = (typeof NUDGE_KINDS)[number];
 export const NUDGE_STEPS = ['shown', 'accepted', 'never', 'dismissed'] as const;
 export type NudgeStep = (typeof NUDGE_STEPS)[number];

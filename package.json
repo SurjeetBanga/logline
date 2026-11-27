@@ -901,12 +901,13 @@
           {
             "id": "capture",
             "title": "Capture a terminal",
-            "description": "Turn on terminal capture, then run your app in a VS Code terminal as usual. Its output becomes searchable in the Logs panel.\n[Turn On Terminal Capture](command:logline.enableTerminalCapture)",
+            "description": "Run your app in a VS Code terminal as usual. Capture is on, so its output becomes searchable in the Logs panel.\n[Open the Logs Panel](command:logline.showLogs)",
             "media": {
               "markdown": "media/walkthrough/capture.md"
             },
             "completionEvents": [
-              "onSettingChanged:logline.captureTerminals"
+              "onSettingChanged:logline.captureTerminals",
+              "onContext:logline.terminalCaptured"
             ]
           },
           {
@@ -965,9 +966,9 @@
         "properties": {
           "logline.captureTerminals": {
             "type": "boolean",
-            "default": false,
+            "default": true,
             "order": 1,
-            "markdownDescription": "Capture the next commands you run in supported VS Code terminals, so their output can be searched in Logline. Output from commands already in progress cannot be recovered. **Capture** in the Logs panel status bar turns this on and off for the workspace."
+            "markdownDescription": "Capture the next commands you run in supported VS Code terminals, so their output can be searched in Logline. What is captured stays on this computer. On by default, except on a remote host such as a Codespace or an SSH machine, where it is off until you turn it on. Output from commands already in progress cannot be recovered. **Capture** in the Logs panel status bar turns this on and off for the workspace."
           },
           "logline.captureDebugSessions": {
             "type": "boolean",

@@ -35,6 +35,8 @@ export class TerminalCapture {
   checked?: (integrated: boolean, shell: string | undefined) => void;
   /** Told the command line of a command that started while capture was off, so capture can be offered. */
   uncaptured?: (commandLine: string) => void;
+  /** Told the command line of each command whose output capture started reading. */
+  captured?: (commandLine: string) => void;
   /** Told when a terminal did not bring up shell integration, so the user can learn why nothing is captured. */
   noIntegration?: (shell: string | undefined) => void;
   /** Open terminals judged without shell integration, until one runs a command through it or closes. */
@@ -298,6 +300,7 @@ export class TerminalCapture {
       this.state.notify();
       return;
     }
+    this.captured?.(command);
     const limit = this.config.get('maxLineLength', 65536);
     const ingest = (text: string, truncated: boolean, container?: ContainerTag) => {
       if (!context.accepting || this.disposed || !this.enabled) return;

@@ -57,7 +57,7 @@ Run your app the way you already do: in a terminal, with F5, as a task, in Docke
 ## Get started
 
 1. Install Logline in **VS Code 1.99+** from the [Marketplace](https://marketplace.visualstudio.com/items?itemName=surjeetbanga.logline). In Cursor, Windsurf, or Kiro, install it from [Open VSX](https://open-vsx.org/extension/surjeetbanga/logline).
-2. Open the **Logs** panel. Click **Capture off** in its status bar so it reads **Capture on**, then run your app in a terminal as usual. Or press F5: debug output appears automatically.
+2. Open the **Logs** panel. Capture is already on: run your app in a terminal as usual, or press F5, and its output appears.
 3. Type `level:error` in the search box and press **Enter**. Click an event to open it beside the list, with everything about it.
 
 New to it? Logline offers a one-minute tour the first time, which **More actions → Take the tour** replays, and **More actions → Help** opens the guide. To try it without your own app, import [samples/demo-logs.jsonl](samples/demo-logs.jsonl) with **Logline: Import Logs**, or run the [checkout sample](samples/README.md#checkout-demo).
