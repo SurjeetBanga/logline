@@ -35,6 +35,10 @@ When you turn on **Show Codex Usage**, Logline reads the session files Codex kee
 
 When you turn on `logline.agentSessions.enabled`, Logline reads the transcripts Claude Code, Codex, and GitHub Copilot keep on your machine (under `~/.claude`, `~/.codex`, `~/.copilot`, and VS Code's storage for Copilot Chat) for sessions that worked in an open folder, and shows them as logs. While it is off, Logline reads only the start of a session file, to find which folder it worked in and offer to show it. What is read stays on your machine like any other log: it is shared with an agent only when you share, redacted, and none of it is added to usage data.
 
+## Exception snapshots
+
+While `logline.exceptionSnapshots` is on (the default), when a debug session stops on an exception, Logline asks the debugger for the exception and the local variables of the innermost frames in your code, at most 4 KB, and records them as an event in that debug run. Values are redacted like everything Logline shares, by field name and by what they look like. The event stays on your machine like any other log, is shared with an agent only when you share, and is never added to usage data. Logline only reads while the program is already stopped; it never pauses or resumes it.
+
 ## GitHub Actions connections
 
 A GitHub Actions connection signs in with the GitHub account VS Code is signed in to. Logline asks VS Code for the token when a search runs, sends it only to GitHub's API, and never stores it. The repository and branch you enter are saved in the workspace settings, and are not added to usage data.

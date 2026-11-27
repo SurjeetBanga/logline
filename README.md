@@ -25,8 +25,9 @@ Run your app the way you already do: in a terminal, with F5, as a task, in Docke
 - **Search like you think**: `level:error service:api`, `status:5xx`, `durationMs:>200`, `last:15m`, or `changed:true` for logs from code you changed since the last commit.
 - **Read any format**: JSON, logfmt, plain text, Pino, Winston, Log4j2, and ECS, with stack traces kept together.
 - **Agent sessions too**: what Claude Code, Codex, and GitHub Copilot did in your workspace, each prompt, tool call, and reply, shows beside your app's logs, so a failed tool call sits next to the error it caused.
-- **Back to the code**: every log statement shows live hit counts, errors, and p95 durations above it, and **Break here** stops the debugger the next time it logs.
-- **Errors on the line that threw them**: the line of your code that raised a captured error is marked with the error, how often it happened, and how long ago, inline and in Problems, with a quick fix to see its logs or break there.
+- **Back to the code**: every log statement shows live hit counts, errors, and p95 durations above it, the values it logged last at the end of its line, and **Break here** stops the debugger the next time it logs.
+- **Errors on the line that threw them**: the line of your code that raised a captured error is marked with the error, how often it happened, and how long ago, inline and in Problems, with a quick fix to see its logs or break there. A test that failed in a local run or in CI is marked on its line too, with **Run again** for the terminal that ran it.
+- **What the program held**: when the debugger stops on an exception, Logline records the exception and the locals of your own frames, redacted, as an event beside the logs, so your agent sees the state behind the error.
 - **Insert Log** (Ctrl+Alt+L, Cmd+Alt+L on macOS) adds a log line for the expression at the cursor in the style the file already logs with, and its CodeLens shows the latest value it logged. One command removes every inserted line.
 
 ## Find the problem
