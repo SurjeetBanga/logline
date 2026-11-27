@@ -11,3 +11,6 @@ coverage/
 performance/
 test-results/
 playwright-report/
+
+# Kept by Logline for its vscode:uninstall script; never shipped or committed.
+.usage-uninstall.json

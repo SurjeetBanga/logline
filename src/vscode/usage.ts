@@ -8,6 +8,8 @@ import {
   AUTOMATIC_CAPTURES,
   debuggerKind,
   TEST_FRAMEWORKS,
+  USAGE_HOST,
+  type TIMED_REQUESTS,
   commonProperties,
   DOCTOR_CODES,
   MILESTONES,
@@ -37,7 +39,7 @@ void agentCodesComplete;
 
 // Where anonymous usage counts go. The project key can only write events, so it is
 // safe to ship; with no key, nothing is sent and Show Usage Data still lists events.
-export const USAGE_HOST = 'https://eu.i.posthog.com';
+export { USAGE_HOST };
 export const USAGE_PROJECT_KEY = 'phc_Amvwr7HmP3SzK8uTELYNuC7joo6jKtC8X9TvovZW37b2';
 
 const ID_KEY = 'logline.usage.id';
@@ -97,6 +99,10 @@ export interface UsageSummarySource {
   runtimeErrors?(): number;
   /** Agent sessions read, and which agents they came from. */
   agentSessions?(): { sessions: number; agents: string[] };
+  /** Terminal commands captured, run while capture was off, or with no stream to read; terminals without integration. */
+  terminal?(): { captured: number; uncaptured: number; unreadable: number; unintegrated: number };
+  /** Log statements showing their latest value at the end of their line now. */
+  inlineValues?(): number;
   /** Whether terminal capture is on only because nobody set it. */
   captureDefault?(): boolean;
   /** Events dropped to stay within limits, and events cut short. */
@@ -111,6 +117,11 @@ export interface UsageOptions {
   environment: UsageEnvironment;
   transport?: UsageTransport;
   now?: () => number;
+  /**
+   * Where to keep what an uninstall reports, in the extension's own folder, which the `vscode:uninstall` script
+   * reads after Logline is removed. Kept only while usage counts are on.
+   */
+  willFile?: string;
   /** Process environment, for DO_NOT_TRACK and LOGLINE_USAGE_DEBUG. */
   env?: NodeJS.ProcessEnv;
   projectKey?: string;
@@ -195,6 +206,10 @@ export class Usage implements vscode.Disposable {
   private readonly testFrameworks = new Set<string>();
   private snapshots = 0;
   private activationCounted = false;
+  private readonly timedRequests = new Map<string, number>();
+  private investigatedAt?: number;
+  private investigations = 0;
+  private investigationsRead = 0;
   private activationTimer?: ReturnType<typeof setTimeout>;
   private testRuns = 0;
   private testsFailed = 0;
@@ -251,6 +266,7 @@ export class Usage implements vscode.Disposable {
       if (state.version && state.version !== this.common.version) this.record('updated', { from: state.version });
       if (state.version !== this.common.version) this.saveState({ version: this.common.version as string });
     }
+    this.writeWill();
     this.activationTimer = setTimeout(() => this.activated(), ACTIVATION_WAIT_MS);
     this.activationTimer.unref?.();
     this.flushTimer = setInterval(() => {
@@ -264,7 +280,10 @@ export class Usage implements vscode.Disposable {
     if (onConfig)
       this.subscriptions.push(
         onConfig((event) => {
-          if (event.affectsConfiguration('logline.telemetry.enabled') && !this.settingEnabled()) this.queue = [];
+          if (event.affectsConfiguration('logline.telemetry.enabled')) {
+            if (!this.settingEnabled()) this.queue = [];
+            this.writeWill();
+          }
           for (const key of this.options.vocabulary.settings.keys())
             if (key !== 'telemetry.enabled' && event.affectsConfiguration(`logline.${key}`))
               this.record('setting_changed', {
@@ -278,6 +297,7 @@ export class Usage implements vscode.Disposable {
       this.subscriptions.push(
         onStates(() => {
           if (!this.logger?.isUsageEnabled) this.queue = [];
+          this.writeWill();
         }),
       );
   }
@@ -422,6 +442,7 @@ export class Usage implements vscode.Disposable {
     if (state.milestones?.includes(name)) return;
     this.saveState({ milestones: [...(state.milestones ?? []), name] });
     this.record('milestone', { name, after: this.now() - (state.installedAt ?? this.now()) });
+    this.writeWill();
   }
 
   /** A command run from the palette, a menu, or a keybinding. */
@@ -467,7 +488,8 @@ export class Usage implements vscode.Disposable {
 
   /** A capture started; each kind counts once a session, since terminals start a run per command. */
   capture(kind: string, byDefault?: boolean): void {
-    this.milestone('first_capture');
+    if (kind === 'agent') this.milestone('first_agent_session');
+    else this.milestone('first_capture');
     if (this.features.has(kind)) return;
     this.features.add(kind);
     this.record('capture_started', {
@@ -505,11 +527,37 @@ export class Usage implements vscode.Disposable {
   }
 
   /** Whether a terminal came up with shell integration, without which nothing is captured: each outcome once a session for each shell. */
-  terminalChecked(shell: string, integrated: boolean): void {
-    const key = `${shell}:${integrated}`;
+  terminalChecked(
+    shell: string,
+    integrated: boolean,
+    detail: { variant?: 'windows_powershell' | 'pwsh' | 'other'; settingOff?: boolean } = {},
+  ): void {
+    const key = `${shell}:${detail.variant ?? ''}:${integrated}`;
     if (this.terminalsChecked.has(key)) return;
     this.terminalsChecked.add(key);
-    this.record('terminal_checked', { shell, integrated });
+    this.record('terminal_checked', {
+      shell,
+      integrated,
+      ...(shell === 'powershell' && detail.variant ? { variant: detail.variant } : {}),
+      ...(detail.settingOff === undefined ? {} : { setting_off: detail.settingOff }),
+    });
+  }
+
+  /** How long the host took to answer one of the panel's heavier requests: the first few of each, then a sample. */
+  timed(op: (typeof TIMED_REQUESTS)[number], ms: number, events?: number): void {
+    const count = (this.timedRequests.get(op) ?? 0) + 1;
+    this.timedRequests.set(op, count);
+    if (count <= SAMPLE_AFTER || count % SAMPLE_EVERY === 0)
+      this.record('perf', { op, ms, ...(events !== undefined ? { events } : {}) });
+  }
+
+  /** An error was handed to an agent; whether an agent then reads the shared logs is told once. */
+  investigated(agent: string, from: string, ci: boolean): void {
+    this.touch();
+    this.investigations++;
+    this.investigatedAt = this.now();
+    this.record('investigate', { agent, from, ci });
+    this.milestone('first_investigate');
   }
 
   /** A new search in the panel: what it used and how much it found, never what it said. */
@@ -575,6 +623,11 @@ export class Usage implements vscode.Disposable {
     this.clients.add(properties.client);
     if (this.sharedAt !== undefined && this.sharedCalls++ === 0)
       this.record('first_tool_after_share', { after: this.now() - this.sharedAt });
+    if (this.investigatedAt !== undefined) {
+      this.investigationsRead++;
+      this.record('investigate_read', { after: this.now() - this.investigatedAt });
+      this.investigatedAt = undefined;
+    }
     const { resultSize, ...rest } = properties;
     this.record('agent_tool', { ...rest, result_size: resultSize });
     this.milestone('first_agent_call');
@@ -661,6 +714,7 @@ export class Usage implements vscode.Disposable {
     const connections = source?.connections() ?? {};
     const quality = source?.quality?.();
     const agentSessions = source?.agentSessions?.();
+    const terminal = source?.terminal?.();
     this.record('session_summary', {
       active_minutes: this.activeMinutes.size * 60_000,
       session_length: this.now() - this.startedAt,
@@ -694,6 +748,17 @@ export class Usage implements vscode.Disposable {
       exception_snapshots: this.snapshots,
       ...(agentSessions ? { agent_sessions: agentSessions.sessions, agents_followed: agentSessions.agents } : {}),
       debuggers: [...this.debuggers],
+      ...(terminal
+        ? {
+            commands_captured: terminal.captured,
+            commands_uncaptured: terminal.uncaptured,
+            commands_unreadable: terminal.unreadable,
+            terminals_unintegrated: terminal.unintegrated,
+          }
+        : {}),
+      ...(source?.inlineValues ? { inline_values: source.inlineValues() } : {}),
+      investigations: this.investigations,
+      investigations_read: this.investigationsRead,
     });
   }
 
@@ -782,6 +847,35 @@ export class Usage implements vscode.Disposable {
     void vscode.window.showInformationMessage('Logline: Your anonymous usage ID was reset.');
   }
 
+  /**
+   * Keep what an uninstall reports in the extension's own folder: the anonymous id, how long ago Logline was
+   * installed, which firsts it reached, and the common properties. Removed while usage counts are off or in a
+   * development host, so the uninstall script sends nothing then.
+   */
+  private writeWill(): void {
+    const file = this.options.willFile;
+    if (!file) return;
+    try {
+      if (!this.production || this.debug || !this.enabled || !this.id) {
+        rmSync(file, { force: true });
+        return;
+      }
+      const state = this.state;
+      writeFileSync(
+        file,
+        JSON.stringify({
+          id: this.id,
+          projectKey: this.projectKey,
+          installedAt: state.installedAt,
+          milestones: state.milestones ?? [],
+          common: this.common,
+        }),
+      );
+    } catch {
+      /* a read-only extension folder: an uninstall is not reported */
+    }
+  }
+
   /** Send the session summary and what is queued; deactivation waits for it. */
   close(): Promise<void> {
     if (this.disposed) return Promise.resolve();
@@ -830,6 +924,7 @@ export function usageEnvironment(version: string): UsageEnvironment {
     arch: process.arch,
     cpus: typeof os.availableParallelism === 'function' ? os.availableParallelism() : os.cpus().length,
     totalMemory: os.totalmem(),
+    internal: /^(1|true)$/i.test(process.env.LOGLINE_USAGE_INTERNAL ?? ''),
   };
 }
 
@@ -868,6 +963,19 @@ export function counted<A extends unknown[], R>(
 ): (...args: A) => R {
   return (...args) => {
     usage?.command(id);
-    return handler(...args);
+    const failed = () => usage?.record('error', { area: 'command', code: 'command_failed', command: id });
+    try {
+      const result = handler(...args);
+      // A command that fails later rejects its promise; it is counted, and still fails as before.
+      if (result instanceof Promise)
+        return result.catch((error: unknown) => {
+          failed();
+          throw error;
+        }) as R;
+      return result;
+    } catch (error) {
+      failed();
+      throw error;
+    }
   };
 }

@@ -108,7 +108,7 @@ import { AGENT_FIRST_PROMPT, detectAgent, setupSummary, type DetectedAgent } fro
 import { mcpScriptPath } from '../protocol/agent-bridge';
 import { openSourceLocation } from './source-navigation';
 import { parseQuery } from '../core/query';
-import { CONNECTION_TYPES, queryFeatures, type AgentOnboardingStep } from '../core/usage-events';
+import { CONNECTION_TYPES, queryFeatures, shellVariant, type AgentOnboardingStep } from '../core/usage-events';
 import type { Usage, UsageSummarySource } from './usage';
 import type { FeedbackOpen } from '../core/feedback';
 import type { UpdateCheck } from './update-check';
@@ -260,8 +260,19 @@ export class LogsController {
     this.transfer.failed =
       usage && ((area) => usage.record('error', { area, code: area === 'export' ? 'write_failed' : 'read_failed' }));
     this.otel.failed = usage && (() => usage.record('error', { area: 'otlp', code: 'start_failed' }));
+    this.terminalCapture.streamFailed =
+      usage && (() => usage.record('error', { area: 'capture', code: 'stream_failed' }));
     this.terminalCapture.checked =
-      usage && ((integrated, shell) => usage.terminalChecked(shellKind(shell ?? vscode.env.shell), integrated));
+      usage &&
+      ((integrated, shell) => {
+        const path = shell ?? vscode.env.shell;
+        const setting = vscode.workspace.getConfiguration?.('terminal.integrated')?.get?.('shellIntegration.enabled');
+        usage.terminalChecked(shellKind(path), integrated, {
+          variant: shellVariant(path),
+          // Turned off in settings is a cause the Status panel can name; left alone it is on.
+          ...(integrated ? {} : { settingOff: setting === false }),
+        });
+      });
   }
   /** The panel's Update button, in a real editor. */
   updateCheck?: UpdateCheck;
@@ -1505,6 +1516,8 @@ export class LogsController {
   usageSummary(): UsageSummarySource {
     return {
       captureDefault: () => this.terminalCapture.isEnabled && this.captureByDefault(),
+      terminal: () => ({ ...this.terminalCapture.counts }),
+      inlineValues: () => this.lens?.inlineValuesShown ?? 0,
       runtimeErrors: () => this.runtimeErrors?.marked ?? 0,
       agentSessions: () => this.agentSessions.summary(),
       eventsCaptured: () => this.store.total,

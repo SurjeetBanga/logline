@@ -37,8 +37,15 @@ export class TerminalCapture {
   uncaptured?: (commandLine: string) => void;
   /** Told the command line of each command whose output capture started reading. */
   captured?: (commandLine: string) => void;
+  /** Told when a terminal's output stream failed while it was being captured. */
+  streamFailed?: () => void;
   /** Told when a terminal did not bring up shell integration, so the user can learn why nothing is captured. */
   noIntegration?: (shell: string | undefined) => void;
+  /**
+   * For usage counts: commands captured, run while capture was off, and with no stream to read; and terminals
+   * that never brought up shell integration, whose commands capture cannot see at all.
+   */
+  readonly counts = { captured: 0, uncaptured: 0, unreadable: 0, unintegrated: 0 };
   /** Open terminals judged without shell integration, until one runs a command through it or closes. */
   private readonly unintegrated = new Set<object>();
   private readonly judged = new WeakSet<object>();
@@ -242,6 +249,7 @@ export class TerminalCapture {
       const shell = terminal.state?.shell ?? terminal.creationOptions?.shellPath;
       this.checked?.(!!terminal.shellIntegration, shell);
       if (terminal.shellIntegration) return;
+      this.counts.unintegrated++;
       this.unintegrated.add(object);
       this.state.notify();
       this.noIntegration?.(shell);
@@ -260,7 +268,10 @@ export class TerminalCapture {
       const known = this.terminalIds.get(terminal);
       const excluded = this.ignored.has(terminal) || (known !== undefined && this.ignoredSourceIds.has(known));
       const commandLine = event.execution.commandLine?.value;
-      if (commandLine && !excluded && !event.terminal.creationOptions?.pty) this.uncaptured?.(commandLine);
+      if (!excluded && !event.terminal.creationOptions?.pty) {
+        this.counts.uncaptured++;
+        if (commandLine) this.uncaptured?.(commandLine);
+      }
       return;
     }
     if (this.ignored.has(terminal)) return;
@@ -311,12 +322,14 @@ export class TerminalCapture {
       context.streamFailed = true;
       context.streamDone = true;
       record.captureStatus = 'unavailable';
+      this.counts.unreadable++;
       record.captureReason = 'Shell integration did not expose a readable stream.';
       record.error = record.captureReason;
       this.active.delete(context);
       this.state.notify();
       return;
     }
+    this.counts.captured++;
     this.captured?.(command);
     const limit = this.config.get('maxLineLength', 65536);
     const ingest = (text: string, truncated: boolean, container?: ContainerTag) => {
@@ -358,6 +371,7 @@ export class TerminalCapture {
       context.streamDone = true;
     } catch (error) {
       context.streamFailed = true;
+      if (context.accepting) this.streamFailed?.();
       record.captureStatus = context.accepting ? 'failed' : 'interrupted';
       record.captureReason = context.accepting
         ? `Terminal output stream failed: ${error instanceof Error ? error.message : String(error)}`

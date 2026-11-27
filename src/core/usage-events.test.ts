@@ -5,6 +5,7 @@ import { test } from 'node:test';
 import { parseQuery } from './query';
 import {
   agentClient,
+  shellVariant,
   bytesBucket,
   commonProperties,
   countBucket,
@@ -334,4 +335,26 @@ test('percentages and panel widths only ever leave as ranges', () => {
     '100',
   ]);
   assert.deepEqual([120, 399, 400, 899, 900].map(panelWidth), ['narrow', 'narrow', 'medium', 'medium', 'wide']);
+});
+
+test('PowerShell is told apart as Windows PowerShell or PowerShell 7, by its program alone', () => {
+  assert.equal(shellVariant('C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe'), 'windows_powershell');
+  assert.equal(shellVariant('C:\\Program Files\\PowerShell\\7\\pwsh.exe'), 'pwsh');
+  assert.equal(shellVariant('/usr/local/bin/pwsh'), 'pwsh');
+  assert.equal(shellVariant('C:\\Users\\jane\\my-shell.exe'), 'other');
+  assert.equal(shellVariant(undefined), 'other');
+});
+
+test("a maintainer's own install is marked, and nothing marks any other", () => {
+  const env = {
+    version: '1.23.0',
+    vscode: '1.99.0',
+    uiKind: 'desktop' as const,
+    platform: 'win32',
+    arch: 'x64',
+    cpus: 8,
+    totalMemory: 16 * 1024 ** 3,
+  };
+  assert.equal(commonProperties({ ...env, internal: true }).internal, true);
+  assert.equal('internal' in commonProperties(env), false);
 });

@@ -75,6 +75,8 @@ export type ViewRequest =
   | { type: 'connectAgent'; agent?: 'claude' | 'codex' }
   | { type: 'agentHint'; action: 'show' | 'dismiss'; agent: AgentHintView['agent'] }
   | { type: 'showAgentSessions' }
+  /** The panel's own script failed; nothing about the failure is sent. */
+  | { type: 'panelError' }
   | { type: 'onboardingSeen'; choice?: WelcomeChoice }
   | { type: 'installUpdate' }
   | { type: 'panelSize'; width: number }
@@ -691,6 +693,7 @@ export function parseViewRequest(value: unknown): ViewRequest | undefined {
         : { type: msg.type };
     }
     case 'import':
+    case 'panelError':
     case 'showAgentSessions':
     case 'clear':
     case 'manageServers':

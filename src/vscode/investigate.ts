@@ -129,7 +129,7 @@ export class Investigator implements vscode.Disposable {
       runs: status.sources.flatMap((source) => source.runs.map((run) => run.id)),
       skill: agent === 'claude' ? '/logline-triage' : agent === 'codex' ? '$logline-triage' : undefined,
     });
-    this.sources.usage?.record('investigate', { agent, from, ci: target.ci !== undefined });
+    this.sources.usage?.investigated(agent, from, target.ci !== undefined);
     if (agent === 'copilot') {
       if (!(await this.sources.openChat(prompt))) return undefined;
     } else if (agent === 'claude' || agent === 'codex') {

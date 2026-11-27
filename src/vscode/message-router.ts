@@ -15,6 +15,7 @@ import {
   type ViewRequest,
 } from '../protocol/messages';
 import type { LogEvent } from '../core/types';
+import type { TIMED_REQUESTS } from '../core/usage-events';
 import type { GenAiCallDetail, GenAiSummary } from '../core/gen-ai';
 import type { MetricSeriesView } from '../core/metrics';
 import type { SpanDetail, TraceSummary, TraceView } from '../core/traces';
@@ -70,8 +71,20 @@ const VIEW_REQUESTS: Partial<Record<ViewRequest['type'], string>> = {
   connectionFetch: 'connection',
 };
 
+/** Requests whose answers read many events, timed for usage counts. */
+const TIMED: Partial<Record<ViewRequest['type'], (typeof TIMED_REQUESTS)[number]>> = {
+  analysis: 'analysis',
+  traces: 'traces',
+  trace: 'trace',
+  aiCalls: 'ai_calls',
+  details: 'details',
+  context: 'context',
+};
+/** An agent call's action, as the panel action it counts as. */
+const AGENT_CALL_ACTIONS = { logs: 'agent_logs', transcript: 'agent_transcript', terminal: 'agent_terminal' } as const;
+
 interface MessageServices {
-  usage?: Pick<Usage, 'view' | 'record' | 'findingHelpful' | 'panelAction' | 'panelSize'>;
+  usage?: Pick<Usage, 'view' | 'record' | 'findingHelpful' | 'panelAction' | 'panelSize' | 'timed'>;
   /** Send what the feedback form submitted. */
   feedback?(request: FeedbackRequest): Promise<FeedbackResult>;
   store: LogStore;
@@ -153,6 +166,17 @@ export async function handleMessage(
 ): Promise<void> {
   const msg = parseViewRequest(value);
   if (!msg) return;
+  const timed = services.usage && TIMED[msg.type];
+  if (!timed) return route(services, send, msg);
+  const started = performance.now();
+  try {
+    await route(services, send, msg);
+  } finally {
+    services.usage?.timed(timed, performance.now() - started, services.store.total);
+  }
+}
+
+async function route(services: MessageServices, send: (message: HostMessage) => void, msg: ViewRequest): Promise<void> {
   const view = VIEW_REQUESTS[msg.type];
   if (view) services.usage?.view(view);
   const action = PANEL_REQUESTS[msg.type];
@@ -314,6 +338,7 @@ export async function handleMessage(
       await services.investigate?.(msg.id, msg.query, msg.from);
       return;
     case 'agentCall':
+      services.usage?.panelAction(AGENT_CALL_ACTIONS[msg.action]);
       await services.agentCall?.(msg.id, msg.action);
       return;
     case 'shareEvent': {
@@ -330,6 +355,9 @@ export async function handleMessage(
       return;
     case 'import':
       await transfer.importLogs();
+      return;
+    case 'panelError':
+      services.usage?.record('error', { area: 'panel', code: 'script_failed' });
       return;
     case 'details':
     case 'copy': {
