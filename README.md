@@ -24,8 +24,10 @@ Run your app the way you already do: in a terminal, with F5, as a task, in Docke
 - **The browser too**: open your app from Logline, and its console, uncaught errors, and network requests land in the same timeline as the server's logs.
 - **Search like you think**: `level:error service:api`, `status:5xx`, `durationMs:>200`, `last:15m`, or `changed:true` for logs from code you changed since the last commit.
 - **Read any format**: JSON, logfmt, plain text, Pino, Winston, Log4j2, and ECS, with stack traces kept together.
-- **Agent sessions too**: what Claude Code and Codex did in your workspace, each prompt, tool call, and reply, shows beside your app's logs.
+- **Agent sessions too**: what Claude Code, Codex, and GitHub Copilot did in your workspace, each prompt, tool call, and reply, shows beside your app's logs, so a failed tool call sits next to the error it caused.
 - **Back to the code**: every log statement shows live hit counts, errors, and p95 durations above it, and **Break here** stops the debugger the next time it logs.
+- **Errors on the line that threw them**: the line of your code that raised a captured error is marked with the error, how often it happened, and how long ago, inline and in Problems, with a quick fix to see its logs or break there.
+- **Insert Log** (Ctrl+Alt+L, Cmd+Alt+L on macOS) adds a log line for the expression at the cursor in the style the file already logs with, and its CodeLens shows the latest value it logged. One command removes every inserted line.
 
 ## Find the problem
 
@@ -40,7 +42,7 @@ Run your app the way you already do: in a terminal, with F5, as a task, in Docke
 
 ![Compare: production errors from Datadog lined up with local runs, marked Reproduced, Fixed locally, Not seen locally, or New, with both sides of one error shown](media/readme/compare.webp)
 
-- **Connections** search and tail Datadog, CloudWatch, Grafana Loki, Elasticsearch and OpenSearch, Google Cloud Logging, the failed jobs of a GitHub Actions repository (each failed test is an event of its own), Postgres, MySQL and Aurora (with AWS IAM sign-in), MongoDB, and SQLite logs, read-only, beside your local runs. Add one in a form that tests it and previews its log table first; **Edit** changes it later.
+- **Connections** search and tail Datadog, CloudWatch, Grafana Loki, Elasticsearch and OpenSearch, Google Cloud Logging, the failed jobs of a GitHub Actions repository (each failed test is an event of its own, marked on its line in the editor), Postgres, MySQL and Aurora (with AWS IAM sign-in), MongoDB, and SQLite logs, read-only, beside your local runs. Add one in a form that tests it and previews its log table first; **Edit** changes it later.
 - **Compare** lines production errors up with your newest local runs: is it reproduced, and is your fix working? Errors from code you changed are tagged.
 - **Metrics** chart a connection's queries; drag across a spike to fetch the logs from that window.
 
@@ -49,6 +51,8 @@ Run your app the way you already do: in a terminal, with F5, as a task, in Docke
 ![The Share panel: everything captured is shared, Copilot is ready, and Claude Code is reading](media/readme/share.webp)
 
 **Logline: Set Up for My Agent** turns on capture, shares, and connects the agent in your editor in one step. **Share with agent** gives Copilot, Claude Code, Codex, or the agent in Cursor, Windsurf, or Kiro read-only access to what you choose: everything, or specific runs. Logs are always redacted, agents can't run anything, and **Stop sharing** cuts them off at once. Allow an agent to fetch from a connection, and it can pull production logs and compare them with your run, then verify its own fix.
+
+**Investigate** hands one error to Copilot, Claude Code, or Codex, from an error group in Analyze, an open error, or the error's mark in the editor. The agent gets the event to start from and the search for its other occurrences, and is asked to find the cause, fix it, and confirm with fresh logs. Logline then watches the error's source and says **Fixed locally** or **Still failing**.
 
 ## Get started
 
@@ -66,7 +70,7 @@ New to it? Logline offers a one-minute tour the first time, which **More actions
 | **Search tools** | Field and value autocomplete, include or exclude a value from any cell, saved searches, and surrounding logs from the same run. |
 | **Export** | JSONL, JSON, CSV, or Markdown for AI tools, redacted by default. |
 | **Retention** | Keeps the newest logs within a memory budget you set, optionally written to disk. |
-| **Outside the panel** | A status bar item counts captured logs and errors, the Logline icon on the right opens the Logs panel and can show how much of Codex's plan limit is used, a notification says when a run logs errors while the panel is hidden, and **Open in Logline** shows a `.log` or `.jsonl` file. |
+| **Outside the panel** | A status bar item counts captured logs and errors, the Logline icon on the right opens the Logs panel and can show how much of Codex's plan limit is used and Claude Code's tokens of today, a notification says when a run logs errors while the panel is hidden, and **Open in Logline** shows a `.log` or `.jsonl` file. |
 | **Troubleshooting** | The check mark in the Logs panel's status bar opens a Status panel for capture, the OpenTelemetry receiver, agents, log issues, and memory, and **Logline: Show Status** shows what is on, off, or broken, with the fix. |
 | **Feedback** | **More actions → Send feedback…** suggests a feature or votes on what to build next. |
 

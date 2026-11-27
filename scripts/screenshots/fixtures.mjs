@@ -228,6 +228,16 @@ export const sessions = [
     startedAt: Date.UTC(2026, 9, 25, 22, 41, 7),
     sourceKind: 'remote',
   },
+  {
+    id: 'claude-1',
+    serverId: 'agent:claude-code',
+    server: 'Claude Code',
+    command: 'Fix the payment timeout on checkout',
+    status: 'running',
+    startedAt: Date.UTC(2026, 9, 25, 22, 58, 0),
+    sourceKind: 'agent',
+    detail: '13m · 24 tools · 2 failed',
+  },
 ];
 
 const server = (id, label, status, kind, more = {}) => ({
@@ -251,6 +261,7 @@ export const servers = [
   server('otel', 'OpenTelemetry · checkout', 'running', 'otel', { configured: false }),
   server('import', 'Imported · prod-10-23.jsonl', 'exited', 'import', { configured: false }),
   server('remote:dd', 'Datadog · prod', 'exited', 'remote', { configured: false }),
+  server('agent:claude-code', 'Claude Code', 'running', 'agent', { configured: false, canStop: false }),
 ];
 
 export const connections = (agents) => [
@@ -665,6 +676,8 @@ export function details(id) {
     target: 'main',
     text: JSON.stringify(body, null, 2),
     exceptions: [],
+    // The host marks an error, as Analyze counts them, so Investigate can hand it to an agent.
+    ...(event.level === 'error' || event.level === 'fatal' ? { error: true } : {}),
     ...(failing ? { site: 'pay.ts:46', traceId: TRACE_ID, findings: [] } : {}),
   };
 }

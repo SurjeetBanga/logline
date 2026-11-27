@@ -15,11 +15,11 @@ Every event carries:
 
 Events cover:
 
-- **Use**: the day you first use Logline each day, the commands you run, the kinds of capture you start, when the Logs panel opens, the views you open, which panel actions you use by name (such as opening an event, exporting, or saving a search, never what they acted on), how wide the panel is in a range, which option you chose in the welcome, whether you finished or skipped the panel tour, whether you opened Logline from the status bar, a file's menu, a terminal's menu, or the empty panel, and the first time you reach a few steps such as your first search or first share.
+- **Use**: the day you first use Logline each day, the commands you run, the kinds of capture you start, when the Logs panel opens, the views you open, which panel actions you use by name (such as opening an event, exporting, or saving a search, never what they acted on), how wide the panel is in a range, which option you chose in the welcome, whether you finished or skipped the panel tour, whether you opened Logline from the status bar, a file's menu, a terminal's menu, the empty panel, the Sources rail's offer of agent sessions, or the **Add logs** menu, and the first time you reach a few steps such as your first search or first share.
 - **Searches**: which operators a search used (fields, `-`, regex, time ranges, comparisons, `*`, `changed:`, `OR`), which of Logline's own fields it filtered on, such as `level` or `service`, and how many events it found, in ranges. Never what you searched for, and never your own field names.
 - **Connections**: the type (Datadog, Postgres, and so on), how it signs in, and whether a search, tail, query, or test worked, with its time and row count in ranges.
 - **Log doctor**: which kinds of problem it found, such as a secret or a noisy statement, once a session; the actions you take on them; and a thumbs up or down you give a kind of finding. Never the statement, file, or value.
-- **Agents**: when you share logs, how (all, chosen runs, one event, or from the window's start after the one-step setup) and how much in ranges; how connecting an agent went; whether the one-step setup was offered, accepted, finished, or stopped at sharing or connecting, and for which kind of agent; whether you stopped sharing or the window closed; whether an agent that started Logline's server found the window, or why not (it runs in a folder no window has open, or its editor did not say the folder); which kind of agent called (Claude Code, Codex, Cursor, Copilot, or other); which tool it called, whether it worked, how long it took, and how many values were redacted from its result, in a range.
+- **Agents**: when you share logs, how (all, chosen runs, one event, or from the window's start after the one-step setup) and how much in ranges; how connecting an agent went; whether the one-step setup was offered, accepted, finished, or stopped at sharing or connecting, and for which kind of agent; whether you stopped sharing or the window closed; whether an agent that started Logline's server found the window, or why not (it runs in a folder no window has open, or its editor did not say the folder); which kind of agent called (Claude Code, Codex, Cursor, Copilot, or other); which tool it called, whether it worked, how long it took, and how many values were redacted from its result, in a range; and, for **Investigate**, which kind of agent an error was handed to (Copilot, Claude Code, Codex, or a copied prompt) and whether the error then stopped or happened again. Never the error or the prompt.
 - **Settings**: which Logline setting changed, and its new value only when it is on or off, a number in a range, or one of the setting's own choices.
 - **Was it helpful**: a few minutes after **Ask Copilot** opens an investigation, Logline may ask whether it helped, at most once a week and three times in all, and sends Yes or No. Never the chat.
 - **Performance and errors**: how long activation, the first logs in the panel, searches, and imports took, and how many events an import brought, in ranges; and failures by area and a code Logline names, never their message.
@@ -29,7 +29,15 @@ Events cover:
 
 ## AI usage in the status bar
 
-When you turn on **Show Codex Usage**, Logline reads the session files Codex keeps under `~/.codex` to show its plan limits and today's tokens in the status bar. This is read on your machine only. Nothing read is sent, and no token or limit figure is added to usage data.
+When you turn on **Show Codex Usage**, Logline reads the session files Codex keeps under `~/.codex` to show its plan limits and today's tokens in the status bar. **Show Claude Code Usage** reads the session files Claude Code keeps under `~/.claude` for today's tokens. This is read on your machine only. Nothing read is sent, and no token or limit figure is added to usage data.
+
+## Agent sessions
+
+When you turn on `logline.agentSessions.enabled`, Logline reads the transcripts Claude Code, Codex, and GitHub Copilot keep on your machine (under `~/.claude`, `~/.codex`, `~/.copilot`, and VS Code's storage for Copilot Chat) for sessions that worked in an open folder, and shows them as logs. While it is off, Logline reads only the start of a session file, to find which folder it worked in and offer to show it. What is read stays on your machine like any other log: it is shared with an agent only when you share, redacted, and none of it is added to usage data.
+
+## GitHub Actions connections
+
+A GitHub Actions connection signs in with the GitHub account VS Code is signed in to. Logline asks VS Code for the token when a search runs, sends it only to GitHub's API, and never stores it. The repository and branch you enter are saved in the workspace settings, and are not added to usage data.
 
 ## What is never sent
 
