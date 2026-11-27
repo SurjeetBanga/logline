@@ -555,10 +555,12 @@ test('the rail’s offer of an agent’s sessions reaches the window, and a malf
   await handleMessage(service as any, () => undefined, { type: 'agentHint', action: 'show', agent: 'claude-code' });
   await handleMessage(service as any, () => undefined, { type: 'agentHint', action: 'dismiss', agent: 'codex' });
   await handleMessage(service as any, () => undefined, { type: 'agentHint', action: 'show', agent: 'copilot' });
+  await handleMessage(service as any, () => undefined, { type: 'agentHint', action: 'show', agent: 'cursor' });
   await handleMessage(service as any, () => undefined, { type: 'agentHint', action: 'delete', agent: 'codex' });
   assert.deepEqual(hints, [
     ['show', 'claude-code'],
     ['dismiss', 'codex'],
+    ['show', 'copilot'],
   ]);
 });
 

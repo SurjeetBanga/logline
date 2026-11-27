@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import type { AgentName } from '../core/agent-session';
 import type { ProcessRunner } from '../capture/process-runner';
 import { extractExceptions } from '../core/exceptions';
 import { formatDetails } from '../core/format-details';
@@ -117,7 +118,7 @@ interface MessageServices {
   /** A way in chosen from the empty Logs panel. */
   emptyAction?(action: 'capture' | 'openFile' | 'browser' | 'agent'): Promise<void>;
   /** The rail's offer of an agent's sessions: show them, or stop offering them in this workspace. */
-  agentHint?(action: 'show' | 'dismiss', agent: 'claude-code' | 'codex'): Promise<void>;
+  agentHint?(action: 'show' | 'dismiss', agent: AgentName): Promise<void>;
   /** Add logs › Agent sessions: turn them on after asking, and restore removed agents. */
   showAgentSessions?(): Promise<void>;
   connections?: Pick<

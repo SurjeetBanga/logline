@@ -1,3 +1,4 @@
+import { dirname, join } from 'node:path';
 import * as vscode from 'vscode';
 import { DebugCapture } from '../capture/debug-capture';
 import { OtlpReceiver } from '../capture/otlp-receiver';
@@ -28,7 +29,7 @@ import {
 import { OtelIntegration } from './otel-integration';
 import { BrowserCapture } from '../capture/browser-capture';
 import { AgentSessionCapture } from '../capture/agent-sessions';
-import { agentSource, type AgentName } from '../core/agent-session';
+import { AGENT_NAMES, agentSource, type AgentName } from '../core/agent-session';
 import type { BrowserLauncher } from './browser';
 import { FileFollower } from '../capture/file-follower';
 import { RemoteSource } from '../capture/remote-source';
@@ -114,9 +115,7 @@ import { feedbackSendable, sendFeedback } from './feedback';
 const SHARE_ALL_CONFIRMED_KEY = 'logline.shareAllLogsConfirmed.v1';
 /** `<agent> <folder>` for each folder where the rail's offer of an agent's sessions was dismissed. */
 const AGENT_HINTS_DISMISSED_KEY = 'logline.agentHints.dismissed';
-const AGENT_SERVER_IDS = new Map<string, AgentName>(
-  (['claude-code', 'codex'] as const).map((agent) => [agentSource(agent).serverId, agent]),
-);
+const AGENT_SERVER_IDS = new Map<string, AgentName>(AGENT_NAMES.map((agent) => [agentSource(agent).serverId, agent]));
 /**
  * Set by the one-step agent setup: every window on this profile shares what it
  * captures from its start, until Stop sharing. Kept out of settings so a
@@ -264,7 +263,7 @@ export class LogsController {
 
   constructor(
     context: Pick<vscode.ExtensionContext, 'globalState'> &
-      Partial<Pick<vscode.ExtensionContext, 'environmentVariableCollection' | 'secrets'>>,
+      Partial<Pick<vscode.ExtensionContext, 'environmentVariableCollection' | 'secrets' | 'storageUri'>>,
   ) {
     this.globalState = context.globalState;
     this.remoteMetrics = new RemoteMetrics(this.metrics, this.state);
@@ -298,6 +297,9 @@ export class LogsController {
     );
     this.runner.environment = (server, env) => this.otel.processEnvironment(server, env);
     this.agentSessions.folders = () => (vscode.workspace.workspaceFolders ?? []).map((folder) => folder.uri.fsPath);
+    // This extension's storage is workspaceStorage/<workspace>/<extension>; Copilot Chat keeps the workspace's sessions beside it.
+    const storage = context.storageUri?.fsPath;
+    if (storage) this.agentSessions.chatSessions = () => join(dirname(storage), 'chatSessions');
     this.searches = new SavedSearches(context.globalState);
     const workspaceApi = vscode.workspace as typeof vscode.workspace & {
       onDidChangeWorkspaceFolders?: typeof vscode.workspace.onDidChangeWorkspaceFolders;

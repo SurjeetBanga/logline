@@ -306,3 +306,219 @@ test('a session never answers more tool calls than it can hold', () => {
   assert.equal(feed(parser, result('t0')).length, 0, 'the oldest call was dropped');
   assert.equal(feed(parser, result('t599')).length, 1);
 });
+
+test('Copilot CLI: prompt, tool calls with their exit code, replies, model, and tokens', () => {
+  const parser = new AgentSessionParser('copilot');
+  const event = (type: string, at: number, data: unknown) => ({ type, timestamp: iso(at), id: type, data });
+  const records = feed(
+    parser,
+    event('session.start', 0, { sessionId: 'cli-1', context: { cwd: CWD } }),
+    event('session.model_change', 0, { newModel: 'auto' }),
+    event('session.auto_mode_resolved', 0, { chosenModel: 'gpt-test' }),
+    event('user.message', 1, { content: 'Fix the checkout 500', transformedContent: '<context>…</context>' }),
+    event('assistant.message', 2, { content: 'Running the tests.', model: 'gpt-test' }),
+    event('tool.execution_start', 2, { toolCallId: 't1', toolName: 'bash', arguments: { command: 'npm test' } }),
+    event('tool.execution_start', 3, { toolCallId: 't2', toolName: 'view', arguments: { path: `${CWD}/src/a.ts` } }),
+    event('tool.execution_complete', 4, { toolCallId: 't2', success: true, result: { content: 'code' } }),
+    event('tool.execution_complete', 6, {
+      toolCallId: 't1',
+      success: true,
+      shellExecution: { exitCode: 1 },
+      result: { content: 'FAIL charge.test.ts' },
+    }),
+    event('tool.execution_start', 7, { toolCallId: 't3', toolName: 'edit', arguments: { path: '/elsewhere/b.ts' } }),
+    event('tool.execution_complete', 8, { toolCallId: 't3', success: false, error: { message: 'No such file' } }),
+    event('session.usage_record', 8, { usage: { inputTokens: 100, outputTokens: 20, cacheReadTokens: 60 } }),
+    event('session.usage_record', 9, { usage: { inputTokens: 50, outputTokens: 5, cacheReadTokens: 0 } }),
+    event('session.shutdown', 10, { tokenDetails: { input: { tokenCount: 9999 } } }),
+    event('hook.start', 10, {}),
+  );
+  assert.deepEqual(
+    records.map((record) => [record.action, record.level, record.message]),
+    [
+      ['prompt', 'info', 'Fix the checkout 500'],
+      ['reply', 'info', 'Running the tests.'],
+      ['tool', 'info', 'view  src/a.ts'],
+      ['tool', 'error', 'bash  npm test  exit 1'],
+      ['tool', 'error', 'edit  /elsewhere/b.ts  failed'],
+    ],
+  );
+  const [, , view, bash, edit] = records;
+  assert.equal(view.file, 'src/a.ts');
+  assert.equal(bash.command, 'npm test');
+  assert.equal(bash.exitCode, 1);
+  assert.equal(bash.durationMs, 4000);
+  assert.equal(bash.timestamp, iso(2));
+  assert.match(bash.output!, /FAIL charge\.test\.ts/);
+  assert.equal(edit.output, 'No such file');
+  assert.ok(records.every((record) => record.agent === 'copilot' && record.session === 'cli-1'));
+  assert.equal(bash.model, 'gpt-test');
+  assert.equal(parser.info.cwd, CWD);
+  assert.equal(parser.label, 'Fix the checkout 500');
+  assert.equal(parser.info.toolCalls, 3);
+  assert.equal(parser.info.failedCalls, 2);
+  // Each model call's usage is counted; the totals at shutdown are not added to it.
+  assert.deepEqual(parser.info.tokens, { input: 90, output: 25, cached: 60 });
+  assert.deepEqual(agentSource('copilot'), { serverId: 'agent:copilot', server: 'Copilot' });
+});
+
+test('Copilot CLI: a session that recorded only its totals counts them at shutdown, and errors are logged', () => {
+  const parser = new AgentSessionParser('copilot');
+  const records = feed(
+    parser,
+    {
+      type: 'session.shutdown',
+      timestamp: iso(5),
+      data: {
+        tokenDetails: {
+          input: { tokenCount: 10 },
+          cache_write: { tokenCount: 30 },
+          cache_read: { tokenCount: 500 },
+          output: { tokenCount: 7 },
+        },
+      },
+    },
+    { type: 'session.error', timestamp: iso(6), data: { message: 'Rate limited' } },
+    { type: 'session.error', timestamp: iso(6), data: {} },
+    { type: 'user.message', timestamp: iso(7), data: { content: '<reminder>' } },
+  );
+  assert.deepEqual(parser.info.tokens, { input: 40, output: 7, cached: 500 });
+  assert.deepEqual(
+    records.map((record) => [record.level, record.message]),
+    [['error', 'Rate limited']],
+  );
+});
+
+/** A Copilot Chat request as VS Code keeps it. */
+function chatRequest(id: string, at: number, text: string, response: unknown[] = []) {
+  return { requestId: id, timestamp: T0 + at * 1000, message: { text }, modelId: 'copilot/auto', response, agent: {} };
+}
+const tool = (id: string, toolId: string, fields: Record<string, unknown> = {}) => ({
+  kind: 'toolInvocationSerialized',
+  toolCallId: id,
+  toolId,
+  isComplete: true,
+  isConfirmed: { type: 1 },
+  ...fields,
+});
+
+test('Copilot Chat: replaying the session logs each prompt, finished tool call, and reply once', () => {
+  const parser = new AgentSessionParser('copilot');
+  parser.info.cwd = CWD;
+  const first = feed(parser, {
+    kind: 0,
+    v: {
+      version: 3,
+      sessionId: 'chat-1',
+      creationDate: T0,
+      requests: [
+        chatRequest('r1', 1, 'Why does checkout fail?', [
+          { kind: 'thinking', value: 'hmm' },
+          tool('c1', 'copilot_readFile', {
+            pastTenseMessage: { value: `Read [](file://${CWD}/src/pay%20ment.ts#1-20), lines 1 to 20` },
+            resultDetails: { input: '{}', output: [{ value: 'big' }] },
+          }),
+          tool('c2', 'run_in_terminal', { isComplete: false, invocationMessage: 'Running' }),
+        ]),
+      ],
+    },
+  });
+  assert.deepEqual(
+    first.map((record) => [record.action, record.message]),
+    [
+      ['prompt', 'Why does checkout fail?'],
+      ['tool', 'copilot_readFile  Read src/pay ment.ts, lines 1 to 20'],
+    ],
+  );
+  assert.equal(first[1].file, 'src/pay ment.ts');
+  assert.equal(first[1].timestamp, new Date(T0 + 1000).toISOString());
+  // The terminal call finishes, a denied call is added, and the request ends with its reply and tokens.
+  const later = feed(
+    parser,
+    {
+      kind: 1,
+      k: ['requests', 0, 'response', 2],
+      v: tool('c2', 'run_in_terminal', {
+        toolSpecificData: {
+          kind: 'terminal',
+          commandLine: { original: 'npm tset', userEdited: 'npm test' },
+          terminalCommandState: { exitCode: 1, timestamp: T0 + 3000, duration: 1500 },
+          terminalCommandOutput: { text: 'FAIL charge.test.ts' },
+        },
+      }),
+    },
+    {
+      kind: 2,
+      k: ['requests', 0, 'response'],
+      v: [tool('c3', 'mcp_deploy', { isConfirmed: { type: 0 }, invocationMessage: 'Deploying' })],
+    },
+    {
+      kind: 2,
+      k: ['requests', 0, 'response'],
+      v: [{ value: 'The card ' }, { value: 'is expired.', supportHtml: false }],
+    },
+    { kind: 1, k: ['requests', 0, 'promptTokens'], v: 120 },
+    { kind: 1, k: ['requests', 0, 'completionTokens'], v: 30 },
+    { kind: 1, k: ['requests', 0, 'elapsedMs'], v: 9000 },
+    {
+      kind: 1,
+      k: ['requests', 0, 'result'],
+      v: { metadata: { resolvedModel: 'gpt-test', renderedUserMessage: [{}] } },
+    },
+    { kind: 1, k: ['customTitle'], v: 'Checkout failure' },
+  );
+  assert.deepEqual(
+    later.map((record) => [record.action, record.level, record.message]),
+    [
+      ['tool', 'error', 'run_in_terminal  npm test  exit 1'],
+      ['tool', 'warn', 'mcp_deploy  Deploying  denied'],
+      ['reply', 'info', 'The card is expired.'],
+    ],
+  );
+  const [terminal, , reply] = later;
+  assert.equal(terminal.command, 'npm test');
+  assert.equal(terminal.exitCode, 1);
+  assert.equal(terminal.durationMs, 1500);
+  assert.equal(terminal.timestamp, new Date(T0 + 3000).toISOString());
+  assert.equal(terminal.output, 'FAIL charge.test.ts');
+  assert.equal(reply.timestamp, new Date(T0 + 10_000).toISOString());
+  assert.equal(reply.model, 'gpt-test');
+  assert.equal(parser.info.id, 'chat-1');
+  assert.equal(parser.label, 'Checkout failure');
+  assert.equal(parser.info.toolCalls, 3);
+  assert.equal(parser.info.failedCalls, 1);
+  assert.deepEqual(parser.info.tokens, { input: 120, output: 30, cached: 0 });
+  // The file rewritten from the start, as VS Code does when it compacts it, logs nothing again.
+  const again = feed(parser, { kind: 0, v: { sessionId: 'chat-1', requests: [] } });
+  assert.deepEqual(again, []);
+});
+
+test('Copilot Chat: a failed request is an error, and a new request after it is read', () => {
+  const parser = new AgentSessionParser('copilot');
+  feed(parser, { kind: 0, v: { sessionId: 'chat-2', requests: [] } });
+  const records = feed(
+    parser,
+    { kind: 2, k: ['requests'], v: [chatRequest('r1', 1, 'Deploy it')] },
+    {
+      kind: 1,
+      k: ['requests', 0, 'result'],
+      v: { errorDetails: { message: 'Sorry, the request failed.' } },
+    },
+    { kind: 1, k: ['requests', 0, 'elapsedMs'], v: 2000 },
+    { kind: 2, k: ['requests'], v: [chatRequest('r2', 5, 'Try again')] },
+    { kind: 1, k: ['requests', 1, 'modelState'], v: { value: 1, completedAt: T0 + 7000 } },
+    { kind: 2, k: ['requests', 1, 'response'], v: [{ value: 'Done.' }] },
+    { kind: 1, k: ['requests', 1, 'result'], v: {} },
+    { kind: 1, k: ['nowhere', 'deep'], v: 1 },
+    'not an object',
+  );
+  assert.deepEqual(
+    records.map((record) => [record.action, record.level, record.message, record.timestamp]),
+    [
+      ['prompt', 'info', 'Deploy it', new Date(T0 + 1000).toISOString()],
+      ['reply', 'error', 'Sorry, the request failed.', new Date(T0 + 1000).toISOString()],
+      ['prompt', 'info', 'Try again', new Date(T0 + 5000).toISOString()],
+      ['reply', 'info', 'Done.', new Date(T0 + 7000).toISOString()],
+    ],
+  );
+});
