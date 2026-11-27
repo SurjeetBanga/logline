@@ -343,7 +343,7 @@ export class RuntimeErrors implements vscode.CodeActionProvider, vscode.Disposab
     if (!error?.local || !error.serverId) return;
     if (!this.sources.runAgain?.(error.serverId, error.local))
       void vscode.window.showInformationMessage(
-        `The terminal that ran ${shortCommand(error.local)} is closed. Run it again in a terminal to check the test.`,
+        `Logline runs a test command again only in the open terminal that ran it, and ${shortCommand(error.local)} is not running there now. Run it again in a terminal to check the test.`,
       );
   }
 

