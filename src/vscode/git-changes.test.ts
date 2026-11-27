@@ -77,7 +77,7 @@ test('git changes follow the working tree of each repository', async () => {
         };
       });
     let ready = next();
-    const tracker = new GitChanges(changes, () => notified());
+    const tracker = new GitChanges(changes, () => notified(), 20);
     try {
       await ready;
       assert.deepEqual(tracker.status(), { files: 2 });

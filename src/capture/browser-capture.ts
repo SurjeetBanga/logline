@@ -236,8 +236,18 @@ interface Running {
   sweeper?: ReturnType<typeof setInterval>;
 }
 
-// Not unref'd: a wait with nothing else pending must still end by its timer, not let the event loop drain.
-const delay = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+/**
+ * Wait for the first of `waits` to settle, or `ms` at most. The timer is not unref'd, so a wait with nothing else
+ * pending still ends by it, and it is cleared once a wait settles, so it holds nothing up afterwards.
+ */
+async function within(ms: number, ...waits: Promise<unknown>[]): Promise<void> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    await Promise.race([...waits, new Promise<void>((resolve) => (timer = setTimeout(resolve, ms)))]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
 
 /**
  * Captures a browser Logline opened: console calls, uncaught exceptions, what the browser itself
@@ -299,7 +309,7 @@ export class BrowserCapture {
       return existing.record.id;
     }
     // A browser on its way out still holds the profile. One that will not go is not waited for.
-    if (existing) await Promise.race([existing.exited, delay(CLOSE_GRACE_MS + KILL_GRACE_MS)]);
+    if (existing) await within(CLOSE_GRACE_MS + KILL_GRACE_MS, existing.exited);
     const { serverId, server } = browserSource(url);
     const process = this.spawner(launch.executable, [
       '--remote-debugging-pipe',
@@ -367,7 +377,7 @@ export class BrowserCapture {
       });
       // The tab the browser opened with usually is reported by now, and shows the address. A browser
       // slow to start reports it a little later; one that never does gets a tab opened.
-      if (running.first) await Promise.race([firstClaimed, exited, delay(FIRST_TAB_MS)]);
+      if (running.first) await within(FIRST_TAB_MS, firstClaimed, exited);
       if (failure) throw failure;
       if (running.first) {
         running.first = undefined;
@@ -585,6 +595,6 @@ export class BrowserCapture {
     const running = this.running;
     if (!running) return;
     this.stopRunning(running);
-    await Promise.race([running.exited, delay(CLOSE_GRACE_MS + 2 * KILL_GRACE_MS)]);
+    await within(CLOSE_GRACE_MS + 2 * KILL_GRACE_MS, running.exited);
   }
 }

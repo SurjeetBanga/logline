@@ -62,6 +62,8 @@ export class GitChanges implements vscode.Disposable {
   constructor(
     private readonly changes: ChangedLines,
     private readonly onChange: () => void,
+    /** How long changes settle before the working tree is read again; shorter in tests. */
+    private readonly settleMs = SETTLE_MS,
   ) {
     void this.start();
   }
@@ -113,7 +115,7 @@ export class GitChanges implements vscode.Disposable {
     this.timer = setTimeout(() => {
       this.timer = undefined;
       void this.update();
-    }, SETTLE_MS);
+    }, this.settleMs);
     this.timer.unref?.();
   }
 
