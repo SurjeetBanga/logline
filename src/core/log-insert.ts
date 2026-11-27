@@ -102,6 +102,8 @@ const CALL = new RegExp(
   'g',
 );
 // A debug line uses a quiet level; warnings and errors would set off alerts and error counts.
+// A receiver whose last name is the console or names a log: `console.`, `this.logger.`, `$log->`, `Log::`.
+const LOG_RECEIVER = /(?:^|[.>:$])(?:console|\w*log\w*)(?:\(\))?(?:\.|->|::)$/i;
 const QUIET = /^(?:log|trace|debug|info|information|verbose|logtrace|logdebug|loginformation)[fw]?!?$/i;
 
 /**
@@ -114,6 +116,8 @@ export function detectLogCall(text: string): LogCall | undefined {
   CALL.lastIndex = 0;
   let scanned = 0;
   for (let match = CALL.exec(text); match && scanned < 5000; match = CALL.exec(text), scanned++) {
+    // `log` is also a logarithm, as in Math.log and math.log: it counts only on a receiver named for logging.
+    if (match[2] === 'log' && !LOG_RECEIVER.test(match[1])) continue;
     const receiver = match[4] ? '' : match[1];
     const method = match[4] ? `${match[4]}!` : match[2];
     const entry = counts.get(receiver) ?? { call: { receiver, method: '', objectFirst: false }, count: 0 };
@@ -192,7 +196,6 @@ function quote(label: string, family: Family, format = false): string {
   if (family === 'dart') return `'${label.replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/\$/g, '\\$')}'`;
   let escaped = label.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
   if (family === 'kotlin' || family === 'groovy') escaped = escaped.replace(/\$/g, '\\$');
-  if (family === 'swift') escaped = escaped.replace(/\\\(/g, '\\\\(');
   if (format && (family === 'python' || family === 'go')) escaped = escaped.replace(/%/g, '%%');
   if (family === 'rust' || (format && family === 'csharp')) escaped = escaped.replace(/\{/g, '{{').replace(/\}/g, '}}');
   return `"${escaped}"`;

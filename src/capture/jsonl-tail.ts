@@ -9,6 +9,8 @@ const CHUNK = 1024 * 1024;
  */
 export class JsonlTail {
   offset = 0;
+  /** The file's size when it was last read. */
+  size = 0;
   /** The start of a line whose end has not been written yet. */
   private partial = Buffer.alloc(0);
 
@@ -21,6 +23,7 @@ export class JsonlTail {
     try {
       handle = await fs.open(this.file, 'r');
       const { size } = await handle.stat();
+      this.size = size;
       if (size < this.offset) {
         this.offset = 0;
         this.partial = Buffer.alloc(0);

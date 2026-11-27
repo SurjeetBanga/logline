@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { parseLogLine } from './log-event';
+import { matchesQuery } from './query';
 import {
   compareSignatures,
   compareTestFailures,
@@ -131,7 +132,10 @@ test('tests that failed in CI are matched with the failures local runner output 
       ['removes items', 1, [0, 0], 'notSeen'],
     ],
   );
-  assert.equal(byName['adds items'].query, 'kind:test-failure test:"adds items"');
+  assert.equal(byName['adds items'].query, 'kind:test-failure test:"adds items" OR "adds items"');
+  const query = byName['adds items'].query!;
+  const local = run2.filter((event) => matchesQuery(event, query));
+  assert.ok(local.length > 0, "the query finds the local run's failure");
   assert.equal(byName['adds items'].message, '✕ adds items');
   assert.equal(byName['adds items'].location, 'cart.test.ts:12');
   assert.ok(byName['adds items'].baselineSample! < byName['adds items'].localSample!);

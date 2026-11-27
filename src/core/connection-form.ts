@@ -188,10 +188,18 @@ export function draftLogGroups(draft: Pick<FormDraft, 'logGroups'>): string[] {
 }
 
 /** The name a new connection is offered: its database, its file, or prod for Datadog. */
+/** `owner/name` from what was typed, which may be the repository's github.com address. */
+function githubRepository(typed: string): string {
+  return typed
+    .trim()
+    .replace(/^(?:https?:\/\/github\.com\/|git@github\.com:)/, '')
+    .replace(/\.git$/, '');
+}
+
 export function suggestedLabel(draft: FormDraft): string {
   if (draft.type === 'datadog') return 'prod';
   if (draft.type === 'gcp') return draft.project.trim();
-  if (draft.type === 'github-actions') return draft.repository.trim().split('/').pop() ?? '';
+  if (draft.type === 'github-actions') return githubRepository(draft.repository).split('/').pop() ?? '';
   if (draft.type === 'loki' || draft.type === 'elasticsearch')
     return /\/\/(?:localhost|127\.0\.0\.1|\[::1\])[:/]?/.test(draft.url) ? 'local' : 'prod';
   if (draft.type === 'cloudwatch') {
@@ -386,10 +394,7 @@ export function readDraft(draft: FormDraft, saved: { secret?: boolean } = {}): D
       break;
     }
     case 'github-actions': {
-      const repository = draft.repository
-        .trim()
-        .replace(/^(?:https?:\/\/github\.com\/|git@github\.com:)/, '')
-        .replace(/\.git$/, '');
+      const repository = githubRepository(draft.repository);
       const branch = draft.branch.trim();
       if (!repository) errors.repository = 'Enter the repository, such as octo-org/shop';
       else if (!isGitHubRepository(repository))

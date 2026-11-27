@@ -363,6 +363,11 @@ test('github-actions connections keep a valid repository, branch and local endpo
   ]);
   assert.equal(loose.type === 'github-actions' && loose.branch, undefined);
   assert.equal(loose.type === 'github-actions' && loose.endpoint, undefined);
+  // Requests carry the github.com account's token, so a workspace cannot send them to another host.
+  const [remote] = normalizeConnections([
+    { id: 'z', type: 'github-actions', repository: 'octo/shop', endpoint: 'https://example.com/api/v3' },
+  ]);
+  assert.equal(remote.type === 'github-actions' && remote.endpoint, undefined);
 });
 
 test('isGitHubRepository and isGitBranch', () => {

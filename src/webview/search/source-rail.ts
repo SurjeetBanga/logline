@@ -376,7 +376,9 @@ export function createSourceRail(
         (session) =>
           session.sourceKind === 'remote' || session.sourceKind === 'import' || session.sourceKind === 'agent',
       );
-    for (const session of sessions) {
+    // Newest first, as the run wanted is usually the latest; runs arrive as they were registered, not as they started.
+    const ordered = [...sessions].sort((a, b) => b.startedAt - a.startedAt);
+    for (const session of ordered) {
       const wrapper = document.createElement('div');
       wrapper.className = 'run-option-row';
       const started = session.startedAt ? startTime(session.startedAt, byTime) : '';

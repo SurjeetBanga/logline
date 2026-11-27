@@ -85,6 +85,11 @@ export function headline(value: string, length = MAX_MESSAGE): string {
   const line = value.trim().split('\n', 1)[0].trim();
   return line.length > length ? `${line.slice(0, length)}…` : line;
 }
+/** A command as one line, ending in `…` when it was cut short or had more lines, so it is never taken for all of it. */
+export function commandText(command: string): string {
+  const line = headline(command, MAX_COMMAND);
+  return line === command.trim() || line.endsWith('…') ? line : `${line}…`;
+}
 const tail = (value: string, length = MAX_OUTPUT) =>
   value.length > length ? `…${value.slice(value.length - length)}` : value;
 
@@ -275,7 +280,7 @@ export class AgentSessionParser {
     return {
       tool,
       at,
-      ...(command ? { command: headline(command, MAX_COMMAND) } : {}),
+      ...(command ? { command: commandText(command) } : {}),
       ...(file ? { file } : {}),
       summary,
     };
@@ -377,7 +382,7 @@ export class AgentSessionParser {
     return {
       tool: name,
       at,
-      ...(command ? { command: headline(command, MAX_COMMAND) } : {}),
+      ...(command ? { command: commandText(command) } : {}),
       ...(summary ? { summary: headline(summary, MAX_COMMAND) } : {}),
     };
   }
@@ -502,7 +507,7 @@ export class AgentSessionParser {
             message: [call.tool, summary, outcome].filter(Boolean).join('  '),
             action: 'tool',
             tool: call.tool,
-            ...(call.command ? { command: headline(call.command, MAX_COMMAND) } : {}),
+            ...(call.command ? { command: commandText(call.command) } : {}),
             ...(file ? { file } : {}),
             ...(call.exitCode !== undefined ? { exitCode: call.exitCode } : {}),
             ...(call.durationMs !== undefined ? { durationMs: call.durationMs } : {}),

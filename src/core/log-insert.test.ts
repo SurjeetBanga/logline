@@ -24,6 +24,10 @@ test('detects the logging call a file uses most, at a quiet level', () => {
   assert.deepEqual(detectLogCall('info!("a {}", x);'), { receiver: '', method: 'info!', objectFirst: false });
   assert.equal(detectLogCall('$this->logger->info("a");')?.receiver, '$this->logger->');
   assert.equal(detectLogCall('const x = 1;'), undefined);
+  // A logarithm is not a logging call.
+  assert.equal(detectLogCall('const a = Math.log(r) + Math.log(2);\nconsole.log(a);')?.receiver, 'console.');
+  assert.equal(detectLogCall('y = math.log(x) + np.log(x)'), undefined);
+  assert.equal(detectLogCall('this.logger.log("a");')?.receiver, 'this.logger.');
 });
 
 test('inserts a pino-style structured line after the statement at the cursor', () => {
@@ -188,6 +192,11 @@ test('escapes labels so they interpolate and format nothing', () => {
   assert.match(plan('a.py', ['logger.info("a")', 'x = 1'], 1, 'd["%s"]')!.text, /"a: d\[\\"%%s\\"\]=%r", d\["%s"\]\)/);
   assert.match(plan('a.rs', ['let x = 1;'], 0, 'm["{}"]')!.text, /eprintln!\("a: m\[\\"\{\{\}\}\\"\]=\{:\?\}"/);
   assert.match(plan('a.kt', ['val x = 1'], 0, '$x')!.text, /println\("a: \\\$x"/);
+  // A backslash is escaped once, so Swift reads `\(` in the label as text, not an interpolation.
+  assert.equal(
+    plan('a.swift', ['let s = 1'], 0, '"\\(id)"')!.text,
+    'print("a: \\"\\\\(id)\\" =", "\\(id)") // logline',
+  );
 });
 
 test('names the enclosing function, whatever the language', () => {

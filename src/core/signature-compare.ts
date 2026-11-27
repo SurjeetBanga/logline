@@ -251,7 +251,8 @@ export function compareTestFailures(baseline: LogEvent[], runs: LogEvent[][], li
       status,
       ...(prod ? { baselineSample: prod.id } : {}),
       ...(mine ? { localSample: mine.id } : {}),
-      query: `kind:test-failure test:${JSON.stringify(test)}`,
+      // CI events name their test in a field; a local runner only prints it, so its lines are matched by the name.
+      query: `kind:test-failure test:${JSON.stringify(test)} OR ${JSON.stringify(test)}`,
     });
   }
   return rows

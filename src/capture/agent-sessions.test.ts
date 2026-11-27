@@ -5,7 +5,15 @@ import { join } from 'node:path';
 import { test } from 'node:test';
 import { claudeProjectDir } from '../core/agent-session';
 import { LogStore } from '../core/log-store';
-import { AGENT_HINT_SCAN_MS, AGENT_IDLE_MS, AgentSessionCapture, sessionDetail, shortDuration } from './agent-sessions';
+import {
+  AGENT_HINT_SCAN_MS,
+  AGENT_IDLE_MS,
+  AGENT_MAX_SESSIONS,
+  AGENT_SCAN_MS,
+  AgentSessionCapture,
+  sessionDetail,
+  shortDuration,
+} from './agent-sessions';
 import { Ingestion } from './ingestion';
 import { RuntimeState } from './runtime-state';
 import { SessionRegistry } from './session-registry';
@@ -13,7 +21,7 @@ import { SessionRegistry } from './session-registry';
 const NOW = Date.now();
 const iso = (offsetSeconds: number) => new Date(NOW - 60_000 + offsetSeconds * 1000).toISOString();
 
-function setup(enabled: boolean) {
+function setup(enabled: boolean, pollBytes?: number) {
   const root = mkdtempSync(join(tmpdir(), 'logline-agents-'));
   const folder = join(root, 'shop');
   const claudeDir = join(root, 'claude');
@@ -32,6 +40,7 @@ function setup(enabled: boolean) {
     codexDir,
     copilotDir,
     now: () => clock.now,
+    ...(pollBytes ? { pollBytes } : {}),
   });
   const clock = { now: NOW };
   capture.folders = () => [folder];
@@ -298,6 +307,71 @@ test('a session that stops growing is exited, and running again when it grows', 
     await t.capture.poll();
     assert.equal(run.status, 'running');
     assert.equal(run.endedAt, undefined);
+  } finally {
+    t.cleanup();
+  }
+});
+
+test('an old session read over several polls has not resumed', async () => {
+  const t = setup(true, 1);
+  try {
+    const file = t.claudeFile();
+    // Longer than one read, so the first poll reads only part of it.
+    const padding = {
+      type: 'user',
+      isMeta: true,
+      timestamp: iso(5),
+      message: { role: 'user', content: 'x'.repeat(1_200_000) },
+    };
+    writeFileSync(file, t.jsonl(...claudeSession(t.folder), padding));
+    const hourAgo = new Date(NOW - 3600_000);
+    utimesSync(file, hourAgo, hourAgo);
+    await t.capture.poll();
+    const [run] = [...t.registry.records.values()];
+    assert.equal(run.status, 'exited');
+    t.clock.now += 2000;
+    await t.capture.poll();
+    assert.equal(run.status, 'exited', 'reading the rest of an old file is not activity');
+    appendFileSync(file, t.jsonl({ type: 'user', timestamp: iso(9), message: { role: 'user', content: 'Again' } }));
+    t.clock.now += 2000;
+    await t.capture.poll();
+    assert.equal(run.status, 'running', 'what is appended after it was read to its end is');
+  } finally {
+    t.cleanup();
+  }
+});
+
+test('a new session is followed once an agent has its most, and an ended one resumes where it was read', async () => {
+  const t = setup(true);
+  try {
+    const files = Array.from({ length: AGENT_MAX_SESSIONS }, (_, index) => {
+      const file = t.claudeFile(`s${index}.jsonl`);
+      writeFileSync(file, t.jsonl(...claudeSession(t.folder)));
+      const at = new Date(NOW - 3600_000 - index * 60_000);
+      utimesSync(file, at, at);
+      return file;
+    });
+    await t.capture.poll();
+    assert.equal(t.capture.active, AGENT_MAX_SESSIONS);
+    t.clock.now += AGENT_SCAN_MS;
+    await t.capture.poll();
+    const fresh = t.claudeFile('fresh.jsonl');
+    writeFileSync(fresh, t.jsonl(...claudeSession(t.folder)));
+    t.clock.now += AGENT_SCAN_MS;
+    await t.capture.poll();
+    assert.equal(t.capture.active, AGENT_MAX_SESSIONS);
+    assert.equal(t.registry.records.size, AGENT_MAX_SESSIONS + 1, 'the new session is a run too');
+    // The longest-ended session gave way; when it is written to again, it goes on from where it was read.
+    const oldest = files.at(-1)!;
+    const run = [...t.registry.records.values()].find((record) => t.capture.transcriptOf(record.id) === oldest)!;
+    const before = t.store.all().filter((event) => event.sessionId === run.id).length;
+    appendFileSync(oldest, t.jsonl({ type: 'user', timestamp: iso(9), message: { role: 'user', content: 'Again' } }));
+    const later = new Date(t.clock.now + 1000);
+    utimesSync(oldest, later, later);
+    t.clock.now += AGENT_SCAN_MS;
+    await t.capture.poll();
+    assert.equal(t.capture.active, AGENT_MAX_SESSIONS);
+    assert.equal(t.store.all().filter((event) => event.sessionId === run.id).length, before + 1);
   } finally {
     t.cleanup();
   }
