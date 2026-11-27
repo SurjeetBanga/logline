@@ -422,7 +422,11 @@ test('a run says what it did, and the transcript it came from is known while it 
     await t.capture.poll();
     const [run] = [...t.registry.records.values()];
     assert.equal(run.detail, '3s · 1 tool · 1 failed');
-    assert.equal(run.tooltip, '10 in · 20 out · claude-opus-5-5', 'the tokens and model are kept for the tooltip');
+    assert.equal(
+      run.tooltip,
+      'Tokens\t10 in · 20 out\nModel\tclaude-opus-5-5',
+      'the tokens and model are kept for the tooltip',
+    );
     assert.equal(t.capture.transcriptOf(run.id), file);
     assert.equal(t.capture.transcriptOf('other'), undefined);
   } finally {
@@ -440,14 +444,14 @@ test('a session detail gives its duration, tools, and failures, and its tooltip 
     sessionDetail({ ...info(3, 1, 1000, 100, 41_100_000), startedAt: 0, lastAt: 8_040_000, model: 'm' }),
     {
       detail: '2h 14m · 3 tools · 1 failed',
-      tooltip: '1.0k in · 100 out · 41.1M cached · m',
+      tooltip: 'Tokens\t1.0k in · 100 out · 41.1M cached\nModel\tm',
     },
   );
-  assert.deepEqual(sessionDetail(info(1, 0, 5)), { detail: '1 tool', tooltip: '5 in' });
+  assert.deepEqual(sessionDetail(info(1, 0, 5)), { detail: '1 tool', tooltip: 'Tokens\t5 in' });
   assert.deepEqual(sessionDetail(info(0, 0, 0)), { detail: '', tooltip: '' }, 'nothing is said of what is zero');
   assert.deepEqual(
     sessionDetail(info(4, 2, 50, 30, 20), info(1, 2, 40, 30, 0)),
-    { detail: '3 tools', tooltip: '10 in · 20 cached' },
+    { detail: '3 tools', tooltip: 'Tokens\t10 in · 20 cached' },
     'only what came after the baseline counts',
   );
 });
@@ -472,7 +476,7 @@ test('after a clear, a run counts only what its session did since, and old lines
     t.capture.cleared();
     assert.equal(run.events, 0);
     assert.equal(run.detail, '3s', 'the counts start again; the session ran as long as it did');
-    assert.equal(run.tooltip, 'claude-opus-5-5');
+    assert.equal(run.tooltip, 'Model\tclaude-opus-5-5');
     assert.equal(t.registry.records.get(run.id), run, 'a running session keeps its run');
     appendFileSync(
       file,
@@ -489,7 +493,7 @@ test('after a clear, a run counts only what its session did since, and old lines
     );
     assert.equal(run.events, 1);
     assert.equal(run.detail, '5s');
-    assert.equal(run.tooltip, '7 out · claude-opus-5-5');
+    assert.equal(run.tooltip, 'Tokens\t7 out\nModel\tclaude-opus-5-5');
   } finally {
     t.cleanup();
   }

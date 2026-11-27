@@ -14,6 +14,9 @@ const MAX_TEXT = 280;
  * styled hover box after a short pause, on pointer hover or keyboard focus.
  * The title moves to `data-tip` while shown so the native one does not also
  * appear, and to `aria-description` so screen readers still read it.
+ *
+ * A title of `Label\tvalue` lines is set out as a table, with any line before
+ * them as its heading and any after as a note.
  */
 export function createTooltips(scope: EventScope) {
   const body = document.body;
@@ -54,11 +57,43 @@ export function createTooltips(scope: EventScope) {
     tip.hidden = true;
   }
 
+  const cut = (text: string) => (text.length > MAX_TEXT ? `${text.slice(0, MAX_TEXT - 1)}…` : text);
+
+  function render(text: string) {
+    const lines = text.split('\n');
+    const facts = lines.filter((line) => line.includes('\t')).length;
+    tip.classList.toggle('tooltip-facts', facts > 0);
+    if (!facts) {
+      tip.textContent = cut(text);
+      return;
+    }
+    tip.replaceChildren();
+    let seen = 0;
+    for (const line of lines) {
+      const tab = line.indexOf('\t');
+      if (tab < 0) {
+        const part = document.createElement('div');
+        part.className = seen ? 'tooltip-note' : 'tooltip-heading';
+        part.textContent = cut(line);
+        tip.append(part);
+        continue;
+      }
+      seen++;
+      const label = document.createElement('span');
+      label.className = 'tooltip-label';
+      label.textContent = line.slice(0, tab);
+      const value = document.createElement('span');
+      value.className = 'tooltip-value';
+      value.textContent = cut(line.slice(tab + 1));
+      tip.append(label, value);
+    }
+  }
+
   function show(element: HTMLElement) {
     if (!element.isConnected || target !== element) return;
     const text = element.dataset.tip;
     if (!text) return;
-    tip.textContent = text.length > MAX_TEXT ? `${text.slice(0, MAX_TEXT - 1)}…` : text;
+    render(text);
     tip.hidden = false;
     const anchor = element.getBoundingClientRect();
     const box = tip.getBoundingClientRect();

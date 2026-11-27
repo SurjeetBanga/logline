@@ -78,6 +78,6 @@ export interface SessionSummary {
   cwd?: string;
   /** A short summary shown under the run's name, such as an agent session's duration and tool calls. */
   detail?: string;
-  /** More about the run for its tooltip, which `detail` leaves out, such as an agent session's tokens and model. */
+  /** More about the run for its tooltip, which `detail` leaves out, such as an agent session's tokens and model: `Label\tvalue` lines. */
   tooltip?: string;
 }

@@ -7179,7 +7179,7 @@ test('an agent session shows what it did on its second line, under the agent ico
         sourceKind: 'agent',
         cwd: '/work/shop',
         detail: '2h 14m · 3 tools · 1 failed',
-        tooltip: '1.0k in · 100 out · 41.1M cached · claude-opus-5-5',
+        tooltip: 'Tokens\t1.0k in · 100 out · 41.1M cached\nModel\tclaude-opus-5-5',
       },
     ],
   });
@@ -7191,7 +7191,7 @@ test('an agent session shows what it did on its second line, under the agent ico
   assert.match(run.querySelector('.rail-status')!.textContent!, /2h 14m · 3 tools · 1 failed$/);
   assert.equal(
     run.title,
-    'running · 1.0k in · 100 out · 41.1M cached · claude-opus-5-5 · /work/shop',
+    'Status\trunning\nTokens\t1.0k in · 100 out · 41.1M cached\nModel\tclaude-opus-5-5\nFolder\t/work/shop',
     'the tooltip says only what the row does not',
   );
 });
