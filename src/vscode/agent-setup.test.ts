@@ -218,6 +218,9 @@ test('shellQuote and promptCommand quote a prompt for each shell', () => {
   assert.equal(shellQuote("it's", 'posix'), `'it'\\''s'`);
   assert.equal(shellQuote("a 'b'", 'powershell'), "'a ''b'''");
   assert.equal(shellQuote('say "hi"', 'cmd'), '"say ""hi"""');
+  // PowerShell reads typographic single quotes as quotes: doubled, they cannot end the string.
+  assert.equal(shellQuote('it\u2019s; calc', 'powershell'), "'it\u2019\u2019s; calc'");
+  assert.equal(shellQuote('\u2018a\u201a\u201b', 'powershell'), "'\u2018\u2018a\u201a\u201a\u201b\u201b'");
   assert.equal(promptCommand('claude', 'Fix it', 'posix'), "claude 'Fix it'");
   assert.equal(promptCommand('claude', "a 'b'", 'powershell', 'C:\\x\\claude.exe'), "& 'C:\\x\\claude.exe' 'a ''b'''");
   // Windows shells get no double quotes to split the prompt at, and Command Prompt no %NAME% to expand.

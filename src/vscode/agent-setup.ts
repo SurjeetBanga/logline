@@ -154,10 +154,12 @@ export function shellKind(shellPath: string | undefined, platform: NodeJS.Platfo
 
 /** One argument quoted for a shell. */
 export function shellQuote(value: string, shell: Shell): string {
-  // PowerShell expands $ and ` inside double quotes, so it gets single quotes, where only ' is special ('').
+  // PowerShell expands $ and ` inside double quotes, so it gets single quotes, where only a single quote is special.
+  // PowerShell also reads the typographic ‘ ’ ‚ ‛ as single quotes, so each is doubled too: left alone, one
+  // in a log message would end the string and run what follows it.
   // Command Prompt has only double quotes; programs read "" inside them as one ".
   if (shell === 'posix') return /^[\w@%+=:,./-]+$/.test(value) ? value : `'${value.replace(/'/g, `'\\''`)}'`;
-  if (shell === 'powershell') return `'${value.replace(/'/g, "''")}'`;
+  if (shell === 'powershell') return `'${value.replace(/['\u2018\u2019\u201a\u201b]/g, '$&$&')}'`;
   return `"${value.replace(/"/g, '""')}"`;
 }
 

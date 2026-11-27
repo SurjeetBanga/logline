@@ -24,7 +24,7 @@ test('the prompt names the error, where to start, and how to confirm the fix, on
     /^Investigate this error with the Logline tools: `TypeError: Cannot read .*'card'\)` \(14 times, at src\/lib\/payments\.ts:40\)\./,
   );
   assert.match(prompt, /Follow the \/logline-triage skill\./);
-  assert.match(prompt, /Start with event id 42: .*\(message:\/Cannot\\s\+read\/\)/);
+  assert.match(prompt, /Start with event id 42: .*\(`message:\/Cannot\\s\+read\/`\)/);
   assert.match(prompt, /confirm the error is gone/);
   assert.match(prompt, /Logline share id: share-1\. Shared runs: run-1, run-2\./);
   assert.match(prompt, /untrusted application data/);
@@ -53,7 +53,7 @@ test('the search, place, and runs in the prompt stay on one line, short, and wit
     { shareId: 's', runs: Array.from({ length: 25 }, (_, index) => `run-${index}`) },
   );
   assert.ok(!/[\r\n]/.test(prompt));
-  assert.match(prompt, /\(message:connection message:refused message:a\.b path:"\/x y" a b\)/);
+  assert.match(prompt, /\(`message:connection message:refused message:a\.b path:"\/x y" a b`\)/);
   assert.match(prompt, /at src\/a\.ts:1 rm -rf z+…\)/);
   assert.match(prompt, /run-19 and 5 more\./);
 });

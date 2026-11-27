@@ -844,6 +844,23 @@ test('an agent call opens the logs around it, the transcript, or its command in 
   assert.equal(terminals[0].shown, true);
   assert.deepEqual(terminals[0].sent, [['npm test', false]]);
 
+  // A command of several lines is copied, not sent: its line breaks would run it.
+  controller.store.add({
+    level: 'info',
+    id: 4,
+    serverId: 'agent:claude-code',
+    sessionId: 's1',
+    message: 'Bash',
+    timestampMs: start,
+    fields: { kind: 'agent', action: 'tool', command: 'cat <<EOF\nrm -rf build\nEOF' },
+  });
+  await controller.agentCall(4, 'terminal');
+  assert.equal(terminals.length, 2);
+  assert.deepEqual(terminals[1].sent, []);
+  assert.deepEqual(copied, ['cat <<EOF\nrm -rf build\nEOF']);
+  assert.match(notices.at(-1)!, /line break or a control character, so it was copied/);
+  terminals.length = 1;
+
   await controller.agentCall(1, 'transcript');
   assert.equal(opened.length, 0, 'no followed transcript, nothing opened');
   assert.match(notices.at(-1)!, /transcript is no longer being read/);

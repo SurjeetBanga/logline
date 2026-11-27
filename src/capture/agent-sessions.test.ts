@@ -232,6 +232,25 @@ test('a Codex session reads its folder from session_meta', async () => {
   }
 });
 
+test('a session outside the folder shows nothing until it says which folder it worked in', async () => {
+  const t = setup(true);
+  try {
+    const dir = join(t.codexDir, 'sessions', '2026', '11', '15');
+    mkdirSync(dir, { recursive: true });
+    const item = (offset: number, payload: unknown) => ({ timestamp: iso(offset), type: 'response_item', payload });
+    // No session_meta: the folder it worked in is not known, so it may be another project's.
+    writeFileSync(
+      join(dir, 'rollout-unknown.jsonl'),
+      t.jsonl(item(1, { type: 'message', role: 'user', content: [{ type: 'input_text', text: 'secret plan' }] })),
+    );
+    await t.capture.poll();
+    assert.deepEqual(t.store.all(), []);
+    assert.equal(t.registry.records.size, 0);
+  } finally {
+    t.cleanup();
+  }
+});
+
 test('a removed source is no longer read', async () => {
   const t = setup(true);
   try {

@@ -579,7 +579,7 @@ export function createSourceRail(
       button.className = 'rail-empty-add';
       button.textContent = 'Add connection';
       button.title =
-        'Search Datadog, CloudWatch, Loki, Elasticsearch, Cloud Logging, or a database next to your local runs.';
+        'Search Datadog, CloudWatch, Loki, Elasticsearch, Cloud Logging, GitHub Actions, or a database next to your local runs.';
       scope.listen(button, 'click', () => api.postMessage({ type: 'addConnection' }));
       empty.append(button);
       children.push(empty);

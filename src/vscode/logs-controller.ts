@@ -640,6 +640,15 @@ export class LogsController {
     const cwd = event.sessionId ? this.registry.records.get(event.sessionId)?.cwd : undefined;
     const terminal = vscode.window.createTerminal({ name: 'Agent command', ...(cwd ? { cwd } : {}) });
     terminal.show();
+    // A line break sent to a shell runs the line before it, and other control characters act as keys, so a command
+    // with any is copied for the person to paste, where the terminal asks before pasting several lines.
+    if (/[\u0000-\u0008\u000a-\u001f\u007f]/.test(command)) {
+      await vscode.env.clipboard.writeText(command);
+      void vscode.window.showInformationMessage(
+        'The command has a line break or a control character, so it was copied rather than pasted, where it could run. Paste it into the terminal to review it.',
+      );
+      return;
+    }
     // Pasted, not run: the person reads it and presses Enter.
     terminal.sendText(command, false);
   }
