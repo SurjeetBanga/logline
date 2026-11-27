@@ -536,7 +536,8 @@ export function shortDuration(ms: number): string {
 
 /**
  * A session's run: `detail` goes under its name, such as `2h 14m · 42 tools · 3 failed`,
- * and `tooltip` holds what that line leaves out, its tokens and model. Counts are of what
+ * and `tooltip` holds what that line leaves out, its tokens and model, as `Label\tvalue`
+ * lines the tooltip sets out as a table. Counts are of what
  * it did after `since`; the duration is the whole session's, from the start time beside it.
  */
 export function sessionDetail(
@@ -553,11 +554,13 @@ export function sessionDetail(
     failedCalls ? `${failedCalls} failed` : '',
   ];
   // Cache reads dwarf the rest in a long session, so the tokens are given apart, not summed.
-  const tooltip = [
+  const spent = [
     tokens('input') ? `${shortCount(tokens('input'))} in` : '',
     tokens('output') ? `${shortCount(tokens('output'))} out` : '',
     tokens('cached') ? `${shortCount(tokens('cached'))} cached` : '',
-    info.model ?? '',
-  ];
-  return { detail: detail.filter(Boolean).join(' · '), tooltip: tooltip.filter(Boolean).join(' · ') };
+  ]
+    .filter(Boolean)
+    .join(' · ');
+  const tooltip = [spent && `Tokens\t${spent}`, info.model && `Model\t${info.model}`];
+  return { detail: detail.filter(Boolean).join(' · '), tooltip: tooltip.filter(Boolean).join('\n') };
 }

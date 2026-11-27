@@ -392,22 +392,25 @@ export function createSourceRail(
             [started, session.detail || stateText].filter(Boolean).join(' · '),
             session.sourceKind === 'remote' || session.sourceKind === 'import' || session.sourceKind === 'agent',
           );
-      // The tooltip adds only what the row leaves out, and the name when it is cut short.
+      // The tooltip adds only what the row leaves out, and the name when it is cut short,
+      // as a table of `Label\tvalue` lines under the name.
+      const fact = (label: string, value: string | undefined) => (value ? `${label}\t${value}` : '');
       const hidden = [
-        byTime && started ? runName(session) : '',
-        !byTime && session.detail ? stateText : '',
-        byTime ? session.detail : '',
+        !byTime && session.detail ? fact('Status', stateText) : '',
+        byTime ? fact('Activity', session.detail) : '',
         session.tooltip,
-        session.cwd,
-        session.captureStatus && `Capture: ${session.captureStatus}`,
+        fact('Folder', session.cwd),
+        fact('Capture', session.captureStatus),
         session.captureReason,
       ].filter(Boolean);
-      if (hidden.length) button.title = hidden.join(' · ');
+      const tipFor = (named: boolean) => (named ? [runName(session), ...hidden] : hidden).join('\n');
+      const named = byTime && Boolean(started);
+      if (hidden.length || named) button.title = tipFor(named);
       // Checked as the pointer arrives, before the tooltip takes the title, since the width can change.
       scope.listen(button, 'pointerover', () => {
         const name = button.querySelector<HTMLElement>('.rail-name');
-        const cut = !byTime && name && name.scrollWidth > name.clientWidth;
-        const title = (cut ? [runName(session), ...hidden] : hidden).join(' · ');
+        const cut = !byTime && Boolean(name && name.scrollWidth > name.clientWidth);
+        const title = tipFor(named || cut);
         if (title !== (button.dataset.tip ?? button.title)) button.title = title;
       });
       wrapper.append(button);
