@@ -44,7 +44,7 @@
 <span class="ln">43</span>  <span class="c">try</span> {
 <span class="ln">44</span>    <span class="c">await</span> <span class="v">provider</span>.<span class="f">charge</span>(<span class="v">order</span>.<span class="v">total</span>, { <span class="v">timeout</span>: <span class="n">3000</span> });
 <span class="ln">45</span>  } <span class="c">catch</span> (<span class="v">error</span>) {
-<span class="lens">Logline · 312 hits · 41 errors · p95 3,004 ms · last 2s ago</span><span class="ln cur">46</span>    <span class="v">logger</span>.<span class="f">error</span>({ <span class="v">orderId</span>: <span class="v">order</span>.<span class="v">id</span>, <span class="v">attempt</span> }, <span class="s">'Payment provider timeout after 3000ms'</span>);
+<span class="lens">Logline · 312 hits · 41 errors · p95 3,004 ms · last 2s ago</span><span class="ln cur">46</span>    <span class="v">logger</span>.<span class="f">error</span>({ <span class="v">orderId</span>: <span class="v">order</span>.<span class="v">id</span>, <span class="v">attempt</span> }, <span class="s">'Payment provider timeout after 3000ms'</span>);<span class="inline-value error">orderId=8811 attempt=3</span>
 <span class="ln">47</span>    <span class="c">throw</span> <span class="k">new</span> <span class="t">ChargeFailed</span>(<span class="v">order</span>.<span class="v">id</span>, <span class="v">error</span>);
 <span class="ln">48</span>  }</pre>
           </div>

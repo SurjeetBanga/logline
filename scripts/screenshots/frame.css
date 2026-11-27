@@ -141,6 +141,14 @@ body {
 .ln.cur {
   color: #cccccc;
 }
+.inline-value {
+  margin-left: 2em;
+  font-style: italic;
+  color: var(--dim);
+}
+.inline-value.error {
+  color: #f48771;
+}
 .lens {
   display: block;
   padding-left: 70px;
