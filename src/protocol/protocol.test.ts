@@ -359,6 +359,13 @@ test('an analysis request carries its request id only when it is a count', () =>
 
 test('investigate messages keep a short search and need an event id', () => {
   assert.deepEqual(parseViewRequest({ type: 'investigate', id: 3 }), { type: 'investigate', id: 3 });
+  // Where it was started is kept only as one of its two names.
+  assert.deepEqual(parseViewRequest({ type: 'investigate', id: 3, from: 'analyze' }), {
+    type: 'investigate',
+    id: 3,
+    from: 'analyze',
+  });
+  assert.deepEqual(parseViewRequest({ type: 'investigate', id: 3, from: 'somewhere' }), { type: 'investigate', id: 3 });
   assert.deepEqual(parseViewRequest({ type: 'investigate', id: 3, query: 'message:"boom"', ignored: true }), {
     type: 'investigate',
     id: 3,

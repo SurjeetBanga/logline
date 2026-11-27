@@ -7,7 +7,7 @@
 
 export const INSERT_MARKER = 'logline';
 
-type Family =
+export type Family =
   | 'js'
   | 'python'
   | 'go'
@@ -165,6 +165,10 @@ export interface Insertion {
   text: string;
   /** The literal message the line logs, which its CodeLens strips from what it shows. */
   label: string;
+  /** The language family it was written in, such as `js` or `python`. */
+  family: Family;
+  /** Whether it uses the logging call the file already used, rather than the language's own print. */
+  styled: boolean;
 }
 
 /** The line Insert Log adds, and where. Undefined for languages it does not write. */
@@ -177,9 +181,10 @@ export function planInsertion(request: InsertRequest): Insertion | undefined {
   const { line, indent } = placement(lines, cursor, family);
   const scope = enclosingScope(lines, cursor, family) ?? basename(request.file);
   const label = expression ? `${scope}: ${expression}` : `${scope}: reached line ${line + 1}`;
-  const statement = buildStatement(family, detectLogCall(request.text), label, expression, request.text);
+  const call = detectLogCall(request.text);
+  const statement = buildStatement(family, call, label, expression, request.text);
   const comment = HASH_COMMENT.has(family) ? '#' : '//';
-  return { line, text: `${indent}${statement} ${comment} ${INSERT_MARKER}`, label };
+  return { line, text: `${indent}${statement} ${comment} ${INSERT_MARKER}`, label, family, styled: call !== undefined };
 }
 
 function basename(file: string): string {

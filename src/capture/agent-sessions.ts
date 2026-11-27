@@ -168,6 +168,12 @@ export class AgentSessionCapture {
     return restored;
   }
 
+  /** For usage counts: the sessions that logged something, and the agents they came from. */
+  summary(): { sessions: number; agents: AgentName[] } {
+    const listed = this.sessions().filter((followed) => followed.listed);
+    return { sessions: listed.length, agents: [...new Set(listed.map((followed) => followed.agent))] };
+  }
+
   /** Sessions being followed. */
   get active(): number {
     return this.followed.size;

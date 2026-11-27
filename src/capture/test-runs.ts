@@ -11,6 +11,8 @@ export interface TestRunResult {
   command: string;
   failed: string[];
   fixed: string[];
+  /** The runner whose output named the failures, such as `vitest`; unknown for a run that failed none. */
+  framework?: string;
 }
 
 // Most lines of a run read for its failures, newest kept: a huge suite's start says nothing about what failed.
@@ -85,7 +87,14 @@ export class TestRuns {
     this.failing.delete(key);
     this.failing.set(key, now);
     if (this.failing.size > MAX_COMMANDS) this.failing.delete(this.failing.keys().next().value!);
-    return { record, command, failed, fixed: [...before].filter((test) => !now.has(test)) };
+    const framework = failures[0]?.framework;
+    return {
+      record,
+      command,
+      failed,
+      fixed: [...before].filter((test) => !now.has(test)),
+      ...(framework ? { framework } : {}),
+    };
   }
 }
 

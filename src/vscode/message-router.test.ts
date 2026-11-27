@@ -156,7 +156,7 @@ test('message router dispatches every public action and preserves normalized inp
     { type: 'stopSharing' },
     { type: 'askCopilot', anchor: 1 },
     { type: 'shareEvent', id: 1 },
-    { type: 'investigate', id: 1, query: 'message:"boom"' },
+    { type: 'investigate', id: 1, query: 'message:"boom"', from: 'analyze' },
     { type: 'agentCall', id: 2, action: 'terminal' },
     { type: 'toggleTerminalCapture', enabled: true },
     { type: 'showGuide', section: 'whatsNew' },
@@ -199,7 +199,7 @@ test('message router dispatches every public action and preserves normalized inp
   );
   assert.deepEqual(
     calls.filter((call) => call.name === 'investigate').map((call) => call.value),
-    [[1, 'message:"boom"']],
+    [[1, 'message:"boom"', 'analyze']],
   );
   assert.deepEqual(
     calls.filter((call) => call.name === 'agentCall').map((call) => call.value),

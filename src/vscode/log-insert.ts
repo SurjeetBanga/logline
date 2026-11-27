@@ -81,7 +81,10 @@ export class LogInserter implements vscode.Disposable {
         } else builder.insert(new vscode.Position(insertion.line, 0), insertion.text + eol);
       }
     });
-    if (applied) this.setContext(true);
+    if (applied) {
+      this.setContext(true);
+      this.usage?.record('log_inserted', { language: insertions[0].family, styled: insertions[0].styled });
+    }
     return applied;
   }
 

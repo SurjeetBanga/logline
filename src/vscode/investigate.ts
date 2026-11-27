@@ -15,6 +15,8 @@ import {
 import { counted, type Usage } from './usage';
 
 export type InvestigateAgent = 'copilot' | Agent | 'copy';
+/** Where Investigate was started: Analyze, an open event, the editor, the Command Palette, or Investigate Again. */
+export type InvestigateFrom = 'analyze' | 'inspector' | 'editor' | 'palette' | 'again';
 
 export interface InvestigatorSources {
   store: Pick<LogStore, 'find' | 'eventsAfter' | 'all' | 'newestFirst'>;
@@ -61,7 +63,7 @@ export class Investigator implements vscode.Disposable {
       vscode.commands.registerCommand(
         'logline.investigate',
         counted(sources.usage, 'logline.investigate', (target?: unknown) =>
-          isTarget(target) ? this.investigate(target) : this.pickError(),
+          isTarget(target) ? this.investigate(target, undefined, 'editor') : this.pickError(),
         ),
       ),
       vscode.workspace.onDidSaveTextDocument((document) => {
@@ -93,7 +95,11 @@ export class Investigator implements vscode.Disposable {
   }
 
   /** Hand an error to an agent; resolves to the agent chosen, or undefined when nothing was handed over. */
-  async investigate(target: InvestigationTarget, agent?: InvestigateAgent): Promise<InvestigateAgent | undefined> {
+  async investigate(
+    target: InvestigationTarget,
+    agent?: InvestigateAgent,
+    from: InvestigateFrom = 'editor',
+  ): Promise<InvestigateAgent | undefined> {
     const event = this.sources.store.find(target.eventId);
     if (!event) {
       void vscode.window.showInformationMessage('Logline: That error is no longer in the retained logs.');
@@ -123,7 +129,7 @@ export class Investigator implements vscode.Disposable {
       runs: status.sources.flatMap((source) => source.runs.map((run) => run.id)),
       skill: agent === 'claude' ? '/logline-triage' : agent === 'codex' ? '$logline-triage' : undefined,
     });
-    this.sources.usage?.record('investigate', { agent });
+    this.sources.usage?.record('investigate', { agent, from, ci: target.ci !== undefined });
     if (agent === 'copilot') {
       if (!(await this.sources.openChat(prompt))) return undefined;
     } else if (agent === 'claude' || agent === 'codex') {
@@ -182,7 +188,11 @@ export class Investigator implements vscode.Disposable {
           .then((action) => {
             if (action === 'Show Error') void this.sources.showQuery(`id:${outcome.eventId}`);
             if (action === 'Investigate Again')
-              void this.investigate({ ...watch.target, eventId: outcome.eventId, count: outcome.occurrences });
+              void this.investigate(
+                { ...watch.target, eventId: outcome.eventId, count: outcome.occurrences },
+                undefined,
+                'again',
+              );
           });
       }
     }
@@ -239,13 +249,17 @@ export class Investigator implements vscode.Disposable {
     );
     if (!picked) return undefined;
     const { group } = picked;
-    return this.investigate({
-      message: group.message,
-      eventId: group.sampleIds[group.sampleIds.length - 1],
-      query: group.query,
-      count: group.count,
-      location: group.location,
-    });
+    return this.investigate(
+      {
+        message: group.message,
+        eventId: group.sampleIds[group.sampleIds.length - 1],
+        query: group.query,
+        count: group.count,
+        location: group.location,
+      },
+      undefined,
+      'palette',
+    );
   }
 }
 

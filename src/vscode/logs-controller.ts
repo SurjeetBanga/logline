@@ -90,7 +90,7 @@ import type {
 import type { LogBreakpoints } from './log-breakpoints';
 import { doctorMode, type LogDoctor } from './log-doctor';
 import type { RuntimeErrors } from './runtime-errors';
-import type { Investigator } from './investigate';
+import type { InvestigateFrom, Investigator } from './investigate';
 import { SensitiveScanner, type SourceSensitive } from '../core/log-findings';
 import type { GitChanges } from './git-changes';
 import type { LogLens } from './log-lens';
@@ -100,6 +100,7 @@ import {
   agentsWithSkills,
   connectAgent,
   copilotAvailable,
+  readyAgents,
   shellKind,
   type AgentSetup,
 } from './agent-setup';
@@ -284,7 +285,8 @@ export class LogsController {
     );
     this.compare = new ProductionCompare(this.store, this.registry, (view) => void this.comparisonFinished(view));
     this.registry.records.onStart = (record) => {
-      this.usage?.capture(captureKind(record));
+      const kind = captureKind(record);
+      this.usage?.capture(kind, kind === 'terminal' ? this.captureByDefault() : undefined);
       this.runStarted?.(record);
     };
     // Agents fetch from connections the user allowed, and compare with production, through the sharing boundary.
@@ -538,7 +540,7 @@ export class LogsController {
           this.shareWithAgent(sourceIds, anchor, sessionIds, chooseRuns),
         stopSharing: () => this.stopSharing(),
         askCopilot: (anchor) => this.askCopilot(anchor),
-        investigate: (id, query) => this.investigateEvent(id, query),
+        investigate: (id, query, from) => this.investigateEvent(id, query, from),
         agentCall: (id, action) => this.agentCall(id, action),
         toggleTerminalCapture: async (enabled) => void (await this.toggleTerminalCapture(enabled)),
         detailLinks: (event) => this.detailLinks(event),
@@ -934,6 +936,7 @@ export class LogsController {
     this.usage?.autoShared(
       sources.length,
       sources.reduce((sum, source) => sum + source.events, 0),
+      readyAgents(),
     );
     this.notifications.send({ type: 'update' });
   }
@@ -1209,6 +1212,7 @@ export class LogsController {
       how,
       sources.length,
       sources.reduce((sum, source) => sum + source.events, 0),
+      readyAgents(),
     );
   }
   stopSharing(): void {
@@ -1367,7 +1371,7 @@ export class LogsController {
     this.notifications.send({ type: 'update' });
   }
   /** Investigate the error an event shows, from the Logs panel. */
-  async investigateEvent(id: number, query?: string): Promise<void> {
+  async investigateEvent(id: number, query?: string, from: InvestigateFrom = 'inspector'): Promise<void> {
     const event = this.store.find(id);
     if (!event || !this.investigator) return;
     const message = errorLine(event);
@@ -1378,17 +1382,23 @@ export class LogsController {
       failure && event.fields?.file
         ? `${event.fields.file}${event.fields.line ? `:${event.fields.line}` : ''}`
         : undefined;
-    await this.investigator.investigate({
-      message,
-      eventId: id,
-      // The same search Analyze gives the error's group, so its later occurrences are found though their ids differ.
-      query:
-        query ??
-        (failure ? `kind:test-failure test:${JSON.stringify(failure.test)}` : templateQuery(normalizeMessage(message))),
-      location: place ?? (site ? `${site.file}:${site.line}` : undefined),
-      serverId: event.serverId,
-      ...(failure?.ci ? { ci: failure.ci } : {}),
-    });
+    await this.investigator.investigate(
+      {
+        message,
+        eventId: id,
+        // The same search Analyze gives the error's group, so its later occurrences are found though their ids differ.
+        query:
+          query ??
+          (failure
+            ? `kind:test-failure test:${JSON.stringify(failure.test)}`
+            : templateQuery(normalizeMessage(message))),
+        location: place ?? (site ? `${site.file}:${site.line}` : undefined),
+        serverId: event.serverId,
+        ...(failure?.ci ? { ci: failure.ci } : {}),
+      },
+      undefined,
+      from,
+    );
   }
   async askCopilot(anchor?: number): Promise<boolean> {
     const status = this.agentAccess.status();
@@ -1488,8 +1498,15 @@ export class LogsController {
     return kind === 'browser' || kind === 'remote';
   }
   /** What a usage summary reads when it is sent: sizes and counts only. */
+  /** Whether terminal capture is on only because nobody set it; on a remote host it is off by default. */
+  captureByDefault(): boolean {
+    return !vscode.env?.remoteName && this.config.isDefault('captureTerminals');
+  }
   usageSummary(): UsageSummarySource {
     return {
+      captureDefault: () => this.terminalCapture.isEnabled && this.captureByDefault(),
+      runtimeErrors: () => this.runtimeErrors?.marked ?? 0,
+      agentSessions: () => this.agentSessions.summary(),
       eventsCaptured: () => this.store.total,
       sources: () => new Set([...this.registry.records.values()].map((record) => record.serverId)).size,
       memoryMb: () => this.store.bytes / (1024 * 1024),
@@ -1533,7 +1550,8 @@ export class LogsController {
       this.testRunGeneration = this.state.generation;
       this.testRuns.reset();
     }
-    for (const { record, command, fixed } of this.testRuns.check()) {
+    for (const { record, command, failed, fixed, framework } of this.testRuns.check()) {
+      if (failed.length || fixed.length) this.usage?.testRun(framework, failed.length, fixed.length);
       if (!fixed.length) continue;
       this.runtimeErrors?.testsPassed(record.serverId, command, fixed);
       const tests = fixed.length === 1 ? '1 test' : `${fixed.length.toLocaleString()} tests`;

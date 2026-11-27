@@ -7018,7 +7018,7 @@ test('the inspector hands the open error to an agent with Investigate', () => {
   assert.equal(button.querySelector('.event-action-label')?.textContent, 'Investigate');
   assert.equal(button.getAttribute('aria-disabled'), null);
   get('inspectorBody').listeners.get('click')!(clickOn('.investigate-button', button));
-  assert.deepEqual(JSON.parse(JSON.stringify(messages.at(-1))), { type: 'investigate', id: 42 });
+  assert.deepEqual(JSON.parse(JSON.stringify(messages.at(-1))), { type: 'investigate', id: 42, from: 'inspector' });
 });
 
 test('Analyze lists Investigate beside an error group and hands its newest event and search to an agent', () => {
@@ -7042,6 +7042,7 @@ test('Analyze lists Investigate beside an error group and hands its newest event
   assert.deepEqual(JSON.parse(JSON.stringify(messages.at(-1))), {
     type: 'investigate',
     id: 9,
+    from: 'analyze',
     query: 'message:"failure 0"',
   });
 });

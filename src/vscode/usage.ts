@@ -6,6 +6,8 @@ import { join } from 'node:path';
 import * as vscode from 'vscode';
 import {
   AUTOMATIC_CAPTURES,
+  debuggerKind,
+  TEST_FRAMEWORKS,
   commonProperties,
   DOCTOR_CODES,
   MILESTONES,
@@ -44,6 +46,10 @@ const STATE_KEY = 'logline.usage.state';
 const ID_FILE = 'usage-id';
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const QUEUE_LIMIT = 500;
+/** How many times a batch is sent before its events are dropped, so a short outage loses nothing. */
+const SEND_ATTEMPTS = 3;
+/** How long activation may take to report its time before `activated` is sent without it. */
+const ACTIVATION_WAIT_MS = 30_000;
 const FLUSH_MS = 60_000;
 const SUMMARY_MS = 24 * 60 * 60 * 1000;
 const LOG_LIMIT = 200;
@@ -73,8 +79,8 @@ interface QueuedEvent {
   timestamp: string;
   /** Its own one-time id instead of the install's, for answers a person wrote. */
   distinctId?: string;
-  /** Already sent once and not accepted: not tried again. */
-  retried?: boolean;
+  /** How many times it was sent and not accepted; it is dropped after `SEND_ATTEMPTS`. */
+  failures?: number;
 }
 
 /** Sends one batch and says whether it was accepted; the default posts it to PostHog. */
@@ -87,6 +93,12 @@ export interface UsageSummarySource {
   memoryMb(): number;
   trimmed(): boolean;
   connections(): Record<string, number>;
+  /** Runtime errors and test failures marked in the editor now. */
+  runtimeErrors?(): number;
+  /** Agent sessions read, and which agents they came from. */
+  agentSessions?(): { sessions: number; agents: string[] };
+  /** Whether terminal capture is on only because nobody set it. */
+  captureDefault?(): boolean;
   /** Events dropped to stay within limits, and events cut short. */
   discarded?(): number;
   truncated?(): number;
@@ -178,6 +190,14 @@ export class Usage implements vscode.Disposable {
   private sharedCalls = 0;
   private unusedShares = 0;
   private peakEventsPerSecond = 0;
+  private readonly debuggers = new Set<string>();
+  private readonly snapshotted = new Set<string>();
+  private readonly testFrameworks = new Set<string>();
+  private snapshots = 0;
+  private activationCounted = false;
+  private activationTimer?: ReturnType<typeof setTimeout>;
+  private testRuns = 0;
+  private testsFailed = 0;
   private lastSample?: { total: number; at: number };
 
   constructor(
@@ -231,7 +251,8 @@ export class Usage implements vscode.Disposable {
       if (state.version && state.version !== this.common.version) this.record('updated', { from: state.version });
       if (state.version !== this.common.version) this.saveState({ version: this.common.version as string });
     }
-    this.record('activated');
+    this.activationTimer = setTimeout(() => this.activated(), ACTIVATION_WAIT_MS);
+    this.activationTimer.unref?.();
     this.flushTimer = setInterval(() => {
       this.sampleRate();
       void this.flush();
@@ -372,6 +393,17 @@ export class Usage implements vscode.Disposable {
     return new Date(Math.floor(this.now() / 60_000) * 60_000).toISOString();
   }
 
+  /**
+   * The extension finished activating, after `ms`; once. Without it, `start` sends the event
+   * without a time, so an activation that failed partway is still counted.
+   */
+  activated(ms?: number): void {
+    if (this.activationCounted) return;
+    this.activationCounted = true;
+    clearTimeout(this.activationTimer);
+    this.record('activated', ms === undefined ? {} : { ms });
+  }
+
   /** Something the person did, for active days and active minutes. */
   touch(): void {
     if (!this.enabled) return;
@@ -434,11 +466,42 @@ export class Usage implements vscode.Disposable {
   }
 
   /** A capture started; each kind counts once a session, since terminals start a run per command. */
-  capture(kind: string): void {
+  capture(kind: string, byDefault?: boolean): void {
     this.milestone('first_capture');
     if (this.features.has(kind)) return;
     this.features.add(kind);
-    this.record('capture_started', { kind, auto: AUTOMATIC_CAPTURES.includes(kind) });
+    this.record('capture_started', {
+      kind,
+      auto: AUTOMATIC_CAPTURES.includes(kind),
+      ...(byDefault === undefined ? {} : { by_default: byDefault }),
+    });
+  }
+
+  /** A debug session started: which runtime, once a session for each. */
+  debugSession(type: string | undefined): void {
+    const kind = debuggerKind(type);
+    if (this.debuggers.has(kind)) return;
+    this.debuggers.add(kind);
+    this.record('debug_session', { debugger: kind });
+  }
+
+  /** What a program held when its debugger stopped on an exception was recorded: counted, and sent once a session for each debugger. */
+  exceptionSnapshot(type: string | undefined, frames: number, locals: number): void {
+    this.snapshots++;
+    const kind = debuggerKind(type);
+    if (this.snapshotted.has(kind)) return;
+    this.snapshotted.add(kind);
+    this.record('exception_snapshot', { debugger: kind, frames, locals });
+  }
+
+  /** A local test run finished and was read for failures: counted, and sent once a session for each runner. */
+  testRun(framework: string | undefined, failed: number, fixed: number): void {
+    this.testRuns++;
+    this.testsFailed += failed;
+    const kind = (TEST_FRAMEWORKS as readonly string[]).includes(framework ?? '') ? framework! : 'other';
+    if (this.testFrameworks.has(kind)) return;
+    this.testFrameworks.add(kind);
+    this.record('test_run', { framework: kind, failed, fixed });
   }
 
   /** Whether a terminal came up with shell integration, without which nothing is captured: each outcome once a session for each shell. */
@@ -466,21 +529,21 @@ export class Usage implements vscode.Disposable {
       this.record('perf', { op: 'search', ms, ...(matched !== undefined ? { events: matched } : {}) });
   }
 
-  shared(how: 'all' | 'runs' | 'event', sources: number, events: number): void {
+  shared(how: 'all' | 'runs' | 'event', sources: number, events: number, agentsReady: string[] = []): void {
     this.touch();
     if (this.sharedAt !== undefined && this.sharedCalls === 0) this.unusedShares++;
     this.shares++;
     this.sharedAt = this.now();
     this.sharedCalls = 0;
-    this.record('shared_with_agent', { how, sources, events });
+    this.record('shared_with_agent', { how, sources, events, agents_ready: agentsReady });
     this.milestone('first_share');
   }
 
   /** A window shared from its start, as the one-step setup asked: not something its user did just now. */
-  autoShared(sources: number, events: number): void {
+  autoShared(sources: number, events: number, agentsReady: string[] = []): void {
     this.sharedAt = this.now();
     this.sharedCalls = 0;
-    this.record('shared_with_agent', { how: 'auto', sources, events });
+    this.record('shared_with_agent', { how: 'auto', sources, events, agents_ready: agentsReady });
   }
 
   sharingStopped(by: 'user' | 'closed' = 'user'): void {
@@ -597,6 +660,7 @@ export class Usage implements vscode.Disposable {
     const source = this.summarySource;
     const connections = source?.connections() ?? {};
     const quality = source?.quality?.();
+    const agentSessions = source?.agentSessions?.();
     this.record('session_summary', {
       active_minutes: this.activeMinutes.size * 60_000,
       session_length: this.now() - this.startedAt,
@@ -623,6 +687,13 @@ export class Usage implements vscode.Disposable {
       tool_calls: this.toolCalls,
       unused_shares: this.unusedShares + (this.sharedAt !== undefined && this.sharedCalls === 0 ? 1 : 0),
       clients_used: [...this.clients],
+      ...(source?.captureDefault ? { capture_default: source.captureDefault() } : {}),
+      ...(source?.runtimeErrors ? { runtime_errors: source.runtimeErrors() } : {}),
+      test_runs: this.testRuns,
+      tests_failed: this.testsFailed,
+      exception_snapshots: this.snapshots,
+      ...(agentSessions ? { agent_sessions: agentSessions.sessions, agents_followed: agentSessions.agents } : {}),
+      debuggers: [...this.debuggers],
     });
   }
 
@@ -669,7 +740,9 @@ export class Usage implements vscode.Disposable {
    */
   private requeue(batch: QueuedEvent[], id: string): void {
     if (this.disposed || !this.enabled || id !== this.id) return;
-    const again = batch.filter((item) => !item.retried && !item.distinctId).map((item) => ({ ...item, retried: true }));
+    const again = batch
+      .filter((item) => !item.distinctId && (item.failures ?? 0) + 1 < SEND_ATTEMPTS)
+      .map((item) => ({ ...item, failures: (item.failures ?? 0) + 1 }));
     this.queue = [...again, ...this.queue].slice(-QUEUE_LIMIT);
   }
 
@@ -713,6 +786,8 @@ export class Usage implements vscode.Disposable {
   close(): Promise<void> {
     if (this.disposed) return Promise.resolve();
     if (!this.closing) {
+      // A window closed before activation reported its time is still counted.
+      this.activated();
       this.sharingStopped('closed');
       this.sendSummary();
       // Disposed once the last batch is out, so Show Usage Data still lists it.
@@ -728,6 +803,7 @@ export class Usage implements vscode.Disposable {
     if (this.disposed) return;
     this.disposed = true;
     clearInterval(this.flushTimer);
+    clearTimeout(this.activationTimer);
     clearTimeout(this.helpfulTimer);
     clearInterval(this.summaryTimer);
     for (const subscription of this.subscriptions) subscription.dispose();

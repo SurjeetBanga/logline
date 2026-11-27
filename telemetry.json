@@ -62,7 +62,12 @@
     },
     "surjeetbanga.logline/activated": {
       "owner": "SurjeetBanga",
-      "comment": "Logline started in a window."
+      "comment": "Logline started in a window; ms is how long activation took, and is left out when it did not finish.",
+      "ms": {
+        "classification": "SystemMetaData",
+        "purpose": "PerformanceAndHealth",
+        "comment": "Milliseconds, bucketed."
+      }
     },
     "surjeetbanga.logline/active_day": {
       "owner": "SurjeetBanga",
@@ -103,6 +108,72 @@
         "classification": "SystemMetaData",
         "purpose": "FeatureInsight",
         "comment": "Whether the capture starts by itself, as debug, terminal, and OpenTelemetry captures do."
+      },
+      "by_default": {
+        "classification": "SystemMetaData",
+        "purpose": "FeatureInsight",
+        "comment": "For a terminal: true when capture is on only because nobody set logline.captureTerminals."
+      }
+    },
+    "surjeetbanga.logline/debug_session": {
+      "owner": "SurjeetBanga",
+      "comment": "A debug session started; once a session for each kind of debugger.",
+      "debugger": {
+        "classification": "SystemMetaData",
+        "purpose": "FeatureInsight",
+        "comment": "One of: node, browser, extension_host, python, dotnet, java, go, cpp, rust, php, ruby, dart, or other."
+      }
+    },
+    "surjeetbanga.logline/exception_snapshot": {
+      "owner": "SurjeetBanga",
+      "comment": "What a program held when its debugger stopped on an exception was recorded; once a session for each kind of debugger. Never a value, name, or path.",
+      "debugger": {
+        "classification": "SystemMetaData",
+        "purpose": "FeatureInsight",
+        "comment": "One of: node, browser, extension_host, python, dotnet, java, go, cpp, rust, php, ruby, dart, or other."
+      },
+      "frames": {
+        "classification": "SystemMetaData",
+        "purpose": "FeatureInsight",
+        "comment": "Frames recorded. A count, bucketed (0, 1-9, 10-99, ...)."
+      },
+      "locals": {
+        "classification": "SystemMetaData",
+        "purpose": "FeatureInsight",
+        "comment": "Variables recorded. A count, bucketed (0, 1-9, 10-99, ...)."
+      }
+    },
+    "surjeetbanga.logline/test_run": {
+      "owner": "SurjeetBanga",
+      "comment": "A local test run failed or fixed tests; once a session for each test runner. Never a test name, file, or command.",
+      "framework": {
+        "classification": "SystemMetaData",
+        "purpose": "FeatureInsight",
+        "comment": "One of: vitest, jest, node, tap, pytest, go, junit, dotnet, or other."
+      },
+      "failed": {
+        "classification": "SystemMetaData",
+        "purpose": "FeatureInsight",
+        "comment": "Tests it failed. A count, bucketed (0, 1-9, 10-99, ...)."
+      },
+      "fixed": {
+        "classification": "SystemMetaData",
+        "purpose": "FeatureInsight",
+        "comment": "Tests an earlier run of its command failed that it passed. A count, bucketed (0, 1-9, 10-99, ...)."
+      }
+    },
+    "surjeetbanga.logline/log_inserted": {
+      "owner": "SurjeetBanga",
+      "comment": "Insert Log added a log line. Never the expression or the file.",
+      "language": {
+        "classification": "SystemMetaData",
+        "purpose": "FeatureInsight",
+        "comment": "One of: js, python, go, java, kotlin, scala, groovy, csharp, rust, ruby, php, swift, or dart."
+      },
+      "styled": {
+        "classification": "SystemMetaData",
+        "purpose": "FeatureInsight",
+        "comment": "true when it used the logging call the file already used, false for the language's own print."
       }
     },
     "surjeetbanga.logline/panel_opened": {
@@ -219,6 +290,11 @@
         "classification": "SystemMetaData",
         "purpose": "FeatureInsight",
         "comment": "A count, bucketed (0, 1-9, 10-99, ...)."
+      },
+      "agents_ready": {
+        "classification": "SystemMetaData",
+        "purpose": "FeatureInsight",
+        "comment": "Some of: host, claude, codex, or copilot."
       }
     },
     "surjeetbanga.logline/sharing_stopped": {
@@ -250,6 +326,16 @@
         "classification": "SystemMetaData",
         "purpose": "FeatureInsight",
         "comment": "One of: copilot, claude, codex, copy."
+      },
+      "from": {
+        "classification": "SystemMetaData",
+        "purpose": "FeatureInsight",
+        "comment": "One of: analyze, inspector, editor, palette, or again."
+      },
+      "ci": {
+        "classification": "SystemMetaData",
+        "purpose": "FeatureInsight",
+        "comment": "true when the error is a test that failed in CI."
       }
     },
     "surjeetbanga.logline/investigate_outcome": {
@@ -385,7 +471,7 @@
       "op": {
         "classification": "SystemMetaData",
         "purpose": "FeatureInsight",
-        "comment": "One of: activate, first_render, search, import."
+        "comment": "One of: first_render, search, or import."
       },
       "ms": {
         "classification": "SystemMetaData",
@@ -683,6 +769,46 @@
         "classification": "SystemMetaData",
         "purpose": "FeatureInsight",
         "comment": "The share of recent events with several lines, in a range."
+      },
+      "capture_default": {
+        "classification": "SystemMetaData",
+        "purpose": "FeatureInsight",
+        "comment": "true when terminal capture was on only because nobody set it."
+      },
+      "runtime_errors": {
+        "classification": "SystemMetaData",
+        "purpose": "FeatureInsight",
+        "comment": "Runtime errors and failed tests marked in the editor. A count, bucketed (0, 1-9, 10-99, ...)."
+      },
+      "test_runs": {
+        "classification": "SystemMetaData",
+        "purpose": "FeatureInsight",
+        "comment": "Finished local test runs that failed or fixed a test. A count, bucketed (0, 1-9, 10-99, ...)."
+      },
+      "tests_failed": {
+        "classification": "SystemMetaData",
+        "purpose": "FeatureInsight",
+        "comment": "Tests those runs failed. A count, bucketed (0, 1-9, 10-99, ...)."
+      },
+      "exception_snapshots": {
+        "classification": "SystemMetaData",
+        "purpose": "FeatureInsight",
+        "comment": "Exception snapshots recorded. A count, bucketed (0, 1-9, 10-99, ...)."
+      },
+      "agent_sessions": {
+        "classification": "SystemMetaData",
+        "purpose": "FeatureInsight",
+        "comment": "Agent sessions shown. A count, bucketed (0, 1-9, 10-99, ...)."
+      },
+      "agents_followed": {
+        "classification": "SystemMetaData",
+        "purpose": "FeatureInsight",
+        "comment": "Some of: claude-code, codex, copilot."
+      },
+      "debuggers": {
+        "classification": "SystemMetaData",
+        "purpose": "FeatureInsight",
+        "comment": "Some of: node, browser, extension_host, python, dotnet, java, go, cpp, rust, php, ruby, dart, or other."
       }
     },
     "surjeetbanga.logline/survey sent": {

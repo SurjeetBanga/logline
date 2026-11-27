@@ -130,8 +130,14 @@ export async function readSnapshot(request: Request, threadId: number): Promise<
   return { type, message, frames };
 }
 
+/** What usage counts learn from debugging: which debugger a session used, and the size of a snapshot. */
+export interface DebugUsage {
+  debugSession(type: string | undefined): void;
+  exceptionSnapshot(type: string | undefined, frames: number, locals: number): void;
+}
+
 /** Observe every debug adapter's output events and session lifecycle. */
-export function registerDebugCapture(capture: DebugCapture): vscode.Disposable[] {
+export function registerDebugCapture(capture: DebugCapture, usage?: DebugUsage): vscode.Disposable[] {
   const debug = (vscode as unknown as { debug?: DebugApi }).debug;
   if (!debug?.registerDebugAdapterTrackerFactory) return [];
   const disposables: vscode.Disposable[] = [
@@ -153,6 +159,7 @@ export function registerDebugCapture(capture: DebugCapture): vscode.Disposable[]
           return true;
         };
         capture.start(describeSession(session, stop, pause));
+        usage?.debugSession(session.type);
         return {
           onWillReceiveMessage(message: unknown) {
             const request = message as { type?: string; command?: string } | undefined;
@@ -175,7 +182,11 @@ export function registerDebugCapture(capture: DebugCapture): vscode.Disposable[]
                 capture.snapshots
               )
                 void readSnapshot((command, args) => session.customRequest(command, args), threadId).then(
-                  (snapshot) => snapshot && capture.snapshot(session.id, snapshot),
+                  (snapshot) => {
+                    if (!snapshot || !capture.snapshot(session.id, snapshot)) return;
+                    const locals = snapshot.frames.reduce((sum, frame) => sum + frame.variables.length, 0);
+                    usage?.exceptionSnapshot(session.type, snapshot.frames.length, locals);
+                  },
                 );
             } else if (event.event === 'continued') stopped = false;
           },
