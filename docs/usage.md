@@ -364,7 +364,19 @@ Logline indexes logging calls in workspace source files: calls such as `logger.i
 
 Each captured event is attributed to a statement by the code location it reports, when it reports one: the debugger's output location, OpenTelemetry `code.filepath`/`code.lineno` (or `code.file.path`/`code.line.number`), Log4j and Go `source.file`/`source.line`, Python `pathname`/`lineno`, ECS `log.origin.file.*`, or a `caller` such as `pkg/handler.go:42`. Otherwise the message text is matched against the statement's literal text. Short or generic templates (fewer than six distinctive characters) are only matched by location. A message that two statements explain equally well is not attributed to either.
 
-Statements that produced retained events show a CodeLens such as **12 hits · 2 errors · last 3s ago**; click it to filter the Logs panel to those events. When a statement's events report how long something took, in `durationMs`, `duration`, `duration_ms`, or `responseTime` (the fields `durationMs:>200` searches), the lens shows it too: **1,204 hits · p50 12 ms · p95 180 ms**. Percentiles appear once there are at least 5 durations; before that the lens shows the value or the range. They cover the statement's latest 256 retained events that reported a non-negative number, and like the counts, they change as events are evicted. Hover over the statement to see its three most recent messages, how they were matched, and its p50, p95, p99, and maximum duration. With `logline.logLenses` set to `codelens+gutter`, statements that logged errors are also marked in the gutter and overview ruler. Counts cover the retained events and change as events arrive or are evicted; **Clear logs** resets them. Open events offer **Open code · file:line** to jump to the statement behind them, and **Logline: Show Log Statements That Have Not Logged** lists statements in the active file without retained events, which helps when a code path was never reached. Set `logline.logLenses` to `off` to stop indexing.
+Statements that produced retained events show a CodeLens such as **12 hits · 2 errors · last 3s ago**; click it to filter the Logs panel to those events. When a statement's events report how long something took, in `durationMs`, `duration`, `duration_ms`, or `responseTime` (the fields `durationMs:>200` searches), the lens shows it too: **1,204 hits · p50 12 ms · p95 180 ms**. Percentiles appear once there are at least 5 durations; before that the lens shows the value or the range. They cover the statement's latest 256 retained events that reported a non-negative number, and like the counts, they change as events are evicted. Hover over the statement to see its latest values (up to three, newest first, each with how long ago), its p50, p95, p99, and maximum duration, and the actions **Show in Logs**, **Copy value**, which copies the full, redacted latest value, and **Break here**, which adds a debugger breakpoint on the statement. With `logline.inlineValues` off, the hover lists the statement's three most recent messages and how they were matched instead. With `logline.logLenses` set to `codelens+gutter`, statements that logged errors are also marked in the gutter and overview ruler. Counts cover the retained events and change as events arrive or are evicted; **Clear logs** resets them. Open events offer **Open code · file:line** to jump to the statement behind them, and **Logline: Show Log Statements That Have Not Logged** lists statements in the active file without retained events, which helps when a code path was never reached. Set `logline.logLenses` to `off` to stop indexing.
+
+## Inline values
+
+With `logline.inlineValues` on (the default) and `logline.logLenses` not `off`, Logline shows what a log statement logged last at the end of its line in the editor, as faded italic text in the editor's inlay hint colour. It appears for every statement that produced retained events, and in the error colour when the statement's latest event was an error or fatal.
+
+The value is the part of the event that the statement added:
+
+- For a JSON event, the fields beyond the ones loggers add to every event (level, time, message, pid, hostname, service, trace ids, and similar). One field shows its value alone, such as `{"id":42}`; several show as a JSON object, such as `{"cartId":"c_81","items":3}`.
+- For a key=value (logfmt) event, the `key=value` pairs; one field shows its value alone.
+- For plain text, the values that filled the message's placeholders, joined by ` · `. `logger.warn("no card on file for user %s", user.id)` logging `no card on file for user u_42` shows `u_42`. For a call like `console.log("total", total)`, it is what was printed after the text, such as `19.9`. A message that is only its text shows nothing.
+
+Values are always redacted (secrets, credential fields, and `logline.redactionFields`, replaced with `logline.redactionReplacement`), even when `logline.redactExports` is off, and are cut to 60 characters with `…`. Editing a line hides its value until the statement logs again.
 
 ## Insert logs
 
@@ -374,7 +386,7 @@ The line uses the logging call the file already uses most, such as `logger.info`
 
 The line goes after the statement at the cursor, following a statement that spans several lines. When that statement opens a block, the line goes inside the block; before a `return` or `throw`, it goes above it so that it runs. Every inserted line ends in a `// logline` comment (`# logline` in Python and Ruby), which is how Logline recognises it later and never touches code you wrote.
 
-Once an inserted line has logged and `logline.logLenses` is on, its CodeLens leads with the latest value it logged: **order = {"id":42} · 3 hits · last 1s ago**.
+Once an inserted line has logged and `logline.logLenses` is on, its value appears at the end of the line, named: `order = {"id":42}`. Its CodeLens then keeps the counts only, such as **3 hits · last 1s ago**. With `logline.inlineValues` off, the CodeLens leads with the value instead: **order = {"id":42} · 3 hits · last 1s ago**.
 
 To remove inserted lines, run **Logline: Remove Inserted Logs in This File** for the active editor, or **Logline: Remove Inserted Logs in Workspace**. The workspace command finds marked lines in workspace source files, skipping dependency and build folders such as `node_modules`, asks for confirmation, removes them, and saves the files that had no unsaved changes before. A trash button in the Source Control view's title runs it while an open file has inserted lines, or this window inserted some since the last workspace removal.
 
@@ -582,6 +594,7 @@ Settings are grouped the same way in the Settings editor (**More actions → Set
 | Setting | Default | Description |
 | --- | --- | --- |
 | `logline.logLenses` | `codelens` | `off`, `codelens`, or `codelens+gutter`: show activity for log statements in the editor. |
+| `logline.inlineValues` | `true` | Show the latest value each log statement logged at the end of its line in the editor. Needs `logline.logLenses` not `off`. |
 | `logline.logLensMaxFiles` | `5000` | Workspace source files scanned for log statements; files that events report are indexed on demand beyond it. |
 | `logline.logDoctor` | `all` | `off`, `security` (secrets and personal data), or `all`: report problems with log statements in the Problems panel. |
 | `logline.runtimeErrors` | `inline` | `inline`, `problems`, or `off`: mark the line that raised each captured error, after the line and in the Problems panel. |

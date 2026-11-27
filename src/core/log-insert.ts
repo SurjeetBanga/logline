@@ -462,8 +462,8 @@ export function insertedLines(text: string): number[] {
   return found;
 }
 
-// Keys loggers add to every event, which say nothing about the logged value.
-const META = new Set([
+/** Keys loggers add to every event, which say nothing about the logged value. */
+export const META = new Set([
   'level',
   'lvl',
   'severity',
