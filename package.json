@@ -364,6 +364,16 @@
         "category": "Logline"
       },
       {
+        "command": "logline.copyLogValue",
+        "title": "Copy Logged Value",
+        "category": "Logline"
+      },
+      {
+        "command": "logline.breakAtLogSite",
+        "title": "Break on Log Statement",
+        "category": "Logline"
+      },
+      {
         "command": "logline.showRuntimeError",
         "title": "Show Runtime Error in Logs",
         "category": "Logline"
@@ -427,6 +437,14 @@
         },
         {
           "command": "logline.showLogSite",
+          "when": "false"
+        },
+        {
+          "command": "logline.copyLogValue",
+          "when": "false"
+        },
+        {
+          "command": "logline.breakAtLogSite",
           "when": "false"
         },
         {
@@ -1542,12 +1560,18 @@
             "order": 1,
             "markdownDescription": "Connect log statements in source code to captured events. Logline indexes logging calls in up to #logline.logLensMaxFiles# workspace source files and attributes each event by the code location it reports or by its message text."
           },
+          "logline.inlineValues": {
+            "type": "boolean",
+            "default": true,
+            "order": 2,
+            "markdownDescription": "Show what each log statement logged last at the end of its line: the fields its event added, or the values that filled its message's placeholders, redacted and cut to 60 characters. Hover for its latest values, **Copy value**, and **Break here**. Needs #logline.logLenses#."
+          },
           "logline.logLensMaxFiles": {
             "type": "integer",
             "default": 5000,
             "minimum": 100,
             "maximum": 50000,
-            "order": 2,
+            "order": 3,
             "markdownDescription": "Most workspace source files scanned for log statements when log lenses start. Files that events report as their origin are indexed on demand beyond this limit."
           },
           "logline.logDoctor": {
@@ -1563,7 +1587,7 @@
               "Also report errors logged without the caught exception, statements that produce most of the log volume, and values formatted into message text."
             ],
             "default": "all",
-            "order": 3,
+            "order": 4,
             "markdownDescription": "Report problems with log statements in the Problems panel, based on the events they actually logged. Requires #logline.logLenses#. Values are masked in every report. Add a `logline-ignore` comment on or above a statement to silence it."
           },
           "logline.runtimeErrors": {
@@ -1580,7 +1604,7 @@
             ],
             "default": "inline",
             "markdownDescription": "Mark the line of your code that raised each captured error, with how often and how recently it failed, using the error's stack trace. Frames in dependencies and the runtime are skipped.",
-            "order": 4
+            "order": 5
           }
         }
       },

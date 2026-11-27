@@ -627,6 +627,28 @@ timed('sites', 'Index 200 source files and attribute 1,000 events', async () => 
   };
 });
 
+timed('inline-values', 'Read the values 200 log statements show after their lines, structured and plain', async () => {
+  const { siteValue } = await load('core/inline-value.js');
+  const { parseLogLine } = await load('core/log-event.js');
+  // An editor's worth of statements: half log JSON with fields of their own, half fill placeholders in plain text.
+  const statements = Array.from({ length: 200 }, (_, s) =>
+    s % 2
+      ? {
+          site: { template: `order … rejected by rule${s} after … tries` },
+          event: parseLogLine(`order ${s} rejected by rule${s} after ${s % 7} tries`, 'stdout', s + 1, receivedAt),
+        }
+      : {
+          site: { template: `checkout${s} started` },
+          event: parseLogLine(line(s + 1).replace('"request', `"checkout${s} started`), 'stdout', s + 1, receivedAt),
+        },
+  );
+  return () => {
+    let shown = 0;
+    for (const { site, event } of statements) if (siteValue(event, site)) shown++;
+    assert.equal(shown, statements.length);
+  };
+});
+
 timed('sites-shared', 'Attribute 1,000 events among 4,000 statements that share their words', async () => {
   const { LogSiteIndex, extractLogSites } = await load('core/log-sites.js');
   const { parseLogLine } = await load('core/log-event.js');

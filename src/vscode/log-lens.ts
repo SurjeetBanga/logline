@@ -14,6 +14,8 @@ import {
 import type { LogStore } from '../core/log-store';
 import type { Settings } from '../core/settings';
 import { isInsertedLine, loggedValue } from '../core/log-insert';
+import { shortValue, siteValue } from '../core/inline-value';
+import type { RedactionOptions } from '../core/redaction';
 import { openSourceLocation } from './source-navigation';
 
 export type LensMode = 'off' | 'codelens' | 'codelens+gutter';
@@ -86,6 +88,13 @@ export class LogLens implements vscode.CodeLensProvider, vscode.HoverProvider, v
   private readonly indexing: vscode.Disposable[] = [];
   private readonly pendingDocuments = new Map<string, ReturnType<typeof setTimeout>>();
   private decoration?: vscode.TextEditorDecorationType;
+  // What each statement logged last, after its line; a statement that logged an error has its own colour.
+  private valueDecoration?: vscode.TextEditorDecorationType;
+  private errorValueDecoration?: vscode.TextEditorDecorationType;
+  // Each statement's latest value, kept until it logs again.
+  private readonly values = new Map<string, { id: number; value: string | undefined }>();
+  // Statements whose line was edited since they last logged, with the event shown then, until a newer one.
+  private readonly dismissed = new Map<string, number>();
   private mode: LensMode = 'off';
   private refreshTimer?: ReturnType<typeof setTimeout>;
   private clockTimer?: ReturnType<typeof setInterval>;
@@ -109,15 +118,32 @@ export class LogLens implements vscode.CodeLensProvider, vscode.HoverProvider, v
         counted(this.sources.usage, 'logline.showLogSite', (id: unknown) => this.showSite(id)),
       ),
       vscode.commands.registerCommand(
+        'logline.copyLogValue',
+        counted(this.sources.usage, 'logline.copyLogValue', (id: unknown) => this.copyValue(id)),
+      ),
+      vscode.commands.registerCommand(
+        'logline.breakAtLogSite',
+        counted(this.sources.usage, 'logline.breakAtLogSite', (id: unknown) => this.breakAt(id)),
+      ),
+      vscode.commands.registerCommand(
         'logline.showQuietLogStatements',
         counted(this.sources.usage, 'logline.showQuietLogStatements', () => this.showQuietStatements()),
       ),
       vscode.window.onDidChangeVisibleTextEditors(() => this.decorate()),
       vscode.workspace.onDidChangeConfiguration((event) => {
         if (event.affectsConfiguration('logline.logLenses')) this.applyMode();
+        else if (event.affectsConfiguration('logline.inlineValues')) {
+          this.changeEmitter.fire();
+          this.decorate();
+        }
       }),
     );
     this.applyMode();
+  }
+
+  /** Whether each log statement shows what it logged last after its line. */
+  get inlineValues(): boolean {
+    return this.enabled && this.sources.config.get('inlineValues', true);
   }
 
   get enabled(): boolean {
@@ -201,7 +227,7 @@ export class LogLens implements vscode.CodeLensProvider, vscode.HoverProvider, v
       const stats = this.sources.tracker.stats.get(site.id);
       if (!stats?.hits || site.line > document.lineCount) continue;
       const range = new vscode.Range(site.line - 1, 0, site.line - 1, 0);
-      const value = this.insertedValue(document, site, stats);
+      const value = this.inlineValues ? undefined : this.insertedValue(document, site, stats);
       lenses.push(
         new vscode.CodeLens(range, {
           title: value ? `${value} · ${lensTitle(stats, now).replace('$(pulse) ', '')}` : lensTitle(stats, now),
@@ -220,7 +246,6 @@ export class LogLens implements vscode.CodeLensProvider, vscode.HoverProvider, v
     const stats = site && this.sources.tracker.stats.get(site.id);
     if (!site || !stats?.hits) return undefined;
     const markdown = new vscode.MarkdownString(undefined, true);
-    markdown.isTrusted = { enabledCommands: ['logline.showLogSite'] };
     const how =
       stats.exact === stats.hits
         ? 'matched by the code location in each event'
@@ -238,15 +263,75 @@ export class LogLens implements vscode.CodeLensProvider, vscode.HoverProvider, v
         `Duration ${spread}, from the latest ${durations.count.toLocaleString()} ${durations.count === 1 ? 'event' : 'events'} with \`durationMs\` or a similar field\n\n`,
       );
     }
-    for (const sample of [...stats.samples].reverse()) {
-      markdown.appendMarkdown(`- \`${sample.level.toUpperCase()}\` `);
-      markdown.appendText(sample.message);
-      markdown.appendMarkdown('\n');
+    const values = this.inlineValues ? this.recentValues(site, stats) : [];
+    if (values.length) {
+      const now = Date.now();
+      for (const { time, value } of values) {
+        markdown.appendMarkdown(`- ${time === undefined ? '' : `${formatAgo(now - time)} · `}`);
+        markdown.appendMarkdown(`\`${shortValue(value, 120).replace(/`/g, "'")}\`\n`);
+      }
+    } else {
+      for (const sample of [...stats.samples].reverse()) {
+        markdown.appendMarkdown(`- \`${sample.level.toUpperCase()}\` `);
+        markdown.appendText(sample.message);
+        markdown.appendMarkdown('\n');
+      }
     }
-    markdown.appendMarkdown(
-      `\n[Show in Logs](command:logline.showLogSite?${encodeURIComponent(JSON.stringify([site.id]))})`,
-    );
+    const args = encodeURIComponent(JSON.stringify([site.id]));
+    markdown.isTrusted = { enabledCommands: ['logline.showLogSite', 'logline.copyLogValue', 'logline.breakAtLogSite'] };
+    markdown.appendMarkdown(`\n[Show in Logs](command:logline.showLogSite?${args})`);
+    if (values.length) markdown.appendMarkdown(` · [Copy value](command:logline.copyLogValue?${args})`);
+    if (this.uris.has(site.file)) markdown.appendMarkdown(` · [Break here](command:logline.breakAtLogSite?${args})`);
     return new vscode.Hover(markdown);
+  }
+
+  /** Redaction for values shown in the editor: always on, with the fields and replacement the user set. */
+  private redaction(): RedactionOptions {
+    return {
+      enabled: true,
+      fields: this.sources.config.get<string[]>('redactionFields', []),
+      replacement: this.sources.config.get('redactionReplacement', '[REDACTED]'),
+    };
+  }
+
+  /** What a statement logged last, in full, read once per event. */
+  private latestValue(site: LogSite, stats: SiteStats): string | undefined {
+    const latest = stats.samples[stats.samples.length - 1];
+    if (!latest) return undefined;
+    const cached = this.values.get(site.id);
+    if (cached?.id === latest.id) return cached.value;
+    const event = this.sources.store.find(latest.id);
+    const value = event ? siteValue(event, site, this.redaction()) : undefined;
+    this.values.set(site.id, { id: latest.id, value });
+    return value;
+  }
+
+  /** The values of a statement's retained samples, newest first. */
+  private recentValues(site: LogSite, stats: SiteStats): { time?: number; value: string }[] {
+    const redaction = this.redaction();
+    return [...stats.samples].reverse().flatMap((sample) => {
+      const event = this.sources.store.find(sample.id);
+      const value = event && siteValue(event, site, redaction);
+      return value ? [{ time: sample.time, value }] : [];
+    });
+  }
+
+  private copyValue(id: unknown): void {
+    const site = typeof id === 'string' ? this.sources.index.find(id) : undefined;
+    const stats = site && this.sources.tracker.stats.get(site.id);
+    const value = site && stats ? this.latestValue(site, stats) : undefined;
+    if (value !== undefined) void vscode.env.clipboard.writeText(value);
+  }
+
+  private breakAt(id: unknown): void {
+    const site = typeof id === 'string' ? this.sources.index.find(id) : undefined;
+    const uri = site && this.uris.get(site.file);
+    if (!site || !uri) return;
+    const position = new vscode.Position(site.line - 1, Math.max(0, site.column - 1));
+    vscode.debug.addBreakpoints([new vscode.SourceBreakpoint(new vscode.Location(uri, position))]);
+    void vscode.window.showInformationMessage(
+      'Logline added a breakpoint on this log statement. Run it under the debugger to stop there before it logs.',
+    );
   }
 
   /**
@@ -287,6 +372,8 @@ export class LogLens implements vscode.CodeLensProvider, vscode.HoverProvider, v
   dispose(): void {
     this.disposed = true;
     this.stopIndexing();
+    this.valueDecoration?.dispose();
+    this.errorValueDecoration?.dispose();
     for (const disposable of this.disposables) disposable.dispose();
     this.changeEmitter.dispose();
   }
@@ -349,17 +436,37 @@ export class LogLens implements vscode.CodeLensProvider, vscode.HoverProvider, v
       this.decoration.dispose();
       this.decoration = undefined;
     }
+    if (this.enabled && !this.valueDecoration) {
+      const after = { margin: '0 0 0 2em', fontStyle: 'italic' };
+      this.valueDecoration = vscode.window.createTextEditorDecorationType({
+        after: {
+          ...after,
+          color: new vscode.ThemeColor('editorInlayHint.foreground'),
+          backgroundColor: new vscode.ThemeColor('editorInlayHint.background'),
+        },
+      });
+      this.errorValueDecoration = vscode.window.createTextEditorDecorationType({
+        after: { ...after, color: new vscode.ThemeColor('editorError.foreground') },
+      });
+    } else if (!this.enabled && this.valueDecoration) {
+      this.valueDecoration.dispose();
+      this.errorValueDecoration?.dispose();
+      this.valueDecoration = this.errorValueDecoration = undefined;
+    }
     if (this.enabled && !wasEnabled) this.startIndexing();
     else if (!this.enabled && wasEnabled) {
       this.stopIndexing();
       this.sources.index.clear();
       this.sources.tracker.reset();
+      this.values.clear();
+      this.dismissed.clear();
     }
     this.changeEmitter.fire();
     this.decorate();
   }
 
   private decorate(): void {
+    this.decorateValues();
     if (!this.decoration) return;
     for (const editor of vscode.window.visibleTextEditors ?? []) {
       const ranges = this.sources.index
@@ -371,6 +478,63 @@ export class LogLens implements vscode.CodeLensProvider, vscode.HoverProvider, v
         .map((site) => new vscode.Range(site.line - 1, 0, site.line - 1, 0));
       editor.setDecorations(this.decoration, ranges);
     }
+  }
+
+  /** Put each statement's latest value after its line, in the visible editors only. */
+  private decorateValues(): void {
+    if (!this.valueDecoration || !this.errorValueDecoration) return;
+    const on = this.inlineValues;
+    for (const editor of vscode.window.visibleTextEditors ?? []) {
+      const plain: vscode.DecorationOptions[] = [];
+      const errors: vscode.DecorationOptions[] = [];
+      if (on) {
+        for (const site of this.sources.index.sitesIn(this.fileId(editor.document.uri))) {
+          const stats = this.sources.tracker.stats.get(site.id);
+          const latest = stats?.samples[stats.samples.length - 1];
+          if (!stats || !latest || site.line > editor.document.lineCount) continue;
+          if ((this.dismissed.get(site.id) ?? -1) >= latest.id) continue;
+          const value = this.lineValue(editor.document, site, stats);
+          if (!value) continue;
+          const line = editor.document.lineAt(site.line - 1);
+          const range = new vscode.Range(line.range.end, line.range.end);
+          const error = latest.level === 'error' || latest.level === 'fatal';
+          (error ? errors : plain).push({ range, renderOptions: { after: { contentText: value } } });
+        }
+      }
+      editor.setDecorations(this.valueDecoration, plain);
+      editor.setDecorations(this.errorValueDecoration, errors);
+    }
+  }
+
+  /** The text after a statement's line: its value, named for a line Insert Log wrote. */
+  private lineValue(document: vscode.TextDocument, site: LogSite, stats: SiteStats): string | undefined {
+    const value = this.latestValue(site, stats);
+    if (value === undefined) return undefined;
+    // Insert Log labels its line `checkout: order`, which names the value.
+    const name = isInsertedLine(document.lineAt(site.line - 1).text)
+      ? (site.literals[0] ?? '').match(/:\s*([^:]+?)\s*=?\s*$/)?.[1]
+      : undefined;
+    return shortValue(name && !name.startsWith('reached line') ? `${name} = ${value}` : value);
+  }
+
+  /** An edited line hides its value until the statement logs again. */
+  private hideEdited(event: vscode.TextDocumentChangeEvent): void {
+    if (!this.inlineValues || !event.contentChanges.length) return;
+    const sites = this.sources.index.sitesIn(this.fileId(event.document.uri));
+    if (!sites.length) return;
+    let changed = false;
+    for (const change of event.contentChanges) {
+      const first = change.range.start.line + 1;
+      const last = change.range.end.line + 1;
+      for (const site of sites) {
+        if (site.line < first || site.line > last) continue;
+        const latest = this.sources.tracker.stats.get(site.id)?.samples.at(-1);
+        if (!latest || this.dismissed.get(site.id) === latest.id) continue;
+        this.dismissed.set(site.id, latest.id);
+        changed = true;
+      }
+    }
+    if (changed) this.decorateValues();
   }
 
   // Multi-root workspaces prefix the folder name, so `src/index.ts` in two
@@ -416,7 +580,10 @@ export class LogLens implements vscode.CodeLensProvider, vscode.HoverProvider, v
         this.sources.index.deleteFile(file);
         this.schedule();
       }),
-      vscode.workspace.onDidChangeTextDocument((event) => this.documentChanged(event.document)),
+      vscode.workspace.onDidChangeTextDocument((event) => {
+        this.hideEdited(event);
+        this.documentChanged(event.document);
+      }),
     );
     // Relative times in CodeLens titles age between bursts of logs.
     this.clockTimer = setInterval(() => {

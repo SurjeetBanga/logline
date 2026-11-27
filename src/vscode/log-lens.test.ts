@@ -76,7 +76,10 @@ const commands = new Map<string, (...args: unknown[]) => unknown>();
 const textDocument = (path: string) => ({
   uri: Uri.file(path),
   lineCount: 6,
-  lineAt: (line: number) => ({ text: files.get(path)?.split('\n')[line] ?? '' }),
+  lineAt: (line: number) => {
+    const text = files.get(path)?.split('\n')[line] ?? '';
+    return { text, range: { end: new Position(line, text.length) } };
+  },
 });
 const files = new Map<string, string>([
   [
@@ -91,12 +94,29 @@ const unscanned = new Map<string, string>([
 const opened: { path: string; line: number }[] = [];
 let configured = 'codelens+gutter';
 let decorations: Range[] = [];
+type ValueDecoration = { range: Range; renderOptions: { after: { contentText: string } } };
+// What each statement shows after its line, by line, and whether it is in the error colour.
+let values = new Map<number, { text: string; error: boolean }>();
 const editor = {
   document: textDocument('/w/src/auth.ts'),
-  setDecorations(_type: unknown, ranges: Range[]) {
-    decorations = ranges;
+  setDecorations(
+    type: { options: { gutterIconPath?: unknown; after?: { color: { id: string } } } },
+    ranges: unknown[],
+  ) {
+    if (type.options.gutterIconPath) {
+      decorations = ranges as Range[];
+      return;
+    }
+    const error = type.options.after?.color.id === 'editorError.foreground';
+    for (const [line, value] of values) if (value.error === error) values.delete(line);
+    for (const item of ranges as ValueDecoration[])
+      values.set(item.range.startLine, { text: item.renderOptions.after.contentText, error });
   },
 };
+let changeText: ((event: unknown) => void) | undefined;
+let inlineValues = true;
+const clipboard: string[] = [];
+const breakpoints: { line: number; character: number }[] = [];
 let pick: ((items: { label: string; site: unknown }[]) => unknown) | undefined;
 const mock = {
   Uri,
@@ -121,18 +141,35 @@ const mock = {
     visibleTextEditors: [editor],
     activeTextEditor: editor,
     onDidChangeVisibleTextEditors: () => ({ dispose() {} }),
-    createTextEditorDecorationType: () => ({ dispose() {} }),
+    createTextEditorDecorationType: (options: unknown) => ({ options, dispose() {} }),
     showInformationMessage: () => undefined,
     showQuickPick: async (items: { label: string; site: unknown }[]) => pick?.(items),
     showTextDocument: async (document: { uri: Uri }, options: { selection: Range }) => {
       opened.push({ path: document.uri.path, line: options.selection.startLine });
     },
   },
+  env: { clipboard: { writeText: async (text: string) => void clipboard.push(text) } },
+  debug: {
+    addBreakpoints: (added: { location: { range: Position } }[]) =>
+      breakpoints.push(...added.map((breakpoint) => breakpoint.location.range)),
+  },
+  SourceBreakpoint: class {
+    constructor(readonly location: unknown) {}
+  },
+  Location: class {
+    constructor(
+      readonly uri: unknown,
+      readonly range: unknown,
+    ) {}
+  },
   workspace: {
     textDocuments: [] as unknown[],
     asRelativePath: (uri: Uri) => uri.path.replace(/^\/w\//, ''),
     onDidChangeConfiguration: () => ({ dispose() {} }),
-    onDidChangeTextDocument: () => ({ dispose() {} }),
+    onDidChangeTextDocument: (listener: (event: unknown) => void) => {
+      changeText = listener;
+      return { dispose() {} };
+    },
     createFileSystemWatcher: () => ({
       onDidChange: () => ({ dispose() {} }),
       onDidCreate: () => ({ dispose() {} }),
@@ -167,6 +204,7 @@ async function harness(maxRows = 100000) {
       tracker,
       config: {
         get<T>(key: string, fallback: T): T {
+          if (key === 'inlineValues') return inlineValues as T;
           return (key === 'logLenses' ? configured : fallback) as T;
         },
       },
@@ -194,6 +232,7 @@ async function harness(maxRows = 100000) {
 const add = (store: LogStore, id: number, line: string) => store.add(parseLogLine(line, 'stdout', id, new Date()));
 
 test('log lenses count events per statement and filter the Logs panel', async () => {
+  inlineValues = false;
   const h = await harness();
   assert.equal(h.index.size, 3);
   add(h.store, 1, '{"level":"info","msg":"user 41 logged in","durationMs":30}');
@@ -229,6 +268,53 @@ test('log lenses count events per statement and filter the Logs panel', async ()
   h.clear();
   h.lens.refresh(Date.now() + 5000);
   assert.deepEqual(h.lens.provideCodeLenses(document as never), []);
+  h.lens.dispose();
+  inlineValues = true;
+});
+
+test('each log statement shows what it logged last after its line, and an edit hides it until it logs again', async () => {
+  values = new Map();
+  const h = await harness();
+  add(h.store, 1, '{"level":"info","msg":"user 41 logged in"}');
+  add(h.store, 2, 'user 42 logged in');
+  add(h.store, 3, '{"level":"error","msg":"login failed for user","user":"bob","token":"abc"}');
+  add(h.store, 4, '{"level":"debug","msg":"session refreshed ok"}');
+  h.lens.refresh(Date.now() + 5000);
+  assert.deepEqual(Object.fromEntries(values), {
+    1: { text: '42', error: false },
+    2: { text: '{"user":"bob","token":"[REDACTED]"}', error: true },
+  });
+  // The value replaces nothing in the CodeLens, which keeps the counts.
+  const document = textDocument('/w/src/auth.ts');
+  assert.match(
+    (h.lens.provideCodeLenses(document as never) as unknown as CodeLens[])[0].command.title,
+    /^\$\(pulse\) 2 hits/,
+  );
+
+  // The hover lists the latest values, newest first, with Copy value and Break here.
+  const hover = h.lens.provideHover(document as never, new Position(1, 4) as never) as unknown as Hover;
+  assert.match(hover.contents.value, /`42`[^]*`41`/);
+  assert.match(hover.contents.value, /\[Copy value\]\(command:logline\.copyLogValue\?[^]*\[Break here\]/);
+  const site = h.index.sitesIn('src/auth.ts').find((item) => item.line === 2)!;
+  await commands.get('logline.copyLogValue')!(site.id);
+  assert.deepEqual(clipboard, ['42']);
+  commands.get('logline.breakAtLogSite')!(site.id);
+  assert.deepEqual(breakpoints, [new Position(1, 2)]);
+
+  changeText!({
+    document,
+    contentChanges: [{ range: { start: new Position(1, 10), end: new Position(1, 10) } }],
+  });
+  assert.equal(values.has(1), false, 'an edited line hides its value');
+  assert.equal(values.has(2), true);
+  add(h.store, 5, 'user 43 logged in');
+  h.lens.refresh(Date.now() + 5000);
+  assert.equal(values.get(1)?.text, '43', 'and shows it again once the statement logs again');
+
+  inlineValues = false;
+  (h.lens as unknown as { decorateValues(): void }).decorateValues();
+  assert.equal(values.size, 0, 'logline.inlineValues off removes them');
+  inlineValues = true;
   h.lens.dispose();
 });
 

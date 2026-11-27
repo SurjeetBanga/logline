@@ -44,6 +44,8 @@ export async function run(): Promise<void> {
       'removeInsertedLogs',
       'removeInsertedLogsInFile',
       'showLogSite',
+      'copyLogValue',
+      'breakAtLogSite',
       'connectAgent',
       'showStatus',
       'about',
