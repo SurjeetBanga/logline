@@ -1806,6 +1806,36 @@ test('the rail selects a run, moves with the arrow keys, and collapses to a stri
   assert.equal(savedStates.at(-1)?.rail, 'collapsed');
 });
 
+test('clicking the selected source again hides its runs, and again shows them', () => {
+  const { get, receive, app } = viewer({ server: 'api' });
+  receive(railSnapshot);
+  assert.equal(rail(get).runs().length, 4, 'All runs and the source’s three runs');
+  assert.equal(rail(get).select('api')!.attributes['aria-expanded'], 'true');
+  rail(get).runs()[1].listeners.get('click')!();
+  assert.equal(app.state.selectedSession, 'run-a');
+
+  rail(get).select('api')!.listeners.get('click')!();
+  assert.equal(rail(get).runs().length, 0);
+  assert.equal(rail(get).select('api')!.attributes['aria-expanded'], 'false');
+  assert.equal(app.state.selectedServer, 'api', 'the source stays selected');
+  assert.equal(app.state.selectedSession, '', 'a hidden run no longer narrows the logs');
+  receive(railSnapshot);
+  assert.equal(rail(get).runs().length, 0, 'a new snapshot keeps them hidden');
+
+  rail(get).select('api')!.listeners.get('click')!();
+  assert.equal(rail(get).runs().length, 4);
+  assert.equal(rail(get).select('api')!.attributes['aria-expanded'], 'true');
+
+  // Hidden, then another source chosen and this one again: its runs show.
+  rail(get).select('api')!.listeners.get('click')!();
+  rail(get).select('terminal-1')!.listeners.get('click')!();
+  assert.equal(rail(get).select('terminal-1')!.attributes['aria-expanded'], 'true');
+  assert.equal(rail(get).select('api')!.attributes['aria-expanded'], undefined, 'only the selected source expands');
+  rail(get).select('api')!.listeners.get('click')!();
+  assert.equal(rail(get).runs().length, 4);
+  assert.equal(rail(get).select('')!.attributes['aria-expanded'], undefined, 'All sources has no runs to hide');
+});
+
 test('the rail is resized by dragging its edge or with the arrow keys, and the width is kept', () => {
   const { get, dom, savedStates } = viewer();
   const handle = get('railResizer');
@@ -5535,7 +5565,9 @@ test('run times in the rail follow the display time zone, and an unknown zone fa
       sessions: railSnapshot.sessions.map((session) => ({ ...session, startedAt })),
     });
   show('Asia/Tokyo');
-  rail(get).select('api')!.listeners.get('click')!({});
+  // Choosing the source shows its runs; clicking it while it is selected would hide them.
+  if (rail(get).select('api')!.attributes['aria-current'] !== 'true')
+    rail(get).select('api')!.listeners.get('click')!({});
   show('Asia/Tokyo');
   const text = () => rail(get).runs()[1].querySelector('.rail-meta')!.textContent;
   assert.ok(text().includes(clock('Asia/Tokyo')), text());

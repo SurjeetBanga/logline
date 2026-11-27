@@ -22,6 +22,7 @@ All notable changes to Logline are documented in this file.
 
 ### Fixes
 
+- Clicking the selected source in the Sources rail again hides its runs, and clicking it once more shows them, so a source with many runs, such as an agent's sessions, can be folded away. Hiding them while a run is selected shows the whole source's logs.
 - With **Datadog syntax** on, a `service:` filter left in the search box naming another service no longer hides every log a run fetches: **Run**, **Tail**, and choosing a service remove it. A `service:` filter is only removed when it names one service that the Datadog query's one service does not contain: a name with a space counts as one name, and a filter or query that uses OR or NOT, a wildcard, or a group is left alone. When a run sent with **Datadog syntax** fetched logs the filter hides, the table says how many were fetched and that the filter hides them, rather than *No matching rows*.
 - Choosing a service when the query has a group such as `service:(a OR b)` replaces the whole group, instead of leaving part of it behind. A group missing its closing parenthesis no longer takes the terms after it with it.
 - Choosing a service keeps a filter typed in the search box but not yet entered, with **Datadog syntax** on or off. A typed filter that is not valid stays in the box, saying why, and the service is still chosen.
