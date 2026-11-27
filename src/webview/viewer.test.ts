@@ -1781,7 +1781,7 @@ test('the Sources rail lists each source with its status, and the runs of the se
 
   view.select('task-build')!.listeners.get('click')!();
   // One command's runs are named by when they started; the command, here its task, is in the title.
-  assert.match(view.runs()[1].title, /^Task: build/, 'a run without a command is named by its task');
+  assert.match(view.runs()[1].title, /^Name\tTask: build/, 'a run without a command is named by its task');
 });
 
 test('the rail selects a run, moves with the arrow keys, and collapses to a strip of icons', () => {
