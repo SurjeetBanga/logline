@@ -83,7 +83,7 @@ export function investigationPrompt(target: InvestigationTarget, context: Prompt
   return [
     `Investigate this ${target.ci ? 'test that failed in CI' : 'error'} with the Logline tools: ${quoted(target.message)}${facts.length ? ` (${facts.join(', ')})` : ''}.`,
     context.skill ? `Follow the ${context.skill} skill.` : '',
-    `Start with event id ${target.eventId}: inspect it, its surrounding logs and its trace, search for other occurrences${target.query ? ` (${searchText(target.query)})` : ''}, and check logs from code changed since the last commit (changed:true).`,
+    `Start with event id ${target.eventId}: inspect it, its surrounding logs and its trace, search for other occurrences${target.query ? ` (\`${searchText(target.query).replace(/`/g, "'")}\`)` : ''}, and check logs from code changed since the last commit (changed:true).`,
     target.ci
       ? "Read the CI job's log around that event: the step, the assertion, and what differs from a local run. Find the cause and fix it. Then run the test locally, confirm it passes and nothing else fails, and say what the next CI run should show. Keep evidence apart from hypotheses."
       : 'Find the cause and fix it. Then reproduce it, wait for fresh logs, and confirm the error is gone and no new errors appeared. Keep evidence apart from hypotheses.',

@@ -226,7 +226,9 @@ export class AgentSessionCapture {
       this.ignore(file);
       return;
     }
-    if (!records.length) return;
+    // A session found outside this folder's own files shows nothing until it says which folder it worked in, so
+    // another project's prompts and commands are never shown, or shared, here.
+    if (!records.length || (!cwd && !followed.exact)) return;
     const { record } = followed;
     const label = followed.parser.label;
     if (label) record.command = label;
