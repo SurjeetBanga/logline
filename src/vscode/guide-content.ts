@@ -17,6 +17,27 @@ export interface GuideRelease {
 
 export const GUIDE_RELEASES: GuideRelease[] = [
   {
+    version: '1.23.0',
+    date: '2026-11-27',
+    highlights: [
+      {
+        title: 'Hand an error to your agent',
+        text: 'Investigate, on an error group in Analyze, an open error, or its mark in the editor, gives Copilot, Claude Code, or Codex the event to start from and asks it to find the cause, fix it, and confirm with fresh logs. Logline then says Fixed locally or Still failing.',
+        section: 'share',
+      },
+      {
+        title: 'Your code shows what happened',
+        text: 'The line that raised a captured error, and a test that failed locally or in CI, is marked in the editor, and each log statement shows what it logged last at the end of its line. Stopped on an exception, the debugger’s locals are recorded beside the logs, redacted.',
+        section: 'inspect',
+      },
+      {
+        title: 'Terminals, agents, and CI with no setup',
+        text: 'Terminal capture is on by default on this machine. Show Agent Sessions puts what Claude Code, Codex, and Copilot did beside your app’s logs, and a GitHub Actions or GitLab CI connection searches the jobs that failed in CI.',
+        section: 'capture',
+      },
+    ],
+  },
+  {
     version: '1.22.0',
     date: '2026-11-23',
     highlights: [
@@ -421,7 +442,7 @@ export const GUIDE_SECTIONS: GuideSection[] = [
     id: 'connections',
     title: 'Connections',
     summary:
-      'Search production logs in Datadog, CloudWatch, Loki, Elasticsearch, Cloud Logging, Postgres, MySQL and Aurora, MongoDB, or SQLite next to your local runs. Every connection is read-only.',
+      'Search production logs in Datadog, CloudWatch, Loki, Elasticsearch, Cloud Logging, GitHub Actions, Postgres, MySQL and Aurora, MongoDB, or SQLite next to your local runs. Every connection is read-only.',
     isNew: true,
   },
   { id: 'search', title: 'Search', summary: 'Turn a noisy stream into the few events you need.' },
@@ -500,7 +521,7 @@ export const GUIDE_CARDS: GuideCard[] = [
     section: 'capture',
     title: 'Debug sessions',
     where: ['Run and Debug', 'F5'],
-    text: 'Debug Console output from every debugger streams in as its own source, and each restart is a new run.',
+    text: 'Debug Console output from every debugger streams in as its own source, and each restart is a new run. When the debugger stops on an exception, the exception and your frames’ locals are recorded, redacted.',
     example: 'logline.captureDebugSessions',
     setting: 'logline.captureDebugSessions',
   },
@@ -625,6 +646,15 @@ export const GUIDE_CARDS: GuideCard[] = [
   },
   {
     section: 'connections',
+    title: 'Search failed CI jobs',
+    where: ['Add Connection', 'GitHub Actions or GitLab CI'],
+    text: 'A GitHub Actions or GitLab CI connection reads the logs of the jobs that failed in the newest failed runs, with your VS Code GitHub sign-in or a GitLab access token. Each failed test is an event of its own, and is marked on its line in the editor.',
+    example: 'kind:test-failure',
+    command: 'logline.addConnection',
+    docs: 'github-actions',
+  },
+  {
+    section: 'connections',
     title: 'Run SQL',
     where: ['Connection controls', 'Run SQL…'],
     text: 'Run a read-only SELECT on a database. Columns named like a time, level, or message are read as those.',
@@ -730,9 +760,25 @@ export const GUIDE_CARDS: GuideCard[] = [
     section: 'inspect',
     title: 'Jump between logs and code',
     where: ['Editor', 'CodeLens above a log call'],
-    text: 'Log statements show how often they fired and their recent values. Click the CodeLens to filter Logs.',
+    text: 'Log statements show how often they fired above them, and what they logged last at the end of their line. Click the CodeLens to filter Logs; hover the value to copy it or break there.',
     example: 'logline.logLenses',
     setting: 'logline.logLenses',
+  },
+  {
+    section: 'inspect',
+    title: 'Errors on the line that threw them',
+    where: ['Editor', 'After the line', 'Problems'],
+    text: 'The line of your code that raised a captured error is marked with the error, how often it happened, and how long ago, and so is a test that failed locally or in CI. Its quick fixes show the error’s events, run the test again, add a breakpoint, or hand it to an agent.',
+    setting: 'logline.runtimeErrors',
+    docs: 'runtime-errors-in-the-editor',
+  },
+  {
+    section: 'inspect',
+    title: 'Insert a log line',
+    where: ['Editor', 'Ctrl+Alt+L (Cmd+Alt+L on macOS)'],
+    text: 'Adds a log line for the expression at the cursor, using the logger the file already uses, and its CodeLens shows the latest value it logged. Remove Inserted Logs in Workspace deletes them all.',
+    command: 'logline.insertLog',
+    docs: 'insert-logs',
   },
   {
     section: 'inspect',
@@ -769,9 +815,9 @@ export const GUIDE_CARDS: GuideCard[] = [
   },
   {
     section: 'traces',
-    title: 'See Codex usage',
+    title: 'See Codex and Claude Code usage',
     where: ['VS Code status bar', 'Logline icon'],
-    text: 'The Logline icon on the right of the VS Code status bar opens the Logs panel. Turn on Codex usage and it shows how much of Codex’s plan limit is used, with each limit, when it resets, and today’s tokens on hover. Codex’s session files are read on this machine only.',
+    text: 'The Logline icon on the right of the VS Code status bar opens the Logs panel. Turn on Codex usage and it shows how much of Codex’s plan limit is used, with each limit, when it resets, and today’s tokens on hover; Show Claude Code Usage adds Claude Code’s tokens of today. Session files are read on this machine only.',
     command: 'logline.enableCodexUsage',
     docs: 'ai-usage-in-the-status-bar',
   },
@@ -820,6 +866,24 @@ export const GUIDE_CARDS: GuideCard[] = [
     text: 'One step turns on terminal capture, shares what Logline captures in every window, and connects the agent found in your editor. It shows what it will do first, and Stop sharing ends it.',
     command: 'logline.setUpForAgent',
     docs: 'set-up-for-your-agent-in-one-step',
+  },
+  {
+    section: 'share',
+    title: 'Investigate an error',
+    where: ['Analyze', 'Error group', 'Investigate'],
+    text: 'Hands one error to Copilot, Claude Code, or Codex with the event to start from and the search for its other occurrences, shared first if it is not yet. Logline then watches the error’s source and says Fixed locally or Still failing.',
+    command: 'logline.investigate',
+    docs: 'investigate-an-error-with-an-agent',
+  },
+  {
+    section: 'share',
+    title: 'See what your agents did',
+    where: ['Sources rail', 'Add logs', 'Show agent sessions…'],
+    text: 'Each prompt, tool call, and reply of Claude Code, Codex, and Copilot in this folder shows beside your app’s logs, a failed tool call as an error. Transcripts are read on this machine only.',
+    example: 'kind:agent level:error',
+    command: 'logline.showAgentSessions',
+    setting: 'logline.agentSessions.enabled',
+    docs: 'agent-sessions',
   },
   {
     section: 'share',
