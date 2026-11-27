@@ -10,6 +10,7 @@ import {
   within,
   type AgentName,
   type AgentSessionInfo,
+  type AgentTokens,
 } from '../core/agent-session';
 import { shortCount } from '../core/codex-usage';
 import type { Settings } from '../core/settings';
@@ -215,7 +216,7 @@ export class AgentSessionCapture {
     const label = followed.parser.label;
     if (label) record.command = label;
     if (cwd) record.cwd = cwd;
-    record.detail = sessionDetail(followed.parser.info, followed.baseline);
+    Object.assign(record, sessionDetail(followed.parser.info, followed.baseline));
     if (followed.parser.info.startedAt !== undefined) record.startedAt = followed.parser.info.startedAt;
     // A run a clear or pruning removed comes back when its session logs again.
     if (!this.registry.records.has(record.id)) {
@@ -393,7 +394,7 @@ export class AgentSessionCapture {
       const { toolCalls, failedCalls, tokens } = followed.parser.info;
       followed.baseline = { toolCalls, failedCalls, tokens: { ...tokens } };
       followed.record.events = 0;
-      if (followed.listed) followed.record.detail = sessionDetail(followed.parser.info, followed.baseline);
+      if (followed.listed) Object.assign(followed.record, sessionDetail(followed.parser.info, followed.baseline));
     }
   }
 
@@ -460,17 +461,39 @@ export class AgentSessionCapture {
   }
 }
 
-/** `42 tools · 3 failed · 186k tok`: a session's run, under its name, counting what it did after `since`. */
-export function sessionDetail(info: AgentCounts, since?: AgentCounts): string {
+/** `2h 14m`, `12m`, `40s`: how long a session ran, short enough for the rail. */
+export function shortDuration(ms: number): string {
+  const seconds = Math.max(0, Math.round(ms / 1000));
+  if (seconds < 60) return `${seconds}s`;
+  const minutes = Math.round(seconds / 60);
+  if (minutes < 60) return `${minutes}m`;
+  return minutes % 60 ? `${Math.floor(minutes / 60)}h ${minutes % 60}m` : `${minutes / 60}h`;
+}
+
+/**
+ * A session's run: `detail` goes under its name, such as `2h 14m · 42 tools · 3 failed`,
+ * and `tooltip` holds what that line leaves out, its tokens and model. Counts are of what
+ * it did after `since`; the duration is the whole session's, from the start time beside it.
+ */
+export function sessionDetail(
+  info: AgentCounts & Partial<Pick<AgentSessionInfo, 'startedAt' | 'lastAt' | 'model'>>,
+  since?: AgentCounts,
+): { detail: string; tooltip: string } {
   const toolCalls = info.toolCalls - (since?.toolCalls ?? 0);
   const failedCalls = info.failedCalls - (since?.failedCalls ?? 0);
-  const sum = ({ tokens }: AgentCounts) => tokens.input + tokens.output + tokens.cached;
-  const total = Math.max(0, sum(info) - (since ? sum(since) : 0));
-  return [
-    `${toolCalls} tool${toolCalls === 1 ? '' : 's'}`,
+  const tokens = (key: keyof AgentTokens) => Math.max(0, info.tokens[key] - (since?.tokens[key] ?? 0));
+  const { startedAt, lastAt } = info;
+  const detail = [
+    startedAt !== undefined && lastAt !== undefined && lastAt > startedAt ? shortDuration(lastAt - startedAt) : '',
+    toolCalls ? `${toolCalls} tool${toolCalls === 1 ? '' : 's'}` : '',
     failedCalls ? `${failedCalls} failed` : '',
-    total ? `${shortCount(total)} tok` : '',
-  ]
-    .filter(Boolean)
-    .join(' · ');
+  ];
+  // Cache reads dwarf the rest in a long session, so the tokens are given apart, not summed.
+  const tooltip = [
+    tokens('input') ? `${shortCount(tokens('input'))} in` : '',
+    tokens('output') ? `${shortCount(tokens('output'))} out` : '',
+    tokens('cached') ? `${shortCount(tokens('cached'))} cached` : '',
+    info.model ?? '',
+  ];
+  return { detail: detail.filter(Boolean).join(' · '), tooltip: tooltip.filter(Boolean).join(' · ') };
 }

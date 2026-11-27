@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { test } from 'node:test';
 import { claudeProjectDir } from '../core/agent-session';
 import { LogStore } from '../core/log-store';
-import { AGENT_HINT_SCAN_MS, AGENT_IDLE_MS, AgentSessionCapture, sessionDetail } from './agent-sessions';
+import { AGENT_HINT_SCAN_MS, AGENT_IDLE_MS, AgentSessionCapture, sessionDetail, shortDuration } from './agent-sessions';
 import { Ingestion } from './ingestion';
 import { RuntimeState } from './runtime-state';
 import { SessionRegistry } from './session-registry';
@@ -347,7 +347,8 @@ test('a run says what it did, and the transcript it came from is known while it 
     writeFileSync(file, t.jsonl(...claudeSession(t.folder)));
     await t.capture.poll();
     const [run] = [...t.registry.records.values()];
-    assert.equal(run.detail, '1 tool · 1 failed · 30 tok');
+    assert.equal(run.detail, '3s · 1 tool · 1 failed');
+    assert.equal(run.tooltip, '10 in · 20 out · claude-opus-5-5', 'the tokens and model are kept for the tooltip');
     assert.equal(t.capture.transcriptOf(run.id), file);
     assert.equal(t.capture.transcriptOf('other'), undefined);
   } finally {
@@ -355,15 +356,33 @@ test('a run says what it did, and the transcript it came from is known while it 
   }
 });
 
-test('a session detail counts tools, failures, and tokens, leaving out what is zero', () => {
+test('a session detail gives its duration, tools, and failures, and its tooltip the tokens apart', () => {
   const info = (toolCalls: number, failedCalls: number, input: number, output = 0, cached = 0) => ({
     toolCalls,
     failedCalls,
     tokens: { input, output, cached },
   });
-  assert.equal(sessionDetail(info(3, 1, 1000, 100, 100)), '3 tools · 1 failed · 1.2k tok');
-  assert.equal(sessionDetail(info(1, 0, 5)), '1 tool · 5 tok');
-  assert.equal(sessionDetail(info(0, 0, 0)), '0 tools');
+  assert.deepEqual(
+    sessionDetail({ ...info(3, 1, 1000, 100, 41_100_000), startedAt: 0, lastAt: 8_040_000, model: 'm' }),
+    {
+      detail: '2h 14m · 3 tools · 1 failed',
+      tooltip: '1.0k in · 100 out · 41.1M cached · m',
+    },
+  );
+  assert.deepEqual(sessionDetail(info(1, 0, 5)), { detail: '1 tool', tooltip: '5 in' });
+  assert.deepEqual(sessionDetail(info(0, 0, 0)), { detail: '', tooltip: '' }, 'nothing is said of what is zero');
+  assert.deepEqual(
+    sessionDetail(info(4, 2, 50, 30, 20), info(1, 2, 40, 30, 0)),
+    { detail: '3 tools', tooltip: '10 in · 20 cached' },
+    'only what came after the baseline counts',
+  );
+});
+
+test('a short duration says seconds, minutes, or hours and minutes', () => {
+  assert.equal(shortDuration(40_000), '40s');
+  assert.equal(shortDuration(12 * 60_000), '12m');
+  assert.equal(shortDuration(2 * 3_600_000), '2h');
+  assert.equal(shortDuration(2 * 3_600_000 + 14 * 60_000), '2h 14m');
 });
 
 test('after a clear, a run counts only what its session did since, and old lines are not read again', async () => {
@@ -373,12 +392,13 @@ test('after a clear, a run counts only what its session did since, and old lines
     writeFileSync(file, t.jsonl(...claudeSession(t.folder)));
     await t.capture.poll();
     const [run] = [...t.registry.records.values()];
-    assert.equal(run.detail, '1 tool · 1 failed · 30 tok');
+    assert.equal(run.detail, '3s · 1 tool · 1 failed');
     t.store.clear();
     t.registry.clearCompleted();
     t.capture.cleared();
     assert.equal(run.events, 0);
-    assert.equal(run.detail, '0 tools');
+    assert.equal(run.detail, '3s', 'the counts start again; the session ran as long as it did');
+    assert.equal(run.tooltip, 'claude-opus-5-5');
     assert.equal(t.registry.records.get(run.id), run, 'a running session keeps its run');
     appendFileSync(
       file,
@@ -394,7 +414,8 @@ test('after a clear, a run counts only what its session did since, and old lines
       ['All fixed'],
     );
     assert.equal(run.events, 1);
-    assert.equal(run.detail, '0 tools · 7 tok');
+    assert.equal(run.detail, '5s');
+    assert.equal(run.tooltip, '7 out · claude-opus-5-5');
   } finally {
     t.cleanup();
   }
@@ -444,7 +465,7 @@ test('a cleared session is read again from its start when reloaded, its run coun
     assert.equal(t.registry.records.get(run.id), run, 'the run is listed again');
     assert.equal(run.events, t.store.all().length);
     assert.ok(run.events > 0);
-    assert.equal(run.detail, '1 tool · 1 failed · 30 tok', 'no baseline from the clear');
+    assert.equal(run.detail, '3s · 1 tool · 1 failed', 'no baseline from the clear');
     assert.equal(run.status, 'exited', 'reading old lines again is not activity');
     const once = t.store.all().length;
     t.store.clear();
