@@ -830,12 +830,16 @@ body > header {
   min-width: 0;
   border-radius: 4px;
 }
-/* A finished run's Remove shows while the run is pointed at or focused, like a source's actions. */
-.run-option-row .run-remove {
+/* A finished run's Remove, and an agent session's Reload, show while the run is pointed at or focused,
+   like a source's actions. */
+.run-option-row .run-remove,
+.run-option-row .run-reload {
   visibility: hidden;
 }
 .run-option-row:hover .run-remove,
-.run-option-row:focus-within .run-remove {
+.run-option-row:focus-within .run-remove,
+.run-option-row:hover .run-reload,
+.run-option-row:focus-within .run-reload {
   visibility: visible;
 }
 .rail-runs .run-select {

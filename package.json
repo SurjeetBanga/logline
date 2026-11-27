@@ -397,6 +397,11 @@
         "command": "logline.showAgentSessions",
         "title": "Show Agent Sessions",
         "category": "Logline"
+      },
+      {
+        "command": "logline.reloadAgentSessions",
+        "title": "Reload Agent Sessions",
+        "category": "Logline"
       }
     ],
     "keybindings": [

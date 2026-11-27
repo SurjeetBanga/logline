@@ -523,6 +523,7 @@ export class LogsController {
         about: () => this.aboutShown,
         removeRun: (sessionId) => this.removeRun(sessionId),
         removeFinishedRuns: (serverId) => this.removeFinishedRuns(serverId),
+        reloadAgentSessions: (serverId, sessionId) => this.reloadAgentSessions(serverId, sessionId),
         welcomed: () => this.welcomed(),
         runner: this.runner,
         showGuide: (section) => this.guideOpener?.(section),
@@ -1028,6 +1029,23 @@ export class LogsController {
       finished,
       `${finished.length.toLocaleString()} finished run${finished.length === 1 ? '' : 's'} of ${label}`,
     );
+  }
+
+  /**
+   * Read agent sessions again from their start, such as after a clear: one
+   * run's, one agent's, or with neither every one's. Their logs are dropped
+   * first, so nothing shows twice. Returns how many sessions are read again.
+   */
+  reloadAgentSessions(serverId?: string, sessionId?: string): number {
+    if (!this.agentSessions.enabled) return 0;
+    const runs = this.agentSessions.reload({ serverId, sessionId });
+    this.store.removeSessions(new Set(runs));
+    this.state.status = runs.length
+      ? `Reading ${runs.length === 1 ? 'the agent session' : `${runs.length.toLocaleString()} agent sessions`} again`
+      : 'No agent sessions to read again';
+    this.state.invalidate();
+    void this.agentSessions.poll();
+    return runs.length;
   }
 
   private removeRuns(records: SessionSummary[], name: string): number {

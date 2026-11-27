@@ -898,6 +898,25 @@ test('an agent offered in the rail can be shown, or dismissed in this folder onl
   assert.equal(controller.snapshot({ type: 'snapshot' }).agentHints?.length, 2, 'another folder still offers it');
 });
 
+test('reloading agent sessions drops their logs before they are read again, and does nothing while they are off', (t) => {
+  const controller = setup(t);
+  const sessions = controller.agentSessions;
+  controller.store.add({ level: 'info', id: 1, serverId: 'agent:codex', sessionId: 'x1', message: 'old' });
+  controller.store.add({ level: 'info', id: 2, serverId: 'api', sessionId: 'a1', message: 'app' });
+  const asked: unknown[] = [];
+  sessions.reload = (target) => (asked.push(target), ['x1']);
+  assert.equal(controller.reloadAgentSessions('agent:codex'), 0, 'off: nothing is read again');
+  assert.deepEqual(asked, []);
+  Object.defineProperty(sessions, 'enabled', { get: () => true });
+  assert.equal(controller.reloadAgentSessions(undefined, 'x1'), 1);
+  assert.deepEqual(asked, [{ serverId: undefined, sessionId: 'x1' }]);
+  assert.deepEqual(
+    controller.store.all().map((event) => event.message),
+    ['app'],
+  );
+  assert.equal(controller.state.status, 'Reading the agent session again');
+});
+
 test('a removed agent is offered again, even where dismissed, and Show restores it without asking', async (t) => {
   const saved = new Map<string, unknown>([['logline.agentHints.dismissed', ['claude-code /work/shop']]]);
   const controller = new LogsController({

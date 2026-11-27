@@ -58,6 +58,8 @@ interface Followed {
   /** In the registry: it has logged something. */
   listed: boolean;
   modifiedAt: number;
+  /** Found in a folder that holds only this workspace's sessions. */
+  exact: boolean;
   /** What the session had done when the logs were last cleared, left out of its run's detail. */
   baseline?: AgentCounts;
 }
@@ -200,7 +202,8 @@ export class AgentSessionCapture {
   }
 
   private line(file: string, followed: Followed, line: string): void {
-    if (this.ignored.has(file)) return;
+    // A session reloaded while it was being read is read afresh; what the old read finds is dropped.
+    if (this.ignored.has(file) || this.followed.get(file) !== followed) return;
     const records = followed.parser.line(line);
     const { cwd } = followed.parser.info;
     if (cwd && !this.folders().some((folder) => within(cwd, folder))) {
@@ -341,18 +344,23 @@ export class AgentSessionCapture {
       canStop: false,
       captureComplete: false,
     };
+    this.followed.set(file, {
+      agent,
+      tail: new JsonlTail(file),
+      parser: this.parser(agent, exact),
+      record,
+      listed: false,
+      modifiedAt,
+      exact,
+    });
+  }
+
+  private parser(agent: AgentName, exact: boolean): AgentSessionParser {
     const parser = new AgentSessionParser(agent);
     // A Copilot Chat session does not name its folder: it is this workspace's, which has one unless it is multi-root.
     const folders = this.folders();
     if (agent === 'copilot' && exact && folders.length === 1) parser.info.cwd = folders[0];
-    this.followed.set(file, {
-      agent,
-      tail: new JsonlTail(file),
-      parser,
-      record,
-      listed: false,
-      modifiedAt,
-    });
+    return parser;
   }
 
   private ignore(file: string): void {
@@ -387,6 +395,32 @@ export class AgentSessionCapture {
       followed.record.events = 0;
       if (followed.listed) followed.record.detail = sessionDetail(followed.parser.info, followed.baseline);
     }
+  }
+
+  /**
+   * Read sessions again from their start, such as after a clear: one run's, one
+   * agent's by its source, or, with neither, every session's, with removed
+   * agents restored. Returns the runs read again; the caller drops their logs.
+   */
+  reload(target: { serverId?: string; sessionId?: string } = {}): string[] {
+    const { serverId, sessionId } = target;
+    if (!serverId && !sessionId) this.restore();
+    const runs: string[] = [];
+    for (const [file, followed] of this.followed) {
+      const { record } = followed;
+      if (sessionId ? record.id !== sessionId : serverId && record.serverId !== serverId) continue;
+      runs.push(record.id);
+      record.events = 0;
+      this.followed.set(file, {
+        ...followed,
+        tail: new JsonlTail(file),
+        parser: this.parser(followed.agent, followed.exact),
+        baseline: undefined,
+      });
+    }
+    // Sessions begun since the last scan are found now, not ten seconds later.
+    if (!sessionId) this.scanned = -Infinity;
+    return runs;
   }
 
   /** The transcript a run was read from, while it is followed. */

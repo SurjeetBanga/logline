@@ -108,6 +108,8 @@ export type ViewRequest =
   | { type: 'removeSource'; serverId: string }
   | { type: 'removeRun'; sessionId: string }
   | { type: 'removeFinishedRuns'; serverId: string }
+  /** Read agent sessions again from their start: one run's, one agent's, or with neither every one's. */
+  | { type: 'reloadAgentSessions'; serverId?: string; sessionId?: string }
   | { type: 'removeConnection' | 'editConnection'; connectionId: string }
   /** A message from the Connection form; the connection manager checks `request` itself. */
   | { type: 'connectionForm'; session: number; request: Record<string, unknown> }
@@ -605,6 +607,12 @@ export function parseViewRequest(value: unknown): ViewRequest | undefined {
       return filter.sessionId ? { type: msg.type, sessionId: filter.sessionId } : undefined;
     case 'removeFinishedRuns':
       return filter.serverId ? { type: msg.type, serverId: filter.serverId } : undefined;
+    case 'reloadAgentSessions':
+      return {
+        type: msg.type,
+        ...(filter.serverId ? { serverId: filter.serverId } : {}),
+        ...(filter.sessionId ? { sessionId: filter.sessionId } : {}),
+      };
     case 'connectionForm':
       return Number.isSafeInteger(msg.session) &&
         msg.request &&

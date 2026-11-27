@@ -137,7 +137,7 @@ An agent event opened in the inspector has actions beside **Surrounding logs**. 
 
 In the source rail, each session's run shows its tool calls, failed calls, and tokens under its name, such as `42 tools · 3 failed · 186k tok`, with its start time.
 
-**Clear logs** clears agent events with the rest. Sessions are still read, from what the agent does next: what was cleared does not come back, and each session's run counts only what is shown since. A session that had ended leaves the rail and appears again when it resumes. To read the last day's sessions in full again, turn `logline.agentSessions.enabled` off and on.
+**Clear logs** clears agent events with the rest. Sessions are still read, from what the agent does next: what was cleared does not come back, and each session's run counts only what is shown since. A session that had ended leaves the rail and appears again when it resumes. To read sessions in full again, use the reload icon (↻): on a session's run it reads that session's transcript again from its start, and on an agent's source it reads all of that agent's sessions. **Logline: Reload Agent Sessions** reads every agent's sessions again, including ended ones a clear took out of the rail and agents whose source was removed. Their logs are replaced, not added twice, and each run counts everything its session did.
 
 Removing the source stops reading its sessions. Everything is read on your machine, and nothing leaves it unless you share it with an agent, where it is redacted like any logs.
 

@@ -48,6 +48,7 @@ const PANEL_REQUESTS: Partial<Record<ViewRequest['type'], PanelAction>> = {
   removeSource: 'remove_source',
   removeRun: 'remove_run',
   removeFinishedRuns: 'remove_finished_runs',
+  reloadAgentSessions: 'reload_agent_sessions',
   stop: 'stop',
   run: 'run',
   metricQuery: 'metric_query',
@@ -84,6 +85,8 @@ interface MessageServices {
   removeSource(serverId: string): Promise<number>;
   removeRun(sessionId: string): number;
   removeFinishedRuns(serverId: string): number;
+  /** Read agent sessions again from their start: one run's, one agent's, or every one's. */
+  reloadAgentSessions?(serverId?: string, sessionId?: string): number;
   welcomed?(): void;
   /** The panel's Update button was pressed. */
   installUpdate?(): Promise<void>;
@@ -369,6 +372,9 @@ export async function handleMessage(
       return;
     case 'removeFinishedRuns':
       services.removeFinishedRuns(msg.serverId);
+      return;
+    case 'reloadAgentSessions':
+      services.reloadAgentSessions?.(msg.serverId, msg.sessionId);
       return;
     case 'editConnection':
       await services.connections?.edit(msg.connectionId);
