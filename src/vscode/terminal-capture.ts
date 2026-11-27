@@ -110,11 +110,18 @@ export class TerminalCapture {
 
   /** Run a command again in the open terminal a captured run came from; false when it is closed. */
   runAgain(serverId: string, command: string): boolean {
+    // The command comes from a test-failure event, whose fields any captured JSON line can set. Only a command
+    // this terminal itself ran is sent, so a line a program or a web page prints cannot choose what runs.
+    const typed = command.trim();
+    const ran = [...this.registry.records.values()].some(
+      (record) => record.serverId === serverId && record.sourceKind === 'terminal' && record.command?.trim() === typed,
+    );
+    if (!ran || !typed || /[\u0000-\u001f\u007f]/.test(typed)) return false;
     const terminal = this.terminals.get(serverId)?.terminal as
       { show?: (preserveFocus?: boolean) => void; sendText?: (text: string, addNewLine?: boolean) => void } | undefined;
     if (!terminal?.sendText) return false;
     terminal.show?.(true);
-    terminal.sendText(command, true);
+    terminal.sendText(typed, true);
     return true;
   }
   status(): { state: 'off' | 'waiting' | 'capturing' | 'attention'; detail: string; active: number; failed: number } {
