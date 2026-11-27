@@ -7,8 +7,9 @@ import { iamPassword, listProfiles } from '../capture/connectors/aws-auth';
 import { ElasticConnector } from '../capture/connectors/elastic';
 import { GcpConnector } from '../capture/connectors/gcp';
 import { GitHubActionsConnector } from '../capture/connectors/github-actions';
+import { GitLabCiConnector } from '../capture/connectors/gitlab-ci';
 import { LokiConnector } from '../capture/connectors/loki';
-import { githubAuth } from './github-auth';
+import { checkedOutBranch, githubAuth } from './github-auth';
 import { MongoConnector } from '../capture/connectors/mongo';
 import { MysqlDriver } from '../capture/connectors/mysql-driver';
 import { PostgresDriver } from '../capture/connectors/postgres-driver';
@@ -31,6 +32,7 @@ import {
   type DatadogConnection,
   type MongoConnection,
   type ElasticConnection,
+  type GitLabCiConnection,
   type LokiConnection,
   type MysqlConnection,
   type PostgresConnection,
@@ -66,8 +68,8 @@ const sqlCapable = (connection: ConnectionConfig) => connectionKind(connection.t
 type SqlConnection = PostgresConnection | MysqlConnection | SqliteConnection;
 /** A database that signs in with a user and a password, or an IAM token. */
 type ServerConnection = PostgresConnection | MysqlConnection;
-/** A connection that signs in with a password kept in secret storage, or a Loki token. */
-type PasswordConnection = ServerConnection | MongoConnection | LokiConnection | ElasticConnection;
+/** A connection that signs in with a password kept in secret storage, or a Loki or GitLab token. */
+type PasswordConnection = ServerConnection | MongoConnection | LokiConnection | ElasticConnection | GitLabCiConnection;
 /** A connection that signs in with AWS IAM instead of a password. */
 const signsInWithIam = (connection: ConnectionConfig) =>
   (connection.type === 'postgres' || connection.type === 'mysql' || connection.type === 'elasticsearch') &&
@@ -131,6 +133,9 @@ export class ConnectionManager implements vscode.Disposable {
     // The same groups read with the same credentials; other groups are another permission.
     if (connection.type === 'github-actions')
       return `github-actions:${connection.endpoint ?? ''}/${connection.repository}/${connection.branch ?? ''}`;
+    // A token reads every project on its GitLab; another project is another permission.
+    if (connection.type === 'gitlab-ci')
+      return `gitlab-ci:${connection.url}/${connection.project}/${connection.branch ?? ''}`;
     if (connection.type === 'cloudwatch')
       return `cloudwatch:${cloudwatchEndpoint(connection)}/${connection.profile ?? ''}/${[...connection.logGroups].sort().join(',')}`;
     return secretKey(connection);
@@ -329,6 +334,13 @@ export class ConnectionManager implements vscode.Disposable {
     cloudwatch: async (connection) => new CloudWatchConnector(connection, this.timeoutMs),
     gcp: async (connection) => new GcpConnector(connection, this.timeoutMs),
     'github-actions': async (connection) => new GitHubActionsConnector(connection, githubAuth, this.timeoutMs),
+    'gitlab-ci': async (connection, secret) =>
+      new GitLabCiConnector(
+        connection,
+        (secret ? secret.password : await this.secrets?.get(secretKey(connection))) || undefined,
+        checkedOutBranch,
+        this.timeoutMs,
+      ),
     elasticsearch: async (connection, secret) =>
       new ElasticConnector(
         connection,
@@ -417,9 +429,11 @@ export class ConnectionManager implements vscode.Disposable {
             ? connection.site
             : connection.type === 'cloudwatch'
               ? `${connection.region} · ${connection.logGroups.join(', ')}`
-              : connection.type === 'gcp'
+              : connection.type === 'gcp' || connection.type === 'gitlab-ci'
                 ? connection.project
-                : connection.logs?.table,
+                : connection.type === 'github-actions'
+                  ? connection.repository
+                  : connection.logs?.table,
         connection,
       })),
       { title },
@@ -433,20 +447,24 @@ export class ConnectionManager implements vscode.Disposable {
     const signsInWithPassword =
       connection.type === 'postgres' || connection.type === 'mysql' || connection.type === 'elasticsearch'
         ? !signsInWithIam(connection)
-        : connection.type === 'loki' || (connection.type === 'mongodb' && mongoUrl(connection.url)?.user !== undefined);
+        : connection.type === 'loki' ||
+          connection.type === 'gitlab-ci' ||
+          (connection.type === 'mongodb' && mongoUrl(connection.url)?.user !== undefined);
     if (
       signsInWithPassword &&
       (authFailed(cause) ||
-        /password|authentication failed|refused the credentials|refused the request \(401/i.test(error))
+        /password|authentication failed|refused the credentials|refused the request \(401|add an access token/i.test(
+          error,
+        ))
     ) {
       const target = connection as PasswordConnection;
       const saved = (await this.secrets?.get(secretKey(target))) !== undefined;
-      const user = target.type === 'mongodb' ? mongoUrl(target.url)?.user : target.user;
+      const user = target.type === 'mongodb' ? mongoUrl(target.url)?.user : 'user' in target ? target.user : undefined;
       const choice = await vscode.window.showErrorMessage(
-        target.type === 'loki' || target.type === 'elasticsearch'
+        target.type === 'loki' || target.type === 'elasticsearch' || target.type === 'gitlab-ci'
           ? `${connectionLabel(connection)}: ${error}`
           : `${connectionLabel(connection)}: the server ${saved ? 'refused the saved password' : 'needs a password'} for ${user} (${error}).`,
-        'Enter Password…',
+        target.type === 'gitlab-ci' ? 'Enter Token…' : 'Enter Password…',
       );
       if (choice) await this.askPassword(target);
       return;
@@ -498,6 +516,19 @@ export class ConnectionManager implements vscode.Disposable {
   }
 
   private async askPassword(connection: PasswordConnection): Promise<void> {
+    if (connection.type === 'gitlab-ci') {
+      const token = await vscode.window.showInputBox({
+        title: `GitLab access token for ${new URL(connection.url).host}`,
+        password: true,
+        ignoreFocusOut: true,
+        prompt:
+          'A personal, group, or project access token with the read_api scope. Kept in VS Code secret storage, never in settings.',
+      });
+      if (!token?.trim()) return;
+      await this.secrets?.store(secretKey(connection), token.trim());
+      this.reopen(connection);
+      return;
+    }
     const where =
       connection.type === 'loki' || connection.type === 'elasticsearch'
         ? `${connection.user ? `${connection.user}@` : ''}${new URL(connection.url).host}`

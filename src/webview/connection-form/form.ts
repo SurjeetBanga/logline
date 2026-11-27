@@ -546,6 +546,37 @@ export function createConnectionForm(api: FormApi, root: HTMLElement) {
     ];
   }
 
+  function gitlabDetails(): Child[] {
+    return [
+      h(
+        'div',
+        { className: 'grid' },
+        field('repository', 'Project', {
+          placeholder: 'my-group/shop',
+          hint: 'The project as group/name, with any subgroups, or its address.',
+        }),
+        field('branch', 'Branch', {
+          placeholder: 'The checked-out branch',
+          hint: 'Optional: the branch whose pipelines are read. Left empty, it follows the branch checked out in this workspace.',
+        }),
+        field('url', 'GitLab URL', {
+          placeholder: 'https://gitlab.com',
+          hint: 'Optional: your own GitLab, such as https://gitlab.example.com. Left empty, gitlab.com.',
+        }),
+        secretField(
+          'password',
+          'Access token',
+          'A personal, group, or project access token with the read_api scope. Leave empty for a public project. Kept in VS Code secret storage, never in settings.',
+        ),
+      ),
+      h(
+        'div',
+        { className: 'hint' },
+        'A search reads the jobs that failed in the newest failed pipelines of the branch in its range, leaving out jobs allowed to fail.',
+      ),
+    ];
+  }
+
   function elasticDetails(): Child[] {
     const iamHint = h(
       'div',
@@ -688,17 +719,21 @@ export function createConnectionForm(api: FormApi, root: HTMLElement) {
   // ---- Step 1: the type.
 
   function renderTypes(): void {
-    const group = (kind: 'logs' | 'database', caption: string) =>
+    const group = (kind: 'logs' | 'ci' | 'database', caption: string) =>
       h(
         'div',
-        { className: `type-group ${kind === 'logs' ? 'service' : 'database'}` },
+        { className: `type-group ${kind === 'logs' ? 'service' : kind}` },
         h('div', { className: 'type-caption' }, caption),
         h('div', { className: 'type-grid' }, ...cards(kind)),
       );
-    types.replaceChildren(group('logs', 'Log service'), group('database', 'Database to query'));
+    types.replaceChildren(
+      group('logs', 'Log service'),
+      group('ci', 'CI system'),
+      group('database', 'Database to query'),
+    );
   }
 
-  function cards(kind: 'logs' | 'database'): HTMLElement[] {
+  function cards(kind: 'logs' | 'ci' | 'database'): HTMLElement[] {
     return CONNECTION_TYPES.filter((entryType) => entryType.kind === kind).map((entryType) => {
       const selected = entryType.type === draft.type;
       return h(
@@ -794,6 +829,9 @@ export function createConnectionForm(api: FormApi, root: HTMLElement) {
         break;
       case 'github-actions':
         children.push(...githubDetails());
+        break;
+      case 'gitlab-ci':
+        children.push(...gitlabDetails());
         break;
     }
     details.replaceChildren(...children.filter((child): child is Node | string => !!child));

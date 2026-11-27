@@ -13,7 +13,8 @@ export type ConnectionType =
   | 'loki'
   | 'elasticsearch'
   | 'gcp'
-  | 'github-actions';
+  | 'github-actions'
+  | 'gitlab-ci';
 /** How a timestamp column stores time; `native` is a database date/time type. */
 export type TimeEncoding = 'iso' | 'epoch_s' | 'epoch_ms' | 'native';
 
@@ -136,6 +137,28 @@ export interface GitHubActionsConnection extends BaseConnection {
   /** A GitHub API on this machine in place of github.com's, for tests; requests carry the github.com account's token. */
   endpoint?: string;
 }
+/** The CI pipelines of a GitLab project, on gitlab.com or a self-managed GitLab, read with an access token. */
+export interface GitLabCiConnection extends BaseConnection {
+  type: 'gitlab-ci';
+  /** The GitLab instance, such as `https://gitlab.com` or `https://gitlab.example.com`. */
+  url: string;
+  /** The project's full path, such as `group/subgroup/shop`. */
+  project: string;
+  /** The branch whose pipelines are read; the checked-out branch when left out. */
+  branch?: string;
+}
+export const GITLAB_URL = 'https://gitlab.com';
+/** A project's full path, `group/name` or with subgroups, as GitLab allows them. */
+export function isGitLabProject(value: string): boolean {
+  if (value.length > 255) return false;
+  const parts = value.split('/');
+  return (
+    parts.length >= 2 &&
+    parts.every(
+      (part) => /^[A-Za-z0-9_][A-Za-z0-9_.-]*$/.test(part) && !part.endsWith('.git') && !/\.\.|\.$/.test(part),
+    )
+  );
+}
 /** `owner/name`, as GitHub allows them. */
 export function isGitHubRepository(value: string): boolean {
   return (
@@ -150,6 +173,7 @@ export function isGitBranch(value: string): boolean {
 }
 export type ConnectionConfig =
   | GitHubActionsConnection
+  | GitLabCiConnection
   | GcpConnection
   | ElasticConnection
   | SqliteConnection
@@ -288,6 +312,9 @@ export function secretKey(
     return `logline.connection.elasticsearch:${apiUrl(connection.url) ?? connection.url}/${encodeURIComponent(connection.user ?? '')}`;
   if (connection.type === 'loki')
     return `logline.connection.loki:${apiUrl(connection.url) ?? connection.url}/${encodeURIComponent(connection.tenant ?? '')}/${encodeURIComponent(connection.user ?? '')}`;
+  // One token reads every project it can on its GitLab.
+  if (connection.type === 'gitlab-ci')
+    return `logline.connection.gitlab-ci:${apiUrl(connection.url) ?? connection.url}`;
   if (connection.type === 'datadog')
     return `logline.connection.datadog:${datadogApiBase(connection.site) ?? connection.site}`;
   if (connection.type === 'mongodb') {
@@ -480,6 +507,19 @@ export function normalizeConnections(value: unknown): ConnectionConfig[] {
           repository,
           ...(branch && isGitBranch(branch) ? { branch } : {}),
           ...(endpoint && /^http:\/\/(?:127\.0\.0\.1|localhost|\[::1\])[:/]/.test(`${endpoint}/`) ? { endpoint } : {}),
+        };
+    } else if (item.type === 'gitlab-ci') {
+      const url = typeof item.url === 'string' ? apiUrl(item.url.trim()) : GITLAB_URL;
+      const project = text(item.project, 255);
+      const branch = text(item.branch, 255);
+      if (url && project && isGitLabProject(project))
+        connection = {
+          id,
+          label,
+          type: 'gitlab-ci',
+          url,
+          project,
+          ...(branch && isGitBranch(branch) ? { branch } : {}),
         };
     } else if (item.type === 'cloudwatch') {
       const region = text(item.region, 32);

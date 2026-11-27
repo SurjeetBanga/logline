@@ -6,7 +6,7 @@ interface GitApi {
 }
 
 /** The branch checked out in the workspace's first repository, from the built-in git extension. */
-async function checkedOutBranch(): Promise<string | undefined> {
+export async function checkedOutBranch(): Promise<string | undefined> {
   const extension = vscode.extensions?.getExtension<{ getAPI(version: 1): GitApi }>('vscode.git');
   if (!extension) return undefined;
   try {

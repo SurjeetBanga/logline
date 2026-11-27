@@ -1223,7 +1223,8 @@
                     "loki",
                     "elasticsearch",
                     "gcp",
-                    "github-actions"
+                    "github-actions",
+                    "gitlab-ci"
                   ]
                 },
                 "path": {
@@ -1293,7 +1294,7 @@
                 },
                 "project": {
                   "type": "string",
-                  "description": "Cloud Logging: the Google Cloud project id, such as shop-prod-1234."
+                  "description": "Cloud Logging: the Google Cloud project id, such as shop-prod-1234. GitLab CI: the project's full path, such as my-group/shop. Without a token kept in secret storage, only a public project can be read."
                 },
                 "filter": {
                   "type": "string",
@@ -1309,7 +1310,7 @@
                 },
                 "branch": {
                   "type": "string",
-                  "description": "GitHub Actions: the branch whose runs are read. The branch checked out in the workspace when left out."
+                  "description": "GitHub Actions and GitLab CI: the branch whose runs or pipelines are read. The branch checked out in the workspace when left out."
                 },
                 "logs": {
                   "type": "object",
@@ -1379,7 +1380,7 @@
                 },
                 "url": {
                   "type": "string",
-                  "description": "MongoDB: a mongodb:// or mongodb+srv:// URL without a password, such as mongodb+srv://reader@cluster0.example.mongodb.net/app. Loki: the URL of the Loki API, such as http://localhost:3100. Elasticsearch: the cluster's URL, such as http://localhost:9200."
+                  "description": "MongoDB: a mongodb:// or mongodb+srv:// URL without a password, such as mongodb+srv://reader@cluster0.example.mongodb.net/app. Loki: the URL of the Loki API, such as http://localhost:3100. Elasticsearch: the cluster's URL, such as http://localhost:9200. GitLab CI: your own GitLab, such as https://gitlab.example.com; https://gitlab.com when left out."
                 }
               },
               "required": [
