@@ -76,6 +76,8 @@ export interface SessionSummary {
   captureReason?: string;
   command?: string;
   cwd?: string;
-  /** A short summary shown under the run's name, such as an agent session's tool calls and tokens. */
+  /** A short summary shown under the run's name, such as an agent session's duration and tool calls. */
   detail?: string;
+  /** More about the run for its tooltip, which `detail` leaves out, such as an agent session's tokens and model. */
+  tooltip?: string;
 }

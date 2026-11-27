@@ -105,6 +105,7 @@ export class SessionRegistry {
     | 'command'
     | 'cwd'
     | 'detail'
+    | 'tooltip'
   >[] {
     return [...this.records.values()].map((record) => ({
       id: record.id,
@@ -126,6 +127,7 @@ export class SessionRegistry {
       command: record.command,
       cwd: record.cwd,
       ...(record.detail ? { detail: record.detail } : {}),
+      ...(record.tooltip ? { tooltip: record.tooltip } : {}),
       canStop: record.canStop,
     }));
   }

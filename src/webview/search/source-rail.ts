@@ -387,18 +387,27 @@ export function createSourceRail(
         : runButton(
             session.id,
             runName(session),
-            [started, session.detail ?? stateText].filter(Boolean).join(' · '),
+            [started, session.detail || stateText].filter(Boolean).join(' · '),
             session.sourceKind === 'remote' || session.sourceKind === 'import' || session.sourceKind === 'agent',
           );
-      button.title = [
-        runName(session),
-        session.detail && `${session.detail} · ${stateText}`,
+      // The tooltip adds only what the row leaves out, and the name when it is cut short.
+      const hidden = [
+        byTime && started ? runName(session) : '',
+        !byTime && session.detail ? stateText : '',
+        byTime ? session.detail : '',
+        session.tooltip,
         session.cwd,
         session.captureStatus && `Capture: ${session.captureStatus}`,
         session.captureReason,
-      ]
-        .filter(Boolean)
-        .join(' · ');
+      ].filter(Boolean);
+      if (hidden.length) button.title = hidden.join(' · ');
+      // Checked as the pointer arrives, before the tooltip takes the title, since the width can change.
+      scope.listen(button, 'pointerover', () => {
+        const name = button.querySelector<HTMLElement>('.rail-name');
+        const cut = !byTime && name && name.scrollWidth > name.clientWidth;
+        const title = (cut ? [runName(session), ...hidden] : hidden).join(' · ');
+        if (title !== (button.dataset.tip ?? button.title)) button.title = title;
+      });
       wrapper.append(button);
       if (session.sourceKind === 'agent') {
         // An agent session's transcript can be read again from its start, such as after a clear.

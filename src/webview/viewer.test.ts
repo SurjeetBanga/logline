@@ -7176,7 +7176,9 @@ test('an agent session shows what it did on its second line, under the agent ico
         status: 'running',
         startedAt: 1,
         sourceKind: 'agent',
-        detail: '3 tools · 1 failed · 1.2k tok',
+        cwd: '/work/shop',
+        detail: '2h 14m · 3 tools · 1 failed',
+        tooltip: '1.0k in · 100 out · 41.1M cached · claude-opus-5-5',
       },
     ],
   });
@@ -7185,8 +7187,12 @@ test('an agent session shows what it did on its second line, under the agent ico
   const run = view.runs().find((button) => button.dataset.runId === 'c1')!;
   assert.ok(run.classList.contains('stacked'));
   assert.equal(run.querySelector('.rail-name')!.textContent, 'Fix the checkout 500');
-  assert.match(run.querySelector('.rail-status')!.textContent!, /3 tools · 1 failed · 1\.2k tok/);
-  assert.match(run.title, /3 tools · 1 failed · 1\.2k tok/);
+  assert.match(run.querySelector('.rail-status')!.textContent!, /2h 14m · 3 tools · 1 failed$/);
+  assert.equal(
+    run.title,
+    'running · 1.0k in · 100 out · 41.1M cached · claude-opus-5-5 · /work/shop',
+    'the tooltip says only what the row does not',
+  );
 });
 
 test('an agent session, and its agent, can be read again from the start', () => {

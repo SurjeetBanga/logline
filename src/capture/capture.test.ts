@@ -297,7 +297,7 @@ test('a task that cannot start reports a failed task state to its dependents', {
   await runner.dispose();
 });
 
-test('session summaries carry a run detail only when it has one', () => {
+test('session summaries carry a run detail and tooltip only when it has one', () => {
   const registry = new SessionRegistry();
   const run = (id: string) => ({
     id,
@@ -307,9 +307,11 @@ test('session summaries carry a run detail only when it has one', () => {
     startedAt: 0,
     events: 0,
   });
-  registry.records.set('a', { ...run('a'), detail: '2 tools' } as never);
+  registry.records.set('a', { ...run('a'), detail: '2 tools', tooltip: '5 in' } as never);
   registry.records.set('b', run('b') as never);
   const [a, b] = registry.sessionSummaries();
   assert.equal(a.detail, '2 tools');
+  assert.equal(a.tooltip, '5 in');
   assert.equal('detail' in b, false);
+  assert.equal('tooltip' in b, false);
 });
