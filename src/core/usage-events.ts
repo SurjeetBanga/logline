@@ -4,6 +4,11 @@
 import type { ConnectionType } from './connections';
 import { BUILT_IN_FIELDS, type ParsedQuery } from './query';
 
+/** Where usage counts are sent: PostHog's EU region. */
+export const USAGE_HOST = 'https://eu.i.posthog.com';
+/** What the extension keeps in its own folder for the `vscode:uninstall` script to report. */
+export const WILL_FILE = '.usage-uninstall.json';
+
 export type UsageValue = string | number | boolean | string[];
 export type UsageProperties = Record<string, UsageValue>;
 
@@ -97,6 +102,12 @@ export const MILESTONES = [
   'first_doctor_action',
   'first_log_breakpoint',
   'first_event_inspected',
+  'first_investigate',
+  'first_agent_session',
+  'first_editor_mark',
+  'first_insert_log',
+  'first_test_rerun',
+  'first_ci_connection',
 ] as const;
 export type Milestone = (typeof MILESTONES)[number];
 /** What someone did in the Logs panel, by name only. */
@@ -124,6 +135,9 @@ export const PANEL_ACTIONS = [
   'copy_ai_call',
   'copy_span',
   'toggle_otlp',
+  'agent_logs',
+  'agent_transcript',
+  'agent_terminal',
 ] as const;
 export type PanelAction = (typeof PANEL_ACTIONS)[number];
 /** Which first step the welcome led to; `dismissed` is Escape. */
@@ -248,7 +262,36 @@ export const READY_AGENTS = ['host', 'claude', 'codex', 'copilot'] as const;
 /** Agents whose sessions Logline reads. */
 export const SESSION_AGENTS = ['claude-code', 'codex', 'copilot'] as const;
 /** What failed inside Logline, by area, as one of these codes. */
-export const ERROR_CODES = ['start_failed', 'write_failed', 'read_failed', 'message_failed'] as const;
+export const ERROR_CODES = [
+  'start_failed',
+  'write_failed',
+  'read_failed',
+  'message_failed',
+  'command_failed',
+  'script_failed',
+  'stream_failed',
+] as const;
+/** Where inside Logline something failed. */
+export const ERROR_AREAS = [
+  'bridge',
+  'otlp',
+  'connection',
+  'import',
+  'export',
+  'capture',
+  'panel',
+  'command',
+  'activation',
+] as const;
+/** What the Logs panel asks the host for that is timed: answers that read many events. */
+export const TIMED_REQUESTS = ['analysis', 'traces', 'trace', 'ai_calls', 'details', 'context'] as const;
+/** Which PowerShell a terminal ran: Windows PowerShell 5.1 (`powershell.exe`) or PowerShell 7 (`pwsh`). */
+export function shellVariant(shellPath: string | undefined): 'windows_powershell' | 'pwsh' | 'other' {
+  const name = (shellPath ?? '').split(/[\\/]/).pop()?.toLowerCase() ?? '';
+  if (/^powershell(\.exe)?$/.test(name)) return 'windows_powershell';
+  if (/^pwsh(-preview)?(\.exe)?$/.test(name)) return 'pwsh';
+  return 'other';
+}
 /** What Log Doctor finds: its own checks and the OpenTelemetry conventions. */
 export const DOCTOR_CODES = [
   'secret',
@@ -286,7 +329,13 @@ export const USAGE_EVENTS: Record<string, Record<string, Rule>> = {
   exception_snapshot: { debugger: oneOf(...DEBUGGERS), frames: COUNT, locals: COUNT },
   test_run: { framework: oneOf(...TEST_FRAMEWORKS), failed: COUNT, fixed: COUNT },
   log_inserted: { language: oneOf(...INSERT_LANGUAGES), styled: BOOL },
-  terminal_checked: { shell: oneOf('posix', 'powershell', 'cmd'), integrated: BOOL },
+  terminal_checked: {
+    shell: oneOf('posix', 'powershell', 'cmd'),
+    integrated: BOOL,
+    variant: oneOf('windows_powershell', 'pwsh', 'other'),
+    setting_off: BOOL,
+  },
+  uninstalled: { age: DURATION, reached: listOf(...MILESTONES), version: { kind: 'version' } },
   panel_opened: {},
   panel_size: { width: oneOf('narrow', 'medium', 'wide') },
   panel_action: { action: oneOf(...PANEL_ACTIONS) },
@@ -309,6 +358,7 @@ export const USAGE_EVENTS: Record<string, Record<string, Rule>> = {
   ask_copilot: {},
   investigate: { agent: oneOf('copilot', 'claude', 'codex', 'copy'), from: oneOf(...INVESTIGATE_FROM), ci: BOOL },
   investigate_outcome: { fixed: BOOL },
+  investigate_read: { after: DURATION },
   agent_setup: {
     agent: oneOf('host', 'claude', 'codex', 'other', 'none'),
     outcome: oneOf('added', 'copied', 'terminal', 'failed', 'cancelled', 'unavailable'),
@@ -343,7 +393,7 @@ export const USAGE_EVENTS: Record<string, Record<string, Rule>> = {
     key: { kind: 'enum', values: (vocabulary) => new Set(vocabulary.settings.keys()) },
     value: { kind: 'setting' },
   },
-  perf: { op: oneOf('first_render', 'search', 'import'), ms: MS, events: COUNT },
+  perf: { op: oneOf('first_render', 'search', 'import', ...TIMED_REQUESTS), ms: MS, events: COUNT },
   doctor_finding: { code: oneOf(...DOCTOR_CODES) },
   doctor_action: { action: oneOf('open', 'showEvents', 'fix', 'report') },
   feedback: { surface: oneOf('doctor', 'copilot'), code: oneOf(...DOCTOR_CODES), helpful: BOOL },
@@ -355,8 +405,9 @@ export const USAGE_EVENTS: Record<string, Record<string, Rule>> = {
   log_breakpoint: { step: oneOf('set', 'hit') },
   compare_production: { ok: BOOL },
   error: {
-    area: oneOf('bridge', 'otlp', 'connection', 'import', 'export', 'capture', 'panel'),
+    area: oneOf(...ERROR_AREAS),
     code: oneOf(...ERROR_CODES),
+    command: { kind: 'enum', values: (vocabulary) => vocabulary.commands },
   },
   session_summary: {
     active_minutes: DURATION,
@@ -392,6 +443,13 @@ export const USAGE_EVENTS: Record<string, Record<string, Rule>> = {
     agent_sessions: COUNT,
     agents_followed: listOf(...SESSION_AGENTS),
     debuggers: listOf(...DEBUGGERS),
+    commands_captured: COUNT,
+    commands_uncaptured: COUNT,
+    commands_unreadable: COUNT,
+    terminals_unintegrated: COUNT,
+    inline_values: COUNT,
+    investigations: COUNT,
+    investigations_read: COUNT,
   },
 };
 export type UsageEventName = keyof typeof USAGE_EVENTS;
@@ -517,9 +575,12 @@ export interface UsageEnvironment {
   arch: string;
   cpus: number;
   totalMemory: number;
+  /** A maintainer's own install, set by LOGLINE_USAGE_INTERNAL, so it can be left out of every chart. */
+  internal?: boolean;
 }
 
 export function commonProperties(env: UsageEnvironment): UsageProperties {
+  const internal: UsageProperties = env.internal ? { internal: true } : {};
   const version = (value: string) => (VERSION.test(value) ? value : 'unknown');
   return {
     version: version(env.version),
@@ -531,6 +592,7 @@ export function commonProperties(env: UsageEnvironment): UsageProperties {
     arch: ['x64', 'arm64', 'arm', 'ia32'].includes(env.arch) ? env.arch : 'other',
     cpus: cpusBucket(env.cpus),
     ram_gb: ramBucket(env.totalMemory),
+    ...internal,
   };
 }
 

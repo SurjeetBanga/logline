@@ -35,3 +35,4 @@ performance/**
 test-results/**
 playwright-report/**
 playwright.config.ts
+.usage-uninstall.json

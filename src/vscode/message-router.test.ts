@@ -362,6 +362,8 @@ test('message router counts views, exports for AI, finding votes, and how a tour
     view: (view: string) => counted.push(['view', view]),
     record: (event: string, properties?: unknown) => counted.push([event, properties]),
     findingHelpful: (code: string, helpful: boolean) => counted.push(['vote', code, helpful]),
+    timed: (op: string, ms: number, events: number) =>
+      counted.push(['timed', op, typeof ms === 'number' && ms >= 0, typeof events]),
   };
   service.traceList = () => [];
   service.metricList = () => [];
@@ -373,14 +375,19 @@ test('message router counts views, exports for AI, finding votes, and how a tour
     { type: 'doctorFeedback', code: 'noisy', helpful: true },
     { type: 'doctorFeedback', code: 'noisy' },
     { type: 'tourEnded', finished: false },
+    { type: 'panelError' },
   ])
     await handleMessage(service, send, message);
   assert.deepEqual(counted, [
     ['view', 'traces'],
+    // The trace list reads many events, so how long it took is timed, with how many events the store held.
+    ['timed', 'traces', true, 'number'],
     ['view', 'metrics'],
     ['exported_for_ai', undefined],
     ['vote', 'noisy', true],
     ['tour', { step: 'skipped' }],
+    // A failure in the panel's own script is counted by kind alone.
+    ['error', { area: 'panel', code: 'script_failed' }],
   ]);
 });
 
@@ -454,15 +461,21 @@ test('what someone does in the panel is counted by name, and a welcome choice an
     record: (...args: unknown[]) => recorded.push(args),
     panelAction: (action: string) => actions.push(action),
     panelSize: (width: number) => widths.push(width),
+    timed() {},
   };
   const base = services() as any;
-  const target = { ...(base.services ?? base), usage };
+  const target = { ...(base.services ?? base), usage, agentCall: async () => {} };
   await handleMessage(target, () => {}, { type: 'details', id: 1 });
   await handleMessage(target, () => {}, { type: 'copy', id: 1 });
   await handleMessage(target, () => {}, { type: 'autocomplete', input: 'le' });
   await handleMessage(target, () => {}, { type: 'onboardingSeen', choice: 'capture' });
   await handleMessage(target, () => {}, { type: 'panelSize', width: 640 });
-  assert.deepEqual(actions, ['inspect_event', 'copy_event'], 'typing in the search box is not an action');
+  await handleMessage(target, () => {}, { type: 'agentCall', id: 1, action: 'transcript' });
+  assert.deepEqual(
+    actions,
+    ['inspect_event', 'copy_event', 'agent_transcript'],
+    'typing in the search box is not an action',
+  );
   assert.deepEqual(recorded, [['welcome', { choice: 'capture' }]]);
   assert.deepEqual(widths, [640]);
 });
@@ -525,7 +538,13 @@ test('a span request reads the span, and copying one is routed and counted', asy
   const lookups: unknown[][] = [];
   const target = {
     ...(services() as any),
-    usage: { view() {}, record() {}, panelAction: (action: string) => actions.push(action), panelSize() {} },
+    usage: {
+      view() {},
+      record() {},
+      panelAction: (action: string) => actions.push(action),
+      panelSize() {},
+      timed() {},
+    },
     spanDetail: (...args: unknown[]) => {
       lookups.push(args);
       return args[1] === 'def' ? detail : undefined;

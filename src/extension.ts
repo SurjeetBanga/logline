@@ -1,7 +1,7 @@
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import * as vscode from 'vscode';
-import { agentClient } from './core/usage-events';
+import { agentClient, WILL_FILE } from './core/usage-events';
 import { registerCommands, startAutoServers } from './vscode/commands';
 import { LogsController } from './vscode/logs-controller';
 import { LogsProvider } from './vscode/logs-view-provider';
@@ -39,6 +39,16 @@ let controller: LogsController | undefined;
 let usage: Usage | undefined;
 
 export function activate(context: vscode.ExtensionContext): { provider: LogsProvider } {
+  try {
+    return start(context);
+  } catch (error) {
+    // Counted by area only, once usage counts exist; the failure itself still reaches VS Code.
+    usage?.record('error', { area: 'activation', code: 'start_failed' });
+    throw error;
+  }
+}
+
+function start(context: vscode.ExtensionContext): { provider: LogsProvider } {
   const started = performance.now();
   const packageJSON = context.extension?.packageJSON as { version?: string } | undefined;
   usage = new Usage(context, {
@@ -47,6 +57,8 @@ export function activate(context: vscode.ExtensionContext): { provider: LogsProv
       GUIDE_SECTIONS.map((section) => section.id),
     ),
     environment: usageEnvironment(packageJSON?.version ?? ''),
+    // What an uninstall reports, kept in Logline's own folder for the vscode:uninstall script.
+    willFile: context.extensionPath ? join(context.extensionPath, WILL_FILE) : undefined,
   });
   // Built-in Copilot shows only as a chat command, which can only be looked up asynchronously.
   void refreshCopilot().then(() => controller?.notifications.notify());

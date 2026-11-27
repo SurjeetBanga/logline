@@ -481,9 +481,13 @@ export class LogLens implements vscode.CodeLensProvider, vscode.HoverProvider, v
   }
 
   /** Put each statement's latest value after its line, in the visible editors only. */
+  /** For usage counts: the most log statements that showed a value at the end of their line at once. */
+  inlineValuesShown = 0;
+
   private decorateValues(): void {
     if (!this.valueDecoration || !this.errorValueDecoration) return;
     const on = this.inlineValues;
+    let shown = 0;
     for (const editor of vscode.window.visibleTextEditors ?? []) {
       const plain: vscode.DecorationOptions[] = [];
       const errors: vscode.DecorationOptions[] = [];
@@ -503,7 +507,9 @@ export class LogLens implements vscode.CodeLensProvider, vscode.HoverProvider, v
       }
       editor.setDecorations(this.valueDecoration, plain);
       editor.setDecorations(this.errorValueDecoration, errors);
+      shown += plain.length + errors.length;
     }
+    this.inlineValuesShown = Math.max(this.inlineValuesShown, shown);
   }
 
   /** The text after a statement's line: its value, named for a line Insert Log wrote. */

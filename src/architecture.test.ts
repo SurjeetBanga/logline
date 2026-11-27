@@ -17,6 +17,8 @@ const ALLOWED: Record<string, string[]> = {
   webview: ['webview', 'core'],
   vscode: ['vscode', 'core', 'capture', 'storage', 'transfer', 'protocol'],
   'extension.ts': ['vscode', 'core', 'capture', 'storage', 'transfer', 'protocol'],
+  // The `vscode:uninstall` script runs without VS Code, after Logline is removed.
+  'uninstall.ts': ['core'],
 };
 
 const src = join(__dirname, '..', 'src');

@@ -244,6 +244,7 @@ export class RuntimeErrors implements vscode.CodeActionProvider, vscode.Disposab
       });
       this.diagnostics.set(uri, diagnostics);
     }
+    if (this.shown.size) this.sources.usage?.milestone('first_editor_mark');
     this.decorate(now);
   }
 
@@ -346,10 +347,13 @@ export class RuntimeErrors implements vscode.CodeActionProvider, vscode.Disposab
   private runAgain(key: unknown): void {
     const error = [...this.shown.values()].find((item) => item.error.key === key)?.error;
     if (!error?.local || !error.serverId) return;
-    if (!this.sources.runAgain?.(error.serverId, error.local))
-      void vscode.window.showInformationMessage(
-        `Logline runs a test command again only in the open terminal that ran it, and ${shortCommand(error.local)} is not running there now. Run it again in a terminal to check the test.`,
-      );
+    if (this.sources.runAgain?.(error.serverId, error.local)) {
+      this.sources.usage?.milestone('first_test_rerun');
+      return;
+    }
+    void vscode.window.showInformationMessage(
+      `Logline runs a test command again only in the open terminal that ran it, and ${shortCommand(error.local)} is not running there now. Run it again in a terminal to check the test.`,
+    );
   }
 
   private breakOn(key: unknown): void {

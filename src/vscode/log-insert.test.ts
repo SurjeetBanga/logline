@@ -142,7 +142,11 @@ function harness(documents: Document[], answer: string | undefined = 'Remove') {
   const module = withVscode(vscode, () => require('./log-insert') as typeof import('./log-insert'));
   // What usage counts were told: never the expression or the file, only the language and whether the file's logger was used.
   const recorded: [string, unknown][] = [];
-  const usage = { command() {}, record: (event: string, properties: unknown) => recorded.push([event, properties]) };
+  const usage = {
+    command() {},
+    milestone: (name: string) => recorded.push(['milestone', name]),
+    record: (event: string, properties: unknown) => recorded.push([event, properties]),
+  };
   const inserter = new module.LogInserter(usage as never);
   const edit = (document: Document, selections: Selection[]) => {
     window.activeTextEditor = {
@@ -187,7 +191,10 @@ test('Insert Log writes a line for the name at each cursor, and the file can be 
     '}',
   ]);
   assert.equal(h.contexts.at(-1), true, 'Source Control offers to remove them');
-  assert.deepEqual(h.recorded, [['log_inserted', { language: 'js', styled: false }]]);
+  assert.deepEqual(h.recorded, [
+    ['log_inserted', { language: 'js', styled: false }],
+    ['milestone', 'first_insert_log'],
+  ]);
   assert.equal(await h.commands.get('logline.removeInsertedLogsInFile')!(), 2);
   assert.equal(document.lines.length, 5);
   assert.equal(h.contexts.at(-1), false);

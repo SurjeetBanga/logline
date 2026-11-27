@@ -945,6 +945,8 @@ export class ConnectionManager implements vscode.Disposable {
       auth: signsInWithIam(connection) ? 'iam' : keepsPassword(connection) ? 'password' : 'other',
     });
     this.usage?.milestone('first_connection');
+    if (connection.type === 'github-actions' || connection.type === 'gitlab-ci')
+      this.usage?.milestone('first_ci_connection');
   }
 
   private uniqueId(label: string): string {

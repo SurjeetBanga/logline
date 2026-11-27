@@ -44,6 +44,11 @@
       "classification": "SystemMetaData",
       "purpose": "PerformanceAndHealth",
       "comment": "Memory, bucketed."
+    },
+    "internal": {
+      "classification": "SystemMetaData",
+      "purpose": "FeatureInsight",
+      "comment": "true for a maintainer's own install, set by LOGLINE_USAGE_INTERNAL, so it can be left out of charts."
     }
   },
   "events": {
@@ -55,6 +60,25 @@
       "owner": "SurjeetBanga",
       "comment": "Logline started at a new version; from is the previous version.",
       "from": {
+        "classification": "SystemMetaData",
+        "purpose": "FeatureInsight",
+        "comment": "A version number."
+      }
+    },
+    "surjeetbanga.logline/uninstalled": {
+      "owner": "SurjeetBanga",
+      "comment": "Logline was removed; sent once by its vscode:uninstall script after the editor restarts, only if usage counts were on, with the common properties it last had.",
+      "age": {
+        "classification": "SystemMetaData",
+        "purpose": "FeatureInsight",
+        "comment": "How long after installing, bucketed."
+      },
+      "reached": {
+        "classification": "SystemMetaData",
+        "purpose": "FeatureInsight",
+        "comment": "Some of the firsts the milestone event names."
+      },
+      "version": {
         "classification": "SystemMetaData",
         "purpose": "FeatureInsight",
         "comment": "A version number."
@@ -79,7 +103,7 @@
       "name": {
         "classification": "SystemMetaData",
         "purpose": "FeatureInsight",
-        "comment": "One of: first_capture, first_search, first_filtered_search, first_view_switch, first_connection, first_share, first_agent_call, first_doctor_action, first_log_breakpoint, first_event_inspected."
+        "comment": "One of: first_capture, first_search, first_filtered_search, first_view_switch, first_connection, first_share, first_agent_call, first_doctor_action, first_log_breakpoint, first_event_inspected, first_investigate, first_agent_session, first_editor_mark, first_insert_log, first_test_rerun, first_ci_connection."
       },
       "after": {
         "classification": "SystemMetaData",
@@ -347,6 +371,15 @@
         "comment": "true when the error stopped, false when it happened again."
       }
     },
+    "surjeetbanga.logline/investigate_read": {
+      "owner": "SurjeetBanga",
+      "comment": "An agent read the shared logs after an error was handed to it with Investigate.",
+      "after": {
+        "classification": "SystemMetaData",
+        "purpose": "FeatureInsight",
+        "comment": "How long after, bucketed."
+      }
+    },
     "surjeetbanga.logline/agent_connected": {
       "owner": "SurjeetBanga",
       "comment": "An agent called Logline for the first time in a while; which kind of client.",
@@ -471,7 +504,7 @@
       "op": {
         "classification": "SystemMetaData",
         "purpose": "FeatureInsight",
-        "comment": "One of: first_render, search, or import."
+        "comment": "One of: first_render, search, import, analysis, traces, trace, ai_calls, details, or context."
       },
       "ms": {
         "classification": "SystemMetaData",
@@ -549,12 +582,17 @@
       "area": {
         "classification": "SystemMetaData",
         "purpose": "FeatureInsight",
-        "comment": "One of: bridge, otlp, connection, import, export, capture, panel."
+        "comment": "One of: bridge, otlp, connection, import, export, capture, panel, command, or activation."
       },
       "code": {
         "classification": "SystemMetaData",
         "purpose": "FeatureInsight",
-        "comment": "One of: start_failed, write_failed, read_failed, message_failed."
+        "comment": "One of: start_failed, write_failed, read_failed, message_failed, command_failed, script_failed, or stream_failed."
+      },
+      "command": {
+        "classification": "SystemMetaData",
+        "purpose": "PerformanceAndHealth",
+        "comment": "For a command that failed: its id, one of the commands in package.json."
       }
     },
     "surjeetbanga.logline/session_summary": {
@@ -809,6 +847,41 @@
         "classification": "SystemMetaData",
         "purpose": "FeatureInsight",
         "comment": "Some of: node, browser, extension_host, python, dotnet, java, go, cpp, rust, php, ruby, dart, or other."
+      },
+      "commands_captured": {
+        "classification": "SystemMetaData",
+        "purpose": "FeatureInsight",
+        "comment": "Terminal commands captured. A count, bucketed (0, 1-9, 10-99, ...)."
+      },
+      "commands_uncaptured": {
+        "classification": "SystemMetaData",
+        "purpose": "FeatureInsight",
+        "comment": "Terminal commands run while capture was off. A count, bucketed (0, 1-9, 10-99, ...)."
+      },
+      "commands_unreadable": {
+        "classification": "SystemMetaData",
+        "purpose": "FeatureInsight",
+        "comment": "Terminal commands whose output had no stream to read. A count, bucketed (0, 1-9, 10-99, ...)."
+      },
+      "terminals_unintegrated": {
+        "classification": "SystemMetaData",
+        "purpose": "FeatureInsight",
+        "comment": "Terminals that did not bring up shell integration, whose commands capture cannot see. A count, bucketed (0, 1-9, 10-99, ...)."
+      },
+      "inline_values": {
+        "classification": "SystemMetaData",
+        "purpose": "FeatureInsight",
+        "comment": "The most log statements that showed their latest value at the end of their line at once. A count, bucketed (0, 1-9, 10-99, ...)."
+      },
+      "investigations": {
+        "classification": "SystemMetaData",
+        "purpose": "FeatureInsight",
+        "comment": "Errors handed to an agent with Investigate. A count, bucketed (0, 1-9, 10-99, ...)."
+      },
+      "investigations_read": {
+        "classification": "SystemMetaData",
+        "purpose": "FeatureInsight",
+        "comment": "Of those, how many an agent then read shared logs for. A count, bucketed (0, 1-9, 10-99, ...)."
       }
     },
     "surjeetbanga.logline/survey sent": {
@@ -837,6 +910,16 @@
         "classification": "SystemMetaData",
         "purpose": "FeatureInsight",
         "comment": "Whether shell integration came up."
+      },
+      "variant": {
+        "classification": "SystemMetaData",
+        "purpose": "FeatureInsight",
+        "comment": "For PowerShell, one of: windows_powershell, pwsh, or other."
+      },
+      "setting_off": {
+        "classification": "SystemMetaData",
+        "purpose": "FeatureInsight",
+        "comment": "For a terminal without shell integration: true when terminal.integrated.shellIntegration.enabled is false."
       }
     },
     "surjeetbanga.logline/panel_size": {

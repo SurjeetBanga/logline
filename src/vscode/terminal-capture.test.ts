@@ -343,6 +343,23 @@ test('terminals are not judged while capture is off, and are once it is turned o
   capture.dispose();
 });
 
+test('usage counts learn how many commands were captured, run with capture off, or unreadable, and which terminals were blind', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const terminal = { name: 'zsh' };
+  const h = harness(true, 100000, [terminal, {}]);
+  const run = (read: () => AsyncIterable<string> | undefined) =>
+    h.start({ terminal, execution: { commandLine: { value: 'npm test' }, cwd: { fsPath: '/w' }, read } });
+  run(async function* () {
+    yield 'ok\n';
+  });
+  run(() => undefined);
+  t.mock.timers.tick(10_000);
+  h.capture.setEnabled(false);
+  run(async function* () {});
+  assert.deepEqual(h.capture.counts, { captured: 1, uncaptured: 1, unreadable: 1, unintegrated: 2 });
+  h.capture.dispose();
+});
+
 test('a terminal is judged by its own shell, and an extension terminal not at all', (t) => {
   t.mock.timers.enable({ apis: ['setTimeout'] });
   const detected = { state: { shell: 'gitbash' }, creationOptions: { shellPath: 'C:/x/pwsh.exe' } };

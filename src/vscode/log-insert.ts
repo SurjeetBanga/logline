@@ -84,6 +84,7 @@ export class LogInserter implements vscode.Disposable {
     if (applied) {
       this.setContext(true);
       this.usage?.record('log_inserted', { language: insertions[0].family, styled: insertions[0].styled });
+      this.usage?.milestone('first_insert_log');
     }
     return applied;
   }

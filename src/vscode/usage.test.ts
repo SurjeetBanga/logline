@@ -115,6 +115,8 @@ function setup(
     accepted?: boolean;
     /** The extension's storage folder, shared by windows of one install. */
     storage?: string;
+    /** Where what an uninstall reports is kept. */
+    willFile?: string;
   } = {},
 ) {
   Object.assign(host, { usageEnabled: true, errorsEnabled: true, answer: undefined, messages: [], opened: [] });
@@ -129,6 +131,7 @@ function setup(
     environment,
     env: options.env ?? {},
     projectKey: options.key ?? 'test-project',
+    ...(options.willFile ? { willFile: options.willFile } : {}),
     now: () => now,
     transport: async (body) => {
       bodies.push(body);
@@ -979,4 +982,136 @@ test('debuggers, snapshots, test runs, and agent sessions are sent once a kind a
   assert.equal(summary.agent_sessions, '1-9');
   assert.deepEqual(summary.agents_followed, ['claude-code', 'codex']);
   assert.deepEqual(summary.debuggers, ['node', 'python', 'other']);
+});
+
+test('heavy panel requests are timed the first few times and then sampled, each kind apart', async () => {
+  const { usage, sent } = setup();
+  usage.start();
+  for (let i = 0; i < 60; i++) usage.timed('analysis', 120, 5000);
+  usage.timed('traces', 30);
+  await usage.close();
+  const perf = sent.filter((item) => item.event === 'perf');
+  assert.equal(perf.filter((item) => item.properties.op === 'analysis').length, 6, 'five, then one in fifty');
+  assert.equal(perf.find((item) => item.properties.op === 'traces')?.properties.ms, '25-49ms');
+  assert.equal(perf.find((item) => item.properties.op === 'analysis')!.properties.events, '1k-10k');
+});
+
+test('an investigation is told when an agent reads the shared logs after it, and counted when none does', async () => {
+  const { usage, sent, advance } = setup();
+  usage.start({
+    eventsCaptured: () => 0,
+    sources: () => 0,
+    memoryMb: () => 0,
+    trimmed: () => false,
+    connections: () => ({}),
+    terminal: () => ({ captured: 12, uncaptured: 3, unreadable: 1, unintegrated: 2 }),
+    inlineValues: () => 4,
+  });
+  const call = {
+    tool: 'logline_search_logs',
+    via: 'mcp' as const,
+    client: 'claude-code',
+    ok: true,
+    ms: 40,
+    resultSize: 100,
+    truncated: false,
+    redactions: 0,
+  };
+  usage.investigated('claude', 'analyze', false);
+  advance(90_000);
+  usage.agentTool(call);
+  usage.agentTool(call);
+  usage.investigated('copy', 'editor', true);
+  usage.capture('agent');
+  await usage.close();
+  const of = (event: string) => sent.filter((item) => item.event === event).map((item) => item.properties);
+  assert.deepEqual(
+    of('investigate').map(({ agent, from, ci }) => [agent, from, ci]),
+    [
+      ['claude', 'analyze', false],
+      ['copy', 'editor', true],
+    ],
+  );
+  assert.deepEqual(
+    of('investigate_read').map(({ after }) => after),
+    ['1-5m'],
+    'told once, for the first call after it',
+  );
+  const names = of('milestone').map(({ name }) => name);
+  assert.ok(names.includes('first_investigate') && names.includes('first_agent_session'));
+  assert.ok(!names.includes('first_capture'), 'reading agent sessions is not capturing the app');
+  const [summary] = of('session_summary');
+  assert.equal(summary.investigations, '1-9');
+  assert.equal(summary.investigations_read, '1-9');
+  assert.equal(summary.commands_captured, '10-99');
+  assert.equal(summary.commands_uncaptured, '1-9');
+  assert.equal(summary.commands_unreadable, '1-9');
+  assert.equal(summary.terminals_unintegrated, '1-9');
+  assert.equal(summary.inline_values, '1-9');
+});
+
+test('a terminal check says which PowerShell, and whether shell integration was turned off in settings', async () => {
+  const { usage, sent } = setup();
+  usage.start();
+  usage.terminalChecked('powershell', false, { variant: 'windows_powershell', settingOff: false });
+  usage.terminalChecked('powershell', false, { variant: 'windows_powershell', settingOff: false });
+  usage.terminalChecked('powershell', true, { variant: 'pwsh' });
+  usage.terminalChecked('posix', true, { variant: 'other' });
+  await usage.close();
+  const checks = sent
+    .filter((item) => item.event === 'terminal_checked')
+    .map(({ properties: { shell, integrated, variant, setting_off } }) => [shell, integrated, variant, setting_off]);
+  assert.deepEqual(checks, [
+    ['powershell', false, 'windows_powershell', false],
+    ['powershell', true, 'pwsh', undefined],
+    ['posix', true, undefined, undefined],
+  ]);
+});
+
+test('a command that fails is counted by its id, and still fails', async () => {
+  const { usage, sent } = setup();
+  usage.start();
+  assert.throws(
+    () =>
+      counted(usage, 'logline.showLogs', () => {
+        throw new Error('boom');
+      })(),
+    /boom/,
+  );
+  await assert.rejects(counted(usage, 'logline.export', async () => Promise.reject(new Error('later')))(), /later/);
+  await usage.close();
+  assert.deepEqual(
+    sent
+      .filter((item) => item.event === 'error')
+      .map(({ properties }) => [properties.area, properties.code, properties.command]),
+    [
+      ['command', 'command_failed', 'logline.showLogs'],
+      ['command', 'command_failed', 'logline.export'],
+    ],
+  );
+});
+
+test('what an uninstall reports is kept while usage counts are on, and removed when they are off', async () => {
+  const folder = mkdtempSync(join(tmpdir(), 'logline-will-'));
+  const willFile = join(folder, '.usage-uninstall.json');
+  try {
+    const { usage } = setup({ willFile });
+    usage.start();
+    const will = JSON.parse(readFileSync(willFile, 'utf8'));
+    assert.equal(will.projectKey, 'test-project');
+    assert.equal(typeof will.id, 'string');
+    assert.equal(typeof will.installedAt, 'number');
+    assert.equal(typeof will.common.version, 'string');
+    usage.milestone('first_search');
+    assert.ok(JSON.parse(readFileSync(willFile, 'utf8')).milestones.includes('first_search'));
+    usage.dispose();
+
+    const off = setup({ willFile });
+    host.usageEnabled = false;
+    off.usage.start();
+    assert.deepEqual(readdirSync(folder), [], 'nothing is left for an uninstall to send');
+    off.usage.dispose();
+  } finally {
+    rmSync(folder, { recursive: true, force: true });
+  }
 });
