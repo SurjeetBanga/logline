@@ -691,8 +691,9 @@ export function createViewer(api: WebviewApi) {
     table.renderFieldList();
     if (Array.isArray(data.fields)) state.allFields = data.fields;
     if (data.searches) search.renderSearchState(data.searches);
-    if (rows && !bridge.refreshRequested && holdingLive()) {
-      // Rows would move under the pointer; show them when it leaves the table.
+    // A changed filter clears `lastRows`; its first answer is what was asked for, so it is shown at once.
+    if (rows && !bridge.refreshRequested && state.lastRows !== undefined && holdingLive()) {
+      // New rows of the same filter would move under the pointer; show them when it leaves the table.
       heldEvents = rows;
       updateModeLabel();
     } else if (rows && !bridge.refreshRequested) {
