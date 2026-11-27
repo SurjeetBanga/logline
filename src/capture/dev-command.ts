@@ -58,11 +58,10 @@ export function looksLikeDevServer(commandLine: string): boolean {
   return PATTERNS.some((pattern) => pattern.test(command));
 }
 
-/** Runs of a program or a test suite, whose output is worth searching even though nothing stays up. */
-const RUN_PATTERNS: RegExp[] = [
-  /^(?:python[\d.]*|py)\s+(?:-[\w.]+\s+)*[^\s-]\S*\.pyw?\b/,
+/** Runs of a test suite. */
+const TEST_PATTERNS: RegExp[] = [
   /^(?:python[\d.]*|py)\s+-m\s+(?:pytest|unittest)\b/,
-  /^(?:node|bun|deno)\s+(?:run\s+)?(?:--[\w=:.-]+\s+)*[^\s-]\S*\.[cm]?[jt]sx?\b/,
+  /^node\s+(?:--[\w=:.-]+\s+)*--test\b/,
   /^(?:npm|pnpm|yarn|bun)\s+(?:run\s+)?test(?::[\w.-]+)?(?:\s|$)/,
   /^npm\s+t(?:\s|$)/,
   /^(?:npx\s+|pnpm\s+(?:exec|dlx)\s+|yarn\s+dlx\s+|bunx\s+)?(?:jest|vitest|mocha|playwright\s+test)(?:\s|$)/,
@@ -70,8 +69,23 @@ const RUN_PATTERNS: RegExp[] = [
   /^(?:poetry|uv|pipenv|hatch)\s+run\s+(?:pytest|python)\b/,
   /^(?:go|cargo|dotnet|mix|deno)\s+test\b/,
   /^php\s+artisan\s+test\b/,
-  /^(?:\.[\\/])?(?:mvnw?|gradlew?)(?:\.cmd|\.bat)?\s+(?:\S+\s+)*?(?:test|check|run|bootRun)\b/,
+  /^(?:\.[\\/])?(?:mvnw?|gradlew?)(?:\.cmd|\.bat)?\s+(?:\S+\s+)*?(?:test|check)\b/,
 ];
+
+/** Runs of a program or a test suite, whose output is worth searching even though nothing stays up. */
+const RUN_PATTERNS: RegExp[] = [
+  /^(?:python[\d.]*|py)\s+(?:-[\w.]+\s+)*[^\s-]\S*\.pyw?\b/,
+  /^(?:node|bun|deno)\s+(?:run\s+)?(?:--[\w=:.-]+\s+)*[^\s-]\S*\.[cm]?[jt]sx?\b/,
+  /^(?:\.[\\/])?(?:mvnw?|gradlew?)(?:\.cmd|\.bat)?\s+(?:\S+\s+)*?(?:run|bootRun)\b/,
+  ...TEST_PATTERNS,
+];
+
+/** Whether a command runs a test suite, whose output may name failed tests. */
+export function looksLikeTestRun(commandLine: string): boolean {
+  if (commandLine.length > MAX_COMMAND) return false;
+  const command = withoutEnvironment(commandLine);
+  return TEST_PATTERNS.some((pattern) => pattern.test(command));
+}
 
 /**
  * Whether a terminal command runs something whose output is worth capturing:

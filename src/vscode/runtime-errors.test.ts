@@ -66,6 +66,8 @@ function harness(mode = 'inline', source = '') {
   const decorations: { range: Range; renderOptions: { after: { contentText: string } } }[][] = [];
   const breakpoints: SourceBreakpoint[] = [];
   const queries: string[] = [];
+  const ran: { serverId: string; command: string }[] = [];
+  const terminalOpen = { value: true };
   let changeListener: ((event: unknown) => void) | undefined;
   const document = {
     uri: Uri.file('/w/src/lib/payments.ts'),
@@ -141,6 +143,10 @@ function harness(mode = 'inline', source = '') {
     showQuery: async (query) => {
       queries.push(query);
     },
+    runAgain: (serverId, command) => {
+      ran.push({ serverId, command });
+      return terminalOpen.value;
+    },
   });
   const add = (id: number, line: number) =>
     store.add({
@@ -173,10 +179,13 @@ function harness(mode = 'inline', source = '') {
         id,
         new Date(0),
       ),
+      serverId: 'terminal-1',
       timestampMs: 1000,
     });
   return {
     addCi,
+    ran,
+    terminalOpen,
     errors,
     commands,
     collection,
@@ -309,4 +318,43 @@ test('a test is found by its own name in any quote, and line 0 when it is not fo
   assert.equal(await testLine(uri, ' › '), 0);
   readers.text = new Error('gone');
   assert.equal(await testLine(uri, 'a'), 0);
+});
+
+test('a test that failed locally offers to run its command again, and clears once a later run passes it', async () => {
+  const h = harness(
+    'inline',
+    ["describe('cart', () => {", "  it('removes items', () => {})", "  it('adds items', () => {})"].join('\n'),
+  );
+  const local = { run: undefined, job: undefined, scope: 'local', command: 'npm test' };
+  h.addCi(1, local);
+  await h.errors.refresh(6000);
+  let [diagnostic] = h.collection.get('file:///w/src/lib/payments.ts')!;
+  assert.equal(diagnostic.message, '✕ cart › adds items · failed locally · npm test · 5s ago');
+  const actions = h.errors.provideCodeActions(
+    h.document as never,
+    diagnostic.range as never,
+    { diagnostics: [diagnostic] } as never,
+  );
+  assert.deepEqual(
+    actions.map((action) => action.title),
+    ['Run npm test again', 'Show in Logs', 'Investigate with agent', 'Break here next time'],
+  );
+  assert.equal((actions[2].command!.arguments![0] as { ci?: string }).ci, undefined, 'not said to fail in CI');
+  await h.commands.get('logline.runTestsAgain')!(actions[0].command!.arguments![0]);
+  assert.deepEqual(h.ran, [{ serverId: 'terminal-1', command: 'npm test' }]);
+
+  // Another command passing the test, or this one passing another, leaves the mark.
+  h.errors.testsPassed('terminal-1', 'npm run test:unit', ['cart › adds items']);
+  h.errors.testsPassed('terminal-1', 'npm test', ['cart › removes items']);
+  assert.equal(h.collection.get('file:///w/src/lib/payments.ts')!.length, 1);
+  h.errors.testsPassed('terminal-1', 'npm test', ['cart › adds items']);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(h.collection.get('file:///w/src/lib/payments.ts'), undefined, 'a pass clears the mark');
+
+  // Failing again brings it back.
+  h.addCi(2, local);
+  await h.errors.refresh(7000);
+  [diagnostic] = h.collection.get('file:///w/src/lib/payments.ts')!;
+  assert.match(diagnostic.message, /failed locally · npm test · 2×/);
+  h.errors.dispose();
 });

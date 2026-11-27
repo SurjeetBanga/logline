@@ -46,6 +46,7 @@ export async function run(): Promise<void> {
       'showLogSite',
       'copyLogValue',
       'breakAtLogSite',
+      'runTestsAgain',
       'connectAgent',
       'showStatus',
       'about',

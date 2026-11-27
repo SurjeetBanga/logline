@@ -32,6 +32,7 @@ import { AgentSessionCapture } from '../capture/agent-sessions';
 import { AGENT_NAMES, agentSource, type AgentName } from '../core/agent-session';
 import type { BrowserLauncher } from './browser';
 import { FileFollower } from '../capture/file-follower';
+import { TestRuns } from '../capture/test-runs';
 import { RemoteSource } from '../capture/remote-source';
 import { RemoteMetrics } from '../capture/remote-metrics';
 import { ConnectionManager } from './connections';
@@ -138,6 +139,7 @@ export class LogsController {
     this.doctor?.schedule();
     this.runtimeErrors?.schedule();
     this.investigator?.schedule();
+    this.scheduleTestRuns();
   });
   readonly store = new LogStore(this.config.get('maxEvents', 50000), this.config.get('maxMemoryMb', 100) * 1024 * 1024);
   readonly registry = new SessionRegistry();
@@ -152,6 +154,10 @@ export class LogsController {
   readonly runner = new ProcessRunner(this.config, this.registry, this.ingestion, this.state);
   readonly tasks = new TaskLifecycle(this.registry, this.ingestion, this.state, () => this.runner.sessions.size > 0);
   readonly terminalCapture = new TerminalCapture(this.config, this.ingestion, this.registry, this.state);
+  /** Reads finished test runs for the tests they failed, which then mark their lines. */
+  readonly testRuns = new TestRuns(this.registry, this.store, this.ingestion);
+  private testRunTimer?: ReturnType<typeof setTimeout>;
+  private testRunGeneration = 0;
   readonly files = new FileFollower(this.config, this.registry, this.ingestion, this.state);
   /** The browser Logline opened, whose console and requests are captured. */
   readonly browser = new BrowserCapture(this.config, this.registry, this.ingestion, this.state);
@@ -1381,7 +1387,7 @@ export class LogsController {
         (failure ? `kind:test-failure test:${JSON.stringify(failure.test)}` : templateQuery(normalizeMessage(message))),
       location: place ?? (site ? `${site.file}:${site.line}` : undefined),
       serverId: event.serverId,
-      ...(failure ? { ci: failure.ci } : {}),
+      ...(failure?.ci ? { ci: failure.ci } : {}),
     });
   }
   async askCopilot(anchor?: number): Promise<boolean> {
@@ -1512,8 +1518,31 @@ export class LogsController {
   dispose(): Promise<void> {
     return (this.disposing ??= this.shutdown());
   }
+  /** Read finished test runs soon: a run's last lines arrive just after it ends. */
+  private scheduleTestRuns(): void {
+    if (this.testRunTimer || this.disposing) return;
+    this.testRunTimer = setTimeout(() => {
+      this.testRunTimer = undefined;
+      this.checkTestRuns();
+    }, 300);
+    this.testRunTimer.unref?.();
+  }
+  /** Record the tests finished runs failed, and clear the marks of those a later run of their command passed. */
+  checkTestRuns(): void {
+    if (this.state.generation !== this.testRunGeneration) {
+      this.testRunGeneration = this.state.generation;
+      this.testRuns.reset();
+    }
+    for (const { record, command, fixed } of this.testRuns.check()) {
+      if (!fixed.length) continue;
+      this.runtimeErrors?.testsPassed(record.serverId, command, fixed);
+      const tests = fixed.length === 1 ? '1 test' : `${fixed.length.toLocaleString()} tests`;
+      vscode.window.setStatusBarMessage?.(`$(check) ${tests} fixed since the last ${command}`, 10_000);
+    }
+  }
   private async shutdown(): Promise<void> {
     clearTimeout(this.searchSettle);
+    clearTimeout(this.testRunTimer);
     this.agentAccess.revoke();
     this.configSubscription.dispose();
     for (const subscription of this.sharingSubscriptions) subscription.dispose();

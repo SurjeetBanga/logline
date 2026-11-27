@@ -24,6 +24,10 @@ export interface RuntimeError {
   test?: string;
   /** Where a CI failure ran: `CI #4812 · build (ubuntu-latest)`. */
   ci?: string;
+  /** The command a test failed in on this machine: `npm test`. */
+  local?: string;
+  /** The source of the run a local failure came from, so the command can be run again there. */
+  serverId?: string;
 }
 
 // Frames in installed packages, the language runtime, or generated code are not where a fix goes.
@@ -44,10 +48,13 @@ function headline(event: LogEvent, blockTitle: string | undefined): string {
 const COMPILED = /^(?:out(?:-[\w-]+)?|dist|build|lib)\/(.+)\.[cm]?js$/;
 const SOURCE_EXTENSIONS = ['ts', 'tsx', 'mts', 'js'];
 
-/** A failed CI test's place in the code: the file and line its runner gave, and the source of a compiled file. */
+/**
+ * A failed test's place in the code: the file and line its runner gave, and the source of a compiled file. It failed
+ * in CI when its event names a CI run or job, and otherwise in the local command its event names.
+ */
 export function testFailureFrames(
   event: LogEvent,
-): { message: string; frames: SourceLocation[]; test: string; ci: string } | undefined {
+): { message: string; frames: SourceLocation[]; test: string; ci?: string; local?: string } | undefined {
   const fields = event.fields;
   if (fields?.kind !== 'test-failure' || typeof fields.test !== 'string' || typeof fields.file !== 'string')
     return undefined;
@@ -59,9 +66,12 @@ export function testFailureFrames(
     for (const extension of SOURCE_EXTENSIONS)
       frames.push({ file: `src/${compiled[1]}.${extension}`, line: 0, column: 0 });
   else frames.push({ file: fields.file, line, column: 0 });
+  const message = `✕ ${fields.test}`;
+  if (fields.scope === 'local' && typeof fields.command === 'string')
+    return { message, frames, test: fields.test, local: fields.command };
   const run = typeof fields.run === 'number' ? ` #${fields.run}` : '';
   const ci = `CI${run}${typeof fields.job === 'string' ? ` · ${fields.job}` : ''}`;
-  return { message: `✕ ${fields.test}`, frames, test: fields.test, ci };
+  return { message, frames, test: fields.test, ci };
 }
 
 /** The app-code frames of an error event's stack, innermost first, or none for an event without one. */
@@ -120,8 +130,9 @@ export class RuntimeErrorTracker {
       if (!found) continue;
       const top = found.frames[0];
       // A failed test is one mark however many runs and jobs it failed in.
+      // A test failing on this machine is marked apart from the same test failing in CI, which a local pass does not fix.
       const key = failure
-        ? `test\0${top.file}\0${failure.test}`
+        ? `test\0${failure.local === undefined ? '' : 'local'}\0${top.file}\0${failure.test}`
         : `${normalizeMessage(found.message)}\0${top.file}:${top.line}`;
       let error = this.errors.get(key);
       if (!error) {
@@ -135,13 +146,18 @@ export class RuntimeErrorTracker {
           query: failure
             ? `kind:test-failure test:${JSON.stringify(failure.test)}`
             : templateQuery(normalizeMessage(found.message)),
-          ...(failure ? { test: failure.test, ci: failure.ci } : {}),
+          ...(failure ? { test: failure.test } : {}),
+          ...(failure?.ci ? { ci: failure.ci } : {}),
         };
         this.errors.set(key, error);
       }
       error.count++;
       error.lastId = event.id;
-      if (failure) error.ci = failure.ci;
+      if (failure?.ci) error.ci = failure.ci;
+      if (failure?.local) {
+        error.local = failure.local;
+        if (event.serverId) error.serverId = event.serverId;
+      }
       if (event.timestampMs !== undefined) error.lastSeen = Math.max(error.lastSeen ?? 0, event.timestampMs);
       this.counted.push({ id: event.id, key });
       changed = true;
@@ -178,8 +194,9 @@ export class RuntimeErrorTracker {
 export function runtimeErrorText(error: RuntimeError, now: number, limit = 120): string {
   const message = error.message.length > limit ? `${error.message.slice(0, limit - 1)}…` : error.message;
   // A failed test says where it failed, and how often only when it failed more than once.
-  const parts = error.ci
-    ? [message, `failed in ${error.ci}`, ...(error.count > 1 ? [`${error.count.toLocaleString()}×`] : [])]
+  const where = error.ci ? `failed in ${error.ci}` : error.local !== undefined ? `failed locally · ${error.local}` : '';
+  const parts = where
+    ? [message, where, ...(error.count > 1 ? [`${error.count.toLocaleString()}×`] : [])]
     : [message, `${error.count.toLocaleString()}×`];
   if (error.lastSeen !== undefined) parts.push(ago(now - error.lastSeen));
   return parts.join(' · ');

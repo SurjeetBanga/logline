@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { looksLikeDevServer, looksLikeProgramRun } from './dev-command';
+import { looksLikeDevServer, looksLikeProgramRun, looksLikeTestRun } from './dev-command';
 
 test('commands that start a dev server, an app, or containers are recognized', () => {
   for (const command of [
@@ -145,4 +145,24 @@ test('a long or adversarial command line is answered at once for the capture off
   ])
     assert.equal(looksLikeProgramRun(command), false, command.slice(0, 20));
   assert.ok(performance.now() - started < 500, 'each answer takes time in proportion to the length');
+});
+
+test('test commands are told apart from other program runs', () => {
+  for (const command of [
+    'npm test',
+    'npm t',
+    'pnpm run test:unit',
+    'npx vitest run src/cart.test.ts',
+    'jest --runInBand',
+    'pytest -k login',
+    'python -m pytest tests',
+    'node --test out/',
+    'go test ./...',
+    'dotnet test',
+    './mvnw -q test',
+    'NODE_ENV=test npm test',
+  ])
+    assert.equal(looksLikeTestRun(command), true, command);
+  for (const command of ['npm run dev', 'node server.js', 'python app.py', './gradlew bootRun', 'npm install', ''])
+    assert.equal(looksLikeTestRun(command), false, command);
 });
