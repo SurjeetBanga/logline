@@ -4355,7 +4355,7 @@ td[data-column]:focus-visible {
   overflow-wrap: anywhere;
   pointer-events: none;
 }
-/* A tooltip of facts: labels in a column, values beside them, under an optional heading. */
+/* A tooltip of facts: labels in a column, values beside them, and any note across both. */
 .tooltip.tooltip-facts {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
@@ -4366,22 +4366,17 @@ td[data-column]:focus-visible {
 .tooltip.tooltip-facts[hidden] {
   display: none;
 }
-.tooltip-heading {
-  grid-column: 1 / -1;
-  margin-bottom: 3px;
-  padding-bottom: 5px;
-  border-bottom: 1px solid var(--vscode-editorHoverWidget-border, #454545);
-  font-weight: 600;
-}
 .tooltip-label {
   color: var(--vscode-descriptionForeground, #9d9d9d);
 }
 .tooltip-value {
   font-variant-numeric: tabular-nums;
 }
+.tooltip-label ~ .tooltip-note {
+  margin-top: 3px;
+}
 .tooltip-note {
   grid-column: 1 / -1;
-  margin-top: 3px;
   color: var(--vscode-descriptionForeground, #9d9d9d);
 }
 /* Medium panels: tabs show their icon and count, and only the selected tab keeps its name. */

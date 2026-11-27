@@ -392,8 +392,8 @@ export function createSourceRail(
             [started, session.detail || stateText].filter(Boolean).join(' · '),
             session.sourceKind === 'remote' || session.sourceKind === 'import' || session.sourceKind === 'agent',
           );
-      // The tooltip adds only what the row leaves out, and the name when it is cut short,
-      // as a table of `Label\tvalue` lines under the name.
+      // The tooltip adds only what the row leaves out, as a table of `Label\tvalue` lines,
+      // and the name when the row shows the start time instead or cuts the name short.
       const fact = (label: string, value: string | undefined) => (value ? `${label}\t${value}` : '');
       const hidden = [
         !byTime && session.detail ? fact('Status', stateText) : '',
@@ -403,14 +403,13 @@ export function createSourceRail(
         fact('Capture', session.captureStatus),
         session.captureReason,
       ].filter(Boolean);
-      const tipFor = (named: boolean) => (named ? [runName(session), ...hidden] : hidden).join('\n');
+      const tipFor = (cut: boolean) => (cut ? [fact('Name', runName(session)), ...hidden] : hidden).join('\n');
       const named = byTime && Boolean(started);
       if (hidden.length || named) button.title = tipFor(named);
       // Checked as the pointer arrives, before the tooltip takes the title, since the width can change.
       scope.listen(button, 'pointerover', () => {
         const name = button.querySelector<HTMLElement>('.rail-name');
-        const cut = !byTime && Boolean(name && name.scrollWidth > name.clientWidth);
-        const title = tipFor(named || cut);
+        const title = tipFor(named || Boolean(!byTime && name && name.scrollWidth > name.clientWidth));
         if (title !== (button.dataset.tip ?? button.title)) button.title = title;
       });
       wrapper.append(button);

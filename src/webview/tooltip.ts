@@ -15,8 +15,8 @@ const MAX_TEXT = 280;
  * The title moves to `data-tip` while shown so the native one does not also
  * appear, and to `aria-description` so screen readers still read it.
  *
- * A title of `Label\tvalue` lines is set out as a table, with any line before
- * them as its heading and any after as a note.
+ * A title of `Label\tvalue` lines is set out as a table, with any other line
+ * as a note across it.
  */
 export function createTooltips(scope: EventScope) {
   const body = document.body;
@@ -68,17 +68,15 @@ export function createTooltips(scope: EventScope) {
       return;
     }
     tip.replaceChildren();
-    let seen = 0;
     for (const line of lines) {
       const tab = line.indexOf('\t');
       if (tab < 0) {
         const part = document.createElement('div');
-        part.className = seen ? 'tooltip-note' : 'tooltip-heading';
+        part.className = 'tooltip-note';
         part.textContent = cut(line);
         tip.append(part);
         continue;
       }
-      seen++;
       const label = document.createElement('span');
       label.className = 'tooltip-label';
       label.textContent = line.slice(0, tab);

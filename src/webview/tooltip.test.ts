@@ -90,16 +90,15 @@ test('a title that was cleared shows no tooltip, and a new one shows', (context)
   assert.equal(tip.textContent, 'Another reason.');
 });
 
-test('a title of labelled lines is set out as a table, under its heading and over its note', (context) => {
+test('a title of labelled lines is set out as a table, with its note across it', (context) => {
   const { tip, hover } = setup(context);
   const button = new Fake();
-  button.title = 'Fix the checkout 500\nStatus\trunning\nModel\tclaude-opus-5-5\nCould not read the file';
+  button.title = 'Status\trunning\nModel\tclaude-opus-5-5\nCould not read the file';
   hover(button);
   assert.ok(tip.classes.has('tooltip-facts'));
   assert.deepEqual(
     tip.children.map((child) => [child.className, child.textContent]),
     [
-      ['tooltip-heading', 'Fix the checkout 500'],
       ['tooltip-label', 'Status'],
       ['tooltip-value', 'running'],
       ['tooltip-label', 'Model'],
