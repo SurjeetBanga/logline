@@ -157,3 +157,34 @@ test('a test failing on this machine says the command it failed in, apart from t
   assert.deepEqual([mark.local, mark.ci], ['npm test', undefined]);
   assert.equal(runtimeErrorText(mark, 6000), '✕ cart › adds items · failed locally · npm test · 5s ago');
 });
+
+test("an exception snapshot's locals join the error raised at its place, before or after it", () => {
+  const snapshot = (id: number, total: number) =>
+    json(id, {
+      level: 'error',
+      message: 'Exception: TypeError boom · charge() payments.ts:40',
+      kind: 'exception-snapshot',
+      function: 'charge',
+      file: '/home/me/app/src/lib/payments.ts',
+      line: 40,
+      locals: { total },
+    });
+  const crash = (id: number) =>
+    json(id, {
+      level: 'error',
+      msg: 'failed',
+      err: {
+        type: 'TypeError',
+        message: 'boom',
+        stack: 'TypeError: boom\n    at charge (/srv/app/src/lib/payments.ts:40:20)',
+      },
+    });
+  const tracker = new RuntimeErrorTracker();
+  tracker.process([snapshot(1, 19.9)]);
+  assert.equal(tracker.list().length, 0, 'a snapshot is not an error of its own');
+  tracker.process([crash(2)]);
+  assert.equal(tracker.list()[0].locals, 'in charge(): total = 19.9');
+  assert.equal(tracker.list()[0].count, 1);
+  tracker.process([snapshot(3, 5)]);
+  assert.equal(tracker.list()[0].locals, 'in charge(): total = 5', 'a newer snapshot updates the error already marked');
+});

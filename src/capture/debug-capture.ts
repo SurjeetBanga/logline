@@ -1,4 +1,5 @@
 import { randomBytes } from 'node:crypto';
+import { snapshotRecord, type SnapshotInput } from '../core/exception-snapshot';
 import type { Settings } from '../core/settings';
 import type { LogEvent, SessionSummary } from '../core/types';
 import type { Ingestion } from './ingestion';
@@ -50,6 +51,8 @@ interface Capture {
   streams: Map<string, Stream>;
   exitCode?: number;
   ended: boolean;
+  /** Output reaches a captured terminal instead, so only exception snapshots are recorded here. */
+  quiet?: boolean;
 }
 
 // DAP output categories. `console` (also the default when an adapter omits
@@ -81,21 +84,46 @@ export class DebugCapture {
 
   start(info: DebugSessionInfo): void {
     if (this.captures.has(info.id) || !this.config.get('captureDebugSessions', true)) return;
-    // With a terminal console, program output also reaches the terminal,
-    // where terminal capture would record every line a second time.
-    if (info.console === 'integratedTerminal' && this.terminalCaptureEnabled()) return;
     this.captures.set(info.id, {
       info,
       serverId: `debug:${info.name}`,
       label: `Debug · ${info.name}`,
       streams: new Map(),
       ended: false,
+      // With a terminal console, program output also reaches the terminal,
+      // where terminal capture would record every line a second time.
+      quiet: info.console === 'integratedTerminal' && this.terminalCaptureEnabled(),
     });
+  }
+
+  /** Whether to record what a program held when the debugger stopped on an exception. */
+  get snapshots(): boolean {
+    return this.config.get('exceptionSnapshots', true);
+  }
+
+  /** Record what the program held when its debugger stopped on an exception, as an event in its debug run. */
+  snapshot(sessionId: string, input: SnapshotInput): LogEvent | undefined {
+    const capture = this.captures.get(sessionId);
+    if (!capture || capture.ended || !this.snapshots) return undefined;
+    const record = capture.record ?? this.createRecord(capture);
+    const redaction = {
+      fields: this.config.get<string[]>('redactionFields', []),
+      replacement: this.config.get('redactionReplacement', '[REDACTED]'),
+    };
+    const event = this.ingestion.accept(JSON.stringify(snapshotRecord(input, redaction)), 'console', {
+      serverId: capture.serverId,
+      server: capture.label,
+      sessionId: record.id,
+    });
+    if (!event) return undefined;
+    record.events++;
+    this.state.notify();
+    return event;
   }
 
   output(sessionId: string, body: DapOutputBody | undefined): void {
     const capture = this.captures.get(sessionId);
-    if (!capture || capture.ended || typeof body?.output !== 'string' || !body.output) return;
+    if (!capture || capture.ended || capture.quiet || typeof body?.output !== 'string' || !body.output) return;
     const name = STREAMS[body.category ?? 'console'];
     if (!name) return;
     if (!capture.record) this.createRecord(capture);

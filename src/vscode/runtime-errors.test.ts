@@ -182,8 +182,26 @@ function harness(mode = 'inline', source = '') {
       serverId: 'terminal-1',
       timestampMs: 1000,
     });
+  const addSnapshot = (id: number, line: number) =>
+    store.add(
+      parseLogLine(
+        JSON.stringify({
+          level: 'error',
+          message: 'Exception: TypeError boom',
+          kind: 'exception-snapshot',
+          function: 'charge',
+          file: '/w/src/lib/payments.ts',
+          line,
+          locals: { total: 19.9 },
+        }),
+        'console',
+        id,
+        new Date(0),
+      ),
+    );
   return {
     addCi,
+    addSnapshot,
     ran,
     terminalOpen,
     errors,
@@ -356,5 +374,19 @@ test('a test that failed locally offers to run its command again, and clears onc
   await h.errors.refresh(7000);
   [diagnostic] = h.collection.get('file:///w/src/lib/payments.ts')!;
   assert.match(diagnostic.message, /failed locally · npm test · 2×/);
+  h.errors.dispose();
+});
+
+test("a debugger's snapshot puts the locals in the mark's hover, not in the text after the line", async () => {
+  const h = harness();
+  h.addSnapshot(1, 40);
+  h.add(2, 40);
+  await h.errors.refresh(6000);
+  const [diagnostic] = h.collection.get('file:///w/src/lib/payments.ts')!;
+  assert.equal(
+    diagnostic.message,
+    'TypeError: boom · 1× · 5s ago\nLocals when it was raised, in charge(): total = 19.9',
+  );
+  assert.equal(h.decorations.at(-1)![0].renderOptions.after.contentText, 'TypeError: boom · 1× · 5s ago');
   h.errors.dispose();
 });
