@@ -1,12 +1,6 @@
 {
   "logline.maxEvents": 100000,
   "logline.maxMemoryMb": 100,
-  "logline.servers": [
-    {
-      "id": "demo-api",
-      "label": "Demo API",
-      "command": "npm run dev"
-    }
-  ],
+  "logline.servers": [],
   "logline.captureTerminals": true
 }
