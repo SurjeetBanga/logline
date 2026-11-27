@@ -140,6 +140,8 @@ export function createSourceRail(
   let connections: ConnectionView[] = [];
   let hints: AgentHintView[] = [];
   let signature = '';
+  /** The selected source's runs were hidden by clicking it again. */
+  let runsHidden = false;
   // Each row's remove action by source id, for the Delete key.
   const removers = new Map<string, () => void>();
 
@@ -197,6 +199,9 @@ export function createSourceRail(
     select.title = options.title;
     select.tabIndex = selected ? 0 : -1;
     select.setAttribute('aria-current', String(selected));
+    // The selected source's runs show under it; clicking it again hides them, and again shows them.
+    const hasRuns = selected && options.id !== '' && sessions.length > 0;
+    if (hasRuns) select.setAttribute('aria-expanded', String(!runsHidden));
     const glyph = span('rail-glyph');
     glyph.append(icon(options.icon));
     select.append(glyph);
@@ -216,7 +221,16 @@ export function createSourceRail(
       dot.setAttribute('aria-label', options.dot);
       select.append(dot);
     }
-    scope.listen(select, 'click', () => actions.selectSource(options.id));
+    scope.listen(select, 'click', () => {
+      if (!hasRuns) {
+        actions.selectSource(options.id);
+        return;
+      }
+      runsHidden = !runsHidden;
+      // A run hidden from view no longer narrows the logs: the whole source is shown.
+      if (runsHidden && state.selectedSession) actions.selectRun('');
+      refresh(true);
+    });
     wrapper.append(select);
     if (options.actions?.length) {
       wrapper.classList.add('has-actions');
@@ -515,7 +529,7 @@ export function createSourceRail(
     ];
     const withRuns = (element: HTMLElement, id: string) => {
       children.push(element);
-      if (id && id === state.selectedServer && sessions.length) children.push(runRows());
+      if (id && id === state.selectedServer && sessions.length && !runsHidden) children.push(runRows());
     };
     if (local.length || hints.length) children.push(group('Local'));
     for (const server of local) withRuns(serverRow(server), server.id);
@@ -675,7 +689,11 @@ export function createSourceRail(
     },
     /** The selection changed: show it, and the runs of the newly selected source. */
     selectionChanged(nextSessions?: Session[]): void {
-      if (nextSessions) sessions = nextSessions;
+      if (nextSessions) {
+        sessions = nextSessions;
+        // Another source was chosen: its runs show.
+        runsHidden = false;
+      }
       refresh();
     },
     servers: () => servers,
