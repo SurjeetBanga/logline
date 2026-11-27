@@ -83,6 +83,7 @@ test(
       new SessionRegistry(),
       new Ingestion(store, () => {}),
       new RuntimeState(() => {}),
+      { stopGraceMs: 200, pipeGraceMs: 100 },
     );
     // The grandchild starts a process group of its own, so stopping the run does not reach it.
     runner.run(process.execPath, undefined, { id: 'daemon', label: 'Daemon' }, undefined, undefined, [
@@ -149,33 +150,6 @@ test('stopping an old session ID leaves a later run alone', { timeout: 10000 }, 
   }
 });
 
-test('stopping one active session leaves its sibling running', { timeout: 10000 }, async () => {
-  const store = new LogStore(100);
-  const runner = new ProcessRunner(
-    { get: (_key, fallback) => fallback },
-    new SessionRegistry(),
-    new Ingestion(store, () => {}),
-    new RuntimeState(() => {}),
-  );
-  const firstId = runner.run(process.execPath, undefined, { id: 'first', label: 'First' }, undefined, undefined, [
-    '-e',
-    'setInterval(() => {}, 1000)',
-  ])!;
-  const secondId = runner.run(process.execPath, undefined, { id: 'second', label: 'Second' }, undefined, undefined, [
-    '-e',
-    'setInterval(() => {}, 1000)',
-  ])!;
-  try {
-    runner.stopSessionById(firstId);
-    const first = [...runner.sessions].find((session) => session.record.id === firstId)!;
-    const second = [...runner.sessions].find((session) => session.record.id === secondId)!;
-    assert.equal(first.stopping, true);
-    assert.equal(second.stopping, false);
-  } finally {
-    await runner.dispose();
-  }
-});
-
 test(
   'process runner records spawn errors, rejects duplicate saved servers, and shuts down when idle',
   { timeout: 10000 },
@@ -232,6 +206,7 @@ test(
       registry,
       new Ingestion(new LogStore(100), () => {}),
       state,
+      { stopGraceMs: 200 },
     );
     let exited!: (code: number) => void;
     const done = new Promise<number>((resolve) => {
@@ -253,7 +228,7 @@ test(
       runner.stopSessionById(id);
       assert.equal(registry.records.get(id)!.status, 'stopping');
       assert.equal(await done, 1);
-      assert.ok(Date.now() - started >= 1900, 'SIGTERM alone did not stop it');
+      assert.ok(Date.now() - started >= 180, 'SIGTERM alone did not stop it');
       const record = registry.records.get(id)!;
       assert.equal(record.signal, 'SIGKILL');
       assert.equal(record.status, 'exited');

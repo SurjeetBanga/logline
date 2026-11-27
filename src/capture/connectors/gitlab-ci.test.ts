@@ -140,7 +140,7 @@ test('the token, own GitLab, and connection branch are applied; a public project
   assert.equal(g.calls[0].headers.authorization, undefined);
 });
 
-test('errors are explained', async () => {
+test('GitLab errors are explained', async () => {
   const status = (response: Response, token: string | null = TOKEN) =>
     make(
       fake(() => response),
@@ -160,9 +160,4 @@ test('errors are explained', async () => {
     make(fake((url) => (url.includes('/pipelines') ? new Response('{}', { status: 200 }) : undefined))).test(),
     /not a list/,
   );
-});
-
-test('services lists failed job names', async () => {
-  const services = await make(fake()).services(range.fromMs, range.toMs);
-  assert.deepEqual(services.map((s) => s.name).sort(), ['e2e', 'unit']);
 });

@@ -12,6 +12,14 @@ import type { Session } from './types';
 
 /** How long a stopped process's output pipes are read after it exits, for output still on its way. */
 const PIPE_GRACE_MS = 1000;
+/** How long a stopped process has after SIGTERM before it is killed. */
+const STOP_GRACE_MS = 2000;
+
+/** How long stopping waits; shorter in tests. */
+export interface ProcessTiming {
+  stopGraceMs?: number;
+  pipeGraceMs?: number;
+}
 
 export class ProcessRunner {
   readonly sessions = new Set<Session>();
@@ -23,6 +31,7 @@ export class ProcessRunner {
     private readonly registry: SessionRegistry,
     private readonly ingestion: Ingestion,
     private readonly state: RuntimeState,
+    private readonly timing: ProcessTiming = {},
   ) {}
   stop(): void {
     for (const session of this.sessions) this.stopSession(session);
@@ -226,7 +235,7 @@ export class ProcessRunner {
     const timer = setTimeout(() => {
       kill('SIGKILL', true);
       this.timers.delete(timer);
-    }, 2000);
+    }, this.timing.stopGraceMs ?? STOP_GRACE_MS);
     timer.unref();
     this.timers.add(timer);
   }
@@ -241,7 +250,7 @@ export class ProcessRunner {
     const timer = setTimeout(() => {
       this.timers.delete(timer);
       if (!session.exited) for (const stream of [session.child.stdout, session.child.stderr]) stream.destroy();
-    }, PIPE_GRACE_MS);
+    }, this.timing.pipeGraceMs ?? PIPE_GRACE_MS);
     timer.unref();
     this.timers.add(timer);
   }

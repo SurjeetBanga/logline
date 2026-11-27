@@ -154,7 +154,7 @@ test('the connection’s branch wins; headers and the endpoint and encoding are 
   assert.equal(g.calls[0].url, 'https://api.github.com/repos/a%20b/c%23d');
 });
 
-test('errors are explained', async () => {
+test('GitHub errors are explained', async () => {
   const f = fake();
   await assert.rejects(
     make(f, connection(), { token: async () => undefined, branch: async () => undefined }).test(),
@@ -181,7 +181,23 @@ test('errors are explained', async () => {
 });
 
 test('services lists failed job names, most failing first', async () => {
-  const f = fake();
+  // A second failed run in which only e2e failed: e2e failed twice, unit once.
+  const runs = {
+    workflow_runs: [
+      { id: 1, run_number: 5, name: 'CI', conclusion: 'failure', created_at: '2026-11-14T08:00:00Z' },
+      { id: 2, run_number: 4, name: 'CI', conclusion: 'failure', created_at: '2026-11-14T07:00:00Z' },
+    ],
+  };
+  const f = fake((url) => {
+    const path = new URL(url).pathname;
+    if (path === '/repos/o/r/actions/runs') return new Response(JSON.stringify(runs));
+    if (path === '/repos/o/r/actions/runs/2/jobs')
+      return new Response(JSON.stringify({ jobs: [{ id: 20, name: 'e2e', conclusion: 'failure' }] }));
+    return undefined;
+  });
   const services = await make(f).services(range.fromMs, range.toMs);
-  assert.deepEqual(services.map((s) => s.name).sort(), ['e2e', 'unit']);
+  assert.deepEqual(
+    services.map((s) => s.name),
+    ['e2e', 'unit'],
+  );
 });
