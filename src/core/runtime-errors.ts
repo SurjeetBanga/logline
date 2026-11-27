@@ -4,6 +4,7 @@
  * the editor can mark the throwing line with how often and how recently it
  * failed. Counts are incremental and follow retention like log lenses.
  */
+import { snapshotPlace, snapshotSummary } from './exception-snapshot';
 import { extractExceptions, type SourceLocation } from './exceptions';
 import { normalizeMessage, templateQuery } from './log-analysis';
 import type { LogEvent } from './types';
@@ -28,12 +29,19 @@ export interface RuntimeError {
   local?: string;
   /** The source of the run a local failure came from, so the command can be run again there. */
   serverId?: string;
+  /** What a debugger's snapshot held where it was raised: `in charge(): order = {…}, total = 19.9`. */
+  locals?: string;
 }
 
 // Frames in installed packages, the language runtime, or generated code are not where a fix goes.
 const NOT_APP_CODE =
   /(?:^|[\\/])(?:node_modules|site-packages|dist-packages|vendor|\.cargo[\\/]registry|go[\\/]pkg[\\/]mod|rustc|jdk|\.m2|gems)[\\/]|^(?:node:|internal[\\/]|<|webpack-internal:)|^(?:\/usr\/lib|\/usr\/local\/lib|\/System\/)/;
 const MAX_FRAMES = 5;
+
+/** Whether a file is the program's own code, rather than an installed package, the runtime, or generated code. */
+export function isAppFile(file: string): boolean {
+  return !NOT_APP_CODE.test(file);
+}
 const MAX_ERRORS = 500;
 
 /** The first line naming the error, from its exception block or its message. */
@@ -110,12 +118,15 @@ export class RuntimeErrorTracker {
   revision = 0;
   private counted: Counted[] = [];
   private head = 0;
+  // The newest exception snapshot at each place, by file name and line, for the errors raised there.
+  private readonly snapshots = new Map<string, string>();
 
   reset(watermark = 0): void {
     this.errors.clear();
     this.watermark = watermark;
     this.counted = [];
     this.head = 0;
+    this.snapshots.clear();
     this.revision++;
   }
 
@@ -125,6 +136,10 @@ export class RuntimeErrorTracker {
     for (const event of events) {
       if (event.id <= this.watermark) continue;
       this.watermark = event.id;
+      if (event.fields?.kind === 'exception-snapshot') {
+        changed = this.snapshot(event) || changed;
+        continue;
+      }
       const failure = testFailureFrames(event);
       const found = failure ?? appFrames(event);
       if (!found) continue;
@@ -153,6 +168,8 @@ export class RuntimeErrorTracker {
       }
       error.count++;
       error.lastId = event.id;
+      const locals = failure ? undefined : this.snapshots.get(snapshotPlace(top.file, top.line));
+      if (locals) error.locals = locals;
       if (failure?.ci) error.ci = failure.ci;
       if (failure?.local) {
         error.local = failure.local;
@@ -160,6 +177,29 @@ export class RuntimeErrorTracker {
       }
       if (event.timestampMs !== undefined) error.lastSeen = Math.max(error.lastSeen ?? 0, event.timestampMs);
       this.counted.push({ id: event.id, key });
+      changed = true;
+    }
+    if (changed) this.revision++;
+    return changed;
+  }
+
+  /** Keep what a snapshot event held for the errors raised at its place, those seen already and those to come. */
+  private snapshot(event: LogEvent): boolean {
+    let summary: ReturnType<typeof snapshotSummary>;
+    try {
+      summary = snapshotSummary(event.raw ? JSON.parse(event.raw) : undefined);
+    } catch {
+      return false;
+    }
+    if (!summary) return false;
+    this.snapshots.delete(summary.place);
+    this.snapshots.set(summary.place, summary.text);
+    if (this.snapshots.size > MAX_ERRORS) this.snapshots.delete(this.snapshots.keys().next().value!);
+    let changed = false;
+    for (const error of this.errors.values()) {
+      const top = error.frames[0];
+      if (error.test || !top || snapshotPlace(top.file, top.line) !== summary.place) continue;
+      error.locals = summary.text;
       changed = true;
     }
     if (changed) this.revision++;

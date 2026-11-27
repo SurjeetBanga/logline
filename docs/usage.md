@@ -390,9 +390,21 @@ Once an inserted line has logged and `logline.logLenses` is on, its value appear
 
 To remove inserted lines, run **Logline: Remove Inserted Logs in This File** for the active editor, or **Logline: Remove Inserted Logs in Workspace**. The workspace command finds marked lines in workspace source files, skipping dependency and build folders such as `node_modules`, asks for confirmation, removes them, and saves the files that had no unsaved changes before. A trash button in the Source Control view's title runs it while an open file has inserted lines, or this window inserted some since the last workspace removal.
 
+## Exception snapshots
+
+When a debug session (F5) stops on an exception, Logline reads what the program held at that moment: the exception's type and message, and the local variables of the innermost frames in your own code. Installed packages, the runtime, and generated code are skipped. It reads at most 3 frames, 2 levels deep, 30 variables per frame and 20 children each, with values cut to 200 characters and about 4 KB in all; outer frames are dropped first. It only reads while the debugger is stopped and never pauses or resumes the program.
+
+Which exceptions stop the program is set in the Breakpoints view. The Python, Go, and Java debuggers stop on uncaught exceptions by default; for Node.js, tick **Uncaught Exceptions**.
+
+Each snapshot is an event of its own in the debug session's run (source **Debug · <name>**), at level error, with a message such as `Exception: KeyError 'card' · charge() payments.py:42`. Its fields are `kind:exception-snapshot`, `exception.type`, `exception.message`, `function`, `file`, `line`, `locals.<name>` for the innermost frame's locals, and `callers` for the outer frames with their own locals. Searches such as `locals.total:>10` or `locals.user.id:u_42` work. Values are always redacted (secrets and credential fields, plus `logline.redactionFields` with `logline.redactionReplacement`), even when export redaction is off. Agents read snapshots like any other event, for example with `logline_inspect_event`, when the run is shared.
+
+A debug session whose output goes to the integrated terminal (`"console": "integratedTerminal"`, while terminal capture is on) still gets a debug run for its snapshots; its output is still recorded by terminal capture. Turn snapshots off with `logline.exceptionSnapshots`.
+
 ## Runtime errors in the editor
 
 When a captured error carries a stack trace, Logline marks the line of your code that raised it. The mark appears after the line, such as **TypeError: Cannot read properties of undefined (reading 'card') · 14× · 2s ago**, and as an error in the Problems panel with the source **Logline runtime**. Stack traces are read the same way as in the inspector: JSON `err`, `error`, and `exception` fields, OpenTelemetry exception fields, and joined plain-text traces from Node, Java, Python, and other runtimes. Only events at `error` or `fatal` count.
+
+When an [exception snapshot](#exception-snapshots) exists for the same file and line, the Problems entry and the hover add the locals, such as `Locals when it was raised, in charge(): order = …, total = 19.9`; the text after the line stays the same. A newer snapshot at the same place replaces the older one.
 
 The line is the innermost stack frame in your own code: frames in `node_modules`, `site-packages`, `vendor`, Go modules, Cargo packages, and the runtime itself are skipped, and the next frame is tried when a file is not in the workspace. A path from a container or another machine, such as `/app/src/lib/payments.ts`, is matched to the one workspace file whose path ends the same way; a path that matches several files, or none, is not marked. Errors with the same message on the same line are one mark, counted while their events are retained, and the newest error on a line speaks for it. Up to 200 errors are marked at a time.
 
@@ -531,6 +543,7 @@ Settings are grouped the same way in the Settings editor (**More actions → Set
 | --- | --- | --- |
 | `logline.captureTerminals` | `true` | Capture new commands from supported shell-integrated VS Code terminals. Off by default on a remote host; a value you set always wins. |
 | `logline.captureDebugSessions` | `true` | Capture program output from debug sessions for every debugger. Applies to sessions started afterwards. |
+| `logline.exceptionSnapshots` | `true` | When a debug session stops on an exception, record its type, message, and the locals of the innermost frames in your code as an event, redacted. Needs no pausing: it reads only while the debugger is stopped. |
 | `logline.source` | `both` | Capture `stdout`, `stderr`, or `both`. |
 | `logline.joinStackTraces` | `true` | Join plain-text stack trace lines into one event for new captures, followed files, and plain-text imports. |
 | `logline.containerPrefixes` | `auto` | Split Docker Compose and `kubectl logs --prefix` prefixes so each service is its own source; `off` keeps them in the message. |

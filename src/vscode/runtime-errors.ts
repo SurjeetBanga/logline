@@ -229,7 +229,10 @@ export class RuntimeErrors implements vscode.CodeActionProvider, vscode.Disposab
     for (const { uri, entries } of byFile.values()) {
       const diagnostics = entries.map(({ error, line }) => {
         const range = new vscode.Range(line, 0, line, Number.MAX_SAFE_INTEGER);
-        const diagnostic = new vscode.Diagnostic(range, runtimeErrorText(error, now), vscode.DiagnosticSeverity.Error);
+        // A snapshot's locals read in the hover, below the error; the text after the line stays short.
+        const text =
+          runtimeErrorText(error, now) + (error.locals ? `\nLocals when it was raised, ${error.locals}` : '');
+        const diagnostic = new vscode.Diagnostic(range, text, vscode.DiagnosticSeverity.Error);
         diagnostic.source = SOURCE;
         this.shown.set(shownKey(uri, line), { error, uri, line });
         return diagnostic;

@@ -1003,6 +1003,12 @@
             "description": "Capture Debug Console output from VS Code debug sessions (Run and Debug, F5) for every debugger, such as Node.js, Python, Java, Go, and .NET. Configurations that print to the integrated terminal are recorded by terminal capture instead. When a debugger reports where a line was logged, Logline can open that line of code. Applies to debug sessions started after the change.",
             "order": 2
           },
+          "logline.exceptionSnapshots": {
+            "type": "boolean",
+            "default": true,
+            "order": 3,
+            "markdownDescription": "When a debug session stops on an exception, record what the program held: the exception and the locals of the innermost frames in your code, redacted, as an event in the debug run that agents can read. Logline only reads while the debugger is stopped; it never pauses or resumes the program. Which exceptions stop is set in the Breakpoints view."
+          },
           "logline.source": {
             "type": "string",
             "enum": [
@@ -1011,7 +1017,7 @@
               "stderr"
             ],
             "default": "both",
-            "order": 3,
+            "order": 4,
             "markdownDescription": "Which streams to capture from commands Logline runs. Terminal capture always records one combined stream.",
             "enumDescriptions": [
               "Capture both standard output and standard error.",
@@ -1023,7 +1029,7 @@
             "type": "boolean",
             "default": true,
             "description": "Join plain-text stack trace lines (Java and Node `at` frames, `Caused by:`, Python tracebacks, uncaught Node.js crash blocks) onto the line before them, so each trace becomes one searchable event. Applies to new captures and plain-text imports.",
-            "order": 4
+            "order": 5
           },
           "logline.containerPrefixes": {
             "type": "string",
@@ -1037,7 +1043,7 @@
             ],
             "default": "auto",
             "description": "Recognize container log prefixes in captured and imported plain-text output. Docker timestamps printed with `--timestamps` are used when the payload has none. Applies to new captures and imports.",
-            "order": 5
+            "order": 6
           },
           "logline.maxLineLength": {
             "type": "integer",
@@ -1045,7 +1051,7 @@
             "minimum": 1024,
             "maximum": 1048576,
             "description": "Maximum characters retained from one live log line or imported record.",
-            "order": 6
+            "order": 7
           },
           "logline.servers": {
             "type": "array",
@@ -1090,7 +1096,7 @@
                 "command"
               ]
             },
-            "order": 7,
+            "order": 8,
             "markdownDescription": "Commands Logline runs and captures, listed as sources in the Logs panel. Add and edit them with **More actions → Manage servers…**."
           },
           "logline.browser.requests": {
@@ -1101,7 +1107,7 @@
               "off"
             ],
             "default": "api",
-            "order": 8,
+            "order": 9,
             "markdownDescription": "Which network requests of the browser opened by **Logline: Open Browser with Capture** become logs. Each is one line with its method, address, status, and duration; headers, cookies, and bodies are never recorded.",
             "enumDescriptions": [
               "Page loads, fetch and XHR calls, WebSocket connections, and any request that failed.",
@@ -1112,14 +1118,14 @@
           "logline.browser.offer": {
             "type": "boolean",
             "default": true,
-            "order": 9,
+            "order": 10,
             "markdownDescription": "Offer **Open Browser with Capture** the first time a captured dev server, such as `npm run dev`, prints a local address, such as `http://localhost:5173`. Once answered, Logline does not ask again in that workspace."
           },
           "logline.browser.executable": {
             "type": "string",
             "default": "",
             "scope": "machine",
-            "order": 10,
+            "order": 11,
             "markdownDescription": "The browser **Logline: Open Browser with Capture** opens: the path of a Chrome, Edge, Chromium, or Brave executable. Empty uses the first of those that is installed. Workspace settings cannot change this."
           }
         }

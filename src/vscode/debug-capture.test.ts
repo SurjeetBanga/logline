@@ -242,3 +242,104 @@ test('a line split across output events keeps the location where it started', ()
   assert.deepEqual(split.location, { file: '/work/a.ts', line: 3 });
   assert.deepEqual(next.location, { file: '/work/b.ts', line: 9 });
 });
+
+/** A debugger stopped in charge() under a library frame, answering the requests a snapshot makes. */
+function stoppedDebugger() {
+  const asked: string[] = [];
+  const answers: Record<string, (args: Record<string, unknown>) => unknown> = {
+    exceptionInfo: () => ({ exceptionId: 'TypeError', description: 'boom', details: { typeName: 'TypeError' } }),
+    stackTrace: () => ({
+      stackFrames: [
+        { id: 1, name: 'get', line: 9, source: { path: '/w/node_modules/lib/get.js' } },
+        { id: 2, name: 'charge', line: 40, source: { path: '/w/src/payments.ts' } },
+        { id: 3, name: 'native', line: 1 },
+      ],
+    }),
+    scopes: ({ frameId }) => ({
+      scopes: [
+        { name: 'Global', variablesReference: 90, expensive: false },
+        { name: 'Local', variablesReference: frameId === 2 ? 10 : 0, expensive: false },
+      ],
+    }),
+    variables: ({ variablesReference }) =>
+      ({
+        10: {
+          variables: [
+            { name: 'order', value: 'Order', variablesReference: 11 },
+            { name: 'total', value: '19.9' },
+          ],
+        },
+        11: { variables: [{ name: 'id', value: '42', variablesReference: 12 }] },
+        90: { variables: [{ name: 'process', value: 'process' }] },
+      })[variablesReference as number],
+  };
+  const request = (command: string, args?: unknown) => {
+    asked.push(command);
+    const answer = answers[command];
+    return answer ? Promise.resolve(answer(args as Record<string, unknown>)) : Promise.reject(new Error('unsupported'));
+  };
+  return { request, asked };
+}
+
+test('a snapshot reads the exception and the locals of frames in the program, two levels deep', async () => {
+  const loaded = withVscode({}, () => require('./debug-capture') as typeof import('./debug-capture'));
+  const { request, asked } = stoppedDebugger();
+  assert.deepEqual(await loaded.readSnapshot(request, 7), {
+    type: 'TypeError',
+    message: 'boom',
+    frames: [
+      {
+        name: 'charge',
+        file: '/w/src/payments.ts',
+        line: 40,
+        variables: [
+          { name: 'order', value: 'Order', children: [{ name: 'id', value: '42' }] },
+          { name: 'total', value: '19.9' },
+        ],
+      },
+    ],
+  });
+  assert.equal(asked.filter((command) => command === 'variables').length, 2, 'globals and deeper levels are not read');
+  assert.equal(await loaded.readSnapshot(() => Promise.reject(new Error('gone')), 7), undefined);
+});
+
+test('stopping on an exception records a snapshot in the debug run, and other stops do not', async () => {
+  let factory:
+    { createDebugAdapterTracker(session: unknown): { onDidSendMessage(message: unknown): void } } | undefined;
+  const mock = {
+    debug: {
+      registerDebugAdapterTrackerFactory(_type: string, value: typeof factory) {
+        factory = value;
+        return { dispose() {} };
+      },
+    },
+  };
+  // Loaded afresh, so it registers with this test's debug API.
+  delete require.cache[require.resolve('./debug-capture')];
+  const loaded = withVscode(mock, () => require('./debug-capture') as typeof import('./debug-capture'));
+  const settle = () => new Promise((resolve) => setTimeout(resolve, 10));
+  const run = async (settings: Record<string, unknown>, body: Record<string, unknown>, terminal = false) => {
+    const h = harness(settings, terminal);
+    loaded.registerDebugCapture(h.capture);
+    const { request } = stoppedDebugger();
+    const tracker = factory!.createDebugAdapterTracker({
+      id: 's1',
+      name: 'Launch API',
+      type: 'python',
+      configuration: { name: 'Launch API', console: terminal ? 'integratedTerminal' : undefined },
+      customRequest: request,
+    });
+    tracker.onDidSendMessage({ type: 'event', event: 'stopped', body });
+    await settle();
+    return h.store.all();
+  };
+  const [event] = await run({}, { reason: 'exception', threadId: 7 });
+  assert.equal(event.serverId, 'debug:Launch API');
+  assert.equal(event.message, 'Exception: TypeError boom · charge() payments.ts:40');
+  assert.equal(event.fields?.kind, 'exception-snapshot');
+  assert.equal(event.fields?.['locals.total'], 19.9);
+  assert.equal((await run({}, { reason: 'breakpoint', threadId: 7 })).length, 0);
+  assert.equal((await run({ exceptionSnapshots: false }, { reason: 'exception', threadId: 7 })).length, 0);
+  // Output goes to a captured terminal, but the snapshot still has a debug run of its own.
+  assert.equal((await run({}, { reason: 'exception', threadId: 7 }, true)).length, 1);
+});
