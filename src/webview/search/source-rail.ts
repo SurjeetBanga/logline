@@ -635,7 +635,12 @@ export function createSourceRail(
         session.startedAt,
         session.exitReason,
         session.captureStatus,
+        session.captureReason,
         session.canStop,
+        // A run's line and tooltip fill in as its session is read, such as after a reload.
+        session.detail,
+        session.tooltip,
+        session.cwd,
       ]),
       hints.map((hint) => [hint.agent, hint.label, hint.sessions]),
       connections.map((connection) => [

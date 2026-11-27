@@ -7196,6 +7196,38 @@ test('an agent session shows what it did on its second line, under the agent ico
   );
 });
 
+test('an agent session read again from its start shows its tokens once they are read', () => {
+  const { get, receive } = viewer({ server: 'agent:claude-code' });
+  const snapshot = (detail?: string, tooltip?: string) => ({
+    ...railSnapshot,
+    servers: [
+      ...railSnapshot.servers,
+      { id: 'agent:claude-code', label: 'Claude Code', status: 'exited', activeSessions: 0, kind: 'agent' },
+    ],
+    sessions: [
+      {
+        id: 'c1',
+        serverId: 'agent:claude-code',
+        server: 'Claude Code',
+        command: 'Fix the checkout 500',
+        status: 'exited',
+        startedAt: 1,
+        sourceKind: 'agent',
+        ...(detail ? { detail } : {}),
+        ...(tooltip ? { tooltip } : {}),
+      },
+    ],
+  });
+  // Its first lines are read before the replies that count its tokens.
+  receive(snapshot('1s', 'Model\tclaude-opus-5-5'));
+  receive(snapshot('3s · 1 tool', 'Tokens\t10 in · 20 out\nModel\tclaude-opus-5-5'));
+  const run = rail(get)
+    .runs()
+    .find((button) => button.dataset.runId === 'c1')!;
+  assert.match(run.querySelector('.rail-status')!.textContent!, /3s · 1 tool$/);
+  assert.equal(run.title, 'Status\texited\nTokens\t10 in · 20 out\nModel\tclaude-opus-5-5');
+});
+
 test("an agent's sessions are listed newest first, whatever order they first logged in", () => {
   const { get, receive } = viewer({ server: 'agent:claude-code' });
   const session = (id: string, startedAt: number) => ({
