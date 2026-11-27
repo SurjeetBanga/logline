@@ -147,3 +147,68 @@ test('parseJobLog adds a record per failed test', () => {
   assert.equal(failure.framework, 'node');
   assert.equal(failure.job, 'test');
 });
+
+test('parseJobLog reads GitLab sections, line times, streams, and checkout paths', () => {
+  const esc = String.fromCharCode(27);
+  const log = [
+    `section_start:1763107200:prepare_executor\r${esc}[0K${esc}[0;mPreparing the "docker" executor`,
+    'Using docker image node:22',
+    `section_end:1763107201:prepare_executor\r${esc}[0Ksection_start:1763107202:step_script\r${esc}[0KExecuting "step_script" stage of the job script`,
+    `${esc}[32;1m$ npm test${esc}[0;m`,
+    'Downloading 10%\rDownloading 100%',
+    ' FAIL  src/cart.test.ts > cart > totals',
+    '   at /builds/my-group/shop/src/cart.test.ts:12:5',
+    'WARNING: cache not found',
+    `section_end:1763107210:step_script\r${esc}[0K`,
+    'ERROR: Job failed: exit code 1',
+    '',
+  ].join('\n');
+  const job = {
+    run: 42,
+    runId: 900,
+    workflow: 'push',
+    job: 'unit',
+    jobId: 7,
+    format: 'gitlab' as const,
+    checkout: 'my-group/shop',
+  };
+  const records = parseJobLog(log, job);
+  const lines = records.filter((r) => r.kind === 'ci');
+  assert.deepEqual(
+    lines.map((r) => [r.step, r.level, r.message]),
+    [
+      ['prepare_executor', 'info', 'Preparing the "docker" executor'],
+      ['prepare_executor', 'info', 'Using docker image node:22'],
+      ['step_script', 'info', 'Executing "step_script" stage of the job script'],
+      ['step_script', 'info', '$ npm test'],
+      ['step_script', 'info', 'Downloading 100%'],
+      ['step_script', 'info', ' FAIL  src/cart.test.ts > cart > totals'],
+      ['step_script', 'info', '   at /builds/my-group/shop/src/cart.test.ts:12:5'],
+      ['step_script', 'warn', 'WARNING: cache not found'],
+      [undefined, 'error', 'ERROR: Job failed: exit code 1'],
+    ],
+  );
+  assert.equal(lines[0].timestamp, '2025-11-14T08:00:00.000Z');
+  assert.equal(lines[3].timestamp, '2025-11-14T08:00:02.000Z');
+  const [failure] = records.filter((r) => r.kind === 'test-failure');
+  assert.equal(failure.test, 'cart › totals');
+  assert.equal(failure.file, 'src/cart.test.ts');
+  assert.equal(failure.line, 12);
+  assert.equal(failure.step, 'step_script');
+
+  // A runner that writes each line's time also writes its stream, which is not part of the text.
+  const stamped = parseJobLog(
+    '2026-11-14T08:00:01.250000Z 00O hello\n2026-11-14T08:00:02.000000Z 01E+ ERROR: boom\n',
+    job,
+  );
+  assert.deepEqual(
+    stamped.map((r) => [r.timestamp, r.level, r.message]),
+    [
+      ['2026-11-14T08:00:01.250Z', 'info', 'hello'],
+      ['2026-11-14T08:00:02.000Z', 'error', 'ERROR: boom'],
+    ],
+  );
+  // A GitHub log keeps such text, and GitHub's markers mean nothing in a GitLab log.
+  assert.equal(parseJobLog('2026-11-14T08:00:01Z 00O hello', { ...job, format: 'github' })[0].message, '00O hello');
+  assert.equal(parseJobLog('##[error]bad', job)[0].level, 'info');
+});

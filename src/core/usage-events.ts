@@ -44,6 +44,7 @@ export const CONNECTION_TYPES: readonly ConnectionType[] = [
   'cloudwatch',
   'loki',
   'github-actions',
+  'gitlab-ci',
   'elasticsearch',
   'gcp',
 ];

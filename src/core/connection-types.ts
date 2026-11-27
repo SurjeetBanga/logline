@@ -17,6 +17,8 @@ export interface ConnectionKind {
   description: string;
   /** A log service is searched as it is; a database once a log table or collection is mapped. */
   service: boolean;
+  /** A CI system, whose failed jobs are searched as logs: offered apart from the log services. */
+  ci?: true;
   icon: 'cloud' | 'database';
   /** What one fetched record is called. */
   noun: 'log' | 'row' | 'document';
@@ -114,6 +116,7 @@ export const CONNECTION_KINDS: Record<ConnectionType, ConnectionKind> = {
     label: 'GitHub Actions',
     description: 'The logs of the CI jobs that failed in a GitHub repository',
     service: true,
+    ci: true,
     icon: 'cloud',
     noun: 'log',
     fields:
@@ -121,6 +124,19 @@ export const CONNECTION_KINDS: Record<ConnectionType, ConnectionKind> = {
     services: true,
     maxRowsSetting: 'logServiceMaxRows',
     secret: 'none',
+  },
+  'gitlab-ci': {
+    label: 'GitLab CI',
+    description: 'The logs of the CI jobs that failed in a GitLab project, on gitlab.com or your own GitLab',
+    service: true,
+    ci: true,
+    icon: 'cloud',
+    noun: 'log',
+    fields:
+      'Searches run on the fetched job logs: their fields are run, workflow, job, step, and, for a failed test, test, file, and line.',
+    services: true,
+    maxRowsSetting: 'logServiceMaxRows',
+    secret: 'password',
   },
   postgres: {
     label: 'Postgres',

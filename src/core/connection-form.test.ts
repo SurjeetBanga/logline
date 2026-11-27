@@ -567,3 +567,54 @@ test('github-actions drafts round-trip, are labelled by repository name, and kee
   const before = { ...connection, endpoint: 'http://127.0.0.1:1' } as ConnectionConfig;
   assert.deepEqual(keepUnmodeled(next, before), { ...next, endpoint: 'http://127.0.0.1:1' });
 });
+
+test('gitlab-ci drafts accept project addresses, take the GitLab from them, and check the branch', () => {
+  const draft = emptyDraft('gitlab-ci');
+  const cases: [string, string][] = [
+    ['my-group/sub/shop', 'https://gitlab.com'],
+    ['https://gitlab.com/my-group/sub/shop', 'https://gitlab.com'],
+    ['https://gitlab.example.com/my-group/sub/shop/-/pipelines', 'https://gitlab.example.com'],
+    ['git@gitlab.example.com:my-group/sub/shop.git', 'https://gitlab.example.com'],
+  ];
+  for (const [repository, url] of cases) {
+    const result = readDraft({ ...draft, repository });
+    assert.deepEqual(result.errors, {}, repository);
+    assert.deepEqual(result.connection, {
+      id: 'draft',
+      label: 'draft',
+      type: 'gitlab-ci',
+      url,
+      project: 'my-group/sub/shop',
+    });
+  }
+  assert.ok(readDraft(draft).errors.repository);
+  assert.ok(readDraft({ ...draft, repository: 'shop' }).errors.repository);
+  assert.ok(readDraft({ ...draft, repository: 'a/b', branch: 'a..b' }).errors.branch);
+  assert.ok(readDraft({ ...draft, repository: 'a/b', url: 'http://gitlab.example.com' }).errors.url);
+  assert.match(
+    readDraft({ ...draft, repository: 'https://gitlab.example.com/a/b', url: 'https://gitlab.com' }).errors
+      .repository ?? '',
+    /on gitlab\.example\.com/,
+  );
+  // The token is optional: a public project needs none.
+  assert.equal(readDraft({ ...draft, repository: 'a/b' }).password, undefined);
+  assert.equal(readDraft({ ...draft, repository: 'a/b', password: secret('glpat') }).password, secret('glpat'));
+});
+
+test('gitlab-ci drafts round-trip and are labelled by project name', () => {
+  const connection: ConnectionConfig = {
+    id: 'ci',
+    label: 'ci',
+    type: 'gitlab-ci',
+    url: 'https://gitlab.example.com',
+    project: 'group/shop',
+    branch: 'main',
+  };
+  const draft = draftFromConnection(connection);
+  assert.equal(draft.url, 'https://gitlab.example.com');
+  assert.equal(draft.repository, 'group/shop');
+  assert.deepEqual(readDraft(draft).connection, { ...connection, id: 'draft', label: 'draft' });
+  assert.equal(suggestedLabel(draft), 'shop');
+  // gitlab.com shows as the empty default.
+  assert.equal(draftFromConnection({ ...connection, url: 'https://gitlab.com' }).url, '');
+});

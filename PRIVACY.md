@@ -39,6 +39,10 @@ When you turn on `logline.agentSessions.enabled`, Logline reads the transcripts 
 
 A GitHub Actions connection signs in with the GitHub account VS Code is signed in to. Logline asks VS Code for the token when a search runs, sends it only to GitHub's API, and never stores it. The repository and branch you enter are saved in the workspace settings, and are not added to usage data.
 
+## GitLab CI connections
+
+A GitLab CI connection reads a public project without signing in, or uses the access token you enter. The token is kept in VS Code secret storage, never in settings, and sent only to the GitLab you named. The project, branch, and GitLab URL are saved in the workspace settings, and are not added to usage data.
+
 ## What is never sent
 
 Log content. Search text or queries, including SQL, Datadog, and other connection queries. File paths, workspace or folder names, and git details. Connection names, hosts, ports, databases, indexes, and user names. Tool inputs and results, and prompts. Your IP address is discarded, and no location is derived from it.

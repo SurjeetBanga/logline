@@ -4,6 +4,7 @@ import {
   cloudwatchEndpoint,
   isGitBranch,
   isGitHubRepository,
+  isGitLabProject,
   connectionIdOf,
   connectionLabel,
   connectionSourceId,
@@ -368,6 +369,43 @@ test('github-actions connections keep a valid repository, branch and local endpo
     { id: 'z', type: 'github-actions', repository: 'octo/shop', endpoint: 'https://example.com/api/v3' },
   ]);
   assert.equal(remote.type === 'github-actions' && remote.endpoint, undefined);
+});
+
+test('gitlab-ci connections keep a valid project, branch and https GitLab, gitlab.com by default', () => {
+  const [kept, defaulted] = normalizeConnections([
+    { id: 'ci', type: 'gitlab-ci', url: 'https://gitlab.example.com/', project: 'group/sub/shop', branch: 'main' },
+    { id: 'pub', type: 'gitlab-ci', project: 'group/shop', branch: 'bad..name' },
+  ]);
+  assert.deepEqual(kept, {
+    id: 'ci',
+    label: 'ci',
+    type: 'gitlab-ci',
+    url: 'https://gitlab.example.com',
+    project: 'group/sub/shop',
+    branch: 'main',
+  });
+  assert.deepEqual(defaulted, {
+    id: 'pub',
+    label: 'pub',
+    type: 'gitlab-ci',
+    url: 'https://gitlab.com',
+    project: 'group/shop',
+  });
+  // A token goes to the GitLab named, so plain http is allowed only on this machine.
+  assert.equal(
+    normalizeConnections([{ id: 'x', type: 'gitlab-ci', url: 'http://gitlab.example.com', project: 'a/b' }]).length,
+    0,
+  );
+  assert.equal(normalizeConnections([{ id: 'x', type: 'gitlab-ci', project: 'shop' }]).length, 0);
+  // One token serves every project on its GitLab.
+  assert.equal(kept.type === 'gitlab-ci' && secretKey(kept), 'logline.connection.gitlab-ci:https://gitlab.example.com');
+});
+
+test('isGitLabProject', () => {
+  for (const ok of ['a/b', 'group/sub/shop', 'my_group/shop.v2', 'a/_x', '1/2'])
+    assert.equal(isGitLabProject(ok), true, ok);
+  for (const bad of ['', 'a', 'a/', '/b', '-a/b', 'a//b', 'a/..', 'a/b.', 'a b/c', 'a/b.git', `a/${'b'.repeat(260)}`])
+    assert.equal(isGitLabProject(bad), false, bad);
 });
 
 test('isGitHubRepository and isGitBranch', () => {

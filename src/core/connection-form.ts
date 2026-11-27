@@ -12,6 +12,8 @@ import {
   isGcpProject,
   isGitBranch,
   isGitHubRepository,
+  isGitLabProject,
+  GITLAB_URL,
   isLokiSelector,
   isRdsHost,
   logGroupIdentifier,
@@ -30,15 +32,15 @@ import {
 } from './connections';
 import { CONNECTION_KINDS, keepsSecret } from './connection-types';
 
-/** What the form offers: a log service, whose logs are searched, or a database, which is queried. */
+/** What the form offers: a log service, whose logs are searched, a CI system, whose failed jobs are, or a database, which is queried. */
 export const CONNECTION_TYPES: {
   type: ConnectionType;
-  kind: 'logs' | 'database';
+  kind: 'logs' | 'ci' | 'database';
   label: string;
   description: string;
 }[] = (Object.keys(CONNECTION_KINDS) as ConnectionType[]).map((type) => {
-  const { service, label, description } = CONNECTION_KINDS[type];
-  return { type, kind: service ? 'logs' : 'database', label, description };
+  const { service, ci, label, description } = CONNECTION_KINDS[type];
+  return { type, kind: ci ? 'ci' : service ? 'logs' : 'database', label, description };
 });
 
 export const ROLE_LABELS: Record<MappedField, string> = {
@@ -71,7 +73,10 @@ export interface FormDraft {
   /** Cloud Logging: the Google Cloud project, and a query every search is narrowed by. */
   project: string;
   filter: string;
-  /** GitHub Actions: the repository as owner/name, and the branch whose runs are read ('' for the checked-out one). */
+  /**
+   * GitHub Actions: the repository as owner/name; GitLab CI: the project's path. The branch whose runs are read
+   * ('' for the checked-out one).
+   */
   repository: string;
   branch: string;
   /** A MongoDB URL, without its password. */
@@ -153,6 +158,13 @@ export function draftFromConnection(connection: ConnectionConfig): FormDraft {
       return { ...draft, project: connection.project, filter: connection.filter ?? '' };
     case 'github-actions':
       return { ...draft, repository: connection.repository, branch: connection.branch ?? '' };
+    case 'gitlab-ci':
+      return {
+        ...draft,
+        url: connection.url === GITLAB_URL ? '' : connection.url,
+        repository: connection.project,
+        branch: connection.branch ?? '',
+      };
     case 'elasticsearch':
       return {
         ...draft,
@@ -196,10 +208,32 @@ function githubRepository(typed: string): string {
     .replace(/\.git$/, '');
 }
 
+/**
+ * A GitLab project from what was typed, which may be its address, with the GitLab it names: `group/shop` from
+ * `https://gitlab.example.com/group/shop/-/pipelines` is on `https://gitlab.example.com`.
+ */
+function gitlabProject(typed: string): { project: string; origin?: string } {
+  const value = typed.trim();
+  const ssh = /^git@([^:/\s]+):(.+)$/.exec(value);
+  if (ssh) return { project: ssh[2].replace(/\.git$/, ''), origin: `https://${ssh[1]}` };
+  if (!/^https?:\/\//i.test(value)) return { project: value.replace(/^\/+|\/+$/g, '').replace(/\.git$/, '') };
+  try {
+    const url = new URL(value);
+    const path = decodePart(url.pathname)
+      .split('/-/')[0]
+      .replace(/^\/+|\/+$/g, '')
+      .replace(/\.git$/, '');
+    return { project: path, origin: url.origin };
+  } catch {
+    return { project: value };
+  }
+}
+
 export function suggestedLabel(draft: FormDraft): string {
   if (draft.type === 'datadog') return 'prod';
   if (draft.type === 'gcp') return draft.project.trim();
   if (draft.type === 'github-actions') return githubRepository(draft.repository).split('/').pop() ?? '';
+  if (draft.type === 'gitlab-ci') return gitlabProject(draft.repository).project.split('/').pop() ?? '';
   if (draft.type === 'loki' || draft.type === 'elasticsearch')
     return /\/\/(?:localhost|127\.0\.0\.1|\[::1\])[:/]?/.test(draft.url) ? 'local' : 'prod';
   if (draft.type === 'cloudwatch') {
@@ -402,6 +436,23 @@ export function readDraft(draft: FormDraft, saved: { secret?: boolean } = {}): D
       if (branch && !isGitBranch(branch))
         errors.branch = 'A branch name such as main, or leave it empty for the checked-out branch';
       item = { type: 'github-actions', repository, ...(branch ? { branch } : {}) };
+      break;
+    }
+    case 'gitlab-ci': {
+      const { project, origin } = gitlabProject(draft.repository);
+      const typed = draft.url.trim();
+      const url = typed || origin || GITLAB_URL;
+      const branch = draft.branch.trim();
+      if (typed && !apiUrl(typed))
+        errors.url = 'An https URL, such as https://gitlab.example.com, or leave it empty for gitlab.com';
+      if (!project) errors.repository = 'Enter the project, such as my-group/shop';
+      else if (!isGitLabProject(project))
+        errors.repository = 'The project as group/name, with any subgroups, such as my-group/shop';
+      else if (typed && origin && apiUrl(typed) && new URL(typed).host !== new URL(origin).host)
+        errors.repository = `This project is on ${new URL(origin).host}; the GitLab URL is ${new URL(typed).host}`;
+      if (branch && !isGitBranch(branch))
+        errors.branch = 'A branch name such as main, or leave it empty for the checked-out branch';
+      item = { type: 'gitlab-ci', url, project, ...(branch ? { branch } : {}) };
       break;
     }
     case 'elasticsearch': {

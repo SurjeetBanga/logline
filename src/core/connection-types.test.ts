@@ -30,7 +30,12 @@ test('a kind says how its connections are searched, named, and kept', () => {
     // searched, so it needs its logs mapped.
     if (kind.service) assert.equal(kind.language, undefined, type);
     else if (kind.language === undefined) assert.equal(kind.mappingRequired, true, type);
-    assert.equal(CONNECTION_TYPES.find((entry) => entry.type === type)?.kind, kind.service ? 'logs' : 'database');
+    // A CI system is searched like a log service, but offered apart from them.
+    if (kind.ci) assert.equal(kind.service, true, type);
+    assert.equal(
+      CONNECTION_TYPES.find((entry) => entry.type === type)?.kind,
+      kind.ci ? 'ci' : kind.service ? 'logs' : 'database',
+    );
   }
   assert.equal(storeName('datadog'), 'Datadog');
   assert.equal(storeName('mongodb'), 'MongoDB');
@@ -45,4 +50,8 @@ test('a kind says how its connections are searched, named, and kept', () => {
   assert.equal(datadog.logs, undefined);
   assert.equal(keepsSecret(datadog), true);
   assert.equal(keepsSecret(sqlite), false);
+  assert.deepEqual(
+    CONNECTION_TYPES.filter((entry) => entry.kind === 'ci').map((entry) => entry.type),
+    ['github-actions', 'gitlab-ci'],
+  );
 });
