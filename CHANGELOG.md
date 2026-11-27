@@ -37,6 +37,7 @@ All notable changes to Logline are documented in this file.
 - Choosing a service when the query has a group such as `service:(a OR b)` replaces the whole group, instead of leaving part of it behind. A group missing its closing parenthesis no longer takes the terms after it with it.
 - Choosing a service keeps a filter typed in the search box but not yet entered, with **Datadog syntax** on or off. A typed filter that is not valid stays in the box, saying why, and the service is still chosen.
 - The search box's suggestions and the **Metric query** bar's metric names can be picked with Up and Down and Enter, as well as with a click; the browser's own list ignored those keys in VS Code. Enter on a highlighted suggestion picks it rather than applying or running what is typed, Escape closes the list, and picking a metric name after an aggregation such as `avg:` keeps the aggregation. The highlighted suggestion stays highlighted when the list is refreshed, suggestions that arrive after you leave the search box no longer open a list over the panel, and Enter in the **Metric query** box closes the list as it runs.
+- Choosing a filter while the pointer is over the log rows, such as a field's filter in a row, shows its results at once. They could wait up to two seconds, because the Logs panel holds new rows still while you point at the table; only rows that arrive for the filter already shown are held now.
 
 ## 1.22.2 — 2026-11-24
 

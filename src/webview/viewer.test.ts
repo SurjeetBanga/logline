@@ -3361,6 +3361,42 @@ test('live rows hold while the pointer is over them and catch up when it leaves'
   assert.equal(get('mode').textContent, 'Live · newest 1,000');
 });
 
+test('a changed filter shows its results at once while the pointer is over the rows', () => {
+  const { get, receive } = viewer();
+  const ids = () =>
+    get('logs')
+      .querySelectorAll('.event-row')
+      .map((row) => Number(row.dataset.id));
+  const snapshot = (events: number[]) =>
+    receive({
+      type: 'snapshot',
+      generation: 1,
+      newest: 101,
+      status: 'Running',
+      command: 'node server',
+      running: true,
+      total: 101,
+      retained: 101,
+      discarded: 0,
+      bytes: 1000,
+      maxBytes: 10000,
+      truncated: 0,
+      events: events.map((id) => ({ id, message: 'tool', level: 'info', timestamp: '12:01', stream: 'stdout' })),
+      columns: [],
+      page: 0,
+      pages: 1,
+      matched: events.length,
+    });
+  get('viewport').listeners.get('pointermove')!();
+  get('search').value = 'action:tool';
+  get('search').listeners.get('keydown')!({ key: 'Enter', preventDefault() {} });
+  snapshot([40, 41]);
+  assert.deepEqual(ids(), [41, 40], 'the filter answers without waiting for the pointer to rest');
+  get('viewport').listeners.get('pointermove')!();
+  snapshot([40, 41, 43]);
+  assert.deepEqual(ids(), [41, 40], 'new rows of the same filter still hold under the pointer');
+});
+
 test('a pointer resting on the table stops holding live rows after two seconds', () => {
   const { get, receive, runtime, timers } = viewer();
   let now = 1_000_000;
