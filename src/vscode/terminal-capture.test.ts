@@ -349,3 +349,26 @@ test('a command that starts while capture is off is reported, so capture can be 
   assert.equal(h.store.all().length, 1);
   h.capture.dispose();
 });
+
+test('a command whose output capture reads is reported, and one without a readable stream is not', async () => {
+  const h = harness();
+  const captured: string[] = [];
+  h.capture.captured = (commandLine) => captured.push(commandLine);
+  h.start({
+    terminal: { name: 'zsh' },
+    execution: {
+      commandLine: { value: 'npm start' },
+      cwd: { fsPath: '/workspace' },
+      async *read() {
+        yield 'listening\n';
+      },
+    },
+  });
+  h.start({
+    terminal: { name: 'zsh' },
+    execution: { commandLine: { value: 'npm test' }, cwd: { fsPath: '/workspace' }, read: () => undefined },
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(captured, ['npm start']);
+  h.capture.dispose();
+});

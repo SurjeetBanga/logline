@@ -4,4 +4,4 @@ Logline records the next commands you run in a VS Code terminal, with their outp
 
 Capture is local: your logs stay on this machine unless you share them with an agent.
 
-You can also turn capture on and off from **Capture** in the Logs panel's status bar.
+Capture is on by default on this machine, and off on a remote host such as a Codespace. Turn it on and off from **Capture** in the Logs panel's status bar.

@@ -115,7 +115,7 @@ export function createTour(
     title.textContent = 'You’re set';
     const text = document.createElement('p');
     text.textContent =
-      'Turn on Capture in the status bar and run your app in a terminal, and its logs show up here. See the tour again from More actions → Take the tour.';
+      'Run your app in a terminal, and its logs show up here; Capture in the status bar turns capture on and off. See the tour again from More actions → Take the tour.';
     const row = document.createElement('div');
     row.className = 'tour-actions';
     const done = button('Done', 'tour-primary', () => close(true));

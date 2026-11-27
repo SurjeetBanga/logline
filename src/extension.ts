@@ -14,6 +14,7 @@ import { AgentReachNotice } from './vscode/agent-reach';
 import { copilotAvailable, refreshCopilot, refreshInstalledSkills } from './vscode/agent-setup';
 import { AgentOnboarding } from './vscode/agent-onboarding';
 import { BROWSER_OFFER_DELAYS_MS, BrowserLauncher, BrowserOffer } from './vscode/browser';
+import { CaptureNotice } from './vscode/capture-notice';
 import { CaptureOffer } from './vscode/capture-offer';
 import { looksLikeDevServer } from './capture/dev-command';
 import { IntegrationNotice } from './vscode/integration-notice';
@@ -257,13 +258,38 @@ export function activate(context: vscode.ExtensionContext): { provider: LogsProv
     enable: (everywhere) => agentController.toggleTerminalCapture(true, everywhere),
     record: (step) => usage?.record('nudge', { kind: 'capture_offer', step }),
   });
+  // Capture that is on because nobody turned it off says so the first time it captures, with a way out.
+  if (context.extensionMode === (vscode.ExtensionMode?.Production ?? 1)) {
+    const captureNotice = new CaptureNotice({
+      global: context.globalState,
+      // On a remote host capture is off by default, so capture there was always someone's choice.
+      byDefault: () => !vscode.env?.remoteName && agentController.config.isDefault('captureTerminals'),
+      turnOff: () => agentController.toggleTerminalCapture(false, true),
+      showLogs: () => void vscode.commands.executeCommand('logline.showLogs'),
+      record: (step) => usage?.record('nudge', { kind: 'capture_notice', step }),
+    });
+    let marked = false;
+    agentController.terminalCapture.captured = () => {
+      if (!marked) {
+        // The walkthrough's capture step ticks off on the first capture; once is enough.
+        marked = true;
+        void vscode.commands.executeCommand('setContext', 'logline.terminalCaptured', true);
+      }
+      if (!captureNotice.finished) void captureNotice.captured();
+    };
+  }
   // Capture that is on but cannot read a terminal says so, rather than staying silent.
   if (context.extensionMode === (vscode.ExtensionMode?.Production ?? 1)) {
     const integrationNotice = new IntegrationNotice({
       global: context.globalState,
       record: (step) => usage?.record('nudge', { kind: 'no_integration', step }),
     });
-    agentController.terminalCapture.noIntegration = (shell) => void integrationNotice.noIntegration(shell);
+    // Capture on only by default was never asked for: a terminal it cannot read is no reason to warn.
+    // The Status panel still counts such terminals.
+    agentController.terminalCapture.noIntegration = (shell) => {
+      if (agentController.config.isDefault('captureTerminals')) return;
+      void integrationNotice.noIntegration(shell);
+    };
   }
   // Like the agent setup, capture is offered only where an answer lasts.
   if (context.extensionMode === (vscode.ExtensionMode?.Production ?? 1) && !vscode.env?.remoteName)

@@ -774,7 +774,7 @@
       "kind": {
         "classification": "SystemMetaData",
         "purpose": "FeatureInsight",
-        "comment": "One of: errors, capture_offer, browser_offer, no_integration."
+        "comment": "One of: errors, capture_offer, capture_notice, browser_offer, no_integration."
       },
       "step": {
         "classification": "SystemMetaData",
