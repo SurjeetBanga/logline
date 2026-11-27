@@ -286,6 +286,10 @@ test('message router removes a source, asks before removing a connection, and op
       calls.push({ name: 'removeFinishedRuns', value: serverId });
       return 2;
     },
+    reloadAgentSessions: (serverId?: string, sessionId?: string) => {
+      calls.push({ name: 'reloadAgentSessions', value: [serverId, sessionId] });
+      return 1;
+    },
     connectAgent: async (agent?: string) => {
       calls.push({ name: 'connectAgent', value: agent });
     },
@@ -301,6 +305,9 @@ test('message router removes a source, asks before removing a connection, and op
     { type: 'removeRun', sessionId: 'run-1' },
     { type: 'removeRun' },
     { type: 'removeFinishedRuns', serverId: 'conn:dd' },
+    { type: 'reloadAgentSessions', sessionId: 'run-2' },
+    { type: 'reloadAgentSessions', serverId: 'agent:codex' },
+    { type: 'reloadAgentSessions' },
     { type: 'removeConnection', connectionId: 'prod' },
     { type: 'connectAgent', agent: 'claude' },
     { type: 'config', setting: 'logline.maxMemoryMb' },
@@ -312,6 +319,9 @@ test('message router removes a source, asks before removing a connection, and op
       ['removeSource', 'api'],
       ['removeRun', 'run-1'],
       ['removeFinishedRuns', 'conn:dd'],
+      ['reloadAgentSessions', [undefined, 'run-2']],
+      ['reloadAgentSessions', ['agent:codex', undefined]],
+      ['reloadAgentSessions', [undefined, undefined]],
       ['removeConnection', 'prod'],
       ['connectAgent', 'claude'],
       ['commandArgs', ['logline.maxMemoryMb']],

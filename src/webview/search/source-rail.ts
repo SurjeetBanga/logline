@@ -33,6 +33,7 @@ const ICONS: Record<string, string> = {
   edit: 'M10.5 2.5l3 3-8 8h-3v-3zM9 4l3 3',
   remove: 'M3 4.5h10M6.5 4.5V3h3v1.5M4.5 4.5l.6 8.5h5.8l.6-8.5M7 7v4M9 7v4',
   dismiss: 'M4.5 4.5l7 7M11.5 4.5l-7 7',
+  reload: 'M12.8 6.5A5 5 0 1 0 13 9M13 3v3.5H9.5',
 };
 
 export function icon(name: string, size = 14): SVGElement {
@@ -159,7 +160,7 @@ export function createSourceRail(
   }
 
   function actionButton(
-    kind: 'run' | 'stop' | 'edit' | 'remove',
+    kind: 'run' | 'stop' | 'edit' | 'remove' | 'reload',
     label: string,
     onClick: () => void,
   ): HTMLButtonElement {
@@ -252,6 +253,13 @@ export function createSourceRail(
       rowActions.push(
         actionButton('stop', `Stop ${sourceName(server)}`, () =>
           api.postMessage({ type: 'stop', serverId: server.id }),
+        ),
+      );
+    // An agent's sessions can be read again from their start, such as after a clear.
+    if (server.kind === 'agent')
+      rowActions.push(
+        actionButton('reload', `Read ${sourceName(server)}'s sessions again from their start`, () =>
+          api.postMessage({ type: 'reloadAgentSessions', serverId: server.id }),
         ),
       );
     const remove = () => api.postMessage({ type: 'removeSource', serverId: server.id });
@@ -392,6 +400,15 @@ export function createSourceRail(
         .filter(Boolean)
         .join(' · ');
       wrapper.append(button);
+      if (session.sourceKind === 'agent') {
+        // An agent session's transcript can be read again from its start, such as after a clear.
+        const reload = actionButton('reload', 'Read this session again from its start', () =>
+          api.postMessage({ type: 'reloadAgentSessions', sessionId: session.id }),
+        );
+        reload.classList.add('run-reload');
+        reload.dataset.runId = session.id;
+        wrapper.append(reload);
+      }
       if ((session.status === 'running' || session.status === 'stopping') && session.canStop === true) {
         const stop = actionButton(
           'stop',

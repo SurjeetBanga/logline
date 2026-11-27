@@ -115,6 +115,7 @@ export const PANEL_ACTIONS = [
   'remove_source',
   'remove_run',
   'remove_finished_runs',
+  'reload_agent_sessions',
   'stop',
   'run',
   'metric_query',

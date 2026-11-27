@@ -7188,3 +7188,38 @@ test('an agent session shows what it did on its second line, under the agent ico
   assert.match(run.querySelector('.rail-status')!.textContent!, /3 tools · 1 failed · 1\.2k tok/);
   assert.match(run.title, /3 tools · 1 failed · 1\.2k tok/);
 });
+
+test('an agent session, and its agent, can be read again from the start', () => {
+  const { get, messages, receive } = viewer({ server: 'agent:codex' });
+  const plain = (value: unknown) => JSON.parse(JSON.stringify(value));
+  receive({
+    ...railSnapshot,
+    servers: [
+      ...railSnapshot.servers,
+      { id: 'agent:codex', label: 'Codex', status: 'exited', activeSessions: 0, kind: 'agent' },
+    ],
+    sessions: [
+      {
+        id: 'x1',
+        serverId: 'agent:codex',
+        server: 'Codex',
+        command: 'Add retries',
+        status: 'exited',
+        startedAt: 1,
+        sourceKind: 'agent',
+      },
+    ],
+  });
+  const view = rail(get);
+  const source = view.actions('agent:codex');
+  assert.deepEqual(
+    source.map((button) => button.attributes['aria-label']),
+    ["Read Codex's sessions again from their start", 'Remove Codex and its logs'],
+  );
+  source[0].listeners.get('click')!({ stopPropagation() {} });
+  assert.deepEqual(plain(messages.at(-1)), { type: 'reloadAgentSessions', serverId: 'agent:codex' });
+  const [row] = view.list.querySelectorAll('.run-option-row');
+  row.querySelector('.run-reload')!.listeners.get('click')!({ stopPropagation() {} });
+  assert.deepEqual(plain(messages.at(-1)), { type: 'reloadAgentSessions', sessionId: 'x1' });
+  assert.ok(row.querySelector('.run-remove'), 'a finished session can still be removed');
+});

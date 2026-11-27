@@ -166,6 +166,12 @@ export function registerCommands(
       controller.connections.remove(typeof id === 'string' ? id : undefined),
     ),
     registerCommand('logline.stopCommand', () => controller.stop()),
+    // While agent sessions are off there is nothing to read again: offer to turn them on instead.
+    registerCommand('logline.reloadAgentSessions', async () => {
+      if (!controller.agentSessions.enabled) return vscode.commands.executeCommand('logline.showAgentSessions');
+      controller.reloadAgentSessions();
+      await controller.showQuery('kind:agent');
+    }),
     registerCommand('logline.export', () => controller.transfer.exportLogs()),
     registerCommand('logline.import', () => controller.transfer.importLogs()),
     registerCommand('logline.exportForAI', () => {

@@ -425,6 +425,77 @@ test('an ended session that a clear removed is listed again when it resumes', as
   }
 });
 
+test('a cleared session is read again from its start when reloaded, its run counting everything', async () => {
+  const t = setup(true);
+  try {
+    const file = t.claudeFile();
+    writeFileSync(file, t.jsonl(...claudeSession(t.folder)));
+    await t.capture.poll();
+    const [run] = [...t.registry.records.values()];
+    t.clock.now += AGENT_IDLE_MS + 1000;
+    await t.capture.poll();
+    t.store.clear();
+    t.registry.clearCompleted();
+    t.capture.cleared();
+    assert.equal(t.registry.records.size, 0, 'the clear removed the ended run');
+    assert.deepEqual(t.capture.reload({ serverId: 'agent:codex' }), [], "another agent's sessions are left");
+    assert.deepEqual(t.capture.reload({ serverId: 'agent:claude-code' }), [run.id]);
+    await t.capture.poll();
+    assert.equal(t.registry.records.get(run.id), run, 'the run is listed again');
+    assert.equal(run.events, t.store.all().length);
+    assert.ok(run.events > 0);
+    assert.equal(run.detail, '1 tool · 1 failed · 30 tok', 'no baseline from the clear');
+    assert.equal(run.status, 'exited', 'reading old lines again is not activity');
+    const once = t.store.all().length;
+    t.store.clear();
+    assert.deepEqual(t.capture.reload({ sessionId: run.id }), [run.id]);
+    assert.deepEqual(t.capture.reload({ sessionId: 'missing' }), []);
+    await t.capture.poll();
+    assert.equal(t.store.all().length, once, 'read once, not twice');
+  } finally {
+    t.cleanup();
+  }
+});
+
+test('a session reloaded while it is being read is read once, from its start', async () => {
+  const t = setup(true);
+  try {
+    const file = t.claudeFile();
+    writeFileSync(file, t.jsonl(...claudeSession(t.folder)));
+    await t.capture.poll();
+    const [run] = [...t.registry.records.values()];
+    t.store.clear();
+    // The poll under way reads this line with the old tail; reloaded, only the new tail's reading counts.
+    appendFileSync(file, t.jsonl({ type: 'user', timestamp: iso(9), message: { role: 'user', content: 'Again' } }));
+    const polling = t.capture.poll();
+    t.capture.reload();
+    await polling;
+    await t.capture.poll();
+    assert.equal(t.store.all().length, run.events);
+    assert.equal(t.store.all().filter((event) => event.message === 'Again').length, 1, 'nothing twice');
+    assert.equal(t.store.all()[0].message, 'Fix the checkout 500', 'read from the start');
+  } finally {
+    t.cleanup();
+  }
+});
+
+test('reloading every session brings back a removed agent', async () => {
+  const t = setup(true);
+  try {
+    writeFileSync(t.claudeFile(), t.jsonl(...claudeSession(t.folder)));
+    await t.capture.poll();
+    t.capture.stopServer('agent:claude-code');
+    assert.deepEqual(t.capture.removedAgents, ['claude-code']);
+    t.capture.reload();
+    assert.deepEqual(t.capture.removedAgents, []);
+    await t.capture.poll();
+    await t.capture.poll();
+    assert.equal(t.capture.active, 1);
+  } finally {
+    t.cleanup();
+  }
+});
+
 test('while agent sessions are off, the agents with sessions in the folder are offered, without following them', async () => {
   const t = setup(false);
   try {
